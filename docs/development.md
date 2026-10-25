@@ -797,3 +797,30 @@ same-task continuation and normal outcome delivery. Direct user chat is a Pot
 adapter capability; Codex task and message adapters do not implement it.
 `TestConfiguredModelAgentLinksLive` separately covers user-only Pot-to-Pot replies
 using the machine's configured model, under its existing request/output caps.
+
+## Browser repository contracts
+
+Serve the repository root on loopback to open
+`scripts/tests/fixtures/chat-cache-read-volume.html`, `projection-store.html`,
+`chat-cache.html`, `chat-cache-ui.html` and `cached-loading.html`. These fixtures
+use synthetic data and isolated IndexedDB names. The read-volume fixture counts
+actual returned message rows and scans for 2048- and 8192-message histories,
+including a cold query; it fails if an incremental write or history page reads
+the whole conversation.
+
+The automated runner can own and clean up its loopback source server:
+
+```sh
+POT_PLAYWRIGHT_MODULE=/absolute/path/to/existing/playwright/index.mjs \
+POT_CHROMIUM_EXECUTABLE=/absolute/path/to/chrome \
+mise exec -- node scripts/tests/db-repositories-browser.mjs auto
+```
+
+Use an existing Playwright installation and Chromium executable; the runner does
+not install dependencies. `POT_DB_FIXTURE=projection-store.html` selects one
+fixture. Optional `POT_DB_SCREENSHOTS=output/pr-images/<branch>` captures the long
+Task history comparison. For its before view, first extract the chosen base
+commit's `web` and `pkg/storage/migrations/ui-cache` directories with `git archive`
+into ignored `output/cached-loading/baseline/`. Both captures use the same
+synthetic 1200-message transcript and viewport. Review and commit only the images
+actually used in a PR, following [PR images](pr-images/README.md).

@@ -27,6 +27,13 @@ Mutations publish after persistence; no-op reads do not produce invalidations.
 The global subscription remains active even when no assistant exists, so an
 assistant created by another client appears without reloading the page.
 
+Frontend repositories persist domain invalidation epochs before refreshed queries
+can publish. A query fetched before an event or successful command cannot replace
+a newer projection, including across tabs. In-memory invalidation immediately
+revokes stale selection eligibility; query subscribers consume only committed
+values. Storage failure retains the prior projection and retries the pending
+invalidation before another refresh.
+
 Change callbacks retain their originating scope and boot identity. Each view
 declares the domains and scope it reads; unrelated notifications do not refresh
 it. General preferences and build information remain mounted without requesting
@@ -162,6 +169,24 @@ unknown or evicted intervals are fetched again. Reset gaps invalidate cached
 interval provenance. Versions fence late pages, transactions serialize writers,
 and retired boot identities cannot restore an earlier projection. This is a
 rebuildable UI cache, never the authoritative conversation store or a send queue.
+
+The reducer coalesces short stream bursts in a 16 ms window and drains terminal
+and error frames promptly. Its one active committed projection is checked against
+the persistent revision. Writes read and update changed message IDs without a
+full history scan or a write-followed-by-full-read. Sequence indexes return bounded
+history windows, and tool indexes resolve required ancestors. Counts and byte
+totals update incrementally; over-budget writes visit eviction victims only.
+Deletion retires the local key so late frames cannot restore it; replaced
+conversations also reject their retired identities. Cross-tab notifications
+announce committed keys; recipients query storage. Version changes close old
+database connections.
+
+Position/disclosure saves prune expired surfaces after 30 days and retain at most
+32 surfaces per conversation, outside the stream write path. Position-save failure
+shows a storage notice without declaring the network offline. Transcript commit
+failure keeps the last committed output and blocks new sends until recovery;
+Stop remains available from confirmed live state. Restoring cached output does
+not mark the subscription connected or re-enable sending.
 
 Reading position, disclosure state and bounded height hints persist per view;
 main/tray windows and browser tabs have independent positions. Returning to Chat

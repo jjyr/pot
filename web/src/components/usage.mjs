@@ -65,7 +65,7 @@ export function usageTrend(data,{locale,timezone,preset}) {
 
 // Keep each resource's page, failures and pending state local to its own region.
 // Requests capture both the outer view token and their own sequence number.
-export function createUsageList({root,kind,title,params,owner,request,token,current,offsets,cache,locale,tr,spaceName=''}) {
+export function createUsageList({root,kind,title,params,owner,request,token,current,offsets,query:querySaved,locale,tr,spaceName=''}) {
   const key=JSON.stringify([owner.space,owner.owner,kind,params]),region=n('section',`page-section page-card usage-list usage-list-${kind}`),heading=n('div','usage-list-heading'),content=n('div'),status=n('div');
   heading.append(n('h2','',title));if(spaceName)heading.append(n('span','hint',spaceName));content.append(n('div','usage-list-skeleton'));region.append(heading,content,status);root.append(region);
   let offset=offsets.get(key)||0,sequence=0;
@@ -81,11 +81,11 @@ export function createUsageList({root,kind,title,params,owner,request,token,curr
     reconcile(content,fragment);status.replaceChildren();if(stale)status.append(n('p','inline-error',tr('Cached data · unavailable','缓存数据 · 当前不可用')),action(tr('Retry','重试'),()=>load(offset)));
   }
   async function load(next=offset){
-    if(!current())return;const query=new URLSearchParams({...params,offset:next}),path=`/api/v1/usage/${kind}?${query}`,cacheKey=JSON.stringify([key,next]),attempt=++sequence,buttons=[...content.querySelectorAll('button')].map(button=>[button,button.disabled]);
-    const saved=cache.get(cacheKey);if(saved){offset=next;offsets.set(key,offset);render(saved);}
+    if(!current())return;const query=new URLSearchParams({...params,offset:next}),path=`/api/v1/usage/${kind}?${query}`,attempt=++sequence,buttons=[...content.querySelectorAll('button')].map(button=>[button,button.disabled]);
+    const saved=await querySaved?.(path,owner).catch(()=>null);if(saved?.value){offset=next;offsets.set(key,offset);render(saved.value);}
     region.setAttribute('aria-busy','true');for(const button of region.querySelectorAll('button'))button.disabled=true;
-    try{const value=await request(path,{...owner,signal:token.signal});if(!current()||attempt!==sequence)return;offset=next;offsets.set(key,offset);cache.set(cacheKey,value);render(value);}
-    catch(reason){if(!current()||attempt!==sequence)return;const saved=cache.get(cacheKey);if(saved){offset=next;offsets.set(key,offset);render(saved,true);}else {content.querySelector('.usage-list-skeleton')?.remove();status.replaceChildren(n('p','inline-error',reason.message),action(tr('Retry','重试'),()=>load(next)));for(const [button,disabled]of buttons)button.disabled=disabled;}}
+    try{const value=await request(path,{...owner,signal:token.signal});if(!current()||attempt!==sequence)return;offset=next;offsets.set(key,offset);render(value);}
+    catch(reason){if(!current()||attempt!==sequence)return;const saved=await querySaved?.(path,owner).catch(()=>null);if(saved?.value){offset=next;offsets.set(key,offset);render(saved.value,true);}else {content.querySelector('.usage-list-skeleton')?.remove();status.replaceChildren(n('p','inline-error',reason.message),action(tr('Retry','重试'),()=>load(next)));for(const [button,disabled]of buttons)button.disabled=disabled;}}
     finally{if(current()&&attempt===sequence)region.removeAttribute('aria-busy');}
   }
   const ready=load();ready.refresh=()=>load();return ready;

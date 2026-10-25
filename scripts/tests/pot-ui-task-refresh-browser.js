@@ -69,6 +69,7 @@ async page=>{
   assert(await page.locator('.task-row').count()===2,'Row identity includes assistant identity');
   await page.getByRole('button',{name:'助手 b',exact:true}).click();
   await page.evaluate(()=>{taskFixture.pages.refresh(['tasks']);});
+  await page.waitForFunction(()=>taskFixture.pending.length===1);
   assert(await page.evaluate(()=>taskFixture.pending.length===1&&taskFixture.pending[0].options.owner==='b'&&!taskFixture.pending[0].options.signal.aborted),'Changes during detail loading do not navigate back to the list');
   await page.evaluate(()=>{taskFixture.detailRecord={capabilities:taskFixture.capabilities,info:{phase:'running'},request:{text:'目标'}};taskFixture.pending.shift().resolve(taskFixture.detailRecord);});
   await page.getByLabel('任务追加',{exact:true}).waitFor();

@@ -353,7 +353,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     send.replaceChildren(icon(stopping ? 'stop' : 'send'));
     send.title = label;
     send.setAttribute('aria-label', label);
-    send.disabled = stopping ? !can('chat.cancel')||selectedAssistant?.offline||cancelPending || connection !== 'connected' : !can('chat.send')||selectedAssistant?.offline|| !snapshot || editorOwner !== ownerKey(snapshot) || pending || (!draft(state).trim()&&!attachmentUI?.items().length) || !!attachmentUI?.problem() || connection !== 'connected';
+    send.disabled = stopping ? !can('chat.cancel')||selectedAssistant?.offline||cancelPending || connection !== 'connected' : !can('chat.send')||chatCacheFailed||selectedAssistant?.offline|| !snapshot || editorOwner !== ownerKey(snapshot) || pending || (!draft(state).trim()&&!attachmentUI?.items().length) || !!attachmentUI?.problem() || connection !== 'connected';
     attachmentUI?.update();
     updateReferenceDraft();
     input.disabled = !snapshot && !editorOwner;
@@ -470,12 +470,12 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     activeView={conversation_id:snapshot.conversation_id,boot_id:snapshot.boot_id,cursor:snapshot.cursor,
       position:reading.snapshot(),layout:layoutKey(),heights:[...windowHeights],tools:[...toolMemory],
       window:snapshot.messages.map(message=>({id:message.id,context_only:!!message.context_only}))};
-    if(chatCache){const view=structuredClone(activeView);viewWrite=viewWrite.catch(()=>{}).then(()=>chatCache.saveView(key,viewSurface,view)).catch(reason=>cacheFailure(reason));}
+    if(chatCache){const view=structuredClone(activeView);viewWrite=viewWrite.catch(()=>{}).then(()=>chatCache.saveView(key,viewSurface,view)).catch(reason=>{if(!disposed){error=t('chatCache.positionFailed');console.error('Chat view storage:',reason);updateControls();}});}
     return viewWrite;
   }
   function cacheFailure(reason){
     if(disposed)return;
-    chatCacheFailed=true;error=t('chatCache.failed');connection='offline';console.error('Chat cache:',reason);updateControls();
+    chatCacheFailed=true;error=t('chatCache.failed');console.error('Chat cache:',reason);updateControls();
     if(!state.snapshot){chatPreparing=false;history.style.visibility='';history.removeAttribute('aria-busy');}
   }
   function prepareChat(){
@@ -690,7 +690,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   latest.onclick = async()=>{const ticket=positionChat({kind:'latest'});if(state.snapshot?.history?.has_newer){prepareChat();await readHistory({},{around:true,positionTicket:ticket});}if(!currentChatPosition(ticket))return;state.uiAnchor=null;renderMessagesNow();};
   historyStatus.onclick=()=>{pauseFollowing();if(historyFailure==='history.missing'){historyFailure='';renderMessages();}else if(!historyLoading&&state.snapshot?.history?.has_more)readHistory({before:state.snapshot.history.before});};
   const messageNodes = new Map(),toolMemory=new Map();
-  const taskCache=new Map();
+  let backgroundProjection={key:'',items:[]};
+  const projectedTasks=scope=>backgroundProjection.key===JSON.stringify([scope.space,scope.owner])?backgroundProjection.items:[];
   const openChatTask=(task,scope=client.scope())=>{route='tasks';pages.openTask({...task,_space_id:task._space_id||scope.space,assistant_id:task.assistant_id||scope.owner},{returnTo:{route:'chat',scope:{...scope}}});renderShell();};
   const backgroundTaskView=createBackgroundTasks({locale:()=>locale,
     onOpen:openChatTask,
@@ -699,20 +700,21 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let backgroundTasks=null,backgroundTaskKey='';
   function refreshBackgroundTasks(){
     if(!client.production||!selectedAssistant)return Promise.resolve();
-    if(!can('task.list')){backgroundTasks?.close();backgroundTasks=null;backgroundTaskKey='';return Promise.resolve();}
+    if(!can('task.list')){backgroundTasks?.close();backgroundTasks=null;backgroundTaskKey='';backgroundProjection={...backgroundProjection,items:backgroundProjection.items.map(task=>({...task,_stale:true}))};if(route==='chat')renderMessages();return Promise.resolve();}
     const scope={...client.scope()},key=JSON.stringify([scope.space,scope.owner]);
     if(!backgroundTasks||key!==backgroundTaskKey){
       backgroundTasks?.close();backgroundTaskKey=key;
       backgroundTasks=createRefreshQueue(async()=>{
-        const items=[],seen=new Set();let offset=0;
+        const items=[],seen=new Set();let offset=0,stale=false;
         do{
           if(seen.has(offset))throw Error('Invalid task pagination cursor');seen.add(offset);
           const value=await client.request(`/api/v1/tasks/query?scope=active&limit=50&offset=${offset}`,{...scope,signal:abort.signal});
-          if(disposed||key!==JSON.stringify([client.scope().space,client.scope().owner]))return;
+          if(disposed||!can('task.list')||key!==JSON.stringify([client.scope().space,client.scope().owner]))return;
+          const freshness=client.resources?.state(value)?.freshness;stale ||= freshness==='retained'||freshness==='stale';
           items.push(...(value.items||[]));offset=value.next_offset;
         }while(offset!=null);
-        taskCache.set(key,items.filter(task=>['queued','running','waiting','waiting_approval'].includes(task.phase)).map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));
-        messageIdentities(client).rememberTasks(items.map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));pages.rememberTasks(taskCache.get(key));if(route==='chat')renderMessages();
+        backgroundProjection={key,items:items.filter(task=>['queued','running','waiting','waiting_approval'].includes(task.phase)).map(task=>({...task,_stale:stale,_space_id:scope.space,assistant_id:scope.owner}))};
+        messageIdentities(client).rememberTasks(items.map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));pages.rememberTasks(backgroundProjection.items);if(route==='chat')renderMessages();
       },{active:()=>!disposed&&key===JSON.stringify([client.scope().space,client.scope().owner])});
     }return backgroundTasks.run();
   }
@@ -748,7 +750,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
  record.compact.update(message);
  }else if(message.role==='tool'&&message.tool){
       const scope=client.scope?.()||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
-      if(!record.tool){record.tool=createToolCall({messageActor:()=>messageIdentities(client).actor(scope),resolveTask:id=>(taskCache.get(JSON.stringify([scope.space,scope.owner]))||[]).find(task=>task.id===id),onOpenTask:task=>openChatTask(task,scope),resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key,locale:()=>locale,machineLabel:id=>machinePresentation(client).label(id,scope,locale),onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
+      if(!record.tool){record.tool=createToolCall({messageActor:()=>messageIdentities(client).actor(scope),resolveTask:id=>projectedTasks(scope).find(task=>task.id===id),onOpenTask:task=>openChatTask(task,scope),resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key,locale:()=>locale,machineLabel:id=>machinePresentation(client).label(id,scope,locale),onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
       record.tool.update(message,{stacked:message.communicationStacked,offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
     }else if(message.role==='assistant'){
       record.reply ||= createReplyBubble(bubble);
@@ -843,7 +845,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     historyStatus.hidden=!client.history||!snapshot;
     historyStatus.disabled=historyLoading||!historyFailure&&!snapshot?.history?.has_more;
     historyStatus.textContent=t(historyLoading?'history.loading':historyFailure|| (snapshot?.history?.has_more?'history.earlier':'history.start'));
-    const tasks=client.production?(taskCache.get(JSON.stringify([client.scope().space,client.scope().owner]))||[]):[];
+    const tasks=client.production?projectedTasks(client.scope()):[];
     if(client.production&&!viewportOnly)backgroundTaskView.update(snapshotKey(),tasks,(id,phase)=>pages.taskNeedsApproval(id,phase));
     // The task region stays outside recycled message rows and shares the chat scroller.
     if(client.production&&tasks.length){
@@ -876,7 +878,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     state.uiAnchor=reading.anchor?.sequence||null;
   }
   function pendingSend(){return state.snapshot&&state.pending.has(ownerKey(state.snapshot));}
-  async function applySnapshot(snapshot, receivedEpoch = epoch, receivedMessages=snapshot.messages) {
+  async function applySnapshot(snapshot, receivedEpoch = epoch, receivedMessages=snapshot.messages,{live=true}={}) {
     if (disposed || receivedEpoch !== state.epoch) return;
     if(state.snapshot&&validSnapshot(snapshot)&&state.snapshot.boot_id!==snapshot.boot_id){
       state.snapshot=null;pages?.clearApprovals();client.resources?.invalidate([],{space:client.scope().space,boot:snapshot.boot_id});
@@ -902,13 +904,12 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       finally{finish();if(historyRecovery===recovery)historyRecovery=null;if(receivedEpoch===epoch&&generation===historyGeneration){historyLoading=false;renderMessages();}}
     }
     const initialSnapshot = !state.snapshot;
-    if(validSnapshot(snapshot)){awaitingSnapshot=false;}
+    if(live&&validSnapshot(snapshot)){awaitingSnapshot=false;}
     const pendingReceipt=state.pending.get(ownerKey(snapshot));
     let accepted;try{accepted=acceptSnapshot(state,snapshot,receivedEpoch,{committed:!!chatCache,receivedMessages});}catch(reason){if(reason.message==='conversation_gap'){loadSnapshot(true);return;}throw reason;}
-    if (!accepted){if(state.snapshot&&validSnapshot(snapshot)&&state.snapshot.cursor===snapshot.cursor){connection='connected';updateControls();}return;}
+    if (!accepted){if(state.snapshot&&validSnapshot(snapshot)&&state.snapshot.cursor===snapshot.cursor){if(live)connection='connected';updateControls();}return;}
     if(pendingReceipt && !state.pending.has(pendingReceipt.key))confirmations.confirmed(pendingReceipt);
-    connection = 'connected';
-    connectionError = '';
+    if(live){connection = 'connected';connectionError = '';}
     if(chatCacheFailed){chatCacheFailed=false;error='';}
     snapshot=state.snapshot;
     if(editorOwner !== ownerKey(snapshot)&&!chatPosition)restoreSavedPosition(activeView?.position);
@@ -930,6 +931,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(client.production&&expected&&snapshot.owner_id!==expected){connection='offline';error=t('identityChanged');updateControls();return;}
     if(chatCache)chatSync?.push(snapshot);else applySnapshot(snapshot,receivedEpoch);
   }
+  const stopChatCommits=chatCache?.subscribe(async(key,{remote})=>{if(!remote||disposed||key!==snapshotKey())return;const receivedEpoch=epoch;try{const saved=await chatCache.read(key,viewSurface);if(!saved&&receivedEpoch===epoch){await loadDirectory();return;}if(saved&&receivedEpoch===epoch)await applySnapshot(saved.snapshot,receivedEpoch,saved.snapshot.messages,{live:false});}catch(reason){if(receivedEpoch===epoch)cacheFailure(reason);}});
   const abort = new AbortController();
   async function loadSnapshot(reattach = false) {
     if (disposed) return;
@@ -956,7 +958,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (value === 'offline') {disconnected = true;connectionError = reason?.message || t('streamDisconnected');}
       if (value === 'connected') connectionError = '';
       if (value === 'connected' && disconnected) { disconnected = false; loadSnapshot(true); }
-      else { connection = chatCacheFailed?'offline':value==='connected'&&awaitingSnapshot?'connecting':value; updateControls(); }
+      else { connection = value==='connected'&&awaitingSnapshot?'connecting':value; updateControls(); }
     });
     if(!client.production)return loadSnapshot();
     // Both SSE and the desktop subscription send an authoritative initial snapshot.
@@ -1004,7 +1006,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     messageWindow.set([]);messageNodes.clear();windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);
     input.value='';directoryOpen=true;error='';
   }
-  const stopResources=client.resources?.subscribe((meta,reason)=>{if(disposed||!['/api/v1/spaces','/api/v1/assistants','/api/v1/agent-links','/api/v1/runtime'].includes(meta.path))return;if(reason){error=translate(locale,'loading.stale');updateControls();return;}if(error===translate(locale,'loading.stale'))error='';loadDirectory();});
+  const stopResources=client.resources?.subscribe((meta,reason)=>{if(!disposed&&meta.path.startsWith('/api/v1/tasks/query?')&&meta.space===client.scope().space&&meta.owner===client.scope().owner){if(!reason)refreshBackgroundTasks();return;}if(disposed||!['/api/v1/spaces','/api/v1/assistants','/api/v1/agent-links','/api/v1/runtime'].includes(meta.path))return;if(reason){error=translate(locale,'loading.stale');updateControls();return;}if(error===translate(locale,'loading.stale'))error='';loadDirectory();});
   const directoryQueue=createRefreshQueue(()=>readDirectory(),{active:()=>!disposed});
   function loadDirectory(){return directoryQueue.run();}
   async function readDirectory() {
@@ -1018,13 +1020,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       spaces = catalog.items || [];client.spaces=spaces;
       if (!spaces.length) throw Error('No serving Space');
       if(!selectedAssistant){client.setScope({space:catalog.active_space_id||spaces[0].id,owner:''});updates?.refresh(client.scope());}
-      const projectAssistants=(value,space,offline)=>{let items=value;if(typeof items==='string'){try{items=JSON.parse(items);}catch{items=[];}}return (items?.items||items||[]).map(item=>({...item,control_id:space.control_id||space.id,space_id:space.id,space_name:space.name,space_kind:space.kind,offline}));};
+      const projectAssistants=(value,space,offline)=>{let items=value;if(typeof items==='string'){try{items=JSON.parse(items);}catch{items=[];}}const saved=client.resources?.state(value),fresh=!saved||saved.freshness==='fresh';return (items?.items||items||[]).map(item=>({...item,...(!fresh?{executing:false,pending_approvals:0,capabilities:{version:1,operations:['chat.read']},retained:true}:{}),control_id:space.control_id||space.id,space_id:space.id,space_name:space.name,space_kind:space.kind,offline}));};
       const linkFailures=[];
       // Keep an acknowledged linked identity while its node is offline.
       const results = await Promise.allSettled(spaces.map(async space => {
         const [items]=await Promise.all([(client.read||client.request)('/api/v1/assistants',{owner:'',space:space.id,signal:abort.signal}),machinePresentation(client).load({space:space.id,signal:abort.signal})]);
         const local=projectAssistants(items,space,space.connected===false);
-        try{const links=await (client.read||client.request)('/api/v1/agent-links',{owner:'',space:space.id,signal:abort.signal});const linked=projectLinkedAssistants(links,space);if(selectedAssistant?.origin&&selectedAssistant.space_id===space.id&&!linked.some(item=>item.id===selectedAssistant.id)){const link=links.items?.find(item=>item.id===selectedAssistant.origin.link_id);if(link&&link.status!=='connected')linked.push({...selectedAssistant,offline:true});}return [...local,...linked];}
+        try{const links=await (client.read||client.request)('/api/v1/agent-links',{owner:'',space:space.id,signal:abort.signal});const linkState=client.resources?.state(links),linked=projectLinkedAssistants(links,space).map(item=>linkState&&linkState.freshness!=='fresh'?{...item,capabilities:{version:1,operations:['chat.read']},retained:true}:item);if(selectedAssistant?.origin&&selectedAssistant.space_id===space.id&&!linked.some(item=>item.id===selectedAssistant.id)){const link=links.items?.find(item=>item.id===selectedAssistant.origin.link_id);if(link&&link.status!=='connected')linked.push({...selectedAssistant,offline:true});}return [...local,...linked];}
         catch{linkFailures.push(space.id);return [...local,...assistants.filter(item=>item.origin&&item.space_id===space.id).map(item=>({...item,offline:true}))];}
       }));
       if (ticket !== directoryEpoch || disposed) return;
@@ -1050,7 +1052,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
           }catch{if(ticket!==directoryEpoch||disposed)return;assistants.push({...missing,offline:true});client.assistants=assistants;error=t('partialOffline');}
         }
       }
-      if (selectedAssistant){selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;if(selectedAssistant.offline)connection='offline';}
+      if (selectedAssistant){const taskAccess=can('task.list');selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;if(selectedAssistant.offline)connection='offline';if(taskAccess!==can('task.list'))refreshBackgroundTasks();}
       renderShell();renderMessages();
       if(!assistants.length&&route==='chat'&&!pages.editing){
         const available=!linkFailures.length&&results.every(result=>result.status==='fulfilled')&&spaces.some(space=>space.connected!==false);
@@ -1073,6 +1075,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     renderShell();renderMessages();window.dispatchEvent(new Event('pot:locale'));
   };
   window.addEventListener('pot:preference',preferencesChanged);
+  const forgotten=()=>{if(client.production&&!client.desktop)location.reload();};window.addEventListener('pot:cache-forgotten',forgotten);
   const popNavigation=async event=>{
     if(await pages?.handleHistory(event))return;
     if(!client.production)return;restoringHistory=true;
@@ -1166,11 +1169,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     rememberChatPosition();clearTimeout(viewTimer);cancelAnimationFrame(revealFrame);historyAbort.abort();
     window.removeEventListener('pagehide',rememberChatPosition);document.removeEventListener('visibilitychange',persistChat);
     Promise.all([viewWrite,chatSync?.close()]).finally(()=>chatCache?.close());
-    disposed = true;updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);viewportObserver.disconnect();reading.dispose();messageWindow.close();stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();backgroundTaskView.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    disposed = true;stopChatCommits?.();updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);viewportObserver.disconnect();reading.dispose();messageWindow.close();stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();backgroundTaskView.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     stopMessageSelection();completions?.dispose();attachmentUI?.destroy();client.releaseAttachments?.();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);
-    window.removeEventListener('pot:preference',preferencesChanged);
+    window.removeEventListener('pot:preference',preferencesChanged);window.removeEventListener('pot:cache-forgotten',forgotten);
     document.removeEventListener('keydown', keydown);window.removeEventListener('popstate',popNavigation);
     media.removeEventListener('change', mediaChanged);
     window.removeEventListener('resize', closeAssistantProfile);

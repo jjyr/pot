@@ -11,16 +11,17 @@ export function createTaskPages(client) {
       const key=JSON.stringify([space.control_id,space.id,scope,q,phase,owner,offset,limit]);
       let page;
       try{
-        let next=0,value,items=[];const seen=new Set();
+        let next=0,value,items=[],stale=false;const seen=new Set();
         do{
           if(signal.aborted)throw signal.reason;
           if(seen.has(next))throw Error('Invalid task pagination cursor');seen.add(next);
           const path=`/api/v1/tasks/catalog?${new URLSearchParams({scope,q,...(phase?{phase}:{}),...(assistant?{assistant_id:assistant.id}:{}),offset:next,limit:50})}`;
           value=await (client.read||client.request)(path,{space:space.id,owner:'',signal});
+          const freshness=client.resources?.state(value)?.freshness;stale ||= freshness==='retained'||freshness==='stale';
           if(epoch!==generation)throw new DOMException('Task sources reset','AbortError');
           items.push(...(value.items||[]));next=value.next_offset;
         }while(next!=null&&items.length<offset+limit);
-        page={space,value:{...value,items},stale:false};cached.delete(key);cached.set(key,page);
+        page={space,value:{...value,items},stale};cached.delete(key);cached.set(key,page);
         while(cached.size>64)cached.delete(cached.keys().next().value);
       }catch(error){
         if(signal.aborted||error.name==='AbortError')throw error;

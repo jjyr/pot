@@ -17,7 +17,7 @@ export function createIntegrations({root,request,scope,signal,locale,openExterna
   const active=()=>!signal.aborted;
   window.addEventListener('pot:locale',render);
   signal.addEventListener('abort',()=>{clearTimeout(timer);window.removeEventListener('pot:locale',render);},{once:true});
-  const call=(path,options={})=>request(path,{...context,signal,...options});
+  const call=(path,options={})=>request(path,{...context,signal,...options,transient:true});
   const fail=(row,error)=>{if(!active())return;row.querySelector('.inline-error')?.remove();const message=n('p','inline-error',error.message||String(error));message.setAttribute('role','alert');row.append(message);};
   async function work(button,task){const row=button.closest('.integration-row');if(busy)return;busy=true;for(const control of rows.querySelectorAll('.integration-actions button,.integration-toggle'))control.disabled=true;try{await task();if(active())await refresh();}catch(error){fail(row,error);}finally{busy=false;if(active())for(const control of rows.querySelectorAll('.integration-actions button,.integration-toggle'))control.disabled=control.dataset.unavailable==='true';}}
   function render(){
