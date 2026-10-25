@@ -22,13 +22,15 @@ export function createResourceCache({now=Date.now,limit=256,onChange=()=>{}}={})
     const background=entry.has&&notify;
     entry.pending=(async()=>{
       for(;;) {
-        const version=entry.version;
+        let version=entry.version;
         try {
-          const value=await load();
+          // A persistent loader may retry an epoch-rejected commit itself.
+          // Fence its final IO, rather than repeating an already satisfied retry.
+          const value=await load(()=>{version=entry.version;});
           if(entries.get(entry.key)!==entry)throw new DOMException('Resource reset','AbortError');
           // An event during IO requires one more read before publishing.
           if(version!==entry.version)continue;
-          entry.value=copy(value);entry.has=true;entry.error=null;entry.at=now();entry.confirmedAt=entry.at;entry.source='committed';
+          entry.value=copy(value);entry.has=true;entry.error=null;entry.at=now();entry.confirmedAt=entry.at;entry.source='committed';entry.confirmedVersion=version;
           return copy(value);
         }catch(error) {
           if(entries.get(entry.key)===entry&&version!==entry.version)continue;
@@ -46,9 +48,12 @@ export function createResourceCache({now=Date.now,limit=256,onChange=()=>{}}={})
     read(key,load,{ttl=30000,signal,authoritative=false,notify=true}={}) {
       if(signal?.aborted)return Promise.reject(signal.reason);
       const value=entry(key),fresh=now()-value.at<ttl;
+      // Event queries must wait for invalidated resources, but a version-fenced
+      // read may already have satisfied that event. Explicit true always does IO.
+      const force=authoritative&&(authoritative!=='invalidated'||value.confirmedVersion!==value.version||value.error);
       let pending;
-      if(!fresh||authoritative)pending=refresh(value,load,notify);
-      if(value.has&&!authoritative) {
+      if(!fresh||force)pending=refresh(value,load,notify);
+      if(value.has&&(!authoritative||!pending)) {
         pending?.catch(()=>{});
         // Returning to a failed resource retains its notice, in the current locale.
         if(value.error&&!pending)queueMicrotask(()=>{if(entries.get(key)===value)onChange(key,value.error);});
@@ -65,7 +70,7 @@ export function createResourceCache({now=Date.now,limit=256,onChange=()=>{}}={})
     },
     peek(key){const value=entries.get(key);return value?.has?copy(value.value):undefined;},
     status(key){const value=entries.get(key);return {has:!!value?.has,lastConfirmed:value?.confirmedAt||value?.at||null,at:value?.at??-Infinity,source:value?.source,error:value?.error||null};},
-    set(key,value,{at=now(),notify=true,source='committed',confirmedAt=at}={}){const target=entry(key);target.version++;target.value=copy(value);target.has=true;target.error=null;target.at=at;target.source=source;target.confirmedAt=confirmedAt;if(notify)onChange(key);},
+    set(key,value,{at=now(),notify=true,source='committed',confirmedAt=at}={}){const target=entry(key);target.version++;target.confirmedVersion=target.version;target.value=copy(value);target.has=true;target.error=null;target.at=at;target.source=source;target.confirmedAt=confirmedAt;if(notify)onChange(key);},
     invalidate(matches=()=>true){for(const [key,value]of entries)if(matches(key)){value.version++;value.at=-Infinity;}},
     reset(matches=()=>true){for(const key of entries.keys())if(matches(key))entries.delete(key);},
   };
@@ -103,7 +108,7 @@ export function createResourceReads(client,{storage=client.production?createProj
     const scope={...client.scope(),...options},space=(client.spaces||[]).find(item=>item.id===scope.space);
     const base=path.split('?')[0];
     const topics=resources[base]||(/^\/api\/v1\/usage\/(summary|models|requests|tools|compactions|providers)$/.test(base)?['usage']:
-      ['/api/v1/tasks/query','/api/v1/tasks/catalog'].includes(base)?['tasks','runner']:base==='/api/v1/schedules'?['schedules','tasks']:/^\/api\/v1\/tasks\/[^/]+(?:\/messages)?$/.test(base)?['tasks','runner']:null);
+      base==='/api/v1/tasks/catalog'?['tasks','runner','assistants']:base==='/api/v1/tasks/query'?['tasks','runner']:base==='/api/v1/schedules'?['schedules','tasks']:/^\/api\/v1\/tasks\/[^/]+(?:\/messages)?$/.test(base)?['tasks','runner']:null);
     return {path,space:scope.space||'',owner:base==='/api/v1/providers'?'':scope.owner||'',
       control:space?.control_id||client.runtime.runtime_id||client.runtime.id,
       boot:boots.get(scope.space)||boots.get('')||client.runtime.boot_id||'',topics};
@@ -124,9 +129,9 @@ export function createResourceReads(client,{storage=client.production?createProj
         if(saved)cache.set(key,saved.value,{at:-Infinity,confirmedAt:saved.lastConfirmed,source:'retained',notify:false});
       }
     }
-    const committedLoad=!storage?load:async()=>{
+    const committedLoad=!storage?load:async onRead=>{
       for(;;){
-        const expected=await storage.token(meta),value=await load();
+        const expected=await storage.token(meta);onRead();const value=await load();
         if(closed)throw new DOMException('Resource disposed','AbortError');
         if(!await storage.commit(key,meta,displayProjection(meta.path,value),expected))continue;
         const saved=await storage.read(key);
