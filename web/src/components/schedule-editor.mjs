@@ -24,7 +24,7 @@ export const timeRule = values => ({kind:values.kind,cron:values.cron||'',timezo
 
 // Preview never mutates a schedule. Both abort and generation checks are needed:
 // remote/native transports may finish a request after it has been cancelled.
-export function connectScheduleEditor({view,request,locale,current,definitions,machineInfo}) {
+export function connectScheduleEditor({view,preview:readPreview,locale,current,definitions,machineInfo}) {
   const {controls,session,lifecycle,form}=view,t=key=>translate(locale(),`schedule.${key}`);
   const preview=n('section','schedule-preview'),title=n('p'),content=n('div'),diagnostic=n('details','detail-disclosure'),summary=n('summary'),raw=n('pre');
   preview.setAttribute('aria-live','polite');diagnostic.append(summary,raw);preview.append(title,content,diagnostic);
@@ -69,7 +69,7 @@ export function connectScheduleEditor({view,request,locale,current,definitions,m
     const own=++generation;controller?.abort();controller=new AbortController();state='loading';result=null;render();
     const [space,owner]=JSON.parse(values.owner_ref);
     try{
-      const next=await request('/api/v1/schedules/preview',{method:'POST',body:timeRule(values),space,owner,signal:controller.signal});
+      const next=await readPreview({space,owner},timeRule(values),controller.signal);
       if(!current()||own!==generation)return null;
       result=next;state='ready';render();return next;
     }catch(reason){if(current()&&own===generation){state='failed';render();}return null;}

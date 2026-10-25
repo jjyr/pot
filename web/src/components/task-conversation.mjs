@@ -36,17 +36,17 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   const initialIdentity={...(initial.info||task),_space_id:scope.space,assistant_id:scope.owner},identityMark=taskIdentityMark(initialIdentity),shortID=taskIdentityShort(initialIdentity,t('tasks.identityUnknown'));shortID.classList.add('task-short-id');goalSummary.insertBefore(identityMark,goalPreview);goalSummary.insertBefore(shortID,goalPreview);
   function updateIdentity(){const info={...(record?.info||initial.info||task),_space_id:scope.space,assistant_id:scope.owner};taskIdentities.register([info]);shortID.textContent=taskIdentities.short(info)||t('tasks.identityUnknown');shortID.title=taskAddress(info)?JSON.stringify(taskAddress(info)):t('tasks.identityUnknown');reconcile(identityMark,taskIdentityMark(info));}
   goalPreview.textContent=(initial.request?.text||'').replace(/\s+/g,' ');goalBody.append(renderMarkdown(initial.request?.text||'',{downloadFile,acquireFileImage}));
-  const historyNotice=n('p','hint'),earlier=action(translate(locale(),'tasks.loadEarlier'),()=>historyWork(onEarlier));
+  const historyNotice=n('p','hint'),boundary=n('div','task-history-boundary');boundary.style.minHeight='1px';boundary.setAttribute('role','status');
   const transcript=n('div','task-transcript'),files=n('div','task-files');files.dataset.scrollAnchor='task-files';transcript.setAttribute('role','log');transcript.setAttribute('aria-label',tr('Task conversation','任务对话'));
   const downloadNotice=n('div','task-download-error');downloadNotice.hidden=true;downloadNotice.setAttribute('role','alert');
-  const approvalHost=n('div','task-unmatched-approvals');column.append(goal,historyNotice,earlier,approvalHost,transcript,files,downloadNotice);history.append(column);
+  const approvalHost=n('div','task-unmatched-approvals');column.append(goal,historyNotice,boundary,approvalHost,transcript,files,downloadNotice);history.append(column);
   const composerArea=n('div','composer-area task-composer-area'),form=n('form','composer'),input=n('textarea','composer-input'),send=iconButton('stop',tr('Stop task','停止任务'),'send-button'),latest=iconButton('down',t('latest'),'latest-button'),footer=n('p','task-ended'),error=n('p','task-action-error');
   input.rows=1;input.id=`task-composer-${task.id}`;input.setAttribute('autocapitalize','sentences');input.setAttribute('aria-label',t('tasks.followupLabel'));input.placeholder=t('tasks.followupPlaceholder');
   input.value=draft;form.append(input,send);composerArea.append(latest,form,footer,error);latest.hidden=true;footer.hidden=true;error.hidden=true;error.setAttribute('role','alert');
   root.classList.add('task-conversation');root.append(stage,history,composerArea);
   const dialog=n('dialog','preferences product-actions task-actions');dialog.setAttribute('aria-label',tr('Task actions','任务操作'));root.append(dialog);
   let fresh=false,record=initial,state,inputs=[],approvals=[],unavailable=false,connectionError='',storageError=false,busy=false,historyBusy=false,disposed=false,restored=false,frame=0,menuMode='actions',menuSignature='',fileSignature='',draftVersion=0;
-  let forest,projection,restoringPosition=false,downloadFailure;
+  let forest,projection,restoringPosition=false,downloadFailure,historyFailure,historyAbort,historyAttempt='',historyRun='',historyFrame=0;
   function renderDownloadFailure(){
     downloadNotice.hidden=!downloadFailure;downloadNotice.replaceChildren();
     if(!downloadFailure)return;
@@ -59,7 +59,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     try{await downloadTaskFile(file);}
     catch(reason){if(!disposed){downloadFailure={file,diagnostic:reason?.message||String(reason)};renderDownloadFailure();}}
   }
-  const reading=createReadingCursor(history,{active:()=>!disposed&&root.isConnected&&!!history.clientHeight,requestRender:scheduleFollow,changed:()=>{latest.hidden=reading.following;}});
+  const reading=createReadingCursor(history,{active:()=>!disposed&&root.isConnected&&!!history.clientHeight,requestRender:scheduleFollow,changed:()=>{latest.hidden=reading.following;},upward:scheduleHistory,scrolled:scheduleHistory,canReadEarlier:()=>!!state?.has_more});
   const editor=bindComposer(input,{layout:work=>reading.layout(work),onInput:text=>{draftVersion++;onDraft(completion.value());updateComposer();},onSend:submit,onCompositionEnd:updateComposer});
   const completion=bindCompletions(input,{client:{scope:()=>scope,resources:client.resources,read:client.read?(path,options)=>client.read(path,options):undefined,request:(path,options)=>client.request(path,options)},host:composerArea,locale,mobile:editor.mobile,id:`pot-task-${task.id}-completions`,setText:text=>editor.setValue(text)});
   input.value='';completion.setValue(draft);
@@ -69,12 +69,19 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   function scheduleFollow(){if(frame||disposed)return;frame=requestAnimationFrame(()=>{frame=0;if(!disposed)renderTranscript();});}
   let previousWidth=0,resizeFrame=0;
   const resizeObserver=new ResizeObserver(()=>{if(root.clientWidth!==previousWidth){previousWidth=root.clientWidth;cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{if(!disposed)editor.resize();});}reading.reflow();});resizeObserver.observe(column);resizeObserver.observe(history);resizeObserver.observe(composerArea);
-  latest.onclick=()=>historyWork(async()=>{await onLatest?.();reading.latest();renderTranscript();});
-  async function historyWork(work){
-    if(historyBusy||disposed)return;historyBusy=true;earlier.disabled=latest.disabled=true;error.hidden=true;
-    try{await work();}catch(reason){if(!disposed){error.textContent=t(reason.storage?'storage.failed':'history.failed');error.title=reason.message;error.hidden=false;}}
-    finally{historyBusy=false;if(!disposed)earlier.disabled=latest.disabled=false;}
+  const historyObserver=new IntersectionObserver(scheduleHistory,{root:history});historyObserver.observe(boundary);
+  function scheduleHistory(){if(disposed||historyFrame)return;historyFrame=requestAnimationFrame(()=>{historyFrame=0;const box=boundary.getBoundingClientRect(),viewport=history.getBoundingClientRect();if(root.isConnected&&history.clientHeight&&box.bottom>=viewport.top&&box.top<=viewport.bottom)loadEarlier();});}
+  function showHistoryStatus(){reading.layout(()=>{boundary.replaceChildren();if(historyBusy)boundary.textContent=t('history.loading');else if(historyFailure){boundary.append(n('span','',t(historyFailure.storage?'storage.failed':'tasks.historyFailed')),action(t('retry'),()=>{historyFailure=null;historyAttempt='';loadEarlier();}));}});}
+  async function loadEarlier(){
+    const before=state?.messages.find(message=>!message.context_only)?.sequence,key=historyRun+':'+before;
+    if(!onEarlier||!state?.has_more||!before||historyBusy||historyFailure||historyAttempt===key||disposed)return;
+    historyAttempt=key;historyBusy=true;historyAbort=new AbortController();const controller=historyAbort;
+    reading.flush();if(reading.following)reading.pause();showHistoryStatus();
+    try{await onEarlier({before,signal:controller.signal});}
+    catch(reason){if(!disposed&&!controller.signal.aborted){historyFailure=reason;}}
+    finally{if(historyAbort===controller){historyBusy=false;historyAbort=null;if(!disposed){showHistoryStatus();renderTranscript();scheduleHistory();}}}
   }
+  latest.onclick=async()=>{historyAbort?.abort();historyAbort=null;historyBusy=false;historyFailure=null;historyAttempt='';showHistoryStatus();try{await onLatest?.();if(!disposed){reading.latest();renderTranscript();}}catch(reason){if(!disposed){historyFailure=reason;showHistoryStatus();}}};
   async function run(work){
     if(busy||disposed)return;busy=true;error.hidden=true;updateComposer();renderMenu();
     try{await work();if(!disposed){dialog.close();error.textContent='';}}
@@ -93,7 +100,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     form.hidden=!can('task.input')&&!can('task.interrupt');input.readOnly=!can('task.input');input.setAttribute('aria-label',t('tasks.followupLabel'));input.placeholder=t('tasks.followupPlaceholder');
     completion.refresh();
     send.hidden=false;send.replaceChildren(icon(stop?'stop':'send'));label(send,stop?tr('Stop task','停止任务'):t('tasks.sendFollowup'));
-    send.disabled=!fresh||busy||(!running&&!hasText)||!!connectionError||(stop?!can('task.interrupt'):!can('task.input'));retry.disabled=busy;earlier.disabled=historyBusy;
+    send.disabled=!fresh||busy||(!running&&!hasText)||!!connectionError||(stop?!can('task.interrupt'):!can('task.input'));retry.disabled=busy;
     footer.hidden=running||!can('task.input');footer.textContent=t(record.info?.archived?'tasks.archivedHint':'tasks.followupHint');
     if(!running&&record.info?.archive_reason)footer.textContent+=' · '+record.info.archive_reason;
   }
@@ -165,7 +172,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     }
     const target=reading.following?{end:true}:destination?{id:destination.id,offset:reading.destination?undefined:reading.anchor?.offset}:undefined;
     transcriptWindow.layout(rows.filter(message=>!message.tool?.parent_id||!forest.byID.has(message.tool.turn_id+':'+message.tool.parent_id)).map(message=>({...message,viewKey:message.id})),{anchor:reading.anchor?.id,target,restore:()=>reading.apply()});
-    latest.hidden=reading.following;
+    latest.hidden=reading.following;scheduleHistory();
   }
   function renderMenu(force=false){
     if(!dialog.open&&!force)return;
@@ -194,7 +201,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     update(next){
       if(disposed)return;
       projection=null;
-      if(next.storageError!==undefined)storageError=next.storageError;if(next.fresh!==undefined)fresh=next.fresh;historyNotice.hidden=!(next.state?.cache_truncated||next.record?.cache_truncated||next.cacheTruncated);historyNotice.textContent=t('tasks.cachedOutputBounded');earlier.hidden=!onEarlier||!next.state?.has_more;earlier.disabled=historyBusy;earlier.textContent=t('tasks.loadEarlier');if(next.record)record=next.record;messageIdentities(client).rememberTasks([record.info||task]);if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
+      if(next.storageError!==undefined)storageError=next.storageError;if(next.fresh!==undefined)fresh=next.fresh;historyNotice.hidden=!(next.state?.cache_truncated||next.record?.cache_truncated||next.cacheTruncated);historyNotice.textContent=t('tasks.cachedOutputBounded');const nextRun=next.record?.run_id||task.id;if(nextRun!==historyRun){historyAbort?.abort();historyAbort=null;historyBusy=false;historyFailure=null;historyAttempt='';historyRun=nextRun;showHistoryStatus();}if(next.record)record=next.record;messageIdentities(client).rememberTasks([record.info||task]);if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
       updateIdentity();renderStage();renderTranscript();scheduleFollow();updateComposer();renderMenu();
       renderDownloadFailure();
       const attachments=record.outcome?.artifacts?.map(path=>({path}))||record.files||[],artifactError=record.outcome?.artifacts_error||'';
@@ -208,6 +215,6 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     position(){return reading.snapshot();},
     restore(position){restored=true;restoringPosition=true;reading.restore(position);editor.resize();renderTranscript();restoringPosition=false;},
     start(){if(!restored)reading.latest();editor.resize();renderTranscript();},
-    dispose(){disposed=true;cancelAnimationFrame(frame);cancelAnimationFrame(resizeFrame);reading.dispose();transcriptWindow.close();resizeObserver.disconnect();completion.dispose();editor.destroy();goal.removeEventListener('toggle',onToggle);dialog.close();dialog.remove();},
+    dispose(){disposed=true;historyAbort?.abort();historyObserver.disconnect();cancelAnimationFrame(historyFrame);cancelAnimationFrame(frame);cancelAnimationFrame(resizeFrame);reading.dispose();transcriptWindow.close();resizeObserver.disconnect();completion.dispose();editor.destroy();goal.removeEventListener('toggle',onToggle);dialog.close();dialog.remove();},
   };
 }

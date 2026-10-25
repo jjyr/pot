@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {taskHistoryBrowser,taskHistoryEdges} from './task-history-browser.mjs';
 import {mkdir,readFile} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {resolve,extname} from 'node:path';
@@ -12,7 +13,7 @@ if(!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(origin||''))throw Error('A lo
 const browser=await chromium.launch({executablePath:process.env.POT_CHROMIUM_EXECUTABLE,headless:true,args:['--no-sandbox']});
 const directory=process.env.POT_DB_SCREENSHOTS;
 try{
-  for(const [path,done]of [['chat-cache-read-volume.html','PASS bounded chat reads'],['chat-cache.html','DONE cache contract'],['projection-store.html','DONE projection store contract'],['chat-cache-ui.html','DONE'],['cached-loading.html','ALL CHECKS PASSED']]){
+  for(const [path,done]of [['domain-repositories.html','DONE domain repositories contract'],['chat-cache-read-volume.html','PASS bounded chat reads'],['chat-cache.html','DONE cache contract'],['projection-store.html','DONE projection store contract'],['chat-cache-ui.html','DONE'],['cached-loading.html','ALL CHECKS PASSED']]){
     if(process.env.POT_DB_FIXTURE&&path!==process.env.POT_DB_FIXTURE)continue;
     const context=await browser.newContext({serviceWorkers:'block',viewport:{width:1280,height:800}}),page=await context.newPage();
     try{
@@ -28,20 +29,12 @@ try{
       console.log(path+': '+result.split('\n').filter(line=>line.startsWith('PASS')).length+' assertions passed');
     }finally{await context.close();}
   }
-  if(directory){
-    await mkdir(directory,{recursive:true});
+  if(!process.env.POT_DB_FIXTURE||process.env.POT_DB_FIXTURE==='task-history'){
+    if(directory)await mkdir(directory,{recursive:true});
     for(const before of [true,false]){
       const context=await browser.newContext({serviceWorkers:'block',viewport:{width:1280,height:800}}),page=await context.newPage();
-      try{await page.goto(origin+'/scripts/tests/fixtures/db-driven-task.html'+(before?'?before=1':''));await page.waitForFunction(()=>document.querySelector('#results')?.textContent.startsWith('Ready'),null,{timeout:120000});await page.getByRole('button',{name:'Read earlier output',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.task-history')?.scrollTop===0);await page.screenshot({path:directory+'/task-history-1280-light-'+(before?'before':'after')+'.png'});
-        if(!before){
-          const firstText=await page.locator('.task-transcript').textContent();assert.ok(firstText.includes('Execution update 0561.'),'Initial committed Task window starts at message 561');
-          await page.getByRole('button',{name:'Load earlier output',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.task-history button')?.disabled);
-          await page.getByRole('button',{name:'Read earlier output',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.task-transcript')?.textContent.includes('Execution update 0481.'));
-          await page.getByRole('button',{name:'Load earlier output',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.task-history button')?.disabled);
-          await page.getByRole('button',{name:'Read earlier output',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.task-transcript')?.textContent.includes('Execution update 0401.'));
-          await page.locator('.task-composer-area .latest-button').click();await page.waitForFunction(()=>document.querySelector('.task-transcript')?.textContent.includes('Execution update 1200.'));
-          console.log('Task UI: two indexed earlier windows and Latest preserve the current transcript');
-        }}
+      try{await taskHistoryBrowser(page,{origin,before,screenshot:directory?directory+'/task-history-1280-light-'+(before?'before':'after')+'.png':undefined});if(!before)await taskHistoryEdges(page,{origin});}
+      catch(error){console.error(await page.evaluate(()=>({errors:document.querySelector('#results')?.textContent,earlier:window.taskFixture?.earlier,counts:window.taskFixture?.counts,history:document.querySelector('.task-history')?.scrollTop,text:document.querySelector('.task-transcript')?.textContent?.slice(0,400)})));throw error;}
       finally{await context.close();}
     }
   }

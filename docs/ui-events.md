@@ -394,7 +394,12 @@ The task conversation uses the shared reply bubbles, tool disclosures, composer
 binding, measured message windows and reference completions. Expanded tool trees
 share its scroll container and retain disclosure state when recycled. Only its history scrolls; status and the composer
 remain visible. Following stops when the reader scrolls upward, and Latest resumes
-it. Navigation restores the goal/tool disclosures and reading position. Terminal
+it. When the upper history boundary becomes visible, the view automatically reads
+an earlier committed page while preserving its message anchor. An initial short
+window uses the same boundary. There is one in-flight request and no repeated
+attempt for an unchanged cursor; a failed page offers explicit Retry. Latest,
+a new run and disposal cancel old history work. New execution output updates
+matching historical rows without selecting the live tail. Navigation restores the goal/tool disclosures and reading position. Terminal
 text already present in the final reply is not repeated. Ended tasks retain an
 unsent draft read-only and expose no send action. Only a matching successful send
 clears an unedited draft; failed sends retain their request identity for retry.

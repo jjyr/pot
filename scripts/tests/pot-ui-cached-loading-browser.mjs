@@ -54,7 +54,7 @@ async function run(){results.textContent='Running '+(baseline?'baseline':'cached
   await pages.show('tasks',{force:true});delays['/api/v1/tasks/t0']=800;delays['/api/v1/tasks/t0/events']=800;
   const returning=pages.openTask({...taskItems[0],_space_id:'a'});await pause(40);check(host.textContent.includes('Cached task transcript'),'Task return keeps transcript during refresh');await returning;
   check([...counts.keys()].some(key=>key.includes('/events?after=3')),'Task return resumes from cached event cursor');
-  await pages.showProviders();failProviders=true;client.resources.invalidate(['providers'],{space:'a'});pages.refresh(['providers'],{space:'a'});await wait(()=>host.querySelector('.resource-refresh-error'));
+  await pages.showProviders();failProviders=true;client.resources.invalidate(['providers'],{space:'a'});pages.refresh(['providers'],{space:'a'});await wait(()=>host.querySelector('.page-refresh-status[role="alert"]'));
   check(host.textContent.includes('Fixture Provider'),'Refresh failure retains provider content');locale='zh-CN';window.dispatchEvent(new Event('pot:locale'));await pause(50);check(host.textContent.includes('刷新失败'),'Refresh failure follows the current locale');
   // Successful navigation keeps shared cache; the error notice uses current locale on its next failure.
   failProviders=false;locale='en';window.dispatchEvent(new Event('pot:locale'));await pause(50);

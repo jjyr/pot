@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {createQueryRegistry,createCommands} from '../../web/src/state/domains/query.mjs';
+import {createProvidersDomain} from '../../web/src/state/domains/providers.mjs';
+const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {resolve,reject,promise};};
+const tick=()=>new Promise(resolve=>setTimeout(resolve,0));
+let committed,loads=0;const changes=new Set(),invalidations=new Set();
+const resources={state:()=>({freshness:'fresh'}),subscribe(fn){changes.add(fn);return()=>changes.delete(fn);},subscribeInvalidation(fn){invalidations.add(fn);return()=>invalidations.delete(fn);}};
+const registry=createQueryRegistry(resources),io=deferred();
+const query=registry.define('tasks:one',async()=>{loads++;const data=await io.promise;assert.equal(committed,data,'Queries publish only committed data');return {data};},{topics:['tasks'],space:'one'});
+const a=[],b=[],stopA=query.watch(state=>a.push(state)),stopB=query.watch(state=>b.push(state));assert.equal(loads,1,'Two views share their first read');stopA();registry.notify(['tasks'],{space:'one'});committed={items:[1]};io.resolve(committed);await tick();assert.equal(a.at(-1).status,'loading');assert.equal(b.at(-1).data,committed,'Disposing one view leaves shared IO active');assert.equal(b.at(-1).fresh,true);
+await registry.notify(['tasks'],{space:'other'});assert.equal(loads,2,'Invalidations during shared IO receive one follow-up; another node does not refresh');stopB();registry.dispose();assert.equal(changes.size,0);assert.equal(invalidations.size,0);
+const commands=createCommands({}),scope={space:'one',owner:'assistant'},pending=deferred();let sends=0,identity;
+const send=(body,id)=>{sends++;identity=id;assert.deepEqual(body,{text:'intent'});return pending.promise;};
+const first=commands.run(scope,'task:t:input',{text:'intent'},send,{idempotent:true}),second=commands.run({...scope},'task:t:input',{text:'intent'},send,{idempotent:true});assert.equal(first,second);await tick();assert.equal(sends,1);assert.equal(commands.pending(scope,'task:'),true);assert.equal(commands.pending({...scope,owner:'other'},'task:'),false);pending.reject(Object.assign(Error('local commit failed'),{accepted:true}));await assert.rejects(first,/local commit/);let retriedID;await commands.run(scope,'task:t:input',{text:'intent'},(_,id)=>{retriedID=id;return {accepted:true};},{idempotent:true});assert.equal(retriedID,identity,'Manual retry retains the accepted intent identity');
+const reads=[];const domain=createProvidersDomain({request:async()=>({})},{resources:{read:async(path,options)=>{reads.push({path,options});return {profiles:[]};},state:()=>({freshness:'fresh'})},queries:createQueryRegistry(resources),commands});
+assert.equal(domain.catalog({space:'one',owner:'a',signal:new AbortController().signal}),domain.catalog({space:'one',owner:'b',request_id:'editor'}),'Provider catalog normalizes shared scope and excludes consumer context');await domain.query({space:'one',owner:'a'});assert.deepEqual(reads[0].options,{space:'one',owner:'',authoritative:false});commands.dispose();
+console.log('Domain queries: shared first read, consumer disposal, committed publication, freshness, scope isolation; commands: shared intent and retry identity; Provider scope normalization passed');

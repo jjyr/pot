@@ -195,7 +195,7 @@ export function createResourceReads(client,{storage=client.production?createProj
       }
       // Notify after fencing pending reads, before any consumer can select an
       // item from an obsolete projection. This is distinct from read completion.
-      for(const listener of invalidations)listener(topics,bootChanged?{...source,reset:true}:source);
+      return Promise.allSettled([...invalidations].map(listener=>listener(topics,bootChanged?{...source,reset:true}:source)));
     },
     clear(){closed=true;stopStorage?.();storage?.close();cache.reset();boots.clear();hydrated.clear();},
   };

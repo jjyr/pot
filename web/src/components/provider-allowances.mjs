@@ -1,6 +1,5 @@
 import {node as n,action,field} from './primitives.mjs';
 import {translate} from '../locales/messages.mjs';
-import {saveAllowanceConfiguration} from '../state/provider-save.mjs';
 
 export function allowanceFreshness(account,window,snapshot,now=Date.now()) {
  const sources=[account.as_of,account.read_at].filter(Boolean),times=[snapshot.read_at,...sources].map(value=>Date.parse(value));
@@ -12,7 +11,7 @@ const monitorValues=monitor=>({enabled:monitor.enabled,threshold:monitor.thresho
 
 // All mutable reminder state lives in caller-owned, connection-scoped memory.
 // Metadata refreshes and locale/page reconstruction never replace a dirty draft.
-export function createProviderAllowances({root,request,scope,profileID,locale,current=()=>true,available=()=>true,identity=()=>[profileID],binding=()=>profileID,memory={}}) {
+export function createProviderAllowances({root,providersDomain,scope,profileID,locale,current=()=>true,available=()=>true,identity=()=>[profileID],binding=()=>profileID,memory={}}) {
  const t=key=>translate(locale(),'providers.'+key),disclosure=n('details','provider-allowances'),summary=n('summary'),content=n('div','provider-allowance-content'),status=n('p','hint'),accountsRoot=n('div'),reminder=n('div','provider-allowance-reminder'),message=n('p','hint');
  disclosure.dataset.cacheKey='provider-allowances:'+profileID;status.setAttribute('role','status');message.setAttribute('role','status');
  let pending=false,version=0,controller,disposed=false;
@@ -35,7 +34,7 @@ export function createProviderAllowances({root,request,scope,profileID,locale,cu
  const refresh=action('',()=>load(true)),save=action('',async()=>{
   synchronizeIdentity();if(memory.saving||!memory.draft||!available()||!threshold.input.reportValidity())return;
   const desired=structuredClone(memory.draft),revision=memory.revision,signature=memory.signature,write=memory.write={};memory.saving=true;memory.message='';renderControls();
-  try{const value=await saveAllowanceConfiguration({request,scope,profileID,values:desired,revision});if(memory.signature!==signature||memory.write!==write)return;memory.needsRead=false;memory.view=value;memory.baseline=desired;memory.revision=value.monitor.revision;if(JSON.stringify(memory.draft)===JSON.stringify(desired))memory.draft=monitorValues(value.monitor);memory.message='reminderSaved';}
+  try{const value=await providersDomain.configureAllowance(scope,profileID,desired,revision);if(memory.signature!==signature||memory.write!==write)return;memory.needsRead=false;memory.view=value;memory.baseline=desired;memory.revision=value.monitor.revision;if(JSON.stringify(memory.draft)===JSON.stringify(desired))memory.draft=monitorValues(value.monitor);memory.message='reminderSaved';}
   catch{if(memory.signature===signature&&memory.write===write)memory.message='reminderFailed';}
   finally{if(memory.write===write){memory.saving=false;delete memory.write;memory.render?.();}}
  },{primary:true});
@@ -66,6 +65,6 @@ export function createProviderAllowances({root,request,scope,profileID,locale,cu
    if(account.until)entry.append(n('p','hint',t(account.renew==='auto'?'renews':'until').replace('{time}',date(account.until))));const observed=account.as_of||account.read_at;if(observed)entry.append(n('small','hint',t('observed').replace('{time}',date(observed))));accountsRoot.append(entry);
   }
  }
- async function load(force=false){synchronizeIdentity();if(pending||!active()||!available())return;pending=true;const captured=++version,signature=memory.signature;controller?.abort();const signal=(controller=new AbortController()).signal;render();try{const value=await request('/api/v1/providers/allowances'+(force?'':'?profile_id='+encodeURIComponent(profileID)),{...scope,signal,...(force?{method:'POST',body:{profile_id:profileID,action:'refresh'}}:{})});if(!active()||captured!==version||signature!==JSON.stringify(identity())||signature!==memory.signature)return;accept(value);}catch(reason){if(!active()||captured!==version||signature!==JSON.stringify(identity())||signature!==memory.signature||reason.name==='AbortError')return;memory.view={...memory.view,status:'unavailable'};}finally{if(captured===version&&active()&&signature===memory.signature){pending=false;render();}}}
+ async function load(force=false){synchronizeIdentity();if(pending||!active()||!available())return;pending=true;const captured=++version,signature=memory.signature;controller?.abort();const signal=(controller=new AbortController()).signal;render();try{const value=await (force?providersDomain.refreshAllowance(scope,profileID,signal):providersDomain.allowance(scope,profileID,signal));if(!active()||captured!==version||signature!==JSON.stringify(identity())||signature!==memory.signature)return;accept(value);}catch(reason){if(!active()||captured!==version||signature!==JSON.stringify(identity())||signature!==memory.signature||reason.name==='AbortError')return;memory.view={...memory.view,status:'unavailable'};}finally{if(captured===version&&active()&&signature===memory.signature){pending=false;render();}}}
  memory.render=render;synchronizeIdentity();disclosure.addEventListener('toggle',()=>{if(disclosure.open&&(!memory.view||memory.needsRead))load();});const update=()=>{synchronizeIdentity();render();if(disclosure.open&&(!memory.view||memory.needsRead))load();};update.dispose=()=>{disposed=true;version++;controller?.abort();};update.remove=()=>{update.dispose();delete memory.view;delete memory.signature;memory.needsRead=true;memory.saving=false;delete memory.write;disclosure.remove();};render();return update;
 }

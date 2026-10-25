@@ -23,6 +23,12 @@ function capture(meta, snapshot) {
   return {...meta,schema_version:2,projection,window:messages.map(message=>({id:message.id,context_only:!!message.context_only})),
     latest:latest(meta?.latest,_latest||history?.after||'0'),updates:[...(_updates?.keys()||[])],used:Date.now()};
 }
+// Event coverage can develop holes when message bodies are evicted. Keep its
+// metadata bounded too; dropping coverage only requires a conservative backfill.
+function evictedRanges(values,at){
+  const kept=values.flatMap(range=>{const first=BigInt(range.before),last=BigInt(range.after);if(at<first||at>last)return [range];return [...(at>first?[{before:String(first),after:String(at-1n)}]:[]),...(at<last?[{before:String(at+1n),after:String(last)}]:[])];});
+  return kept.length>128?[...kept.slice(0,64),...kept.slice(-64)]:kept;
+}
 function ranges(values) {
   const result=[];
   for(const value of values.filter(value=>value.before&&value.after).sort((a,b)=>BigInt(a.before)<BigInt(b.before)?-1:1)){
@@ -86,7 +92,7 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
   async function save(tx,key,meta,snapshot){
     const store=tx.objectStore('messages'),pinned=new Set(snapshot.messages.map(message=>message.id));
     if(meta.count>maxMessages||meta.bytes>maxBytes){
-      await new Promise((resolve,reject)=>{const op=store.index('used').openCursor(IDBKeyRange.bound([key,0],[key,Infinity]));op.onerror=()=>reject(op.error);op.onsuccess=()=>{const row=op.result;if(!row||meta.count<=maxMessages&&meta.bytes<=maxBytes){resolve();return;}if(!pinned.has(row.value.id)){meta.count--;meta.bytes-=row.value.bytes;meta.ranges=[];meta.replies=meta.replies.filter(reply=>reply.input_id!==row.value.id);row.delete();}row.continue();};});
+      await new Promise((resolve,reject)=>{const op=store.index('used').openCursor(IDBKeyRange.bound([key,0],[key,Infinity]));op.onerror=()=>reject(op.error);op.onsuccess=()=>{const row=op.result;if(!row||meta.count<=maxMessages&&meta.bytes<=maxBytes){resolve();return;}if(!pinned.has(row.value.id)){meta.count--;meta.bytes-=row.value.bytes;meta.ranges=evictedRanges(meta.ranges||[],BigInt(row.value.message.sequence));meta.replies=meta.replies.filter(reply=>reply.input_id!==row.value.id);row.delete();}row.continue();};});
     }
     if(meta.count>maxMessages||meta.bytes>maxBytes||meta.bytes>totalBytes)throw Error('chat_cache_capacity');
     const catalogue=tx.objectStore('conversations'),old=await request(catalogue.get(key)),stats=await request(tx.objectStore('cacheStats').get('chat'))||{key:'chat',bytes:0};
@@ -160,11 +166,13 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
       meta=await save(tx,key,meta,snapshot);await saveWindow(tx,key,surface,snapshot,position);return {meta,snapshot};
     });return committed(key,result);
   }
-  async function writeRecords(key,messages,history){
+  async function writeRecords(key,messages,history,{conversation,signal}={}){
     const result=await transaction('readwrite',async tx=>{
+      if(signal?.aborted)throw signal.reason;
       let meta=await request(tx.objectStore('conversations').get(key));if(!meta)return null;
-      const snapshot=await projection(tx,key,meta);await upsert(tx,key,meta,messages);
-      meta.ranges=ranges([...(meta.ranges||[]),history]);meta=await save(tx,key,meta,snapshot);return {meta,snapshot};
+      if(conversation&&meta.projection.conversation_id!==conversation)throw new DOMException('Task run changed','AbortError');
+      const snapshot=await projection(tx,key,meta);await upsert(tx,key,meta,messages);if(signal?.aborted)throw signal.reason;
+      meta.ranges=ranges([...(meta.ranges||[]),history]);meta=await save(tx,key,meta,snapshot);if(signal?.aborted)throw signal.reason;return {meta,snapshot};
     });return committed(key,result);
   }
   async function readPage(key,query){
@@ -179,7 +187,7 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
       else if(target){const earlier=(await indexedRows(index,bounds(key,range.before,BigInt(target.message.sequence)-1n),{...options,direction:'prev',limit:Math.floor(limit/2)})).reverse();const newer=await indexedRows(index,bounds(key,target.message.sequence,range.after),{...options,limit:limit-earlier.length});selected=[...earlier,...newer];}
       else selected=(await indexedRows(index,bounds(key,range.before,range.after),{...options,direction:'prev'})).reverse();
       if(!selected.length)return null;const messages=await dependencies(tx,key,selected);if(!messages)return null;
-      return {boot_id:meta.projection.boot_id,conversation_id:meta.projection.conversation_id,cursor:meta.projection.cursor,messages,history:{before:selected[0].message.sequence,after:selected.at(-1).message.sequence,has_more:sequence(selected[0].message)>1n,has_newer:sequence(selected.at(-1).message)<BigInt(meta.latest)}};
+      return {boot_id:meta.projection.boot_id,conversation_id:meta.projection.conversation_id,cursor:meta.projection.cursor,messages,...(checkpoints?{checkpoint:await request(tx.objectStore('taskCheckpoints').get(key))}:{}),history:{before:selected[0].message.sequence,after:selected.at(-1).message.sequence,has_more:sequence(selected[0].message)>1n,has_newer:sequence(selected.at(-1).message)<BigInt(meta.latest)}};
     });
   }
   return {read,writeFrames,writePage,writeRecords,readPage,readMessages:(key,ids)=>transaction('readonly',async tx=>(await records(tx,key,ids)).map(row=>row.message)),subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},

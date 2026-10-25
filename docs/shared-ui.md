@@ -23,7 +23,7 @@ directory, Chat and input lifecycle. [`components/pages.mjs`](../web/src/compone
 owns Tasks, schedules, Topology, Usage, configuration forms and return contexts.
 [`components/task-conversation.mjs`](../web/src/components/task-conversation.mjs)
 owns the task status, conversation history, menu and fixed composer, reusing the
-shared reply/tool/composer components. Pages retains task requests and owner scope.
+shared reply/tool/composer components. Pages retains Task navigation, editor drafts and reading intent; domain repositories own shared requests and owner scope.
 [`components/usage.mjs`](../web/src/components/usage.mjs) owns exact-count usage tooltips, the trend chart and independently loaded detail lists.
 [`components/reply.mjs`](../web/src/components/reply.mjs) owns reply content,
 activity and the single failure presentation; [`state/chat-replies.mjs`](../web/src/state/chat-replies.mjs)
@@ -94,6 +94,53 @@ unused Blob URLs; a synchronous streaming replacement reuses its lease. Preview
 dialogs close when their message leaves the document. Loading, error and dialog
 controls follow the current UI language, including during asynchronous reads.
 
+## Business repositories
+
+`state/domains/index.mjs` supplies one directory, Tasks, schedules and Providers
+repository per client. Production and fixtures consume these same interfaces.
+A domain query exposes `watch(listener) -> unsubscribe`, a committed `data`
+value, `status`, `freshness`, `error`, `lastConfirmed` and derived `fresh`.
+Convenience methods such as `tasks.watchDetail(task, scope, listener)` and
+`providers.watchCatalog(scope, listener)` select the shared query. They own the
+first database read, background confirmation, pagination, invalidation dependencies
+and subsequent notifications. Unsubscribing one view does not cancel another
+view's IO. Unused completed query entries are bounded to 128; active queries and
+in-flight reads remain leased until their consumers finish.
+
+```text
+shell / page / background strip
+              | watch + typed business command
+    directory | Tasks | schedules | Providers
+              | shared queries + command attempts
+         resource / transcript repository
+              | transaction commit
+             IndexedDB
+```
+
+The directory combines serving Spaces, local and linked assistants and machine
+labels, removing execution and approval authority from retained identities. Tasks
+shares catalogue reads, metadata, guidance and the transcript reducer with the
+Chat background strip. Schedules owns collection pagination and preview/save/run
+commands. Providers owns the shared catalog, routing and allowance settings,
+connection DTOs and quota monitor commands. Provider catalogs normalize away
+assistant/editor context; sensitive editor revision reads remain transient.
+
+UI components keep focus, unsaved values, expanded disclosures, filters and the
+history sentinel. They pass business inputs to typed commands instead of building
+domain URLs or repeating mutation/refresh sequences. Command attempts share
+pending state and immutable input/request identity across consumers; explicit
+retry retains that identity. The production adapter commits accepted response
+receipts and invalidations before notifying domain queries. A manual retry after
+a local commit failure retries that accepted receipt without sending the command
+again. Provider monitor revisions and exact-intent recovery retain their existing
+compare-and-swap behavior.
+
+Permissions, pairing/authentication, binary resources, conversation streaming,
+Topology and detailed Usage retain their specialized interfaces. These combine
+live authority, transport lifecycle or route-specific aggregation that is outside
+the migrated display domains; they still use the shared storage boundary where
+applicable. They must not create a second directory, Task or Provider cache.
+
 ## Committed local projections
 
 `state/resource-cache.mjs` routes allowed display GETs from both `client.read` and
@@ -155,10 +202,21 @@ across Tasks. Message text, tool arguments/result and combined output streams ar
 bounded to about one million characters each; truncated cached output is labeled.
 Task result metadata and retained guidance also have bounded display projections;
 guidance keeps at most 256 entries within 16 MiB, with the same truncation notice.
-The server retains the original output. Load earlier output queries an indexed
-window, replaying the server's after-only event API into a bounded historical
-window if the requested range was evicted. This read never replaces the live
-checkpoint or replays commands. Latest returns to the committed current window.
+The server retains the original output. A visible upper history boundary automatically
+queries an indexed page of 80 records, including when the initial window is
+shorter than the viewport. Prepending preserves the visible message anchor and
+pixel offset. One page may be in flight; unchanged cursors do not retry. Failures
+show a local Retry action and await explicit input. Latest returns to the committed
+current window and cancels pending historical reads. New live output preserves a
+reader's historical window. Navigation, disposal and a new run fence late results.
+
+If a historical range was evicted, the existing after-only event API requires the
+first reconstruction to start at cursor zero and stop before the requested
+boundary. Its working window remains bounded to 640 messages / 16 MiB. Processed
+ranges commit to the historical cache, so neighboring pages reuse that coverage
+while retained. Eviction removes only the affected coverage rather than discarding
+all ranges. Coverage metadata retains at most 128 intervals; discarded coverage
+requires a conservative backfill. Backfill never replaces the live cursor/checkpoint or replays commands.
 A new run has its own conversation boundary.
 
 Task and usage page offsets, reading positions and disclosures remain view state.

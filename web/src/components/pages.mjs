@@ -1,4 +1,5 @@
-import {createTaskRepository} from '../state/task-repository.mjs';
+import {domainsFor} from '../state/domains/index.mjs';
+import {mergeTaskHistory} from '../state/task-repository.mjs';
 import {taskIdentityMark,taskIdentityShort} from './task-identity.mjs';
 import {recordOwner,groupRecords,groupHeading,ownerChoices,createRecordPagination} from './record-groups.mjs';
 import {taskIdentities,taskAddress} from '../state/task-identity.mjs';
@@ -11,7 +12,7 @@ import {usageRange,usageRangeControls,usageToday} from './usage-period.mjs';
 import {notificationSetting} from './notification-setting.mjs';
 import {usageNumbers,usageRows,usageTooltip,usageTrend,createUsageList} from './usage.mjs';
 import {createTaskConversation} from './task-conversation.mjs';
-import {createProviderSave,saveAllowanceConfiguration} from '../state/provider-save.mjs';
+import {createProviderSave} from '../state/provider-save.mjs';
 import {connectProviderEditor} from './provider-connection.mjs';
 import {avatar,avatarFromFile} from './avatar.mjs';
 import {translate} from '../locales/messages.mjs';
@@ -19,10 +20,9 @@ import {icon} from './icons.mjs';
 import {node as n, action, field, section, table, details} from './primitives.mjs';
 import {modelDefaults,createModelInputDiscovery,providerConversationModels} from '../state/models.mjs';
 import {ownedItems,combineTasks,combineUsage} from '../state/aggregate.mjs';
-import {createTaskPages} from '../state/task-pages.mjs';
 import {bindSearch} from './search.mjs';
 import {createEditorSession, createRequestGate} from '../state/editor.mjs';
-import {createTaskTranscript,appendTaskEvents} from '../state/task-transcript.mjs';
+import {createTaskTranscript} from '../state/task-transcript.mjs';
 import {forgetBrowserAccess,configureBrowserAccess,requestPWAInstall} from '../adapters/access.mjs';
 import {renderMarkdown} from './markdown.mjs';
 import {renderAbout} from './about.mjs';
@@ -46,19 +46,18 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   let route = '', title = '', editor = null, disposed = false, pageVersion = 0, configurationSpace = '',taskView=null,taskOrigin=null,taskListView=null,scheduleView=null,detailParent=false,usageOwner=null;
   let filter = {taskScope:'active', taskQuery:'', taskPhase:'', listOwner:'', scheduleQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageScope:'all', usageSpace:'all',usageRange:usageRange(),usageYear:Number(usageToday().slice(0,4)),settingsTab:'general'};
   let pendingApprovals=[],approvalFresh=false,notificationSettings=null;
-  const taskRepository=client.tasks||createTaskRepository(client),resourceBoots=new Map(),ownerDisclosures=new Map();
+  const domains=domainsFor(client),releaseDomains=domains.retain(),taskDomain=domains.tasks,ownerDisclosures=new Map();
   const providerAllowanceMemory=new Map(),toolMemory=new Map(),usageOffsets=new Map(),approvalCards=new Map(),taskNames=new Map();
   const chatApprovals=createChatApprovals({host:chatApprovalHost,locale,visible:chatVisible});
-  const cached = new Map(),machineDrafts=new Map(),editorParents=[],taskDrafts=new Map(),taskDraftVersions=new Map(),taskWrites=new Map(),scheduleWrites=new Map();
+  const cached = new Map(),machineDrafts=new Map(),editorParents=[],taskDrafts=new Map(),taskDraftVersions=new Map();
   let extensionUI=null;const extensionMemory={};
   let pageView=null,currentViewKey='',viewReady=false,shortcutOpen=null,approvalOwner='',topologySelection='',agentOwnerSpace='';
   const tr = (en, zh) => locale() === 'zh-CN' ? zh : en;
   const scope = () => client.scope();
-  const readTaskPages=createTaskPages(client);
   const request = (path, options = {}) => client.request(path, options);
-  const read = (path,options={}) => (client.read||client.request)(path,options);
+  const read = (path,options={}) => client.read(path,options);
   const stopResources=client.resources?.subscribe((meta,error)=>{
-    if(disposed||editor||!host.offsetParent)return;
+    if(disposed||editor||!host.offsetParent||pageView?.domain||taskListView)return;
     if(pageView&&!relevantChange(meta.topics,pageView.topics,pageView.space,{space:meta.space}))return;
     if(taskListView&&!meta.topics.some(topic=>['tasks','machines'].includes(topic)))return;
     if(error){const target=pageView?.root||taskListView?.rows;if(target){let status=target.querySelector('.resource-refresh-error');if(!status){status=n('p','inline-error resource-refresh-error');status.setAttribute('role','alert');target.prepend(status);}status.dataset.resource=JSON.stringify(meta);status.replaceChildren(n('span','',translate(locale(),'loading.stale')),action(translate(locale(),'retry'),()=>{client.resources.invalidate(meta.topics,{space:meta.space});if(pageView)pageView.queue.run();else refreshTaskList();}));}return;}
@@ -73,7 +72,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   async function across(path, token, {spaceID='all', paginate=false,perAssistant=false,ownerID='',errorTarget=null}={}) {
     const spaces=(client.spaces||[]).filter(space=>spaceID==='all'||space.id===spaceID);
     if(!spaces.length)throw Error(tr('Space is unavailable.','Space 不可用。'));
-    const targets=spaces.flatMap(space=>perAssistant?(client.assistants||[]).filter(item=>supportsCapability(item,path.startsWith('/api/v1/schedules')?'schedules.manage':'assistant.usage')&&item.space_id===space.id).map(item=>({space,owner:item.id})):[{space,owner:ownerID}]);
+    const targets=spaces.flatMap(space=>perAssistant?(client.assistants||[]).filter(item=>supportsCapability(item,'assistant.usage')&&item.space_id===space.id).map(item=>({space,owner:item.id})):[{space,owner:ownerID}]);
     const results=await Promise.allSettled(targets.map(async({space,owner})=>{
       try {
         const shared=paginate&&client.resources;
@@ -113,6 +112,16 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     try {await work(); if(!disposed&&version===pageVersion&&button.isConnected) await after();}
     catch(reason) {if(!disposed&&version===pageVersion&&button.isConnected) errorView(reason);}
     finally {setPending(button,false);}
+  }
+  function connectDomain(root,token,watch,refresh,render){
+    const status=n('p','hint page-refresh-status',translate(locale(),'loading.pending'));root.prepend(status);
+    let stop,settled=false;const ready=new Promise(resolve=>{
+      stop=watch(snapshot=>{if(disposed||!gate.current(token))return;root.setAttribute('aria-busy',String(snapshot.status==='loading'));status.hidden=snapshot.status!=='loading'&&snapshot.status!=='error';status.setAttribute('role',snapshot.error?'alert':'status');status.classList.toggle('inline-error',!!snapshot.error);
+        if(snapshot.error){status.replaceChildren(n('span','',translate(locale(),'loading.stale')),action(translate(locale(),'retry'),refresh));}
+        if(snapshot.data!==undefined)render(snapshot.data,snapshot);
+        if(!settled&&(snapshot.data!==undefined||snapshot.status==='error')){settled=true;resolve();}
+      });token.signal.addEventListener('abort',()=>{stop();resolve();},{once:true});
+    });pageView={root,token,domain:true,topics:[],queue:{run:refresh,close:()=>stop?.()}};return ready;
   }
   function connectView(root,token,read,update,{topics=[],space='',invalidate}={}) {
     const status=n('div','hint page-refresh-status',tr('Loading…','正在加载…'));status.setAttribute('role','status');root.prepend(status);
@@ -222,7 +231,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
         if(editor?.session!==session||disposed)return;
         if(!available()){deleteError='assistant.deleteOffline';return;}
         if(client.runtime.boot_id!==session.context.boot){deleteError='assistant.deleteRuntimeChanged';return;}
-        await request(`/api/v1/assistants/${encodeURIComponent(definition.id)}/delete`,{...captured,method:'POST',body:{revision:getRevision()}});
+        await domains.directory.remove(captured,definition.id,getRevision());
         session.settle(true);await leave();route='chat';
         history.replaceState({potRoute:'chat',potScope:{space:captured.space,owner:''},potDirectory:true},'',location.href);
         routeChanged('chat');await changed({deletedAssistant:{space:captured.space,owner:definition.id}});
@@ -249,13 +258,13 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const token=gate.next(),captured={...capturedScope},loading=body();assistantLoad={definition,scope:captured,root:loading};renderAssistantLoad();
     try{
       if(supportsCapability(definition,'assistant.profile')&&!supportsCapability(definition,'assistant.configure')){
-        const profile=await request('/api/v1/assistants/profile',{...captured,signal:token.signal});
+        const profile=await domains.directory.profile(captured,token.signal);
         if(!gate.current(token)||disposed)return;
         assistantLoad=null;
         linkedProfile(definition,profile,captured);return;
       }
       const options={...captured,signal:token.signal};
-      const [providers,thread,rules]=await Promise.all([read('/api/v1/providers',{...options,authoritative:true}),request('/api/v1/agent',options),request('/api/v1/instructions',options)]);
+      let [providers,thread,rules]=await Promise.all([domains.providers.query(options,{authoritative:true}),domains.directory.configuration(captured,token.signal),domains.directory.instructions(captured,token.signal)]);
       if(!gate.current(token)||disposed)return;
       assistantLoad=null;
       let profiles=providers.profiles||[],revision=definition?.revision,generation=thread?.generation||0,configurationRevision=thread?.revision||0,rulesRevision=rules?.revision||'';
@@ -273,12 +282,12 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
         {name:'reasoning_effort',label:tr('Reasoning effort','推理强度')},
         {name:'text',label:translate(locale(),'assistant.personality'),kind:'textarea',help:translate(locale(),'assistant.personalityHelp')},
       ],async(values,context,session)=>{
-        const options={owner:captured.owner,space:captured.space,method:'POST'},selection=selectValue(values);
+        const selection=selectValue(values);
         if(!selection)throw Error(tr('Connect and select a Provider first.','请先连接并选择提供商。'));
-        if(values.name!==initial.name||values.avatar!==initial.avatar){const saved=await request(`/api/v1/assistants/${encodeURIComponent(definition.id)}`,{...options,body:{name:values.name,...(values.avatar!==initial.avatar?{avatar:values.avatar}:{}),revision}});revision=saved.revision;initial.name=values.name;initial.avatar=values.avatar;session.acknowledge({name:values.name,avatar:values.avatar});}
+        if(values.name!==initial.name||values.avatar!==initial.avatar){const saved=await domains.directory.update(captured,definition.id,{name:values.name,...(values.avatar!==initial.avatar?{avatar:values.avatar}:{}),revision});revision=saved.revision;initial.name=values.name;initial.avatar=values.avatar;session.acknowledge({name:values.name,avatar:values.avatar});}
         const signature=JSON.stringify(selection);
-        if(selection&&signature!==initialSelection){const saved=await request('/api/v1/agent',{...options,body:{request_id:context.request_id,expected_generation:generation,expected_revision:configurationRevision,selection}});generation=saved.generation;configurationRevision=saved.revision;initialSelection=signature;session.acknowledge(Object.fromEntries(['profile_id','model','model_selection','context_window','max_output_tokens','reasoning_effort'].map(key=>[key,values[key]])));}
-        if(values.text!==initial.text){const saved=await request('/api/v1/instructions',{...options,body:{text:values.text,revision:rulesRevision}});rulesRevision=saved.revision;initial.text=values.text;session.acknowledge({text:values.text});}
+        if(selection&&signature!==initialSelection){const saved=await domains.directory.configure(captured,{request_id:context.request_id,expected_generation:generation,expected_revision:configurationRevision,selection});generation=saved.generation;configurationRevision=saved.revision;initialSelection=signature;session.acknowledge(Object.fromEntries(['profile_id','model','model_selection','context_window','max_output_tokens','reasoning_effort'].map(key=>[key,values[key]])));}
+        if(values.text!==initial.text){const saved=await domains.directory.saveInstructions(captured,{text:values.text,revision:rulesRevision});rulesRevision=saved.revision;initial.text=values.text;session.acknowledge({text:values.text});}
       },{returnChat:true,capturedScope:captured});
       const controls=form.controls,session=form.session;
       assistantDeleteEditor(form,definition,captured,()=>revision);
@@ -297,7 +306,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       };
       const avatarActions=toolbar(),upload=n('input');upload.type='file';upload.accept='image/png,image/jpeg,image/webp';upload.hidden=true;
       const changeAvatar=action('',()=>upload.click()),resetAvatar=action('',()=>editAvatar(async()=>{
-        const generated=await request('/api/v1/assistants/default-avatar',captured);return {value:'',image:generated.avatar};
+        const generated=await domains.directory.defaultAvatar(captured);return {value:'',image:generated.avatar};
       }));
       const avatarHelp=n('p','hint'),avatarError=n('p','inline-error');avatarError.setAttribute('role','alert');avatarError.hidden=true;
       avatarActions.append(changeAvatar,resetAvatar,upload);preview.after(avatarActions,avatarHelp,avatarError);
@@ -315,7 +324,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       form.lifecycle.locale=()=>{const t=key=>translate(locale(),key),label=t('assistant.personality');instructions.querySelector('summary').textContent=label;instructionsRow.querySelector('.form-label').textContent=label;controls.get('text').setAttribute('aria-label',label);instructionsRow.querySelector('small').textContent=t('assistant.personalityHelp');changeAvatar.textContent=t('assistant.changeAvatar');resetAvatar.textContent=t('assistant.resetAvatar');avatarHelp.textContent=t('assistant.avatarHelp');if(!avatarError.hidden)avatarError.textContent=t('assistant.avatarFailed');};form.lifecycle.locale();
       const providerHelp=n('p','hint',tr('Connect a Provider before creating an assistant.','请先连接提供商，再创建助手。'));form.form.querySelector('.editor-fields').prepend(providerHelp);providerHelp.hidden=profiles.length>0;
       const addProvider=action(tr('+ Add Provider','＋ 添加提供商'),()=>providerPicker(providers,{space:session.values.space_id||captured.space,owner:''}));controls.get('profile_id').closest('.field-body').append(addProvider);
-      form.lifecycle.providersChanged=async saved=>{const value=await read('/api/v1/providers',{space:session.values.space_id||captured.space,owner:'',authoritative:true});if(editor?.session!==session)return;profiles=value.profiles||[];Object.assign(providers,value);providerHelp.hidden=profiles.length>0;const input=controls.get('profile_id');input.replaceChildren();for(const profile of profiles){const option=n('option','',profile.name);option.value=profile.id;input.append(option);}const selected=profiles.find(profile=>profile.id===saved?.id)||profiles.find(profile=>profile.id===session.values.profile_id)||profiles[0];const changedProvider=selected?.id!==session.values.profile_id;set('profile_id',selected?.id||'');if(changedProvider||!session.values.model)set('model',selected?.model||'');updateModels();};
+      form.lifecycle.providersChanged=async saved=>{const value=await domains.providers.query({space:session.values.space_id||captured.space},{authoritative:true});if(editor?.session!==session)return;profiles=value.profiles||[];providers=value;providerHelp.hidden=profiles.length>0;const input=controls.get('profile_id');input.replaceChildren();for(const profile of profiles){const option=n('option','',profile.name);option.value=profile.id;input.append(option);}const selected=profiles.find(profile=>profile.id===saved?.id)||profiles.find(profile=>profile.id===session.values.profile_id)||profiles[0];const changedProvider=selected?.id!==session.values.profile_id;set('profile_id',selected?.id||'');if(changedProvider||!session.values.model)set('model',selected?.model||'');updateModels();};
       form.lifecycle.settled=defaults;
       if(thread?.pending)form.root.prepend(n('p','hint',tr('Saved settings will apply to the next new turn. The current turn keeps its original configuration.','已保存的设置将在下一次新回合生效，当前回合保持原配置。')));
     }catch(reason){if(gate.current(token)&&!disposed){assistantLoad={definition,scope:captured,root:loading,error:reason};renderAssistantLoad();}}
@@ -326,7 +335,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const initial={name:profile.name,avatar:profile.avatar};
     const form=renderEditor(t('assistantSettings'),initial,[{name:'name',label:t('assistant.name'),required:true}],async(values,context,session)=>{
       try{
-        const saved=await request('/api/v1/assistants/'+encodeURIComponent(definition.id),{...captured,method:'POST',body:{name:values.name,avatar:values.avatar,revision}});
+        const saved=await domains.directory.update(captured,definition.id,{name:values.name,avatar:values.avatar,revision});
         revision=saved.revision;session.acknowledge({name:values.name,avatar:values.avatar});return saved;
       }catch(error){throw Object.assign(error,{uiKey:'assistant.profileFailed',diagnostic:error.message});}
     },{returnChat:true,capturedScope:captured});
@@ -341,7 +350,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       catch{form.session.settle(false);error.hidden=false;error.textContent=t('assistant.avatarFailed');}
       finally{for(const node of controls)node.disabled=false;form.lifecycle.refreshDelete?.();}
     };
-    const change=action('',()=>upload.click()),reset=action('',()=>edit(async()=>{const value=await request('/api/v1/assistants/default-avatar',captured);return {value:'',image:value.avatar};}));
+    const change=action('',()=>upload.click()),reset=action('',()=>edit(async()=>{const value=await domains.directory.defaultAvatar(captured);return {value:'',image:value.avatar};}));
     upload.onchange=async()=>{const file=upload.files?.[0];upload.value='';if(file)await edit(async()=>{const image=await avatarFromFile(file);return {value:image,image};});};
     actions.append(change,reset,upload);form.form.querySelector('.editor-fields').prepend(preview,actions,help,error);
     form.lifecycle.locale=()=>{
@@ -379,28 +388,27 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     }
     if(filter.settingsTab==='tasks'){
       const update=createTaskSettings({root,tr,locale,configure:(profile,policy)=>routingEditor(profile,policy,settingsScope),allowance:quota=>providerPolicyEditor(quota,settingsScope)});
-      const data={};
-      return connectView(root,token,async()=>{const results=await Promise.allSettled([['providers','/api/v1/providers'],['policy','/api/v1/agent/routing'],['allowances','/api/v1/usage/providers']].map(async([key,path])=>{const value=await read(path,{...settingsScope,signal:token.signal});if(current()){data[key]=value;update(data);}}));const failed=results.find(value=>value.status==='rejected');if(failed)throw failed.reason;return data;},update,{topics:['providers','settings','usage','spaces'],space:settingsScope.space});
+      return connectDomain(root,token,listener=>domains.providers.watchSettings(settingsScope,listener),()=>domains.providers.refreshSettings(settingsScope),update);
     }
-    const update=createProviderList({...options,pick:providers=>providerPicker(providers,settingsScope),edit:(profile,providers)=>providerEditor(profile,providers,settingsScope)});
-    return connectView(root,token,async()=>({providers:await read('/api/v1/providers',{...settingsScope,signal:token.signal})}),update,{topics:['providers','extensions'],space:settingsScope.space,invalidate:topics=>{if(topics.includes('extensions'))update.invalidate();}});
+    const update=createProviderList({...options,providersDomain:domains.providers,pick:providers=>providerPicker(providers,settingsScope),edit:(profile,providers)=>providerEditor(profile,providers,settingsScope)});
+    return connectDomain(root,token,listener=>domains.providers.watchCatalog(settingsScope,listener),()=>domains.providers.refresh(settingsScope),providers=>update({providers}));
   }
   function providerPolicyEditor(quota,owner) {
     renderEditor(tr('Provider allowance','提供商配额'),quota.policy,[
       {name:'period',label:tr('Period','周期'),choices:[['none',tr('Unlimited','无限制')],['day',tr('Daily','每日')],['week',tr('Weekly','每周')]]},
       {name:'limit',label:tr('Token limit','Token 上限'),kind:'number',parse:Number,required:true,min:1,max:Number.MAX_SAFE_INTEGER},
       {name:'timezone',label:tr('Time zone','时区'),required:true},{name:'auto_resume',label:tr('Automatically resume','自动恢复'),kind:'checkbox'},
-    ],(values,context)=>request('/api/v1/usage/providers',{...context,method:'POST',body:{provider:quota.provider,revision:quota.revision,policy:values}}),{capturedScope:owner});
+    ],(values,context)=>domains.providers.saveAllowance(context,quota,values),{capturedScope:owner});
   }
   function routingEditor(profile,policy,owner) {
     renderEditor(profile.name,{profile_limit:policy.profile_limits?.[profile.id]??null,provider_limit:policy.provider_limits?.[profile.provider]??null},[
       {name:'profile_limit',label:tr('Model concurrency','模型并发数'),kind:'number',parse:value=>value?Number(value):null,min:1,max:1000,help:tr('Leave blank for no additional limit.','留空表示不另设上限。')},
       {name:'provider_limit',label:tr('Provider concurrency','提供商并发数'),kind:'number',parse:value=>value?Number(value):null,min:1,max:1000},
-    ],(values,context)=>{const next=structuredClone(policy);next.profile_limits||={};next.provider_limits||={};for(const [key,id,value]of [['profile_limits',profile.id,values.profile_limit],['provider_limits',profile.provider,values.provider_limit]]){if(value)next[key][id]=value;else delete next[key][id];}return request('/api/v1/agent/routing',{...context,method:'POST',body:next});},{capturedScope:owner});
+    ],(values,context)=>domains.providers.saveRouting(context,profile,policy,values),{capturedScope:owner});
   }
   async function setupAI(target=scope()) {
     const captured={...target,owner:''};
-    const snapshot=await read('/api/v1/providers',{...captured,authoritative:true});
+    const snapshot=await domains.providers.query(captured,{authoritative:true});
     await providerPicker(snapshot,captured);
     if(editor?.kind==='picker')editor.onboarding=true;
   }
@@ -418,22 +426,23 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       const choice=action(provider.name,()=>providerEditor(null,snapshot,captured,provider.id));choice.classList.add('provider-choice');const image=n('img','provider-logo');image.alt='';if(provider.icon){image.src=provider.icon;choice.prepend(image);}else{const fallback=icon('settings');fallback.classList.add('provider-logo');choice.prepend(fallback);}grid.append(choice);
     }if(!grid.children.length)grid.append(n('p','hint',t('noTypes')));toggle.textContent=t(more?'fewer':'more');};
     const toggle=action('',()=>{more=!more;render();});form.form.querySelector('.editor-fields').append(toggle);form.controls.get('search').addEventListener('input',render);const previous=form.lifecycle.locale;form.lifecycle.locale=()=>{previous();render();};
-    const refreshTypes=async()=>{const version=++typeVersion;typeController?.abort();const controller=typeController=new AbortController();types=[];render();try{const value=await read('/api/v1/providers',{...captured,signal:controller.signal,authoritative:true});if(!pickerCurrent()||version!==typeVersion)return;snapshot=value;types=(value.provider_types||[]).filter(value=>value.available!==false);render();}catch(reason){if(pickerCurrent()&&version===typeVersion&&reason.name!=='AbortError'){types=[];render();}}};
+    const refreshTypes=async()=>{const version=++typeVersion;typeController?.abort();const controller=typeController=new AbortController();types=[];render();try{const value=await domains.providers.query(captured,{authoritative:true});if(!pickerCurrent()||version!==typeVersion)return;snapshot=value;types=(value.provider_types||[]).filter(value=>value.available!==false);render();}catch(reason){if(pickerCurrent()&&version===typeVersion&&reason.name!=='AbortError'){types=[];render();}}};
     form.lifecycle.providersInvalidated=refreshTypes;form.lifecycle.dispose=()=>{typeVersion++;typeController?.abort();};await refreshTypes();
   }
   async function providerEditor(profile,snapshot,settingsScope,providerOverride) {
+    snapshot=structuredClone(snapshot);
     const t=key=>translate(locale(),'providers.'+key),onboarding=editor?.kind==='picker'&&editor.onboarding;
     if(editor?.kind==='picker')suspendEditor();else if(!await leave())return;
     const connection=(snapshot.connections||[]).find(c=>c.profile_id===profile?.id),typeID=providerOverride||connection?.type_id||'',type=(snapshot.provider_types||[]).find(value=>value.id===typeID)||{id:typeID,available:false};
     const providerID=type?.directory_provider||profile?.model_settings?.catalog_provider||'',selectedEntry=(snapshot.directory||[]).find(value=>value.id===providerID);
     let monitorView=null,monitorLoaded=!profile,monitorFailure=false;
-    if(profile&&type?.capabilities?.allowances){const token=gate.next();body().append(n('p','hint',t('allowanceLoading')));try{monitorView=await request('/api/v1/providers/allowances?profile_id='+encodeURIComponent(profile.id),settingsScope);monitorLoaded=true;}catch{monitorFailure=true;}if(!gate.current(token)||disposed)return;}
+    if(profile&&type?.capabilities?.allowances){const token=gate.next();body().append(n('p','hint',t('allowanceLoading')));try{monitorView=await domains.providers.allowance(settingsScope,profile.id);monitorLoaded=true;}catch{monitorFailure=true;}if(!gate.current(token)||disposed)return;}
     const inherited=modelDefaults(snapshot,providerID,profile?.model||'');let configuredModels=[...(snapshot.configured_models?.[profile?.id]||[])],discovered=[...(connection?.catalog?.models||[])];
     const inputDiscovery=createModelInputDiscovery(connection,profile?.model_settings?.input_modalities),baseName=type?.name||t('customName'),names=new Set((snapshot.profiles||[]).map(value=>value.name));let defaultName=baseName;for(let index=2;names.has(defaultName);index++)defaultName=`${baseName} ${index}`;
     const assistantChoices=[...(monitorView?.assistants||(client.assistants||[]).filter(value=>value.space_id===settingsScope.space))],monitor=monitorView?.monitor;if(monitor?.assistant&&!assistantChoices.some(value=>value.id===monitor.assistant))assistantChoices.push({id:monitor.assistant,name:t('status.assistant_missing'),missing:true});
     const initial={prompt_cache_minutes:profile?.model_settings?.prompt_cache_minutes??null,name:profile?.name||defaultName,endpoint:connection?.endpoint||type?.endpoint||'',api_key:'',model:profile?.model||'',model_selection:'',protocol:connection?.protocol||type?.protocol||'openai_responses',context_window:profile?.model_settings?.context_window??null,max_output_tokens:profile?.model_settings?.max_output_tokens??null,reasoning_effort:profile?.params?.reasoning_effort||'',...(type?.capabilities?.allowances&&monitorLoaded?{allowance_enabled:monitor?.enabled??true,allowance_threshold:monitor?.threshold??90,allowance_assistant:monitor?.assistant??assistantChoices[0]?.id??''}:{})};
     const protocolNames={openai_chat:'OpenAI Chat Completions',openai_responses:'OpenAI Responses',anthropic_messages:'Anthropic Messages',gemini:'Google Gemini'},protocols=[...new Set([...(type?.protocols?.length?type.protocols:[type?.protocol||initial.protocol]),initial.protocol])];
-    const save=createProviderSave({profile,save:async(values,context,savedProfile)=>{if(!type||type.available===false)throw Object.assign(Error('provider unavailable'),{uiKey:'providers.unavailable'});const {model_selection,context_window,prompt_cache_minutes,...connectionValues}=values;return request('/api/v1/providers',{...context,method:'POST',body:{request_id:context.request_id,provider_type_id:typeID,profile_id:savedProfile?.id||'',expected_revision:savedProfile?.revision||0,models:[...new Set([...configuredModels,values.model].filter(Boolean))],...connectionValues,reasoning_effort:values.reasoning_effort.trim()||null,max_output_tokens:values.max_output_tokens||limitsFor(values.model).output,model_settings:{prompt_cache_minutes:prompt_cache_minutes||null,catalog_provider:providerID||null,context_window:context_window||null,max_output_tokens:values.max_output_tokens||null,input_modalities:inputDiscovery.snapshot(values)}}});},configure:type?.capabilities?.allowances&&monitorLoaded?async(saved,values,context)=>{if(!type.capabilities?.allowances)return;if(!monitorView)monitorView=await request('/api/v1/providers/allowances?profile_id='+encodeURIComponent(saved.id),settingsScope);const revision=monitorView.monitor.revision;monitorView=await saveAllowanceConfiguration({request,scope:context,profileID:saved.id,values,revision});}:null});
+    const save=createProviderSave({profile,save:async(values,context,savedProfile)=>{if(!type||type.available===false)throw Object.assign(Error('provider unavailable'),{uiKey:'providers.unavailable'});return domains.providers.saveProfile(context,{values,typeID,profile:savedProfile,configuredModels,catalogProvider:providerID,defaultOutput:limitsFor(values.model).output,inputModalities:inputDiscovery.snapshot(values)},context.request_id);},configure:type?.capabilities?.allowances&&monitorLoaded?async(saved,values,context)=>{if(!type.capabilities?.allowances)return;if(!monitorView)monitorView=await domains.providers.allowance(settingsScope,saved.id);const revision=monitorView.monitor.revision;monitorView=await domains.providers.configureAllowance(context,saved.id,values,revision);}:null});
     const definitions=[
       {name:'name',label:t('name'),required:true},{name:'endpoint',label:t('endpoint'),kind:'url',required:true,help:t('endpointHelp')},
       {name:'api_key',label:t('key'),kind:'password',required:!profile&&!type?.default_credential,help:profile?t('keepKey'):type?.default_credential?t('publicDefault'):''},
@@ -466,7 +475,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     connectProviderEditor({form,request,scope:settingsScope,profile,connection,type,locale,current:()=>editor?.session===session&&!disposed&&client.runtime.boot_id===session.context.boot,connectionChanged:value=>{inputDiscovery.connectionChanged(value);const next=JSON.stringify([value.endpoint,value.protocol]);if(connectionRoute!==next){connectionRoute=next;discovered=[];inherit();}},models:(entries,inputs)=>{inputDiscovery.adopt(session.values,inputs);configuredModels=entries.map(model=>typeof model==='string'?model:model.id);discovered=entries.filter(model=>typeof model!=='string');models([...new Map([...(selectedEntry?.models||[]),...entries].map(model=>[typeof model==='string'?model:model.id,model])).values()],controls.get('model_selection').value);inherit();}});
     let typeVersion=0,typeController;const priorDispose=form.lifecycle.dispose;
     form.lifecycle.providersInvalidated=async()=>{const version=++typeVersion;typeController?.abort();const controller=typeController=new AbortController();type.available=false;availabilityWarning.hidden=false;form.form.querySelector('.primary').disabled=true;form.lifecycle.connectionRefresh?.();discovered=[];inherit();
-      try{const fresh=await read('/api/v1/providers',{...settingsScope,signal:controller.signal,authoritative:true});if(editor?.session!==session||disposed||version!==typeVersion)return;const updated=(fresh.provider_types||[]).find(value=>value.id===typeID);if(updated)Object.assign(type,updated);type.available=updated?.available!==false&&!!updated;availabilityWarning.hidden=type.available;for(const name of ['allowance_enabled','allowance_threshold','allowance_assistant']){const input=controls.get(name);if(input)input.closest('.form-row').hidden=!type.capabilities?.allowances;}if(section)section.parentElement.hidden=!type.capabilities?.allowances;form.lifecycle.connectionRefresh?.();}
+      try{const fresh=await domains.providers.query(settingsScope,{authoritative:true});if(editor?.session!==session||disposed||version!==typeVersion)return;const updated=(fresh.provider_types||[]).find(value=>value.id===typeID);if(updated)Object.assign(type,updated);type.available=updated?.available!==false&&!!updated;availabilityWarning.hidden=type.available;for(const name of ['allowance_enabled','allowance_threshold','allowance_assistant']){const input=controls.get(name);if(input)input.closest('.form-row').hidden=!type.capabilities?.allowances;}if(section)section.parentElement.hidden=!type.capabilities?.allowances;form.lifecycle.connectionRefresh?.();}
       catch(reason){if(editor?.session===session&&version===typeVersion&&reason.name!=='AbortError'){type.available=false;availabilityWarning.hidden=false;}}
     };
     form.lifecycle.dispose=()=>{typeVersion++;typeController?.abort();priorDispose?.();};
@@ -507,7 +516,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   function refreshTaskList(view=taskListView){return view?.queue.run();}
   function restartTaskList(){
     const view=taskListView;if(!view)return;
-    view.queue.close();view.token=gate.next();view.queue=createRefreshQueue(()=>readTaskList(view),{active:()=>!disposed&&gate.current(view.token)&&taskListView===view});
+    view.stopQuery?.();view.stopQuery=null;view.queue.close();view.token=gate.next();view.queue=createRefreshQueue(()=>readTaskList(view),{active:()=>!disposed&&gate.current(view.token)&&taskListView===view});
     currentViewKey=taskListKey();
     return view.queue.run();
   }
@@ -517,21 +526,21 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     if(view.queryKey!==queryKey){if(view.queryKey&&!view.pageFocus)host.scrollTop=0;view.queryKey=queryKey;view.result=null;view.nodes.clear();view.groups.clear();view.rows.replaceChildren(n('p','hint',translate(locale(),'loading.pending')));}
     for(const [index,value]of ['active','complete','archived'].entries()){const button=view.scopes.children[index];button.classList.toggle('selected',filter.taskScope===value);button.setAttribute('aria-pressed',String(filter.taskScope===value));}
     view.rows.setAttribute('aria-busy','true');view.pager.update({offset,loading:true});
-    try {
-      const [,{pages,partial}]=await Promise.all([
-        Promise.all((client.spaces||[]).map(space=>machineInfo.load({space:space.id,signal:token.signal}))),
-        readTaskPages({scope:filter.taskScope,q:filter.taskQuery,phase:filter.taskPhase,owner:filter.listOwner,offset,signal:token.signal,onProgress:pages=>{if(current()&&!view.result)updateTaskList(view,pages,true,true);}}),
-      ]);
-      if(!current())return;
-      const total=pages.reduce((sum,page)=>sum+(page.value.total??page.value.items?.length??0),0);
-      if(!partial&&filter.taskOffset>=total&&filter.taskOffset){filter.taskOffset=Math.max(0,Math.floor((total-1)/20)*20);currentViewKey=taskListKey();}
-      updateTaskList(view,pages,false,partial);
-      view.rows.parentElement.querySelector('.space-availability')?.remove();
-      if(partial){const notice=n('div','hint space-availability');notice.setAttribute('role','status');notice.append(n('span','',translate(locale(),'tasks.partialSources')),action(translate(locale(),'tasks.retry'),()=>refreshTaskList(view)));view.rows.before(notice);}
-      if(view.pageFocus){focusPagination(view.pageFocus.origin,view.pageFocus.direction);view.pageFocus=null;}
-    }catch(reason){if(current()&&reason.name!=='AbortError'){if(!view.result){view.rows.replaceChildren();errorView(reason,view.rows);}else notify(reason.message);view.pager.update({offset,count:view.result?.items.length||0,partial:true});}}
-    finally{if(current())view.rows.setAttribute('aria-busy','false');}
+    const query={scope:filter.taskScope,q:filter.taskQuery,phase:filter.taskPhase,owner:filter.listOwner,offset};
+    if(view.stopQuery)return taskDomain.refreshList(query);
+    return new Promise(resolve=>{view.stopQuery=taskDomain.watchList(query,snapshot=>{
+      if(!current())return;view.rows.setAttribute('aria-busy',String(snapshot.status==='loading'));
+      if(snapshot.data){const {pages,partial}=snapshot.data,total=pages.reduce((sum,page)=>sum+(page.value.total??page.value.items?.length??0),0);
+        if(!partial&&filter.taskOffset>=total&&filter.taskOffset){filter.taskOffset=Math.max(0,Math.floor((total-1)/20)*20);currentViewKey=taskListKey();}
+        updateTaskList(view,pages,snapshot.status==='loading',partial);view.rows.parentElement.querySelector('.space-availability')?.remove();
+        if(partial){const notice=n('div','hint space-availability');notice.setAttribute('role','status');notice.append(n('span','',translate(locale(),'tasks.partialSources')),action(translate(locale(),'tasks.retry'),()=>refreshTaskList(view)));view.rows.before(notice);}
+        if(view.pageFocus){focusPagination(view.pageFocus.origin,view.pageFocus.direction);view.pageFocus=null;}
+      }
+      if(snapshot.error){if(!view.result){view.rows.replaceChildren();errorView(snapshot.error,view.rows);}else notify(snapshot.error.message);}
+      if(snapshot.status==='ready'||snapshot.error)resolve();
+    });});
   }
+
   function updateTaskList(view,pages,loading,partial=false){
     const result=combineTasks(pages,{offset:filter.taskOffset,limit:20});rememberTasks(pages.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner)));
     if(!view.result)view.rows.replaceChildren();view.result=result;
@@ -572,68 +581,52 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     if(focused?.isConnected&&document.activeElement!==focused)focused.focus({preventScroll:true});host.scrollTop=scroll;
     view.pager.update({offset:filter.taskOffset,count:result.items.length,total:result.total,nextOffset:result.next_offset,loading,partial});view.clock.refresh();
   }
-  function closeTaskList(){taskListView?.stopSearch?.();taskListView?.queue.close();taskListView?.clock.dispose();taskListView=null;}
-  function closeTaskView(){taskView?.eventsQueue?.close();taskView?.ui?.dispose();taskView=null;host.classList.remove('task-page-host');}
+  function closeTaskList(){taskListView?.stopQuery?.();taskListView?.stopSearch?.();taskListView?.queue.close();taskListView?.clock.dispose();taskListView=null;}
+  function closeTaskView(){taskView?.stop?.();taskView?.ui?.dispose();taskView=null;host.classList.remove('task-page-host');}
   async function taskDetail(task,{recordHistory=true,returnTo={route:'chat',scope:{space:task._space_id,owner:task.assistant_id}}}={}) {
     rememberTasks([task]);taskOrigin=returnTo;captureView();viewReady=false;pageView?.queue.close();pageView=null;closeTaskList();closeTaskView();scheduleView=null;detailParent=true;
     if(recordHistory){const replace=history.state?.potTask?.id===task.id&&history.state?.potScope?.space===task._space_id;history[replace?'replaceState':'pushState']({potRoute:'tasks',potScope:{space:task._space_id,owner:task.assistant_id},potTask:{...task},potTaskReturn:returnTo},'',location.href);}
-    const path=`/api/v1/tasks/${encodeURIComponent(task.id)}`,fileScope={owner:task.assistant_id,space:task._space_id};
+    const fileScope={owner:task.assistant_id,space:task._space_id};
     let saved;
-    const result=await load(async token=>{saved=await taskRepository.read(task,fileScope);if(token.signal.aborted)throw token.signal.reason;const [record]=await Promise.all([read(path,{...fileScope,signal:token.signal,authoritative:!saved}),machineInfo.load({...fileScope,signal:token.signal})]);return record;});if(!result)return;
-    const {root,token}=result,record=result.value;host.classList.add('task-page-host');
+    const result=await load(async token=>{saved=await taskDomain.readTranscript(task,fileScope);if(token.signal.aborted)throw token.signal.reason;const [record]=await Promise.all([taskDomain.metadata(task,fileScope,{signal:token.signal,authoritative:!saved}),machineInfo.load({...fileScope,signal:token.signal})]);return record;});if(!result)return;
+    const {root,token}=result,record=result.value;if(saved?.run_id&&saved.run_id!==record.run_id)saved=null;host.classList.add('task-page-host');
     const draftKey=JSON.stringify([task._space_id,task.assistant_id,task.id]);
     const view={task,record,token,returnTo,initialRead:!saved,scope:fileScope,state:saved||createTaskTranscript(),inputs:[],fresh:!saved,busy:false,again:false,unavailable:false};
     const current=()=>gate.current(token)&&taskView===view;
-    const mutate=async(suffix,body)=>{if(!current())return;await request(path+suffix,{...fileScope,method:'POST',body});if(current())await refreshTaskEvents(view);};
+
     const ui=createTaskConversation({root,task,record,locale,client,scope:fileScope,draft:taskDrafts.get(draftKey)||'',onDraft:text=>{taskDraftVersions.set(draftKey,(taskDraftVersions.get(draftKey)||0)+1);if(text)taskDrafts.set(draftKey,text);else taskDrafts.delete(draftKey);},
       onOpenTask:child=>taskDetail({...child,_space_id:child._space_id||fileScope.space,assistant_id:child.assistant_id||fileScope.owner}),
       assistantName:(client.assistants||[]).find(item=>item.id===task.assistant_id&&item.space_id===task._space_id)?.name||task.assistant_id,
       downloadFile:({task:id,path})=>client.downloadFile(id,path,fileScope),toolMemory,approvalFor:tool=>approvalFor(tool,task.id),onDecision:decideApproval,
       onSend:async text=>{
         const version=taskDraftVersions.get(draftKey);
-        let attempt=taskWrites.get(draftKey);if(!attempt||attempt.text!==text){attempt={request_id:uid(),text};taskWrites.set(draftKey,attempt);}
-        await request(path+'/messages',{...fileScope,method:'POST',body:attempt});
-        if(taskWrites.get(draftKey)===attempt)taskWrites.delete(draftKey);
+        await taskDomain.sendInput({...task,run_id:view.record.run_id},fileScope,text);
         if(taskDrafts.get(draftKey)===text&&taskDraftVersions.get(draftKey)===version)taskDrafts.delete(draftKey);
-        if(current())await refreshTaskEvents(view);
+
       },
-      onStop:()=>mutate('/interrupt',{request_id:view.stopID||=(uid())}),
-      onCancel:()=>mutate('/cancel',{request_id:view.cancelID||=(uid())}),
-      onPause:()=>mutate('/control',{run_id:view.record.run_id,action:view.record.info?.paused?'resume':'pause'}),
-      onArchive:async()=>{await request('/api/v1/tasks/dispositions',{...fileScope,method:'POST',body:{decisions:[{task_id:task.id,run_id:view.record.run_id,archived:!view.record.info?.archived,reason:''}]}});if(current())await refreshTaskEvents(view);},
+      onStop:()=>taskDomain.interrupt({...task,run_id:view.record.run_id},fileScope),
+      onCancel:()=>taskDomain.cancel({...task,run_id:view.record.run_id},fileScope),
+      onPause:()=>taskDomain.pause({...task,run_id:view.record.run_id},fileScope,!view.record.info?.paused),
+      onArchive:()=>taskDomain.archive({...task,run_id:view.record.run_id},fileScope,!view.record.info?.archived),
       onUsage:()=>openUsageView({...fileScope,name:task.title,scope:task.id,returnTask:{...task},taskReturn:returnTo}),
-      onEarlier:async()=>{const rows=view.state.messages.filter(message=>!message.context_only),first=rows[0]?.sequence;if(!first)return;const boundary=rows.length>80?Number(rows.at(-81).sequence)+1:Number(first);const earlier=await taskRepository.earlier({...view.task,run_id:view.record.run_id},fileScope,boundary,{limit:640});if(earlier&&current()){view.historyBefore=boundary;view.state=earlier;renderTaskTranscript(view);}},onLatest:async()=>{view.historyBefore=null;view.state=await taskRepository.read({...view.task,run_id:view.record.run_id},fileScope)||view.state;if(current())renderTaskTranscript(view);},onRefresh:()=>refreshTaskEvents(view),onSettings:()=>{configurationSpace=task._space_id;filter.settingsTab='providers';routeChanged('settings');return show('settings');},
+      onEarlier:async({before,signal})=>{const generation=view.windowGeneration=(view.windowGeneration||0)+1,run=view.record.run_id;view.historyBefore=Number(view.state.messages.filter(message=>!message.context_only).at(-1)?.sequence||0)+1;
+        const earlier=await taskDomain.loadEarlier({...view.task,run_id:run},fileScope,before,{signal});if(!current()||generation!==view.windowGeneration||run!==view.record.run_id||signal.aborted)return;
+        if(earlier?.messages.length){const anchor=view.ui.position()?.position?.anchor?.sequence;view.state=mergeTaskHistory(view.state,earlier,anchor||before);}else view.state={...view.state,has_more:false};
+        view.historyBefore=Number(view.state.messages.filter(message=>!message.context_only).at(-1)?.sequence||0)+1;renderTaskTranscript(view);
+      },onLatest:async()=>{const generation=view.windowGeneration=(view.windowGeneration||0)+1;view.historyBefore=null;const state=await taskDomain.latest({...view.task,run_id:view.record.run_id},fileScope);if(current()&&generation===view.windowGeneration){view.state=state||view.state;renderTaskTranscript(view);}},onRefresh:()=>refreshTaskEvents(view),onSettings:()=>{configurationSpace=task._space_id;filter.settingsTab='providers';routeChanged('settings');return show('settings');},
     });
     view.ui=ui;view.transcript=ui.transcript;taskView=view;heading(task.title);permissions();
     if(saved)renderTaskTranscript(view);
     restoreView(`task:${draftKey}`,token);
-    await refreshTaskEvents(view);
+    view.stop=taskDomain.watchDetail(task,fileScope,snapshot=>{
+      if(!current())return;const data=snapshot.data;if(!data)return;
+      if(view.record.run_id!==data.record.run_id){view.windowGeneration=(view.windowGeneration||0)+1;view.historyBefore=null;}view.record=data.record;view.inputs=data.inputs;view.inputsTruncated=data.inputsTruncated;view.fresh=snapshot.fresh&&data.fresh;view.unavailable=data.unavailable;view.storageError=!!snapshot.error?.storage||data.storageError;view.connectionError=snapshot.error?.message||data.connectionError||'';
+      if(!view.historyBefore)view.state=data.state;
+      else{const updates=new Map(data.state.messages.map(message=>[message.id,message]));view.state={...view.state,cursor:data.state.cursor,inputs:data.state.inputs,messages:view.state.messages.map(message=>updates.get(message.id)||message)};}
+      rememberTasks([{...view.record.info,_space_id:fileScope.space,assistant_id:fileScope.owner}]);renderTaskTranscript(view);
+    });
   }
-  function refreshTaskEvents(view=taskView){if(!view)return Promise.resolve();view.eventsQueue||=createRefreshQueue(()=>readTaskEvents(view),{active:()=>!disposed&&gate.current(view.token)&&taskView===view});return view.eventsQueue.run();}
-  async function readTaskEvents(view) {
-    const generation=view.readGeneration||0,current=()=>gate.current(view.token)&&taskView===view&&generation===(view.readGeneration||0);
-    let render=false;
-    try{
-      const path=`/api/v1/tasks/${encodeURIComponent(view.task.id)}`,options={...view.scope,signal:view.token.signal};
-      if(!view.initialRead){view.record=await read(path,{...options,authoritative:true});if(!current())return;}
-      view.fresh=true;const taskRef={...view.task,run_id:view.record.run_id};
-      const committed=await taskRepository.read(taskRef,view.scope);view.state=committed||createTaskTranscript();
-      const can=operation=>supportsCapability(view.record,operation);
-      const events=!can('task.events')?Promise.resolve({events:[],cursor:view.state.cursor,has_more:false,unavailable:false}):(async()=>{let count=0,page;
-        do{page=await request(`${path}/events?${new URLSearchParams({after:view.state.cursor,limit:100})}`,options);if(!current())return;const previous=view.state.cursor;view.state=await taskRepository.append(taskRef,view.scope,page);if(!current())return;if(page.has_more&&view.state.cursor===previous)throw Error('Task event cursor did not advance');count+=(page.events||[]).length;}while(page.has_more&&count<5000);
-        return page;
-      })();
-      const updates=await Promise.allSettled([Promise.resolve(view.record),can('task.input')?read(`${path}/messages`,{...options,authoritative:true}):Promise.resolve([]),events]);view.initialRead=false;
-      if(!current())return;
-      if(updates[0].status==='fulfilled'){view.record=updates[0].value;rememberTasks([{...view.record.info,_space_id:view.scope.space,assistant_id:view.scope.owner,_assistant_id:view.scope.owner}]);}if(updates[1].status==='fulfilled'){view.inputs=list(updates[1].value);view.inputsTruncated=!!updates[1].value?.cache_truncated;}
-      view.connectionError=updates.filter(update=>update.status==='rejected'&&update.reason.name!=='AbortError').map(update=>update.reason.message).join('\n');
-      view.storageError=updates.some(update=>update.status==='rejected'&&update.reason.storage);if(view.connectionError)view.fresh=false;
-      const page=updates[2].status==='fulfilled'?updates[2].value:{};
-      view.unavailable=!!page?.unavailable;if(view.historyBefore)view.state=await taskRepository.earlier(taskRef,view.scope,view.historyBefore,{limit:640})||view.state;render=true;
-      if(page?.has_more)queueMicrotask(()=>refreshTaskEvents(view));
-    }catch(reason){if(current()&&reason.name!=='AbortError'){view.fresh=false;view.storageError=!!reason.storage;view.connectionError=reason.message;render=true;}}
-    if(render&&current())renderTaskTranscript(view);
-  }
+  function refreshTaskEvents(view=taskView){return view?taskDomain.refreshDetail(view.task,view.scope):Promise.resolve();}
   function renderTaskTranscript(view){view.ui.update({storageError:view.storageError,cacheTruncated:view.inputsTruncated,fresh:view.fresh,record:view.record,state:view.state,inputs:view.inputs,unavailable:view.unavailable,connectionError:view.connectionError||'',approvals:pendingApprovals.filter(item=>item.request?.task===view.task.id)});renderApprovals();}
   function approvalFor(tool,task=''){if(approvalOwner!==approvalContext())return;const scope=approvalScope();const approval=pendingApprovals.find(item=>item.request.owner===scope.owner&&(item.request.task||'')===task&&item.request.call_id===tool.id&&item.request.turn===tool.turn_id);return approval?{...approval,fresh:approvalFresh,task_title:taskNames.get(taskNameKey(scope,task))}:undefined;}
   function taskNeedsApproval(id,phase){return approvalOwner===approvalContext()?pendingApprovals.some(item=>item.request.owner===scope().owner&&item.request.task===id):phase==='waiting_approval';}
@@ -656,7 +649,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     owner.input.onchange=()=>{filter.listOwner=owner.input.value;filter.scheduleOffset=0;render();host.scrollTop=0;};
     const stopSearch=bindSearch(search.input,value=>{filter.scheduleQuery=value;filter.scheduleOffset=0;render();host.scrollTop=0;});
     const loading=paginationPair(content,t('tasks.schedulePagination'),()=>{});loading.update({loading:true});content.append(loading.top.root,n('p','hint',t('loading.pending')),loading.bottom.root);
-    const connected=await connectView(root,token,()=>across('/api/v1/schedules?limit=50',token,{paginate:true,perAssistant:true}),pages=>{currentPages=pages;render();},{topics:['schedules','tasks','assistants','spaces','machines']});
+    const connected=await connectDomain(root,token,listener=>domains.schedules.watchList(listener),()=>domains.schedules.refreshList(),pages=>{currentPages=pages;render();});
     if(pageView&&gate.current(token)){const close=pageView.queue.close.bind(pageView.queue);pageView.queue.close=()=>{stopSearch();close();};}else stopSearch();return connected;
   }
   function renderSchedules(root,pages,render) {
@@ -695,10 +688,11 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     if(record)history.pushState({potRoute:'tasks',potSchedule:{...item},potScope:{space:item._space_id,owner:item._assistant_id}},'',location.href);
     const token=gate.next(),root=body(),content=n('div');root.append(content);
     const view={item,runsOffset,token,busy:false,confirmed:false,content};scheduleView=view;
-    await connectView(root,token,()=>read(`/api/v1/schedules?${new URLSearchParams({selected:item.id,runs_offset:runsOffset,limit:20})}`,{signal:token.signal,space:item._space_id,owner:item._assistant_id}),value=>{
+    const selectedScope={space:item._space_id,owner:item._assistant_id},selectedQuery={selected:item.id,runsOffset,limit:20};
+    await connectDomain(root,token,listener=>domains.schedules.watch(selectedScope,selectedQuery,listener),()=>domains.schedules.refresh(selectedScope,selectedQuery),(value,snapshot)=>{
       if(!value.selected||value.selected.deleted){scheduleView=null;return show('tasks',{force:true});}
-      view.fresh=client.resources?.state(value)?.freshness!=='retained'&&client.resources?.state(value)?.freshness!=='stale';view.item={...item,...value.selected};const projection=n('div');renderScheduleHistory(projection,view,value,runsOffset);reconcile(content,projection);
-    },{topics:['schedules','tasks','machines','spaces'],space:item._space_id});
+      view.fresh=snapshot.fresh;view.busy=!!snapshot.pending;view.item={...item,...value.selected};const projection=n('div');renderScheduleHistory(projection,view,value,runsOffset);reconcile(content,projection);
+    });
     if(gate.current(token))restoreView(JSON.stringify(['schedule-history',item._space_id,item._assistant_id,item.id,runsOffset]),token);
   }
   function renderScheduleHistory(root,view,value,runsOffset) {
@@ -706,15 +700,14 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     info.append(n('code','',selected.spec.kind==='cron'?selected.spec.cron:translate(locale(),`schedule.${selected.spec.kind}`)),n('p','hint',selected.spec.goal),n('p','hint',`${selected.spec.timezone||''} · ${selected.next_label||tr('Not scheduled','未安排')}`));if(selected.last_error)info.append(n('p','inline-error',selected.last_error));
     const actions=toolbar();
     for(const name of ['run',selected.spec.enabled?'pause':'resume','edit','delete']) {
-      const writeKey=JSON.stringify([selected._space_id,selected._assistant_id,selected.id,name]);
       const button=action(tr({run:'Run now',pause:'Pause',resume:'Resume',edit:'Edit',delete:'Remove'}[name],{run:'立即运行',pause:'暂停',resume:'恢复',edit:'编辑',delete:'移除'}[name]),async event=>{
         const button=event.currentTarget,actions=button.parentElement;
         if(!view.fresh||view.busy||scheduleView!==view||!gate.current(view.token))return;
         if(name==='edit'){scheduleEditor(selected);return;}
         if(name==='delete'&&!view.confirmed){view.confirmed=true;button.textContent=tr('Confirm removal','确认移除');return;}
         view.busy=true;for(const control of actions.querySelectorAll('button'))control.disabled=true;
-        const body=scheduleWrites.get(writeKey)||{request_id:uid(),action:name,schedule_id:selected.id};scheduleWrites.set(writeKey,body);
-        try{await request('/api/v1/schedules',{method:'POST',space:selected._space_id,owner:selected._assistant_id,body});scheduleWrites.delete(writeKey);if(scheduleView===view&&gate.current(view.token)){if(name==='delete'){scheduleView=null;await show('tasks',{force:true});}else await pageView.queue.run();}}
+        const captured={space:selected._space_id,owner:selected._assistant_id};
+        try{await (name==='run'?domains.schedules.run(captured,selected.id):name==='delete'?domains.schedules.remove(captured,selected.id):domains.schedules.pause(captured,selected.id,name==='pause'));if(scheduleView===view&&gate.current(view.token)&&name==='delete'){scheduleView=null;await show('tasks',{force:true});}}
         catch(reason){if(scheduleView===view&&gate.current(view.token))errorView(reason,view.content);}
         finally{view.busy=false;for(const control of actions.querySelectorAll('button'))control.disabled=!view.fresh;}
       },{primary:name==='run',danger:name==='delete',disabled:!view.fresh||selected._stale||recordOwner(selected,client).profile?.offline||!recordOwner(selected,client).address||view.busy});actions.append(button);
@@ -747,9 +740,9 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       await preview.validate(values);
       const {owner_ref,before_run_command,before_run_cwd,before_run_timeout,...specValues}=values;const [space,owner]=JSON.parse(owner_ref);
       const canonical={...specValues,before_run:beforeRunDraft(values,locale()),cron:values.kind==='cron'?values.cron:'',at:values.kind==='once'?values.at:'',every_minutes:values.kind==='interval'?values.every_minutes:0};
-      return request('/api/v1/schedules',{...context,space,owner,method:'POST',body:{request_id:context.request_id,action:item?'update':'create',schedule_id:item?.id||'',spec:canonical}});
+      return item?domains.schedules.update({space,owner},item.id,canonical,context.request_id):domains.schedules.create({space,owner},canonical,context.request_id);
     },{capturedScope:item?{space:item._space_id,owner:item._assistant_id}:scope(),submitLabel:t('save')});
-    preview=connectScheduleEditor({view,request,locale,definitions,machineInfo,current:()=>editor?.session===view.session&&!disposed});
+    preview=connectScheduleEditor({view,preview:(scope,rule,signal)=>domains.schedules.preview(scope,rule,signal),locale,definitions,machineInfo,current:()=>editor?.session===view.session&&!disposed});
     const refresh=view.lifecycle.locale;view.lifecycle.locale=()=>{refresh();view.lifecycle.setTitle(t(item?'edit':'new'));};
     if(item)editor.returnSchedule={...item};
   }
@@ -800,7 +793,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       const policy=value.quota.policy;
       limitProjection.append(action(`${tr('Usage limits','用量限制')}${pages.length>1?' · '+page.space.name:''}`,()=>policyEditor(policy,owner),{disabled:page.stale}));
       if(value.quota?.active){const allowance=card(`${tr('Token allowance','Token 配额')} · ${page.space.name}`);allowance.append(n('p','hint',value.quota?.active?`${Number(value.quota.remaining).toLocaleString(locale())} ${tr('remaining','剩余')} · ${value.quota.reset_label||''}`:tr('No active token limit','未启用 token 限额')),action(tr('Edit allowance','编辑配额'),()=>policyEditor(policy,owner),{disabled:page.stale}));projection.append(allowance);}
-      if(value.waiting){const waiting=section(tr('Waiting for allowance','等待配额'));waiting.append(n('p','hint',value.waiting.provider||''));for(const name of ['resume','cancel']){const requestID=uid(),task=usageOwner?.returnTask;const button=action(tr(name==='resume'?'Resume':'Cancel waiting',name==='resume'?'恢复':'取消等待'),event=>operation(event.currentTarget,async()=>{if(task)return request(`/api/v1/tasks/${encodeURIComponent(task.id)}/${name}`,{...owner,method:'POST',body:{request_id:requestID,...(name==='resume'?{turn:value.waiting.turn,since:value.waiting.since}:{})}});if(name==='resume')return request('/api/v1/usage/resume',{...owner,method:'POST',body:{request_id:requestID,turn:value.waiting.turn,since:value.waiting.since}});const snapshot=await request('/api/v1/snapshot',owner),message=snapshot.messages?.find(message=>message.id===snapshot.turn?.user_message_id);if(!message||message.request_id!==value.waiting.turn)throw Error(tr('Allowance wait changed. Refresh Usage.','配额等待已变化，请刷新用量页面。'));return request('/api/v1/turn/cancel',{...owner,method:'POST',body:{request_id:requestID,user_message_id:message.id}});},()=>show('usage',{keepUsageOwner:true})),{disabled:page.stale||!usageOwner});waiting.append(button);}projection.append(waiting);}
+      if(value.waiting){const waiting=section(tr('Waiting for allowance','等待配额'));waiting.append(n('p','hint',value.waiting.provider||''));for(const name of ['resume','cancel']){const requestID=uid(),task=usageOwner?.returnTask;const button=action(tr(name==='resume'?'Resume':'Cancel waiting',name==='resume'?'恢复':'取消等待'),event=>operation(event.currentTarget,async()=>{if(task)return name==='resume'?taskDomain.resume(task,owner,{turn:value.waiting.turn,since:value.waiting.since}):taskDomain.cancel(task,owner);if(name==='resume')return request('/api/v1/usage/resume',{...owner,method:'POST',body:{request_id:requestID,turn:value.waiting.turn,since:value.waiting.since}});const snapshot=await request('/api/v1/snapshot',owner),message=snapshot.messages?.find(message=>message.id===snapshot.turn?.user_message_id);if(!message||message.request_id!==value.waiting.turn)throw Error(tr('Allowance wait changed. Refresh Usage.','配额等待已变化，请刷新用量页面。'));return request('/api/v1/turn/cancel',{...owner,method:'POST',body:{request_id:requestID,user_message_id:message.id}});},()=>show('usage',{keepUsageOwner:true})),{disabled:page.stale||!usageOwner});waiting.append(button);}projection.append(waiting);}
     }
       for(const [index,node]of [...projection.children].entries())node.dataset.viewKey=node.querySelector('h2')?.textContent||node.className+':'+index;
       reconcile(content,projection);reconcile(limits,limitProjection);
@@ -822,7 +815,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   async function localAssistantEditor() {
     const captured={space:client.spaces.find(item=>item.kind==='local')?.id||scope().space,owner:''},t=key=>translate(locale(),'agentLinks.'+key);
     const initiatingEditor=editor,initiatingRoot=host.firstElementChild,loading=n('section','assistant-catalog-state');loading.setAttribute('aria-live','polite');loading.append(n('p','hint',translate(locale(),'loading.pending')));initiatingRoot?.append(loading);
-    let providers;try{providers=await read('/api/v1/providers',{...captured,authoritative:true});}catch{if(host.firstElementChild===initiatingRoot)loading.replaceChildren(n('p','inline-error',t('managementFailed')),action(translate(locale(),'retry'),()=>{loading.remove();localAssistantEditor();}));return;}
+    let providers;try{providers=await domains.providers.query(captured,{authoritative:true});}catch{if(host.firstElementChild===initiatingRoot)loading.replaceChildren(n('p','inline-error',t('managementFailed')),action(translate(locale(),'retry'),()=>{loading.remove();localAssistantEditor();}));return;}
     if(disposed||editor!==initiatingEditor||host.firstElementChild!==initiatingRoot)return;loading.remove();const profiles=providers.profiles||[];
     if(!profiles.length){await setupAI(captured);return;}
     const profile=profiles.find(item=>item.id===providers.default_provider_id)||profiles[0];
@@ -831,8 +824,8 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       {name:'name',label:t('assistantName')},{name:'profile_id',label:translate(locale(),'assistantStart.provider'),required:true,choices:profiles.map(item=>[item.id,item.name])},
       {name:'model',label:t('assistantModel'),required:true},{name:'text',label:translate(locale(),'assistantStart.instructions'),kind:'textarea'},
     ],async(values,context)=>{
-      if(attemptID!==context.request_id){const selected=profiles.find(item=>item.id===values.profile_id);attemptID=context.request_id;attemptBody={request_id:attemptID,locale:locale(),name:values.name,text:values.text,selection:{profile_id:selected.id,profile_revision:selected.revision,model:values.model}};}
-      try{committed||=await request('/api/v1/assistants',{...captured,method:'POST',body:attemptBody});uncertain=false;return {created_assistant:{...committed,space_id:captured.space}};}
+      if(attemptID!==context.request_id){const selected=profiles.find(item=>item.id===values.profile_id);attemptID=context.request_id;attemptBody={locale:locale(),name:values.name,text:values.text,profile:selected,model:values.model};}
+      try{committed||=await domains.directory.create(captured,attemptBody,attemptID);uncertain=false;return {created_assistant:{...committed,space_id:captured.space}};}
       catch(reason){uncertain=!reason.code||['request_failed','unavailable'].includes(reason.code);throw Object.assign(Error(t(uncertain?'managementUncertain':'managementFailed')),{uiKey:'agentLinks.'+(uncertain?'managementUncertain':'managementFailed'),diagnostic:reason.message});}
     },{capturedScope:captured,submitLabel:t('assistantCreate')});
     const models=n('datalist');models.id='assistant-models-'+uid();form.form.append(models);form.controls.get('model').setAttribute('list',models.id);
@@ -1091,7 +1084,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
         if(taskView)renderTaskTranscript(taskView);onApprovalsChanged();renderApprovals();
         await Promise.all([...new Set(pendingApprovals.map(item=>item.request.task).filter(Boolean))].map(async id=>{
           const nameKey=taskNameKey(captured,id);if(taskNames.has(nameKey))return;
-          try{const record=await request(`/api/v1/tasks/${encodeURIComponent(id)}`,{...captured,signal:token.signal});if(current())taskNames.set(nameKey,record.info?.title||record.request?.text||id);}catch{/* Retain the exact Task ID when its title is unavailable. */}
+          try{const record=await taskDomain.metadata({id},captured,{signal:token.signal});if(current())taskNames.set(nameKey,record.info?.title||record.request?.text||id);}catch{/* Retain the exact Task ID when its title is unavailable. */}
         }));if(current())renderApprovals();
       },{active:current,onError:reason=>{approvalFresh=false;renderApprovals();if(taskView)renderTaskTranscript(taskView);notify(reason.message);}});
     }return approvalQueue.run();
@@ -1126,9 +1119,8 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   return {get title(){return title;},get editing(){return !!editor;},get approvalSpace(){return approvalScope().space;},get notificationContext(){return taskView?{space:taskView.scope.space,owner:taskView.scope.owner,task:taskView.task.id}:null;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!assistantLoad||!!editor||detailParent||!!usageOwner||route==='add-assistant'&&!host.hidden;},show,assistant,setupAI,leave,back,permissions,syncApprovals:renderApprovals,taskMenu(){taskView?.ui.openMenu();},handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalQueue?.close();approvalQueue=null;approvalQueueKey='';approvalGate.close();approvalOwner='';approvalFresh=false;pendingApprovals=[];approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);},approvalFor,decideApproval,taskNeedsApproval,rememberTasks,renderApprovals,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,options={}){route='tasks';return taskDetail(task,options);},
     showProviders(){filter.settingsTab='providers';return show('settings');},
     refresh(topics=[],source={}){
+      const changed=source.domainNotified?Promise.resolve():domains.changed(topics,source);if(pageView?.domain||taskView||taskListView)return changed;
  if(extensionUI){if(topics.includes('extensions')||topics.includes('spaces'))extensionUI.refresh();return;}
-      if(source.boot&&(resourceBoots.get(source.space)||client.runtime.boot_id)!==source.boot){readTaskPages.clear();if(source.boot)resourceBoots.set(source.space,source.boot);if(taskView&&(!source.space||taskView.scope.space===source.space)){taskView.invalidated=true;taskView.readGeneration=(taskView.readGeneration||0)+1;}}
-      if(topics.includes('spaces')){readTaskPages.clear();if(taskView){taskView.invalidated=true;taskView.readGeneration=(taskView.readGeneration||0)+1;}}
       if(editor){editor.lifecycle.refreshDelete?.();if(topics.includes('extensions')&&(!source.space||source.space===editor.session.context.space))editor.lifecycle.providersInvalidated?.();return;}if(disposed||!route||!host.offsetParent)return;
       if(pageView){if(relevantChange(topics,pageView.topics,pageView.space,source)){pageView.invalidate?.(topics);return pageView.queue.run();}return;}
       if(route==='settings')return;
@@ -1137,6 +1129,6 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       if(taskView)return refreshTaskEvents();
 
     },
-    dispose(){if(!client.tasks)taskRepository.close();extensionUI?.dispose();stopResources?.();notificationSettings?.dispose();for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle?.dispose?.();disposed=true;clearInterval(approvalTimer);closeTaskList();closeTaskView();approvalQueue?.close();pageView?.queue.close();gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
+    dispose(){releaseDomains();extensionUI?.dispose();stopResources?.();notificationSettings?.dispose();for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle?.dispose?.();disposed=true;clearInterval(approvalTimer);closeTaskList();closeTaskView();approvalQueue?.close();pageView?.queue.close();gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
   };
 }

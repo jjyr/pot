@@ -1,3 +1,4 @@
+import {domainsFor} from '../state/domains/index.mjs';
 import {machinePresentation} from '../state/machine-identity.mjs';
 import {storedPreference} from '../state/preferences.mjs';
 import {createCompaction} from './compaction.mjs';
@@ -62,6 +63,7 @@ function persist(key, value) { try { localStorage.setItem(key, value); } catch {
 // Product components depend only on this client contract, not browser transport
 // or Wails APIs. DOM nodes, especially the editor, survive stream/state changes.
 export function mountApp(root, client, {surface = 'main'} = {}) {
+  const domains=domainsFor(client),releaseDomains=domains.retain();
   let viewSurface=surface;
   if(client.production&&!client.desktop){
     let tabID;try{tabID=sessionStorage.getItem('pot-chat-view-id');if(!tabID){tabID=crypto.randomUUID();sessionStorage.setItem('pot-chat-view-id',tabID);}}catch{tabID=crypto.randomUUID();}
@@ -88,7 +90,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let cancelPending = false;
   let editorOwner = null;
   let menuOpen = false;
-  let preferencesOpen = false,restoringHistory=false;
+  let preferencesOpen = false,preferenceOwner='',restoringHistory=false;
   let assistants = [], spaces = [], selectedAssistant = null, pendingSelection = null;
   let unsubscribe = () => {}, stopChanges = () => {};
   let directoryEpoch = 0, directorySignature = '';
@@ -409,7 +411,17 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   let preferenceControls;
   function renderPreferences() {
-    if(client.production){preferences.classList.add('product-actions');const projection=preferences.cloneNode(false);const close=button('close',t('close'));close.onclick=()=>preferences.close();projection.append(close);const action=(label,run)=>{const choice=el('button','menu-destination',label);choice.type='button';choice.onclick=()=>{preferences.close();run();};projection.append(choice);};if(selectedAssistant&&(can('assistant.configure')||can('assistant.profile')))action(t('assistantSettings'),()=>{route='settings';pages.assistant(selectedAssistant);renderShell();});if(selectedAssistant&&can('assistant.usage'))action(t('usage'),()=>{route='usage';pages.conversationUsage(selectedAssistant.name);renderShell();});if(state.snapshot?.running&&can('chat.control')){const captured={...client.scope()},target=state.snapshot.turn_id,paused=!!state.snapshot.turn?.paused;action(t(paused?'chat.resume':'chat.pause'),async()=>{try{await client.controlTurn({user_message_id:target,action:paused?'resume':'pause'},captured);}catch(reason){error=reason.message;updateControls();}});}action(t('settings'),()=>navigate('settings'));reconcile(preferences,projection);return;}
+    if(client.production){
+      const owner=JSON.stringify([client.scope(),client.runtime.boot_id]);
+      if(selectedAssistant?.retained&&owner===preferenceOwner&&preferences.querySelector('.menu-destination')){for(const choice of preferences.querySelectorAll('.menu-destination'))if(choice.dataset.viewKey!=='settings')choice.setAttribute('aria-disabled','true');return;}
+      preferenceOwner=owner;
+      preferences.classList.add('product-actions');const projection=preferences.cloneNode(false),close=button('close',t('close'));close.dataset.viewKey='close';close.onclick=()=>preferences.close();projection.append(close);
+      const action=(key,label,run)=>{const choice=el('button','menu-destination',label);choice.type='button';choice.dataset.viewKey=key;choice.onclick=event=>{if(event.currentTarget.getAttribute('aria-disabled')==='true')return;preferences.close();run();};projection.append(choice);};
+      if(selectedAssistant&&(can('assistant.configure')||can('assistant.profile')))action('assistant-settings',t('assistantSettings'),()=>{route='settings';pages.assistant(selectedAssistant);renderShell();});
+      if(selectedAssistant&&can('assistant.usage'))action('usage',t('usage'),()=>{route='usage';pages.conversationUsage(selectedAssistant.name);renderShell();});
+      if(state.snapshot?.running&&can('chat.control')){const captured={...client.scope()},target=state.snapshot.turn_id,paused=!!state.snapshot.turn?.paused;action('turn-control',t(paused?'chat.resume':'chat.pause'),async()=>{try{await client.controlTurn({user_message_id:target,action:paused?'resume':'pause'},captured);}catch(reason){error=reason.message;updateControls();}});}
+      action('settings',t('settings'),()=>navigate('settings'));reconcile(preferences,projection);return;
+    }
     if (!preferenceControls) {
       const heading = el('div', 'preferences-heading');
       const title = el('h2');
@@ -589,13 +601,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       open.onclick = async () => { try { await client.openMain(); } catch (reason) { error = reason.message; updateControls(); } };
       titlebar.append(open);
     }
-    if (client.production && route === 'chat' && selectedAssistant && (can('assistant.configure')||can('assistant.profile'))) { const settings = button('sliders', t('assistantSettings')); settings.onclick = openAssistantSettings; titlebar.append(settings); }
+    if (client.production && route === 'chat' && selectedAssistant && (can('assistant.configure')||can('assistant.profile'))) { const settings = button('sliders', t('assistantSettings')); settings.dataset.viewKey='assistant-settings';settings.onclick = openAssistantSettings; titlebar.append(settings); }
     if(!client.production){const cloud=el('span','icon-button');cloud.title=t('remote');cloud.append(icon('cloud'));titlebar.append(cloud);}
-    const more = button('more', t(client.production ? 'chat.actions' : 'more'));
+    const more = button('more', t(client.production ? 'chat.actions' : 'more'));more.dataset.viewKey='conversation-actions';
     more.setAttribute('aria-haspopup', 'dialog');
     more.onclick = () => { preferencesOpen = true; renderPreferences(); preferences.showModal(); };
     if(!client.production||route==='chat')titlebar.append(more);
-    if(route==='tasks'&&pages?.taskOwner){const actions=button('more',locale==='zh-CN'?'任务操作':'Task actions');actions.setAttribute('aria-haspopup','dialog');actions.onclick=()=>pages.taskMenu();titlebar.append(actions);}
+    if(route==='tasks'&&pages?.taskOwner){const actions=button('more',locale==='zh-CN'?'任务操作':'Task actions');actions.dataset.viewKey='task-actions';actions.setAttribute('aria-haspopup','dialog');actions.onclick=()=>pages.taskMenu();titlebar.append(actions);}
     notice.textContent = client.production ? '' : t('notice');
     input.placeholder = t(client.production?'completions.placeholder':'composer');
     input.setAttribute('aria-label', t('composer'));
@@ -702,20 +714,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(!client.production||!selectedAssistant)return Promise.resolve();
     if(!can('task.list')){backgroundTasks?.close();backgroundTasks=null;backgroundTaskKey='';backgroundProjection={...backgroundProjection,items:backgroundProjection.items.map(task=>({...task,_stale:true}))};if(route==='chat')renderMessages();return Promise.resolve();}
     const scope={...client.scope()},key=JSON.stringify([scope.space,scope.owner]);
-    if(!backgroundTasks||key!==backgroundTaskKey){
-      backgroundTasks?.close();backgroundTaskKey=key;
-      backgroundTasks=createRefreshQueue(async()=>{
-        const items=[],seen=new Set();let offset=0,stale=false;
-        do{
-          if(seen.has(offset))throw Error('Invalid task pagination cursor');seen.add(offset);
-          const value=await client.request(`/api/v1/tasks/query?scope=active&limit=50&offset=${offset}`,{...scope,signal:abort.signal});
-          if(disposed||!can('task.list')||key!==JSON.stringify([client.scope().space,client.scope().owner]))return;
-          const freshness=client.resources?.state(value)?.freshness;stale ||= freshness==='retained'||freshness==='stale';
-          items.push(...(value.items||[]));offset=value.next_offset;
-        }while(offset!=null);
-        backgroundProjection={key,items:items.filter(task=>['queued','running','waiting','waiting_approval'].includes(task.phase)).map(task=>({...task,_stale:stale,_space_id:scope.space,assistant_id:scope.owner}))};
-        messageIdentities(client).rememberTasks(items.map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));pages.rememberTasks(backgroundProjection.items);if(route==='chat')renderMessages();
-      },{active:()=>!disposed&&key===JSON.stringify([client.scope().space,client.scope().owner])});
+    if(!backgroundTasks||key!==backgroundTaskKey){backgroundTasks?.close();backgroundTaskKey=key;
+      const stop=domains.tasks.watchActive(scope,snapshot=>{if(disposed||key!==JSON.stringify([client.scope().space,client.scope().owner])||!snapshot.data)return;const items=snapshot.data;backgroundProjection={key,items};messageIdentities(client).rememberTasks(items);pages.rememberTasks(items);if(route==='chat')renderMessages();});
+      backgroundTasks={close:stop,run:()=>domains.tasks.active(scope).refresh()};
     }return backgroundTasks.run();
   }
   const windowHeights=new Map();
@@ -1006,7 +1007,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     messageWindow.set([]);messageNodes.clear();windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);
     input.value='';directoryOpen=true;error='';
   }
-  const stopResources=client.resources?.subscribe((meta,reason)=>{if(!disposed&&meta.path.startsWith('/api/v1/tasks/query?')&&meta.space===client.scope().space&&meta.owner===client.scope().owner){if(!reason)refreshBackgroundTasks();return;}if(disposed||!['/api/v1/spaces','/api/v1/assistants','/api/v1/agent-links','/api/v1/runtime'].includes(meta.path))return;if(reason){error=translate(locale,'loading.stale');updateControls();return;}if(error===translate(locale,'loading.stale'))error='';loadDirectory();});
+  const stopResources=domains.directory.watch(snapshot=>{if(disposed)return;if(snapshot.error){error=t('loading.stale');updateControls();}else if(snapshot.data)loadDirectory();});
   const directoryQueue=createRefreshQueue(()=>readDirectory(),{active:()=>!disposed});
   function loadDirectory(){return directoryQueue.run();}
   async function readDirectory() {
@@ -1015,47 +1016,19 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const previousMachines=machinePresentation(client).revision;
     const ticket = ++directoryEpoch,previousSpaces=JSON.stringify(spaces),previousOwners=JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.profile_name,item.avatar,item.origin,item.offline,item.capabilities]));
     try {
-      const catalog = await (client.read||client.request)('/api/v1/spaces', {owner:'', space:'',signal:abort.signal});
-      if (ticket !== directoryEpoch || disposed) return;
-      spaces = catalog.items || [];client.spaces=spaces;
-      if (!spaces.length) throw Error('No serving Space');
-      if(!selectedAssistant){client.setScope({space:catalog.active_space_id||spaces[0].id,owner:''});updates?.refresh(client.scope());}
-      const projectAssistants=(value,space,offline)=>{let items=value;if(typeof items==='string'){try{items=JSON.parse(items);}catch{items=[];}}const saved=client.resources?.state(value),fresh=!saved||saved.freshness==='fresh';return (items?.items||items||[]).map(item=>({...item,...(!fresh?{executing:false,pending_approvals:0,capabilities:{version:1,operations:['chat.read']},retained:true}:{}),control_id:space.control_id||space.id,space_id:space.id,space_name:space.name,space_kind:space.kind,offline}));};
-      const linkFailures=[];
-      // Keep an acknowledged linked identity while its node is offline.
-      const results = await Promise.allSettled(spaces.map(async space => {
-        const [items]=await Promise.all([(client.read||client.request)('/api/v1/assistants',{owner:'',space:space.id,signal:abort.signal}),machinePresentation(client).load({space:space.id,signal:abort.signal})]);
-        const local=projectAssistants(items,space,space.connected===false);
-        try{const links=await (client.read||client.request)('/api/v1/agent-links',{owner:'',space:space.id,signal:abort.signal});const linkState=client.resources?.state(links),linked=projectLinkedAssistants(links,space).map(item=>linkState&&linkState.freshness!=='fresh'?{...item,capabilities:{version:1,operations:['chat.read']},retained:true}:item);if(selectedAssistant?.origin&&selectedAssistant.space_id===space.id&&!linked.some(item=>item.id===selectedAssistant.id)){const link=links.items?.find(item=>item.id===selectedAssistant.origin.link_id);if(link&&link.status!=='connected')linked.push({...selectedAssistant,offline:true});}return [...local,...linked];}
-        catch{linkFailures.push(space.id);return [...local,...assistants.filter(item=>item.origin&&item.space_id===space.id).map(item=>({...item,offline:true}))];}
-      }));
-      if (ticket !== directoryEpoch || disposed) return;
-      assistants = results.flatMap((result, index) => result.status === 'fulfilled' ? result.value : (()=>{const space=spaces[index],previous=assistants.filter(item=>item.space_id===space.id);return previous.length?previous.map(item=>({...item,offline:true})):projectAssistants(space.assistants||[],space,true);})());
-      client.assistants=assistants;
-      const changed=[];if(previousMachines!==machinePresentation(client).revision)changed.push('machines');if(previousSpaces!==JSON.stringify(spaces))changed.push('spaces');if(previousOwners!==JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.profile_name,item.avatar,item.origin,item.offline,item.capabilities])))changed.push('assistants');if(changed.length)pages.refresh(changed);
+      const directory=await domains.directory.query();if(ticket!==directoryEpoch||disposed)return;
+      spaces=directory.spaces;assistants=directory.assistants;client.spaces=spaces;client.assistants=assistants;
+      if(!selectedAssistant){client.setScope({space:directory.activeSpace,owner:''});updates?.refresh(client.scope());}
+      const changed=[];if(previousMachines!==machinePresentation(client).revision)changed.push('machines');if(previousSpaces!==JSON.stringify(spaces))changed.push('spaces');if(previousOwners!==JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.profile_name,item.avatar,item.origin,item.offline,item.capabilities])))changed.push('assistants');if(changed.length)pages.refresh(changed,{domainNotified:true});
       for(const item of assistants){const arrival=replies.observe(controlOf(item),item.id,item.reply_id||'',item.reply_count||0,!item.offline);if(arrival.arrived&&route==='chat'&&document.visibilityState!=='hidden'&&!reducedMotion.matches){reactions.set(replyKey(controlOf(item),item.id),performance.now());setTimeout(()=>{if(!disposed){directorySignature='';renderShell();}},650);}}saveReads();
-      if (linkFailures.length||results.some(result => result.status === 'rejected')) error = t('partialOffline');else if(error===t('partialOffline'))error='';
+      if(directory.partial)error=t('partialOffline');else if(error===t('partialOffline'))error='';
       if(selectedAssistant&&!pages.editing&&!assistants.some(item=>item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id)){
-        const source=spaces.findIndex(space=>space.id===selectedAssistant.space_id);
-        if(source>=0&&results[source].status==='fulfilled'&&spaces[source].connected!==false){
-          // A cached list can predate the creation acknowledgement. Only a
-          // fresh, available source may confirm that the selected identity is gone.
-          const missing=selectedAssistant,space=spaces[source];
-          try{
-            const path=missing.origin?'/api/v1/agent-links':'/api/v1/assistants';
-            const fresh=await (client.read||client.request)(path,{owner:'',space:space.id,signal:abort.signal,authoritative:true});
-            if(ticket!==directoryEpoch||disposed||selectedAssistant?.id!==missing.id||selectedAssistant?.space_id!==missing.space_id)return;
-            const entries=missing.origin?projectLinkedAssistants(fresh,space):projectAssistants(fresh,space,false),link=missing.origin&&fresh.items?.find(item=>item.id===missing.origin.link_id);
-            const confirmed=entries.find(item=>item.id===missing.id);
-            if(confirmed||link&&link.status!=='connected'){assistants.push(confirmed||{...missing,offline:true});client.assistants=assistants;}
-            else clearSelectedAssistant();
-          }catch{if(ticket!==directoryEpoch||disposed)return;assistants.push({...missing,offline:true});client.assistants=assistants;error=t('partialOffline');}
-        }
+        const missing=selectedAssistant;try{const confirmed=await domains.directory.confirm(missing);if(ticket!==directoryEpoch||disposed)return;if(confirmed){assistants=[...assistants,confirmed];client.assistants=assistants;}else clearSelectedAssistant();}catch{error=t('partialOffline');}
       }
       if (selectedAssistant){const taskAccess=can('task.list');selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;if(selectedAssistant.offline)connection='offline';if(taskAccess!==can('task.list'))refreshBackgroundTasks();}
       renderShell();renderMessages();
       if(!assistants.length&&route==='chat'&&!pages.editing){
-        const available=!linkFailures.length&&results.every(result=>result.status==='fulfilled')&&spaces.some(space=>space.connected!==false);
+        const available=!directory.partial&&spaces.some(space=>space.connected!==false);
         if(available){directoryOpen=false;route='add-assistant';renderShell();await pages.show('add-assistant');}else{directoryOpen=false;renderShell();const empty=el('div','empty-chat');empty.append(el('p','hint',t('partialOffline')));const retry=el('button','control',t('retry'));retry.onclick=()=>loadDirectory();empty.append(retry);messageColumn.replaceChildren(empty);}
       }
       mainReady();
@@ -1145,14 +1118,14 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function attachChanges(){
     stopChanges();stopChanges=client.changes((topics,source={})=>{
       const keys=Array.isArray(topics)?topics:Object.keys(topics||{});
-      client.resources?.invalidate(keys,source);
+      domains.changed(keys,source);
  if(relevantChange(keys,['updates','spaces','runtime'],client.scope().space,source))updates?.refresh(client.scope());
       if(source.boot&&state.snapshot&&(!source.space||source.space===client.scope().space)&&state.snapshot.boot_id!==source.boot)loadSnapshot(true);
       if(source.reset){notifications?.refresh({reset:true,space:source.space});loadDirectory();}
       else if(relevantChange(keys,['task-outcomes','permissions']))notifications?.refresh({topics:keys,space:source.space});
       if(relevantChange(keys,['spaces','assistants','assistant-mail','agent-links','conversation','runtime','permissions','tasks','runner']))loadDirectory();
       if(relevantChange(keys,['tasks','runner'],client.scope().space,source))refreshBackgroundTasks();
-      pages.refresh(keys,source);if(relevantChange(keys,['permissions','spaces','runtime'],pages.approvalSpace,source))pages.permissions();
+      pages.refresh(keys,{...source,domainNotified:true});if(relevantChange(keys,['permissions','spaces','runtime'],pages.approvalSpace,source))pages.permissions();
     },{space:''});
   }
   if(client.production){attachChanges();loadDirectory();updates?.refresh(client.scope());}else attach();
@@ -1169,7 +1142,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     rememberChatPosition();clearTimeout(viewTimer);cancelAnimationFrame(revealFrame);historyAbort.abort();
     window.removeEventListener('pagehide',rememberChatPosition);document.removeEventListener('visibilitychange',persistChat);
     Promise.all([viewWrite,chatSync?.close()]).finally(()=>chatCache?.close());
-    disposed = true;stopChatCommits?.();updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);viewportObserver.disconnect();reading.dispose();messageWindow.close();stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();backgroundTaskView.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    disposed = true;stopChatCommits?.();updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);viewportObserver.disconnect();reading.dispose();messageWindow.close();stopResources?.();releaseDomains();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();backgroundTaskView.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     stopMessageSelection();completions?.dispose();attachmentUI?.destroy();client.releaseAttachments?.();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);

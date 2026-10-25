@@ -1,3 +1,4 @@
+import {mergeUIFrame} from './chat-history.mjs';
 import {translate} from '../locales/messages.mjs';
 import {createChatCache} from './chat-cache.mjs';
 import {createTaskTranscript,appendTaskEvents} from './task-transcript.mjs';
@@ -18,9 +19,15 @@ function boundMessage(message){
   }
   return message;
 }
+// Both inputs are committed queries. Reuse Chat's count/byte/anchor bounds.
+export function mergeTaskHistory(state,page,anchor){
+  const messages=[...new Map([...state.messages,...page.messages].map(message=>[message.id,message])).values()];
+  const window=mergeUIFrame(null,{kind:'reset',cursor:String(state.cursor),messages,replies:[],history:{}},anchor);
+  return {...state,messages:window.messages,has_more:Number(window.messages.find(message=>!message.context_only)?.sequence||0)>Number(state.firstSequence||0),cache_truncated:window.messages.some(message=>message.cache_truncated)};
+}
 export function createTaskRepository(client){
   const cache=createChatCache({name:(client.chatCacheName||'pot-chat-cache')+'-tasks',checkpoints:true,totalBytes:64*1024*1024});
-  const stored=promise=>promise.catch(error=>{throw Object.assign(new Error(translate(client.uiLocale?.()||'en','storage.failed'),{cause:error}),{storage:true,uiKey:'storage.failed',diagnostic:error.message});});
+  const stored=promise=>promise.catch(error=>{if(error.name==='AbortError')throw error;throw Object.assign(new Error(translate(client.uiLocale?.()||'en','storage.failed'),{cause:error}),{storage:true,uiKey:'storage.failed',diagnostic:error.message});});
   const identity=(task,scope)=>({key:JSON.stringify([client.runtime.runtime_id,scope.space,scope.owner,task.id]),owner:JSON.stringify([scope.space,scope.owner,task.id]),conversation:task.run_id||task.id});
   async function read(task,scope){
     const {key}=identity(task,scope),saved=await stored(cache.read(key));if(!saved||task.run_id&&saved.snapshot.conversation_id!==task.run_id)return null;
@@ -28,7 +35,7 @@ export function createTaskRepository(client){
     const ids=new Set(messages.map(message=>message.id)),missing=[checkpoint.active,...(checkpoint.tools||[]).map(([,id])=>id)].filter(id=>id&&!ids.has(id));
     if(missing.length>32)throw Error('task_checkpoint_dependencies');
     const context=missing.length?await stored(cache.readMessages(key,missing)):[];messages.push(...context.map(message=>({...message,context_only:true})));const byID=new Map(messages.map(message=>[message.id,message]));
-    return {cursor:Number(saved.snapshot.cursor),messages,active:byID.get(checkpoint.active)||null,tools:new Map((checkpoint.tools||[]).flatMap(([id,message])=>byID.has(message)?[[id,byID.get(message)]]:[])),inputs:new Map(checkpoint.inputs||[]),firstSequence:checkpoint.firstSequence||messages[0]?.sequence,has_more:BigInt(messages[0]?.sequence||0)>BigInt(checkpoint.firstSequence||messages[0]?.sequence||0),cache_truncated:messages.some(message=>message.cache_truncated)};
+    return {run_id:saved.snapshot.conversation_id,cursor:Number(saved.snapshot.cursor),messages,active:byID.get(checkpoint.active)||null,tools:new Map((checkpoint.tools||[]).flatMap(([id,message])=>byID.has(message)?[[id,byID.get(message)]]:[])),inputs:new Map(checkpoint.inputs||[]),firstSequence:checkpoint.firstSequence||messages[0]?.sequence,has_more:BigInt(messages[0]?.sequence||0)>BigInt(checkpoint.firstSequence||messages[0]?.sequence||0),cache_truncated:messages.some(message=>message.cache_truncated)};
   }
   return {
     read,
@@ -52,26 +59,27 @@ export function createTaskRepository(client){
       await stored(cache.writeFrames(ref.key,[{runtime_id:client.runtime.runtime_id,owner_id:ref.owner,conversation_id:ref.conversation,boot_id:client.runtime.boot_id||'task',kind:previous.cursor?'delta':'reset',base_cursor:String(previous.cursor),cursor:String(state.cursor),running:false,turn_id:null,replies:[],messages,history:{before:messages[0]?.sequence||'',after:messages.at(-1)?.sequence||'',has_more:false,has_newer:false}}],{checkpoint,historyRange:{before:String(previous.cursor+1),after:String(state.cursor)}}));
       return read(task,scope);
     },
-    async earlier(task,scope,before,{limit=80}={}){
+    async earlier(task,scope,before,{limit=80,signal}={}){
+      const current=()=>{if(signal?.aborted)throw signal.reason;};current();
       const ref=identity(task,scope);let page=await stored(cache.readPage(ref.key,{before:String(before),limit}));
       if(!page){
         // The original event API has after-only pagination. Reconstruct a bounded
         // earlier window without resetting the live durable cursor/checkpoint.
         const history=createTaskTranscript();let more=true;
         while(more&&history.cursor<Number(before)-1){
-          const batch=await client.request(`/api/v1/tasks/${encodeURIComponent(task.id)}/events?${new URLSearchParams({after:history.cursor,limit:100})}`,scope);
+          current();const batch=await client.request(`/api/v1/tasks/${encodeURIComponent(task.id)}/events?${new URLSearchParams({after:history.cursor,limit:100})}`,{...scope,signal});current();if(batch.unavailable)throw Error('task_history_unavailable');
           const events=(batch.events||[]).filter(row=>row.sequence<Number(before));if(!events.length)break;
           const cursor=history.cursor;appendTaskEvents(history,events);if(history.cursor<=cursor)throw Error('task_event_gap');
           for(const message of history.messages)boundMessage(message);
-          history.messages=history.messages.slice(-640);history.inputs=new Map([...history.inputs].slice(-256));
+          history.messages=mergeUIFrame(null,{kind:'reset',cursor:String(history.cursor),messages:history.messages,replies:[],history:{}}).messages;history.inputs=new Map([...history.inputs].slice(-256));
           if(history.active)boundMessage(history.active);
           const ids=new Set(history.messages.map(message=>message.id));for(const [id,message]of history.tools)if(!ids.has(message.id))history.tools.delete(id);
           const messages=history.messages.map(message=>({...message,sequence:String(message.sequence),version:history.cursor,status:message.phase==='streaming'?'streaming':'complete'}));
-          await stored(cache.writeRecords(ref.key,messages,{before:messages[0]?.sequence,after:messages.at(-1)?.sequence}));more=batch.has_more;
+          await stored(cache.writeRecords(ref.key,messages,{before:String(cursor+1),after:String(history.cursor)},{conversation:ref.conversation,signal}));more=batch.has_more;
         }
         page=await stored(cache.readPage(ref.key,{before:String(before),limit}));
       }
-      if(!page)return null;const state=await read(task,scope);return {...state,messages:page.messages.map(message=>({...message})),has_more:BigInt(page.messages[0]?.sequence||0)>BigInt(state.firstSequence||0),cache_truncated:page.messages.some(message=>message.cache_truncated)};
+      current();if(!page)return null;if(page.conversation_id!==ref.conversation)throw new DOMException('Task run changed','AbortError');return {cursor:Number(page.cursor),messages:page.messages.map(message=>({...message})),has_more:BigInt(page.messages[0]?.sequence||0)>BigInt(page.checkpoint?.firstSequence||0),cache_truncated:page.messages.some(message=>message.cache_truncated)};
     },
     subscribe(task,scope,listener){const key=identity(task,scope).key;return cache.subscribe((changed)=>{if(changed===key)listener();});},
     close(){cache.close();},

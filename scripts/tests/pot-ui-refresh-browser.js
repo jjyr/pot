@@ -104,7 +104,7 @@ async page=>{
   await page.clock.resume();
   await page.evaluate(async()=>{
    const f=refreshFixture;f.pages.dispose();f.approvals=[];document.body.replaceChildren();const root=document.createElement('div');document.body.append(root);
-   const response=f.response;f.response=(path,options)=>{if(path==='/api/v1/spaces')return {active_space_id:'local',items:f.client.spaces};if(path==='/api/v1/assistants')return f.client.assistants.filter(item=>!item.origin&&item.space_id===options.space);if(path.startsWith('/api/v1/tasks/query'))return {items:[{id:'background',assistant_id:'a',title:'Background review',phase:'running'}]};return response(path,options);};
+   f.serverAssistants=structuredClone(f.client.assistants);const response=f.response;f.response=(path,options)=>{if(path==='/api/v1/spaces')return {active_space_id:'local',items:f.client.spaces};if(path==='/api/v1/assistants')return f.serverAssistants.filter(item=>!item.origin&&item.space_id===options.space);if(path.startsWith('/api/v1/tasks/query'))return {items:[{id:'background',assistant_id:'a',title:'Background review',phase:'running'}]};return response(path,options);};
    f.selection={space:'local',owner:'a'};f.client.scope=()=>({...f.selection});f.client.setScope=value=>f.selection={...value};f.client.production=true;
    f.client.notificationStatus=async()=>({enabled:true,permission:'denied'});f.client.notificationView=async()=>{};f.client.notifySystem=async()=>{};
    const withPages=f.response;f.response=(path,options)=>path.startsWith('/api/v1/tasks/outcomes')?{items:[],cursor:0,has_more:false}:withPages(path,options);
@@ -113,7 +113,7 @@ async page=>{
    const {mountApp}=await import('/components/ui.js');f.unmount=mountApp(root,f.client);
   });
   await page.locator('.background-task').waitFor();await page.locator('.assistant-search').fill('Assist');
-  await page.evaluate(()=>{const f=refreshFixture;f.search=document.querySelector('.assistant-search');f.search.setSelectionRange(1,3);f.assistantRow=document.querySelector('.assistant-row');f.chatTask=document.querySelector('.background-task');f.nav=document.querySelector('.feature-rail button');f.client.assistants[0].name='Assistant renamed';f.changes(['assistants'],{space:'local'});});
+  await page.evaluate(()=>{const f=refreshFixture;f.search=document.querySelector('.assistant-search');f.search.setSelectionRange(1,3);f.assistantRow=document.querySelector('.assistant-row');f.chatTask=document.querySelector('.background-task');f.nav=document.querySelector('.feature-rail button');f.serverAssistants[0].name='Assistant renamed';f.changes(['assistants'],{space:'local'});});
   await page.getByText('Assistant renamed',{exact:true}).first().waitFor();
   assert(await page.evaluate(()=>refreshFixture.search===document.querySelector('.assistant-search')&&refreshFixture.search.value==='Assist'&&refreshFixture.search.selectionStart===1&&document.activeElement===refreshFixture.search&&refreshFixture.assistantRow===document.querySelector('.assistant-row')&&refreshFixture.nav===document.querySelector('.feature-rail button')),'Directory updates retain search, selection, focus, assistant rows and navigation');
   assert(await page.locator('.assistant-location').count()===0,'The local serving source needs no ownership label');
@@ -131,7 +131,7 @@ async page=>{
   await page.evaluate(()=>{const f=refreshFixture;f.snapshot.cursor='2';f.receive(structuredClone(f.snapshot));f.changes(['tasks'],{space:'local'});});
   assert(await page.evaluate(()=>refreshFixture.chatTask===document.querySelector('.background-task')),'Chat updates retain the executing task action');
   await page.getByRole('button',{name:'Conversation actions',exact:true}).click();
-  await page.evaluate(()=>{const f=refreshFixture;f.menuAction=document.querySelector('.preferences .menu-destination');f.menuAction.focus();f.client.assistants[0].preview='New preview';f.changes(['assistants'],{space:'local'});});
+  await page.evaluate(()=>{const f=refreshFixture;f.menuAction=document.querySelector('.preferences .menu-destination');f.menuAction.focus();f.serverAssistants[0].preview='New preview';f.changes(['assistants'],{space:'local'});});
   await page.getByText('New preview',{exact:true}).waitFor();
   assert(await page.evaluate(()=>refreshFixture.menuAction===document.querySelector('.preferences .menu-destination')&&document.activeElement===refreshFixture.menuAction),'Open menu actions retain keyboard focus during directory updates');
   await page.evaluate(()=>{const f=refreshFixture;document.querySelector('.preferences').close();f.approvals=[{id:'early',request:{owner:'a',turn:'turn',call_id:'call',machine_id:'host',tool:'exec_command',args:{cmd:'pwd'}}}];f.changes(['permissions'],{space:'local'});});
