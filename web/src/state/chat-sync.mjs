@@ -38,7 +38,7 @@ export function createChatSync({cache,key,context=()=>({}),committed,failed,dela
       if(messages.length>512||messages.reduce((bytes,message)=>bytes+message.text.length*2+(message.tool?JSON.stringify(message.tool).length*2:0)+512,0)>32*1024*1024){
         closed=true;pending=[];host.clearTimeout(timer);failed(Error('chat_cache_backpressure'));return;
       }
-      schedule();
+      if(frame.replies.some(reply=>['completed','failed','cancelled','unknown'].includes(reply.state))||frame.messages.some(message=>message.status==='failed'))drain();else schedule();
     },
     flush,
     retire(){closed=true;return flush();},

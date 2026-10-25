@@ -16,6 +16,9 @@ export async function chatCacheContract({name='pot-chat-contract-'+crypto.random
     const reopened=await cache.read(key,'main');
     check(reopened.snapshot.cursor==='1'&&reopened.view.position.mode==='reading'&&reopened.view.heights[0][1]===120,'reopening preserves messages, reading position and layout hints');
     check((await cache.read(key,'tray')).view===null,'main and tray reading positions are independent');
+    const surfaces=createChatCache({name,maxViews:2});for(let i=0;i<4;i++)await surfaces.saveView(key,'surface-'+i,{conversation_id:'chat',boot_id:'boot',cursor:'1',window:current.messages.map(item=>({id:item.id})),position:{mode:'latest'}});
+    check((await surfaces.read(key,'surface-0')).view===null&&(await surfaces.read(key,'surface-3')).view!==null,'surface retention keeps the current view within the per-conversation cap');surfaces.close();
+    const expiredViews=createChatCache({name,viewTTL:-1});check((await expiredViews.read(key,'surface-3')).view===null,'expired positions cannot restore a stale reading window');expiredViews.close();
     let aborted=false;
     try{await cache.writeFrames(key,[frame(3,'delta',[message(160,'must roll back',3)],99)]);}catch{aborted=true;}
     current=(await cache.read(key)).snapshot;
@@ -48,6 +51,9 @@ export async function chatCacheContract({name='pot-chat-contract-'+crypto.random
     let identityRejected=false;try{await cache.writeFrames(key,[{...frame(2,'reset',[message(1)],0,'next'),owner_id:'wrong-owner'}]);}catch{identityRejected=true;}
     check(identityRejected&&(await cache.read(key)).snapshot.owner_id==='alpha','a cache scope cannot be rebound to a different assistant');
     await cache.remove(other);check(await cache.read(other)===null,'assistant retirement removes its persisted cache');
+    await cache.writeFrames(other,[{...frame(2,'reset',[message(1)]),owner_id:'beta',conversation_id:'other'}]);check(await cache.read(other)===null,'retirement tombstone rejects a late frame from another window');
+    await cache.writeFrames('replacement',[frame(1,'reset',[message(1)])]);await cache.writeFrames('replacement',[{...frame(1,'reset',[message(2)]),conversation_id:'replacement'}]);await cache.writeFrames('replacement',[frame(2,'reset',[message(1)])]);check((await cache.read('replacement')).snapshot.conversation_id==='replacement','a retired conversation cannot replace its newer conversation in the same boot');
+    const capacity=createChatCache({name,maxBytes:2048});await capacity.writeFrames('capacity',[frame(1,'reset',[message(1,'kept')])]);let overBudget=false;try{await capacity.writeFrames('capacity',[frame(2,'delta',[message(1,'x'.repeat(4096),2)],1)]);}catch{overBudget=true;}check(overBudget&&(await capacity.read('capacity')).snapshot.cursor==='1'&&(await capacity.read('capacity')).snapshot.messages[0].text==='kept','an oversized pinned projection rolls back instead of exceeding its storage budget');capacity.close();
     const nested=[{...message(1),context_only:true},...[2,3,4].map(n=>({...message(n),role:'tool',reply_to:'m1',context_only:n<4,tool:{id:'t'+n,turn_id:'turn',...(n>2?{parent_id:'t'+(n-1)}:{})}}))];
     await cache.writeFrames('nested',[frame(1,'reset',nested)]);
     const nestedPage=await cache.readPage('nested',{around:'m4'});
@@ -58,7 +64,7 @@ export async function chatCacheContract({name='pot-chat-contract-'+crypto.random
     await small.writePage('bounded',{...page,cursor:'1'},{anchor:'40',around:true});
     check((await small.read('bounded')).snapshot.messages.length===80&&await small.readPage('bounded',{})===null,'evicted history intervals require a backend read');
     check((await small.read('bounded','tray')).snapshot.messages.length===80,'another window never restores a partially evicted message list');small.close();
-    const global=createChatCache({name,totalBytes:1});
+    const global=createChatCache({name,totalBytes:2048});
     await global.writeFrames('active',[frame(1,'reset',[message(1)])]);
     check(await cache.read('bounded')===null&&(await cache.read('active')).snapshot.messages.length===1,'global eviction removes inactive scopes and preserves the active projection');global.close();
     const unavailable=createChatCache({indexedDB:null});let failed=false;
