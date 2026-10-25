@@ -749,7 +749,8 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 .tool-children { display: flex; flex-direction: column; }
 
 /* Direct manipulation stays unanimated; release settles through the shared motion helper. */
-.is-edge-back .assistant-directory{display:flex;position:absolute;top:calc(var(--titlebar-height) + var(--safe-area-top));bottom:var(--safe-area-bottom);left:var(--safe-area-left);right:var(--safe-area-right);z-index:0;}
+/* Position the absolute preview against the shell, not its normal grid cell. */
+.is-edge-back .assistant-directory{display:flex;position:absolute;grid-area:auto;top:calc(var(--titlebar-height) + var(--safe-area-top));bottom:var(--safe-area-bottom);left:var(--safe-area-left);right:var(--safe-area-right);z-index:0;}
 .is-edge-back .workspace,.is-edge-back .titlebar{z-index:1;background:var(--canvas);}
 .rail-button,.icon-button,.control,.assistant-row,.task-row,.background-task,.background-tasks-toggle,.send-button{transition:background-color var(--motion-fast) ease,color var(--motion-fast) ease,border-color var(--motion-fast) ease;}
 .send-button:not(:disabled):active,.attachment-plus:not(:disabled):active{transform:scale(.94);}

@@ -172,6 +172,8 @@ settles back. Reduced Motion removes the settling animation.
 
 Conversation and editor pages show Back instead of the root menu button. Their
 left-edge swipe uses the same Back path, including the dirty-editor guard.
+The assistant directory preview uses the shell's bounds throughout the gesture
+and settling, including when a small drag also activates the Back button.
 Vertical scrolling and horizontal content gestures away from the left edge stay
 with the content. Conversation actions are available through the ellipsis menu.
 The shell follows the visible viewport as browser chrome or the keyboard changes;

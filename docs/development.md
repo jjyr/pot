@@ -305,6 +305,15 @@ exercises contact before movement, rapid gesture handoff, cancellation, held
 measurement corrections, explicit Latest priority and the quiet-time fallback
 with a deterministic clock against the actual vendored virtualizer.
 
+`scripts/tests/pot-ui-mobile-directory-browser.js`, included in
+`test:ui-http-integration`, checks directory geometry on every visible frame at
+320 and 390 px. Chromium CDP touch input covers taps and 12/13/14 px Back-button
+drifts, including simultaneous click and gesture settling. Full swipe commit and
+cancel use synthetic pointer input because Chromium may hand larger native
+gestures to browser navigation. Short/long conversations, focused drafts, delayed
+directory refresh, search/scroll retention and wide layout share the same fixture.
+These checks do not qualify physical iPhone Safari or a real on-screen keyboard.
+
 For incoming correspondence disclosure checks, open
 `/scripts/tests/fixtures/correspondence.html?locale=en&theme=light` on the loopback
 server and run `await window.correspondenceFixture.verify()` in the browser.

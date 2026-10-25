@@ -498,6 +498,7 @@ def run(binary, base, env, cli_command, profile_only=False):
             print("Browser passed: pot-ui-http-browser.js", flush=True)
             for script in [
                 "pot-ui-fluid-browser.js",
+                "pot-ui-mobile-directory-browser.js",
                 "pot-ui-replies-browser.js",
                 "pot-ui-reply-outcomes-browser.js",
                 "pot-ui-process-runs-browser.js",
