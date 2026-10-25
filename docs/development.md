@@ -897,7 +897,11 @@ mise exec -- node scripts/tests/ui-regressions.mjs --group history --case task-h
 mise exec -- node scripts/tests/ui-regressions.mjs --group domain --fault domain-progress
 ```
 
-The full `test:ui-http-integration` command remains unchanged. It needs cached
+The public `test:ui-http-integration` command retains all six original stages.
+Its suite runner prints the complete plan with `--list`, stops on the first
+nonzero exit and reports completed stages and wall time even on failure. The
+first stage still builds the current CLI and all original build/check commands
+remain required. It needs cached
 `@playwright/cli` (`npm_config_cache` may select an existing cache) and an installed
 browser (`PLAYWRIGHT_MCP_CONFIG` may select an existing executable). Use a private
 `TMPDIR` for fixture files when shared temporary storage is constrained. All model
