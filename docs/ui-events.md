@@ -224,8 +224,14 @@ negative leading spacer margin preserves it without a native scroll write.
 Only newly mounted or updated rows need synchronous initial measurement;
 TanStack batches subsequent ResizeObserver size changes into an animation frame;
 offset corrections and their rendered ranges commit together before paint.
+Initial measurements are committed even during native scrolling, before the
+reading cursor can resolve the new flow layout. This keeps a newly revealed long
+row from receiving both a reading-position projection and a delayed size correction.
 Item margins are included in measured heights. Width changes invalidate
 mounted measurements; each cached owner retains its bounded height estimates.
+Each DOM range replacement temporarily reserves the list's extent until all rows
+and spacers are in place. This prevents native scroll clamping against an
+intermediate shorter layout, including inside expanded tools.
 The adapter commits the measured range once more after initial measurement,
 rather than repeatedly scanning and measuring all rows until pixel offsets settle.
 Pot's logical cursor resolves explicit destinations, nested reading anchors and

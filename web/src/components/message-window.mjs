@@ -94,6 +94,14 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
   for(const name of gestures)scroller.addEventListener(name,cancel,{passive:true});
 
   function draw() {
+    // Moving flow rows/spacers can briefly shrink the list. Reserve its extent
+    // until this DOM commit is complete so native scroll clamping cannot turn
+    // that intermediate layout into a new reading position (also in children).
+    const minHeight=host.style.minHeight;
+    host.style.minHeight=`${Math.max(host.getBoundingClientRect().height,virtualizer.getTotalSize())}px`;
+    try{drawRows();}finally{host.style.minHeight=minHeight;}
+  }
+  function drawRows() {
     const items = virtualizer.getVirtualItems(), selected = new Set(items.map(item=>item.key));
     const layout = []; let offset=0, spacerIndex=0;
     for(const item of items){
@@ -131,6 +139,12 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       if(!record.row.isConnected)continue;
       const index=Number(record.row.dataset.virtualIndex),before=virtualizer.itemSizeCache.get(record.row.dataset.windowKey);
       virtualizer.measureElement(record.row);
+      // TanStack defers measureElement during native scrolling. A newly drawn
+      // flow row already contributes its real height, so leaving its estimate
+      // until ResizeObserver lets the reading cursor project that difference
+      // before TanStack applies it again. Commit initial sizes in this layout;
+      // resizeItem still arbitrates corrections held by an active touch.
+      if(virtualizer.isScrolling)virtualizer.resizeItem(index,sizeOf(record.row));
       changed=before!==virtualizer.itemSizeCache.get(record.row.dataset.windowKey)||changed;
     }
     pending.clear();return changed;
