@@ -349,7 +349,10 @@ Neither receiver advertises a separate instructions field in this version.
 
 A workspace ID identifies a persistent owner-registered path and mode, independently
 of any assistant ID. Remote creation can reuse these scopes but cannot submit new
-paths or broaden permissions. Workspace selection is immutable for an existing
+paths or broaden permissions. The default workspace uses the resolved host-root
+path, including when the root is reached through a filesystem alias. Creation
+rejects a registered workspace that has since been replaced with a symlink.
+Workspace selection is immutable for an existing
 session; create another assistant to use another scope. Each assistant has its own
 identity, saved avatar, model, revision and native conversation. Model/effort changes
 require an idle assistant and revision CAS; presentation-only edits can apply while

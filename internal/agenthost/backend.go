@@ -57,13 +57,20 @@ func newBackend(db *sql.DB, nodeID, root string, runtimes ...Runtime) (*backend,
 	if err != nil {
 		return nil, err
 	}
-	b := &backend{adapter: adapter, db: db, nodeID: nodeID, root: root, binary: binary, worker: []string{worker}, active: map[string]context.CancelFunc{}, workers: map[string]bool{}, reviews: map[string]*pendingReview{}}
 	// Fresh installations have an isolated local read-only workspace. Owners can
 	// add assistants pointing at their own directories through the local command.
 	workspace := filepath.Join(root, "workspace")
 	if err = os.MkdirAll(workspace, 0700); err != nil {
 		return nil, err
 	}
+	// Register the resolved host path, including macOS's /var -> /private/var
+	// alias, so creation can still reject later workspace symlink replacement.
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, err
+	}
+	workspace = filepath.Join(root, "workspace")
+	b := &backend{adapter: adapter, db: db, nodeID: nodeID, root: root, binary: binary, worker: []string{worker}, active: map[string]context.CancelFunc{}, workers: map[string]bool{}, reviews: map[string]*pendingReview{}}
 	name := assistantavatar.RandomName(nil)
 	character := assistantavatar.ForName(name, adapter.Kind)
 	avatar, err := assistantavatar.Render(character, adapter.Kind)
