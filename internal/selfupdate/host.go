@@ -2,6 +2,7 @@ package selfupdate
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -27,6 +28,7 @@ type Installation struct {
 	Kind          string `json:"kind"`
 	Platform      string `json:"platform"`
 	StorageFormat string `json:"storage_format"`
+	Protocol      int    `json:"protocol"`
 }
 type Work struct {
 	Tasks    int `json:"tasks"`
@@ -43,12 +45,15 @@ type Participant struct {
 	Work        Work   `json:"work"`
 	Ready       bool   `json:"ready"`
 	Unsupported bool   `json:"unsupported"`
+	Protocol    int    `json:"protocol"`
+	BootID      string `json:"boot_id"`
 }
 type Host struct {
 	Install, Directory, Executable string
 	Package                        Installation
 	mu                             sync.Mutex
 	root                           string
+	bootID                         string
 	unsupported                    bool
 	work                           func() (Work, error)
 	cancel                         context.CancelFunc
@@ -127,7 +132,7 @@ func OpenHost() (*Host, error) {
 	if err = json.Unmarshal(data, &info); err != nil {
 		return nil, err
 	}
-	if info.Version != buildinfo.Version || info.StorageFormat != storageFormat() || (info.Kind != "cli" && info.Kind != "app") {
+	if info.Protocol != UpdateProtocol || info.Version != buildinfo.Version || info.StorageFormat != storageFormat() || (info.Kind != "cli" && info.Kind != "app") {
 		return nil, errors.New("installed update metadata does not match executable")
 	}
 	directory := install + ".updates"
@@ -159,7 +164,7 @@ func OpenHost() (*Host, error) {
 		lock.Close()
 		return nil, err
 	}
-	h := &Host{Install: install, Directory: directory, Executable: executable, Package: info, listener: listener, lock: lock, done: make(chan struct{}), resume: make(chan struct{}, 1), registration: filepath.Join(directory, fmt.Sprintf("host-%d.json", os.Getpid()))}
+	h := &Host{bootID: rand.Text(), Install: install, Directory: directory, Executable: executable, Package: info, listener: listener, lock: lock, done: make(chan struct{}), resume: make(chan struct{}, 1), registration: filepath.Join(directory, fmt.Sprintf("host-%d.json", os.Getpid()))}
 	h.server = &http.Server{Handler: http.HandlerFunc(h.handle), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: time.Second}
 	go h.server.Serve(listener)
 	return h, nil
@@ -170,12 +175,12 @@ func (h *Host) Bind(root string, work func() (Work, error)) error {
 	h.root = root
 	h.protectLocked(root)
 	h.work = work
-	return instance.WriteJSON(h.registration, Participant{Socket: h.listener.Addr().String(), Root: root, Version: buildinfo.Version, Ready: h.ready.Load(), Unsupported: h.unsupported})
+	return instance.WriteJSON(h.registration, Participant{Socket: h.listener.Addr().String(), Root: root, Version: buildinfo.Version, Ready: h.ready.Load(), Unsupported: h.unsupported, Protocol: UpdateProtocol, BootID: h.bootID})
 }
 func (h *Host) status() (Participant, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	p := Participant{Socket: h.listener.Addr().String(), Root: h.root, Version: buildinfo.Version, Ready: h.ready.Load(), Unsupported: h.unsupported}
+	p := Participant{Socket: h.listener.Addr().String(), Root: h.root, Version: buildinfo.Version, Ready: h.ready.Load(), Unsupported: h.unsupported, Protocol: UpdateProtocol, BootID: h.bootID}
 	if h.work != nil && !h.stopped.Load() {
 		var err error
 		p.Work, err = h.work()

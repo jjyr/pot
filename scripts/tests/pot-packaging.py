@@ -19,6 +19,39 @@ import pot_packaging  # noqa: E402
 
 
 class GoPackaging(unittest.TestCase):
+    def test_update_metadata_and_signed_lineage_are_deterministic(self):
+        catalog = pot_packaging.schema_catalog()
+        self.assertEqual(
+            set(catalog),
+            {"control", "tasks", "runner", "conversation", "machines", "usage", "operations"},
+        )
+        self.assertEqual(catalog, pot_packaging.schema_catalog())
+        ledger = ROOT / "pkg/storage/migrations/ledger.sql"
+        self.assertEqual(
+            pot_packaging.ledger_digest(), hashlib.sha256(ledger.read_bytes()).hexdigest()
+        )
+        expected_digest = hashlib.sha256()
+        root = ROOT / "pkg/storage/migrations"
+        for path in sorted(root.rglob("*.sql")):
+            expected_digest.update(path.relative_to(root).as_posix().encode() + b"\0")
+            expected_digest.update(path.read_bytes() + b"\0")
+        self.assertEqual(pot_packaging.schema_digest(), expected_digest.hexdigest())
+        for kind, ids in catalog.items():
+            paths = sorted((ROOT / "pkg/storage/migrations" / kind).glob("*.sql"))
+            self.assertEqual(
+                ids,
+                [
+                    f"{path.stem}_{kind}_{hashlib.sha256(path.read_bytes()).hexdigest()}"
+                    for path in paths
+                ],
+            )
+        with tempfile.TemporaryDirectory() as temporary:
+            resources = Path(temporary)
+            pot_packaging.update_metadata(resources, "cli", "linux-amd64")
+            metadata = json.loads((resources / "update.json").read_text())
+            self.assertEqual(metadata["protocol"], 2)
+            self.assertEqual(metadata["storage_format"], pot_packaging.storage_format())
+
     def test_frontend_diagrams_ship_with_their_complete_notice(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

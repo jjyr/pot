@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import subprocess
 
-from pot_packaging import ROOT, storage_format
+from pot_packaging import ROOT, storage_format, schema_catalog, ledger_digest
 from release_contract import update_artifacts, version_number
 
 
@@ -29,7 +29,14 @@ def sign(version, output):
             }
         )
     payload = json.dumps(
-        {"version": version, "storage_format": storage_format(), "artifacts": artifacts},
+        {
+            "version": version,
+            "storage_format": storage_format(),
+            "protocol": 2,
+            "schemas": schema_catalog(),
+            "ledger_digest": ledger_digest(),
+            "artifacts": artifacts,
+        },
         separators=(",", ":"),
     ).encode()
     signature = (

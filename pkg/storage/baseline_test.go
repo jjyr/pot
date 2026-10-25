@@ -291,8 +291,8 @@ func TestInitialSchemaFailureRollsBackAndRetries(t *testing.T) {
 			t.Fatal("failed baseline leaked schema", table, err)
 		}
 	}
-	if migrationCount(t, db) != 0 {
-		t.Fatal("failed baseline left receipt")
+	if exists, err := tableExists(t.Context(), db, "pot_migrations"); err != nil || exists {
+		t.Fatal("failed batch leaked its ledger", err)
 	}
 	files = migrationFixture(`CREATE TABLE parent(id INTEGER PRIMARY KEY); CREATE TABLE child(id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED); INSERT INTO parent VALUES(1); INSERT INTO child VALUES(1);`)
 	for range 2 {

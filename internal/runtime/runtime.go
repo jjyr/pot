@@ -12,6 +12,7 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/instance"
+	"github.com/jjyr/pot/pkg/storage"
 	"os"
 	"path/filepath"
 	"sync"
@@ -52,6 +53,10 @@ func Open(ctx context.Context, options Options) (*Runtime, error) {
 	}
 	root, err := instance.Open(path)
 	if err != nil {
+		return nil, err
+	}
+	if err := storage.MigrateRoot(ctx, root.Path); err != nil {
+		root.Close()
 		return nil, err
 	}
 	runctx, cancel := context.WithCancel(ctx)
@@ -116,8 +121,8 @@ func Open(ctx context.Context, options Options) (*Runtime, error) {
 		if err = host.Bind(r.Root.Path, r.updateWork); err != nil {
 			return nil, err
 		}
-		r.background.Go(r.Updates.Run)
 	}
+	r.background.Go(r.Updates.Run)
 	success = true
 	return r, nil
 }
