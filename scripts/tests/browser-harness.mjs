@@ -9,6 +9,7 @@ export async function sourceServer({fault}={}) {
   const server=createServer(async(req,res)=>{
     try {
       let path=decodeURIComponent(new URL(req.url,'http://localhost').pathname);
+      if(path.split('/').includes('..'))throw Error('Outside fixture source paths');
       if(path==='/')path='/web/src/index.html';
       if(!path.startsWith('/web/')&&!path.startsWith('/scripts/')&&!path.startsWith('/pkg/'))path='/web/src'+path;
       const file=resolve(root,'.'+path);

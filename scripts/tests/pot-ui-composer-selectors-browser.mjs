@@ -22,7 +22,7 @@ const skills=[{token:'/skill:code-review',label:'code-review',detail:'检查代�
 const assistants=[{token:'@assistant:local/research',label:'研究助手',detail:'本机 · Pot',avatar:images[0]},{token:'@assistant:workstation/code',label:'代码助手',detail:'工作站 · Codex',avatar:images[1]},{token:'@assistant:cached/research',label:'研究助手',detail:'缓存节点 · Pot',avatar:images[2],offline:true},{token:'@assistant:remote/research',label:'研究助手',detail:'远程节点 · Pot',avatar:images[2]},{token:'@assistant:remote/unicode',label:'设计 师 [托尼] 🙂',detail:'远程节点 · Pot',avatar:images[2]}];
 let scope={space:'one',owner:'alpha'},cursor=1,receive,release,reject=false,mentionGate;
 const frame=()=>({kind:'reset',runtime_id:'fixture',boot_id:'boot',owner_id:JSON.stringify(['one',scope.owner]),conversation_id:scope.owner,cursor:String(cursor),replies:[],running:false,turn_id:null,messages:[{id:'welcome',sequence:'1',role:'assistant',text:'我会结合代码变更，整理需要关注的问题。',status:'complete'}],history:{has_more:false,has_newer:false}});
-const client={production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>scope={...scope,...value},changes:()=>()=>{},
+const client={chatCacheName:'pot-composer-selectors-'+crypto.randomUUID(),production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>scope={...scope,...value},changes:()=>()=>{},
  subscribe(callback,status){receive=callback;const timer=setTimeout(()=>{status('connected');receive(frame());},10);return()=>clearTimeout(timer);},
  async send(request,options){sends.push({request,scope:options});if(reject)throw Object.assign(Error('Synthetic rejection'),{status:400});if(release)await new Promise(resolve=>release=resolve);return {message_id:'accepted-'+sends.length,duplicate:false};},
  async request(path){const url=new URL(path,location.href);
@@ -52,7 +52,12 @@ async function taskChecks(){
  check(composerMentionValue(editor)==='指导 '+code+'  结束'&&document.activeElement===editor,'Task guidance replaces only the query and retains focus');
  editor.setRangeText('继续',editor.selectionStart,editor.selectionEnd,'end');editor.dispatchEvent(new Event('input',{bubbles:true}));
  check(saved==='/skill:code-review\n指导 '+code+' 继续 结束','Task draft serializes the complete inline address with unchanged Skill prefix');
- host.querySelector('.send-button').click();await wait(()=>sent===saved||composerMentionValue(editor)==='');
+ // A retained transcript is readable, but writes require a confirmed domain
+ // snapshot. Explicitly advance the fixture instead of relying on the old
+ // default freshness of task-conversation.update.
+ check(host.querySelector('.send-button').disabled,'Retained Task guidance cannot send before fresh confirmation');
+ view.update({record,state:createTaskTranscript(),inputs:[],approvals:[],fresh:true});
+ host.querySelector('.send-button').click();await wait(()=>sent==='/skill:code-review\n指导 '+code+' 继续 结束');
  check(sent==='/skill:code-review\n指导 '+code+' 继续 结束','Task send receives the inline mention in place');
  await pause(30);
  editor.focus();editor.value='@';editor.setSelectionRange(1,1);editor.dispatchEvent(new Event('input',{bubbles:true}));

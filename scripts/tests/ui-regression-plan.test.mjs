@@ -27,6 +27,7 @@ test('source fixture maps installed UI imports, forbids traversal and closes its
     const response=await fetch(server.origin+'/components/message-window.mjs');
     assert.equal(response.status,200);assert.match(await response.text(),/createMessageWindow/);
     assert.equal((await fetch(server.origin+'/..%2f..%2fetc/passwd')).status,404);
+    assert.equal((await fetch(server.origin+'/scripts/tests/..%2f..%2f.env')).status,404);
   }finally{await server.close();}
   await assert.rejects(fetch(server.origin));
 });
