@@ -208,58 +208,65 @@ pointer, touch, scrolling or keyboard interaction releases that positioning inte
 Returning to an assistant that was following the latest messages keeps following
 through the cached projection, stream reset and background-task refresh. Visible
 task rows do not turn following into a saved historical reading position. Only
-paused reading restores a message or task anchor; restoration callbacks are
+paused reading restores a message or task anchor; restoration requests are
 scoped to the originating navigation generation.
 
-Main Chat and Task transcripts use the vendored TanStack Virtual Core, following
-its [Chat guide](https://tanstack.com/virtual/latest/docs/chat). Stable message
-keys, `anchorTo: 'end'` and conditional append following preserve the visible
-message through historical prepends and streaming growth. Pot retains the normal
-message DOM/CSS and renders virtual gaps as flow spacers. Twelve extra items on
-each side cover fast reversals. Native scroll notifications commit the range
-synchronously instead of waiting behind the ordinary animation-frame queue.
-Held touch corrections may give the first mounted row a negative offset; a
-negative leading spacer margin preserves it without a native scroll write.
+Main Chat and Task transcripts share the same conversation-list controller. It
+owns one intent: Latest following, historical reading by stable message/row ID
+and viewport offset, or an explicit message destination. Pages supply committed
+messages with parent identities, issue explicit navigation commands, and consume
+`subscribeReading` publications. `setMessages` changes data; `restore` requests a
+saved destination once on navigation; `scrollToLatest` and `locate` are deliberate
+commands. `snapshot` reads the last published state without adopting native
+movement or commanding another restoration. A scope reset retires the old
+intent, pending engine commands and touch ownership before the new projection.
+The persisted reading-position representation remains the same.
 
-Only newly mounted or updated rows need synchronous initial measurement;
-TanStack batches subsequent ResizeObserver size changes into an animation frame;
-offset corrections and their rendered ranges commit together before paint.
-Initial measurements are committed even during native scrolling, before the
-reading cursor can resolve the new flow layout. This keeps a newly revealed long
-row from receiving both a reading-position projection and a delayed size correction.
-Item margins are included in measured heights. Width changes invalidate
-mounted measurements; each cached owner retains its bounded height estimates.
-Each DOM range replacement temporarily reserves the list's extent until all rows
-and spacers are in place. This prevents native scroll clamping against an
-intermediate shorter layout, including inside expanded tools.
-The adapter commits the measured range once more after initial measurement,
-rather than repeatedly scanning and measuring all rows until pixel offsets settle.
-Pot's logical cursor resolves explicit destinations, nested reading anchors and
-layout changes outside the virtual list into positioning requests. TanStack is
-the sole scroll writer: the cursor and position resolver never assign
-`scrollTop`. Native writes acknowledge their resulting offset to the cursor, so
-they do not become reader gestures. Deliberate wheel, pointer, touch or keyboard
-input cancels outstanding scroll commands. TanStack alone tracks touch ownership,
-from initial contact through dragging and the native momentum tail, on both iOS
-and Android. Its native `scrollend` listener or quiet-time fallback releases held
-resize corrections. A new touch retires the preceding tail immediately; explicit
-Latest/message commands can take priority, and cancelling a queued command also
-retires its pending momentum-stop operation. The reading cursor has no parallel
-motion timers. It captures TanStack's committed reading anchor and only projects
-saved positions for restoration, explicit navigation or layout outside the list;
-ordinary range renders never replay an old anchor. A native pointer cancellation
-that hands the gesture to scrolling does not end reading input.
-Width reflow retains its requested reading anchor through subsequent measurement
-batches until new reader input releases that layout destination. Native offsets
-from hidden or remounted history do not replace a positioning intent, including
-after its initial restoration has completed. Only reader input since the latest
-Latest/message/restore command can adopt native movement as a reading position.
-No-op native writes are skipped and do not acknowledge a reader's
-pending native movement. Downward gestures also trigger newer-page prefetch at
-the cached history boundary, where the browser can no longer produce a delta.
+The list uses the vendored TanStack Virtual Core for indexed item offsets,
+measured ranges and scroll execution. Its independent append following, end
+anchoring and size-change compensation are disabled. Only the conversation
+controller allocates a geometry correction. It first consumes real native input
+and synchronizes the engine offset, then commits the flow DOM and measurements,
+resolves its current stable reading point and applies any remaining displacement.
+Native input translates the previously committed anchor by the input delta;
+it does not recapture an unreported DOM height change as new reading intent.
+Programmatic write echoes do not become input. Geometry that happens to reach
+the bottom does not enable following; downward user movement to the bottom or
+an explicit Latest command does.
+
+The same reconciliation handles prepend, trimming, reorder, width reflow,
+external header/composer layout and asynchronous image or disclosure sizes.
+Newly mounted or updated rows have synchronous initial measurements, including
+during native scrolling; later ResizeObserver batches update the same geometry.
+A delayed or repeated measurement of an already accounted height yields zero
+remaining displacement. Independent height changes can receive independent
+corrections. Reading state is published after the resulting geometry settles,
+rather than by a separate cursor's layout-finally callback.
+
+TanStack retains native touch ownership and executes deferred corrections through
+contact, dragging and the momentum tail. The controller accounts for a held
+correction when the engine announces its release before the native write, so a
+synchronous range commit cannot allocate that displacement twice. Wheel and key
+motion use the same input-before-geometry model; native keyboard tails remain
+owned through engine idle rather than being retired by a programmatic scrollend.
+A new gesture cancels explicit navigation. Nested scrollable outputs consume
+input while they have room; a pointer cancellation handing control to touch does
+not retire native momentum protection. The controller adds no motion timers.
+
+Pot retains its normal message DOM/CSS and renders virtual gaps as flow spacers,
+with twelve overscan items on each side. Native scroll notifications commit the
+range synchronously. Held touch corrections may require a negative leading
+spacer margin. Each DOM replacement temporarily reserves the host extent until
+all rows and spacers are in place, preventing native clamping against an
+intermediate shorter list. Initial measurement and subsequent bounded range
+commits avoid scanning or rendering the whole transcript. Item margins are
+included in sizes; width changes invalidate mounted measurements, and each
+cached owner retains bounded height hints.
 
 Expanded tools have range-only child virtualizers sharing the chat scroller;
-only the outer window performs automatic scroll compensation. Focus and selected
+only the root controller owns reading intent and scroll compensation. Child
+windows share its destination and parent path, report geometry and never write
+the parent scroller. Focus and selected
 text pin mounted rows through a custom range extractor. Navigation targets resolve
 by message identity against each current window; trimming, replacing or reordering
 rows never reuses a previous numeric target index. Retiring a row immediately
@@ -274,28 +281,14 @@ only when their disclosures open. Recycling releases observers and attachment
 leases, while shared viewers/downloads retain their own leases. Unchanged replies
 retain their Markdown nodes.
 
-Main Chat and Task conversations share one reading-cursor controller per history.
-The cursor owns Latest following, an anchored reading position (stable row key
-and offset within the history viewport), or an explicit message/region destination.
-DOM `scrollTop` is a projection of that cursor, not its source of truth. Wheel,
-touch, keyboard, scrollbar and selection-drag scrolling update the cursor;
-Latest, references, tool-failure links and approval navigation set explicit
-destinations. Conversation and page caches retain the logical cursor, including
-Task history, rather than inferring reading intent from restored pixel offsets.
-
-Composers publish synchronous layout transactions without knowing the history's
-reading mode. While following Latest, input growth shrinks the history viewport
-and moves the latest message upward by the same amount; clearing the draft
-restores the space and keeps Latest at the bottom. Historical reading retains
-its top message anchor instead of following the latest message. Input resizing,
-draft/reference/attachment controls, row measurement,
-history paging and viewport reflow preserve the existing cursor and project it
-back before paint. This includes a textarea temporarily shrinking and returning
-to the same height within one input event, which need not deliver a resize
-observation. Compensation scroll events never overwrite reading intent. Tool
-lists delegate offset compensation to the same controller; nested output panes
-retain their own scrolling. Explicit navigation retains the scoped generation
-checks described above, so late history responses cannot supersede newer intent.
+Main Chat and Task conversations publish their list controller's reading state
+for page and conversation persistence. Composers retain native textarea, IME,
+selection and undo behavior. Their normal DOM sizing changes are observed by the
+list; they do not wrap work in reading-cursor transactions or issue position
+restores after rendering. Input growth while following keeps the end visible;
+historical reading keeps its stable row offset through viewport changes. The
+same owner handles background Task disclosure, approval regions and delayed
+resources outside recycled message rows.
 
 These APIs only project UI messages. Internal `Conversation.Snapshot`, the full
 `c.messages` collection, model checkpoints, input queues, persistence, recovery,

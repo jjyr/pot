@@ -99,17 +99,17 @@ async function componentChecks(){
   const windowed=createMessageWindow({scroller,host,heights,requestRender:()=>{},render(item,existing){if(existing)return existing;const row=document.createElement('article');row.className='message';row.style.cssText='height:120px;overflow:hidden;white-space:pre';row.textContent='Synthetic retained text. '.repeat(12000);const entry={row};live.add(entry);return entry;},dispose(entry){entry.row.remove();live.delete(entry);}});
   try{
     for(let i=0;i<18;i++){
-      scroller.scrollTop=i*1300;windowed.layout(rows);
+      scroller.scrollTop=i*1300;windowed.setMessages(rows);
       const cached=[...live].filter(entry=>!entry.row.isConnected);
       if(cached.length)throw Error('A retired message DOM remained cached in memory');
     }
     check(true,'retired message DOM is released throughout long traversal');
-    windowed.layout([]);check(live.size===0,'data/owner retirement disposes every mounted row');
+    windowed.setMessages([]);check(live.size===0,'data/owner retirement disposes every mounted row');
     const payload='x'.repeat(1100000),heavy=rows.map(row=>({...row,text:payload}));
-    windowed.layout(heavy);scroller.scrollTop=8000;windowed.layout(heavy);
+    windowed.setMessages(heavy);scroller.scrollTop=8000;windowed.setMessages(heavy);
     check([...live].every(entry=>entry.row.isConnected),'large deferred message payloads do not retain detached DOM');
-    windowed.layout([]);
-    windowed.layout(rows);windowed.close();check(live.size===0,'closing the window releases every mounted row');
+    windowed.setMessages([]);
+    windowed.setMessages(rows);windowed.close();check(live.size===0,'closing the window releases every mounted row');
   }finally{windowed.close();scroller.remove();}
   const call=createToolCall(),tool={id:'mutable',name:'fixture_tool',phase:'running',args:{},output:[{text:'initial output'}]};
   document.body.append(call.element);call.element.open=true;call.update({tool});
@@ -145,7 +145,7 @@ async function virtualizerChecks(){
   host.className='message-window';scroller.append(host);document.body.append(scroller);
   let rows=Array.from({length:160},(_,index)=>({id:`anchor-${index}`,viewKey:`anchor-${index}`,role:'user',height:80+index%4*35}));
   let windowed,renderFrame=0;
-  windowed=createMessageWindow({scroller,host,requestRender:()=>{if(!renderFrame)renderFrame=requestAnimationFrame(()=>{renderFrame=0;windowed.layout(rows);});},render(item,record){
+  windowed=createMessageWindow({scroller,host,requestRender:()=>{if(!renderFrame)renderFrame=requestAnimationFrame(()=>{renderFrame=0;windowed.setMessages(rows);});},render(item,record){
     if(!record){const row=document.createElement('article');row.className='message';row.append(document.createElement('button'));record={row};}
     record.row.style.height=`${item.height}px`;record.row.dataset.messageId=item.id;return record;
   },dispose:record=>record.row.remove()});
@@ -153,34 +153,34 @@ async function virtualizerChecks(){
   const offset=row=>row.getBoundingClientRect().top-scroller.getBoundingClientRect().top;
   const move=async top=>{scroller.dispatchEvent(new WheelEvent('wheel',{deltaY:top-scroller.scrollTop||-1}));scroller.scrollTop=top;scroller.dispatchEvent(new Event('scroll'));await settle();};
   try{
-    windowed.layout(rows,{target:{end:true}});await settle();
+    windowed.scrollToLatest();windowed.setMessages(rows);await settle();
     check(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop<2,'TanStack opens a dynamic-height list at its end');
     await move(scroller.scrollHeight*.45);const saved=visible(),savedOffset=offset(saved);
     rows=[...Array.from({length:30},(_,index)=>({id:`prepend-${index}`,viewKey:`prepend-${index}`,role:'user',height:110+index%3*20})),...rows];
-    windowed.layout(rows);await settle();
+    windowed.setMessages(rows);await settle();
     check(saved.isConnected&&Math.abs(offset(saved)-savedOffset)<2,`historical prepend preserves the keyed visible message (${savedOffset} → ${offset(saved)})`);
     const focused=visible();focused.querySelector('button').focus({preventScroll:true});await move(scroller.scrollTop+5000);
     check(focused.isConnected&&focused.contains(document.activeElement),'focused message remains mounted outside the virtual range');
-    rows=[{id:'focused-prepend',viewKey:'focused-prepend',role:'user',height:150},...rows];windowed.layout(rows);await settle();
+    rows=[{id:'focused-prepend',viewKey:'focused-prepend',role:'user',height:150},...rows];windowed.setMessages(rows);await settle();
     check(focused.isConnected&&focused.contains(document.activeElement),'prepending history retains focus by message key after indexes shift');
-    document.activeElement.blur();windowed.layout(rows,{target:{end:true}});await settle();
-    rows=rows.map((row,index)=>index===rows.length-1?{...row,height:row.height+300}:row);windowed.layout(rows);await settle();
+    document.activeElement.blur();windowed.scrollToLatest();windowed.setMessages(rows);await settle();
+    rows=rows.map((row,index)=>index===rows.length-1?{...row,height:row.height+300}:row);windowed.setMessages(rows);await settle();
     check(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop<2,'streaming row growth keeps an end-pinned viewport at the end');
     await move(scroller.scrollTop-1000);const reading=visible(),readingOffset=offset(reading);
-    rows=[...rows,{id:'appended',viewKey:'appended',role:'user',height:180}];windowed.layout(rows);await settle();
+    rows=[...rows,{id:'appended',viewKey:'appended',role:'user',height:180}];windowed.setMessages(rows);await settle();
     check(reading.isConnected&&Math.abs(offset(reading)-readingOffset)<2,'appended output does not pull a historical reader to the end');
     const targetID=rows.at(-1).id;
-    windowed.layout(rows,{target:{id:targetID}});await settle();
-    rows=[...rows].reverse();windowed.layout(rows);await settle();
+    windowed.locate({id:targetID});windowed.setMessages(rows);await settle();
+    rows=[...rows].reverse();windowed.setMessages(rows);await settle();
     check(!!host.querySelector(`[data-message-id="${targetID}"]`),'reordering rows preserves the retained navigation target');
-    rows=rows.slice(0,24);windowed.layout(rows);await settle();
+    rows=rows.slice(0,24);windowed.setMessages(rows);await settle();
     check(!!host.querySelector(`[data-message-id="${targetID}"]`),'trimming history resolves a retained navigation target by message identity');
-    windowed.layout(rows,{target:{end:true}});await settle();
-    rows=rows.slice(-2);windowed.layout(rows);await settle();
+    windowed.scrollToLatest();windowed.setMessages(rows);await settle();
+    rows=rows.slice(-2);windowed.setMessages(rows);await settle();
     check(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop<2,'an end target follows the current list after it shrinks');
-    windowed.layout(rows,{target:{id:targetID}});await settle();
-    rows=[];windowed.layout(rows);await settle();
-    rows=[{id:'replacement',viewKey:'replacement',role:'user',height:180}];windowed.layout(rows);await settle();
+    windowed.locate({id:targetID});windowed.setMessages(rows);await settle();
+    rows=[];windowed.setMessages(rows);await settle();
+    rows=[{id:'replacement',viewKey:'replacement',role:'user',height:180}];windowed.setMessages(rows);await settle();
     check(!!host.querySelector('[data-message-id="replacement"]'),'a removed target cannot break an empty or replacement window');
   }finally{cancelAnimationFrame(renderFrame);windowed.close();scroller.remove();}
 }

@@ -499,6 +499,7 @@ def run(binary, base, env, cli_command, profile_only=False):
             for script in [
                 "pot-ui-fluid-browser.js",
                 "pot-ui-chat-continuity-browser.js",
+                "pot-ui-conversation-controller-browser.js",
                 "pot-ui-mobile-directory-browser.js",
                 "pot-ui-replies-browser.js",
                 "pot-ui-reply-outcomes-browser.js",
