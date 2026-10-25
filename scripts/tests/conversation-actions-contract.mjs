@@ -1,6 +1,7 @@
 import {mountApp} from '../../web/src/components/ui.js';
 import {domainsFor} from '../../web/src/state/domains/index.mjs';
 import {translate} from '../../web/src/locales/messages.mjs';
+import {conversationMenuRefreshContract} from './conversation-menu-refresh-contract.mjs';
 
 // Real shell + domain + isolated IndexedDB. Saved callbacks deliberately bypass
 // DOM disabled/removal so these assertions exercise execution-time authority.
@@ -9,11 +10,11 @@ export async function conversationActionsContract(report=()=>{}){
   const wait=async test=>{for(let i=0;i<500;i++){if(test())return;await new Promise(done=>setTimeout(done,10));}throw Error('Conversation actions timed out');};
   const root=document.createElement('div'),name='pot-conversation-actions-'+crypto.randomUUID();document.body.append(root);
   const operations=['chat.read','chat.send','chat.cancel','chat.control','assistant.profile','assistant.usage'];
-  let scope={space:'local',owner:'a'},failing=false,freshness='fresh',capabilities=operations,conversationBoot='boot',cursor=0,receive,status;
+  let scope={space:'local',owner:'a'},failing=false,connected=true,freshness='fresh',capabilities=operations,conversationBoot='boot',cursor=0,receive,status;
   const controls=[],reads=[];let cancels=0;
   const read=async path=>{
     reads.push(path);
-    if(path==='/api/v1/spaces')return {items:[{id:'local',name:'Synthetic',kind:'local',connected:true,control_id:'runtime'}]};
+    if(path==='/api/v1/spaces')return {items:[{id:'local',name:'Synthetic',kind:'local',connected,control_id:'runtime'}]};
     if(path==='/api/v1/assistants'){
       if(failing)throw Object.assign(Error('Synthetic storage failure'),{storage:true,uiKey:'storage.failed'});
       return {items:['a','b'].map(id=>({id,name:'Synthetic '+id,capabilities:{version:1,operations:capabilities}}))};
@@ -70,8 +71,9 @@ export async function conversationActionsContract(report=()=>{}){
     status('connected');await wait(()=>action('turn-control')&&!action('turn-control').disabled);oldConnection();check(controls.length===beforeState,'Reconnect retires callbacks from the prior subscription epoch');
     const oldCapabilities=saved('turn-control'),oldProfile=saved('assistant-settings'),oldUsageCapability=saved('usage');capabilities=['chat.read'];await domains.directory.refresh();await wait(()=>!action('turn-control')&&!action('assistant-settings')&&!action('usage'));
     oldCapabilities();oldProfile();oldUsageCapability();check(controls.length===beforeState&&dialog().open,'Capability removal refreshes the open menu and fences all capability callbacks');
-    capabilities=operations;await domains.directory.refresh();await wait(()=>action('turn-control'));const retained=saved('turn-control');freshness='retained';await domains.directory.refresh();await wait(()=>!action('turn-control'));retained();check(controls.length===beforeState&&action('settings')&&!action('settings').disabled,'Retained directory projection revokes controls and preserves Settings');
-    freshness='fresh';await domains.directory.refresh();await wait(()=>action('turn-control'));
+    capabilities=operations;await domains.directory.refresh();await wait(()=>action('turn-control'));const retained=saved('turn-control'),retainedNode=action('turn-control');retainedNode.focus();freshness='retained';await domains.directory.refresh();await wait(()=>action('turn-control')?.getAttribute('aria-disabled')==='true');retained(true);check(controls.length===beforeState&&action('turn-control')===retainedNode&&document.activeElement===retainedNode&&action('settings')&&!action('settings').disabled,'Retained directory projection keeps the focused node, revokes execution and preserves Settings');
+    connected=false;await domains.directory.refresh();await wait(()=>!action('turn-control')&&!action('assistant-settings')&&!action('usage'));retainedNode.removeAttribute('aria-disabled');retained(true);check(controls.length===beforeState&&action('settings')&&!retainedNode.isConnected,'An offline retained destination removes capability actions and fences its old node and callback');
+    connected=true;freshness='fresh';await domains.directory.refresh();status('connected');await wait(()=>action('turn-control')&&!action('turn-control').disabled);
     const disposedControl=saved('turn-control');failing=true;await domains.directory.refresh().catch(()=>{});await wait(()=>!action('turn-control'));
     action('settings').click();await wait(()=>root.querySelector('.rail-button.is-selected')?.getAttribute('aria-label')===translate(client.uiLocale(),'settings'));
     check(!dialog().open,'Settings navigation remains usable during directory storage failure');
@@ -80,4 +82,5 @@ export async function conversationActionsContract(report=()=>{}){
     close();root.remove();await new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name);request.onsuccess=resolve;request.onerror=()=>reject(request.error);});
   }
   report('DONE conversation actions authority contract');
+  await conversationMenuRefreshContract(report);
 }

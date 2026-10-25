@@ -69,8 +69,12 @@ reconcile by their scoped identities. Search inputs, focus, selection, disclosur
 state and scroll positions survive unchanged projections. Shell navigation,
 approval actions and Chat task strips retain their nodes too. Action handlers use
 the current projection; pending mutations stay disabled across refreshes.
-An open conversation menu revokes capability actions when directory authority is
-lost, while Settings remains available. Its handlers recheck current capability,
+An open conversation menu keeps existing actions and keyboard focus during a
+retained directory revalidation, marking unavailable actions `aria-disabled` and
+rejecting their execution until fresh capabilities return. This presentation is
+limited to the same scope, assistant, subscription, boot and active turn state;
+offline destinations, storage failures and fresh capability removal still remove
+unavailable actions. Settings remains available. Handlers recheck current capability,
 scope and subscription identity; turn controls also require the same active turn,
 conversation boot and pause state before sending a request.
 
