@@ -1,0 +1,20 @@
+<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/web/src/styles.css"><style>#host{height:640px;width:900px;margin:auto}</style><div id="host"></div>
+<script type="module">
+import {createTaskConversation} from '/web/src/components/task-conversation.mjs';
+const host=document.querySelector('#host'),f=window.historyEdges={calls:[],mode:'error',maximum:0,inflight:0};
+const record=()=>({run_id:'run',request:{text:'Short history'},info:{id:'t',phase:'running'},capabilities:{version:1,operations:['task.read','task.events']}});
+const state=()=>({messages:[81,82].map(sequence=>({id:'m'+sequence,sequence,text:'Message '+sequence,role:'assistant',phase:'complete'})),cursor:82,firstSequence:1,has_more:true,tools:new Map(),inputs:new Map()});
+f.reset=mode=>{
+  f.ui?.dispose();host.replaceChildren();const root=document.createElement('div');root.className='page-content';host.append(root);f.mode=mode;f.state=state();f.record=record();f.pending=false;
+  f.ui=createTaskConversation({root,task:{id:'t'},record:f.record,locale:()=>'en',client:{runtime:{},scope:()=>({}),request:async()=>({})},scope:{space:'local',owner:'a'},draft:'',onDraft:()=>{},toolMemory:new Map(),approvalFor:()=>null,onLatest:()=>{},onEarlier:async({before,signal})=>{
+    f.calls.push({before,signal});f.maximum=Math.max(f.maximum,++f.inflight);
+    try{if(f.mode==='error'){f.mode='success';throw Error('Synthetic page failure');}
+      if(f.mode!=='success'){await new Promise(resolve=>{f.pending=true;f.release=()=>{f.pending=false;resolve();};});}
+      if(signal.aborted)return;
+      f.state={...f.state,messages:[...Array.from({length:80},(_,i)=>({id:'m'+(i+1),sequence:i+1,text:'Message '+(i+1),role:'assistant',phase:'complete'})),...f.state.messages],has_more:false};f.ui.update({record:f.record,state:f.state,fresh:true});
+    }finally{f.inflight--;}
+  }});f.ui.update({record:f.record,state:f.state,fresh:true});f.ui.start();
+};
+f.changeRun=()=>{f.record={...f.record,run_id:'next'};f.state={...state(),has_more:false};f.ui.update({record:f.record,state:f.state,fresh:true});};
+f.reset('error');
+</script>

@@ -20,7 +20,7 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
     if(!tasks.length){const changed=current===scope&&signature!=='';states.delete(scope);element.remove();current=null;signature='';return changed;}
     if(!state){state={expanded:false,order:[]};states.set(scope,state);}
     taskIdentities.register(tasks);
-    const nextSignature=JSON.stringify([scope,locale(),state.expanded,tasks.map(task=>[taskKey(task),task.address,taskIdentities.short(task),task.title,task.phase,task.started_at_ms,task.finished_at_ms,task.agent_link,needsApproval(task.id,task.phase)])]);
+    const nextSignature=JSON.stringify([scope,locale(),state.expanded,tasks.map(task=>[taskKey(task),task.address,taskIdentities.short(task),task.title,task.phase,task._stale,task.started_at_ms,task.finished_at_ms,task.agent_link,needsApproval(task.id,task.phase)])]);
     if(current===scope&&signature===nextSignature)return false;
     signature=nextSignature;
     const byID=new Map(tasks.map(task=>[taskKey(task),task]));
@@ -42,11 +42,11 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
       description.id=`${id}-description-${list.children.length}`;
       open.setAttribute('aria-describedby',description.id);
       if(task.address?.node_id)description.append(node('span','',t('tool.messageFromSource').replace('{source}',task.address.node_id)+' · '));
-      const status=waiting?'tool.waiting_approval':task.phase==='queued'?'tasks.queued':task.phase==='waiting'?'tasks.waiting':task.phase==='complete'?'tasks.complete':task.phase==='failed'?'tasks.failed':task.phase==='cancelled'?'schedule.state.cancelled':task.phase==='interrupted'?'schedule.state.interrupted':'tool.running';
+      const status=task._stale?'tasks.savedState':waiting?'tool.waiting_approval':task.phase==='queued'?'tasks.queued':task.phase==='waiting'?'tasks.waiting':task.phase==='complete'?'tasks.complete':task.phase==='failed'?'tasks.failed':task.phase==='cancelled'?'schedule.state.cancelled':task.phase==='interrupted'?'schedule.state.interrupted':'tool.running';
       const source=taskAgentSource(task,locale());if(source)description.append(node('span','',source.getAttribute('aria-label')+' · '));
-      const activity=node('span','task-activity-dot');activity.setAttribute('aria-hidden','true');activity.dataset.phase=waiting?'waiting_approval':task.phase;
+      const activity=node('span','task-activity-dot');activity.setAttribute('aria-hidden','true');activity.dataset.phase=task._stale?'unknown':waiting?'waiting_approval':task.phase;
       meta.append(activity,node('span','background-task-status',t(status)));
-      const time=taskElapsed(task.started_at_ms,taskClockEnd(task),locale(),true);
+      const time=task._stale?'':taskElapsed(task.started_at_ms,taskClockEnd(task),locale(),true);
       if(time){
         const separator=node('span','','·');separator.setAttribute('aria-hidden','true');
         const elapsed=node('span','background-task-elapsed',time);elapsed.dataset.startedAt=task.started_at_ms;elapsed.dataset.compact='true';if(!['queued','running','waiting','waiting_approval'].includes(task.phase))elapsed.dataset.finishedAt=task.finished_at_ms||0;elapsed.setAttribute('role','timer');elapsed.setAttribute('aria-live','off');elapsed.title=t('tasks.elapsedDescription');

@@ -38,6 +38,7 @@ async page=>{
  assert(await page.locator('.approval-state').textContent()==='等待授权','Approval text follows the current locale');
  await page.evaluate(()=>{identityFixture.locale='en';identityFixture.tool.element.remove();});
  await page.getByRole('button',{name:'Machine identity task',exact:true}).click();
+ await page.locator('.task-conversation').waitFor();
  await page.evaluate(()=>identityFixture.pages.taskMenu());
  await page.getByRole('dialog').getByRole('button',{name:'Task details',exact:true}).click();
  assert((await page.locator('.task-info').innerText()).includes('dev-box.local · 192.168.1.24'),'Task details resolve the original machine');

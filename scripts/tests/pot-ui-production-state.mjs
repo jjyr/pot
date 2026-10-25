@@ -1,3 +1,4 @@
+import {createMemoryProjectionStore} from '../../web/src/state/projection-store.mjs';
 import assert from 'node:assert/strict';
 import {createEditorSession,createRequestGate} from '../../web/src/state/editor.mjs';
 import {scopedPath,normalizeSnapshot,createProductionClient,decodeDesktopResponse,APIError} from '../../web/src/adapters/production.mjs';
@@ -50,7 +51,7 @@ globalThis.fetch=async(url,options)=>{
  if(url.includes('/denied'))return new Response(JSON.stringify({code:'denied',message:'Remote denied'}),{status:403});
  return new Response(JSON.stringify({message_id:'m',duplicate:false}));
 };
-const client=await createProductionClient();client.setScope({owner:'a',space:'remote'});
+const client=await createProductionClient({resourceStorage:createMemoryProjectionStore()});client.setScope({owner:'a',space:'remote'});
 client.spaces=[{id:'local',control_id:'runtime',boot_id:'boot'}];
 const machineInfo=machinePresentation(client),machineScope={space:'local',owner:'b'};
 assert.equal(machineInfo.label('runtime',machineScope,'zh-CN'),'机器信息不可用');

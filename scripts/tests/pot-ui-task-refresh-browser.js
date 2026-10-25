@@ -31,11 +31,11 @@ async page=>{
   });
   assert(await page.evaluate(()=>taskFixture.calls.length===1),'Unrelated changes do not reload task lists');
   await page.evaluate(()=>{const f=taskFixture;f.refresh=f.pages.refresh(['tasks']);for(let i=0;i<20;i++)f.pages.refresh(['tasks']);});
-  assert(await page.evaluate(()=>{const f=taskFixture;return f.calls.length===2&&f.pending.length===1&&!f.pending[0].options.signal.aborted&&f.input.isConnected&&f.rows.isConnected&&f.rows.children.length>0;}),'A burst retains the visible list and one active request');
+  assert(await page.evaluate(()=>{const f=taskFixture;return f.calls.length===2&&f.pending.length===1&&!f.pending[0].options.signal?.aborted&&f.input.isConnected&&f.rows.isConnected&&f.rows.children.length>0;}),'A burst retains the visible list and one active request');
   if(state.screenshot)await page.screenshot({path:state.screenshot});
-  await page.evaluate(async()=>{const f=taskFixture;f.items[0].phase='waiting';f.items[0].pending=2;f.reply();await f.refresh;});
+  await page.evaluate(async()=>{const f=taskFixture;f.items[0].phase='waiting';f.items[0].pending=2;f.reply();});
   await page.waitForFunction(()=>taskFixture.calls.length===3);
-  await page.evaluate(()=>taskFixture.reply());
+  await page.evaluate(async()=>{taskFixture.reply();await taskFixture.refresh;});
   await page.waitForFunction(()=>document.querySelector('.task-phase').textContent==='等待配额');
   assert(await page.evaluate(()=>{const f=taskFixture;return f.calls.length===3&&f.rows.querySelector('.task-row')===f.row&&f.rows.scrollTop===f.scroll&&document.activeElement===f.input&&f.input.value==='未提交的搜索'&&f.input.selectionStart===2&&f.input.selectionEnd===4&&f.row.textContent.includes('2 条待处理指令');}),'One follow-up updates metadata while preserving nodes, draft, selection and scroll');
   // Cached offline rows are retained and recover without repeated warnings.
@@ -59,7 +59,7 @@ async page=>{
   assert(await page.locator('.task-row').count()===0&&await page.locator('.page-empty').count()===1,'Removed tasks reconcile to the empty state');
   // Older requests must not overwrite a new filter, even if cancellation is ignored.
   await page.evaluate(()=>{const f=taskFixture;f.pages.refresh(['tasks']);f.retired=f.pending.splice(0);f.input.value='新查询';f.input.dispatchEvent(new Event('change'));});
-  assert(await page.evaluate(()=>taskFixture.retired[0].options.signal.aborted&&taskFixture.pending[0].path.includes('q=%E6%96%B0%E6%9F%A5%E8%AF%A2')),'Filter navigation aborts the previous generation');
+  assert(await page.evaluate(()=>!taskFixture.retired[0].options.signal?.aborted&&taskFixture.pending[0].path.includes('q=%E6%96%B0%E6%9F%A5%E8%AF%A2')),'Filter navigation releases its consumer while shared IO continues');
   await page.evaluate(()=>{taskFixture.items=[{id:'current',assistant_id:'a',title:'当前筛选任务',phase:'running',updated_at_ms:200}];taskFixture.reply();});
   await page.getByRole('button',{name:'当前筛选任务',exact:true}).waitFor();
   await page.evaluate(()=>{for(const call of taskFixture.retired)call.resolve({items:[{id:'stale',title:'过期任务'}]});});
@@ -69,7 +69,8 @@ async page=>{
   assert(await page.locator('.task-row').count()===2,'Row identity includes assistant identity');
   await page.getByRole('button',{name:'助手 b',exact:true}).click();
   await page.evaluate(()=>{taskFixture.pages.refresh(['tasks']);});
-  assert(await page.evaluate(()=>taskFixture.pending.length===1&&taskFixture.pending[0].options.owner==='b'&&!taskFixture.pending[0].options.signal.aborted),'Changes during detail loading do not navigate back to the list');
+  await page.waitForFunction(()=>taskFixture.pending.length===1);
+  assert(await page.evaluate(()=>taskFixture.pending.length===1&&taskFixture.pending[0].options.owner==='b'&&!taskFixture.pending[0].options.signal?.aborted),'Changes during detail loading do not navigate back to the list');
   await page.evaluate(()=>{taskFixture.detailRecord={capabilities:taskFixture.capabilities,info:{phase:'running'},request:{text:'目标'}};taskFixture.pending.shift().resolve(taskFixture.detailRecord);});
   await page.getByLabel('任务追加',{exact:true}).waitFor();
   await page.getByLabel('任务追加',{exact:true}).fill('保留任务指导');

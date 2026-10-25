@@ -27,6 +27,13 @@ Mutations publish after persistence; no-op reads do not produce invalidations.
 The global subscription remains active even when no assistant exists, so an
 assistant created by another client appears without reloading the page.
 
+Frontend repositories persist domain invalidation epochs before refreshed queries
+can publish. A query fetched before an event or successful command cannot replace
+a newer projection, including across tabs. In-memory invalidation immediately
+revokes stale selection eligibility; query subscribers consume only committed
+values. Storage failure retains the prior projection and retries the pending
+invalidation before another refresh.
+
 Change callbacks retain their originating scope and boot identity. Each view
 declares the domains and scope it reads; unrelated notifications do not refresh
 it. General preferences and build information remain mounted without requesting
@@ -163,6 +170,24 @@ interval provenance. Versions fence late pages, transactions serialize writers,
 and retired boot identities cannot restore an earlier projection. This is a
 rebuildable UI cache, never the authoritative conversation store or a send queue.
 
+The reducer coalesces short stream bursts in a 16 ms window and drains terminal
+and error frames promptly. Its one active committed projection is checked against
+the persistent revision. Writes read and update changed message IDs without a
+full history scan or a write-followed-by-full-read. Sequence indexes return bounded
+history windows, and tool indexes resolve required ancestors. Counts and byte
+totals update incrementally; over-budget writes visit eviction victims only.
+Deletion retires the local key so late frames cannot restore it; replaced
+conversations also reject their retired identities. Cross-tab notifications
+announce committed keys; recipients query storage. Version changes close old
+database connections.
+
+Position/disclosure saves prune expired surfaces after 30 days and retain at most
+32 surfaces per conversation, outside the stream write path. Position-save failure
+shows a storage notice without declaring the network offline. Transcript commit
+failure keeps the last committed output and blocks new sends until recovery;
+Stop remains available from confirmed live state. Restoring cached output does
+not mark the subscription connected or re-enable sending.
+
 Reading position, disclosure state and bounded height hints persist per view;
 main/tray windows and browser tabs have independent positions. Returning to Chat
 reads its target window from disk while the subscription refreshes it. A reset
@@ -199,8 +224,14 @@ negative leading spacer margin preserves it without a native scroll write.
 Only newly mounted or updated rows need synchronous initial measurement;
 TanStack batches subsequent ResizeObserver size changes into an animation frame;
 offset corrections and their rendered ranges commit together before paint.
+Initial measurements are committed even during native scrolling, before the
+reading cursor can resolve the new flow layout. This keeps a newly revealed long
+row from receiving both a reading-position projection and a delayed size correction.
 Item margins are included in measured heights. Width changes invalidate
 mounted measurements; each cached owner retains its bounded height estimates.
+Each DOM range replacement temporarily reserves the list's extent until all rows
+and spacers are in place. This prevents native scroll clamping against an
+intermediate shorter layout, including inside expanded tools.
 The adapter commits the measured range once more after initial measurement,
 rather than repeatedly scanning and measuring all rows until pixel offsets settle.
 Pot's logical cursor resolves explicit destinations, nested reading anchors and
@@ -369,7 +400,12 @@ The task conversation uses the shared reply bubbles, tool disclosures, composer
 binding, measured message windows and reference completions. Expanded tool trees
 share its scroll container and retain disclosure state when recycled. Only its history scrolls; status and the composer
 remain visible. Following stops when the reader scrolls upward, and Latest resumes
-it. Navigation restores the goal/tool disclosures and reading position. Terminal
+it. When the upper history boundary becomes visible, the view automatically reads
+an earlier committed page while preserving its message anchor. An initial short
+window uses the same boundary. There is one in-flight request and no repeated
+attempt for an unchanged cursor; a failed page offers explicit Retry. Latest,
+a new run and disposal cancel old history work. New execution output updates
+matching historical rows without selecting the live tail. Navigation restores the goal/tool disclosures and reading position. Terminal
 text already present in the final reply is not repeated. Ended tasks retain an
 unsent draft read-only and expose no send action. Only a matching successful send
 clears an unedited draft; failed sends retain their request identity for retry.

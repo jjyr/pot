@@ -1,3 +1,4 @@
+import {createMemoryProjectionStore} from '../../web/src/state/projection-store.mjs';
 import assert from 'node:assert/strict';
 import {attachmentAllowed,attachmentProblem,failedMessageInput} from '../../web/src/components/attachments.mjs';
 import {createConversationState,beginSubscription,acceptSnapshot,setDraft,draft,beginSend,settleSend} from '../../web/src/state/conversation.mjs';
@@ -39,7 +40,7 @@ globalThis.fetch=async(url,options)=>{
   return {ok:true,status:200,json:async()=>data};
 };
 try{
-  const client=await createProductionClient();client.setScope({owner:'alice',space:'remote'});
+  const client=await createProductionClient({resourceStorage:createMemoryProjectionStore()});client.setScope({owner:'alice',space:'remote'});
   await client.send({boot_id:'boot',conversation_id:'main',request_id:'guide',text:'',user_message_id:'turn',attachments:[image]});
   assert.match(requests.at(-1).url,/turn\/steer/);assert.deepEqual(JSON.parse(requests.at(-1).options.body).attachments,[image]);
   await client.send({request_id:'retry-original',retry_user_message_id:'original',text:'',attachments:[pdf]});

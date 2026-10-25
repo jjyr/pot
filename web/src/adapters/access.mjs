@@ -1,3 +1,4 @@
+import {clearBusinessCaches} from '../state/cache-lifecycle.mjs';
 // The installation token is origin-scoped in IndexedDB. API calls use the
 // server's HttpOnly session cookie; credentials never enter routes or logs.
 import {bindViewport} from '../components/viewport.mjs';
@@ -44,7 +45,7 @@ export async function ensureBrowserAccess(root) {
     form.onsubmit=async event=>{event.preventDefault();submit.disabled=true;error.textContent='';try{await exchange(input.value.trim());try{await tokenStore('put',input.value.trim());}catch{}input.value='';root.replaceChildren();stopViewport();resolve({...status,authenticated:true});}catch(reason){error.textContent=reason.message;}finally{submit.disabled=false;}};
   });
 }
-export async function forgetBrowserAccess() {try{await tokenStore('remove');}catch{}await fetch('/access/logout',{method:'POST',credentials:'same-origin'});location.reload();}
+export async function forgetBrowserAccess() {try{await tokenStore('remove');}catch{}try{await fetch('/access/logout',{method:'POST',credentials:'same-origin'});}finally{try{await clearBusinessCaches();localStorage.removeItem('pot-ui-read-v1');}finally{location.reload();}}}
 export async function configureBrowserAccess(token) {await exchange(token.trim());try{await tokenStore('put',token.trim());}catch{}}
 export async function requestPWAInstall() {
   if(!installationPrompt)return false;

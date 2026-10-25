@@ -23,7 +23,7 @@ directory, Chat and input lifecycle. [`components/pages.mjs`](../web/src/compone
 owns Tasks, schedules, Topology, Usage, configuration forms and return contexts.
 [`components/task-conversation.mjs`](../web/src/components/task-conversation.mjs)
 owns the task status, conversation history, menu and fixed composer, reusing the
-shared reply/tool/composer components. Pages retains task requests and owner scope.
+shared reply/tool/composer components. Pages retains Task navigation, editor drafts and reading intent; domain repositories own shared requests and owner scope.
 [`components/usage.mjs`](../web/src/components/usage.mjs) owns exact-count usage tooltips, the trend chart and independently loaded detail lists.
 [`components/reply.mjs`](../web/src/components/reply.mjs) owns reply content,
 activity and the single failure presentation; [`state/chat-replies.mjs`](../web/src/state/chat-replies.mjs)
@@ -94,56 +94,140 @@ unused Blob URLs; a synchronous streaming replacement reuses its lease. Preview
 dialogs close when their message leaves the document. Loading, error and dialog
 controls follow the current UI language, including during asynchronous reads.
 
-## Cached resource reads
+## Business repositories
 
-`state/resource-cache.mjs` provides memory-only reads shared by Web and Wails.
-The client explicitly allows display resources: configuration summaries, directory,
-Tasks and schedules, usage pages, machines, Agent Link connections, About, and
-reference completion. A resource key includes the local node, boot, presentation
-scope, assistant and full query. Existing Space-scoped UI keys represent only
-the local presentation scope, not remote ownership. Provider summaries share one
-local entry across assistant contexts. Credentials, editor revision reads,
-approval decisions and permission reads bypass this cache. Invitation creation
-remains an uncached command.
+`state/domains/index.mjs` supplies one directory, Tasks, schedules and Providers
+repository per client. Production and fixtures consume these same interfaces.
+A domain query exposes `watch(listener) -> unsubscribe`, a committed `data`
+value, `status`, `freshness`, `error`, `lastConfirmed` and derived `fresh`.
+Convenience methods such as `tasks.watchDetail(task, scope, listener)` and
+`providers.watchCatalog(scope, listener)` select the shared query. They own the
+first database read, background confirmation, pagination, invalidation dependencies
+and subsequent notifications. Unsubscribing one view does not cancel another
+view's IO. Unused completed query entries are bounded to 128; active queries and
+in-flight reads remain leased until their consumers finish.
 
 ```text
-page / directory / completion
-            |
-     client.read (allowlist)
-            |
-     scoped memory cache ---- cached value ---> render immediately
-            |
-     stale / invalidated ---- one shared read --> notify active views
-            |
-     client.request --> HTTP or Wails
+shell / page / background strip
+              | watch + typed business command
+    directory | Tasks | schedules | Providers
+              | shared queries + command attempts
+         resource / transcript repository
+              | transaction commit
+             IndexedDB
 ```
 
-Fresh configuration reads last 30 seconds; dynamic lists and completion reads last
-5 seconds. TTL is checked on access and creates no polling. Domain events and
-successful commands invalidate their display domains within the captured local scope;
-upload chunks and model checks do not invalidate unrelated resources. A confirmed new boot drops its
-old resource values. Reconnect resets require revalidation while retaining display
-data. Invalidation during IO requires a follow-up read before publishing. Leaving
-one view never aborts a request shared by other consumers. Failures retain old
-values and show a localized retry notice. The bounded cache clones values for each
-consumer so local projection changes do not mutate other views.
+The directory combines serving Spaces, local and linked assistants and machine
+labels, removing execution and approval authority from retained identities. Tasks
+shares catalogue reads, metadata, guidance and the transcript reducer with the
+Chat background strip. Schedules owns collection pagination and preview/save/run
+commands. Providers owns the shared catalog, routing and allowance settings,
+connection DTOs and quota monitor commands. Provider catalogs normalize away
+assistant/editor context; sensitive editor revision reads remain transient.
 
-Task lists read the local operator catalogue and cache backend pages; assistant
-count does not multiply reads. Delegated tasks retain their remote references in
-that catalogue. Counts represent complete totals. Schedule pagination retains
-complete source collections. Tasks and schedules grow with their grouped records;
-the page host scrolls the filters, list and both pagers together. Background
-refresh retains that page position and keyed records/disclosures; pagination
-keeps its initiating pager focused and visible.
-Task detail keeps a bounded transcript cache and resumes events from
-its cursor, reading messages and record updates concurrently. Usage page offsets,
-scroll positions and disclosures remain view state. Chat restores confirmed
-snapshots with local node and assistant identity, then waits for the subscription's
-initial authoritative snapshot before enabling sends; it needs no extra snapshot
-GET. Existing cursor and generation fences reject late or older stream responses.
-Background updates do not replace editor sessions or their dirty values. Unsaved
-forms retain their existing leave protection, with no cross-tab draft persistence.
-All commands still validate permissions and versions at the owning service.
+UI components keep focus, unsaved values, expanded disclosures, filters and the
+history sentinel. They pass business inputs to typed commands instead of building
+domain URLs or repeating mutation/refresh sequences. Command attempts share
+pending state and immutable input/request identity across consumers; explicit
+retry retains that identity. The production adapter commits accepted response
+receipts and invalidations before notifying domain queries. A manual retry after
+a local commit failure retries that accepted receipt without sending the command
+again. Provider monitor revisions and exact-intent recovery retain their existing
+compare-and-swap behavior.
+
+Permissions, pairing/authentication, binary resources, conversation streaming,
+Topology and detailed Usage retain their specialized interfaces. These combine
+live authority, transport lifecycle or route-specific aggregation that is outside
+the migrated display domains; they still use the shared storage boundary where
+applicable. They must not create a second directory, Task or Provider cache.
+
+## Committed local projections
+
+`state/resource-cache.mjs` routes allowed display GETs from both `client.read` and
+`client.request` through `state/projection-store.mjs`. HTTP/native responses and
+successful display mutations commit to IndexedDB before returning query values.
+Domain invalidations persist epoch counters; a response fetched against an older
+epoch must revalidate before it can publish. Memory holds only committed query
+copies inside the repository. Production never falls back to a volatile store
+when IndexedDB fails.
+
+```text
+HTTP / native / SSE / successful mutation
+                  |
+          repository + reducer
+                  |
+      IndexedDB transaction complete
+                  |
+       query projection + notification
+                  |
+              DOM views
+```
+
+Keys include the local node, boot, presentation scope, assistant and full query.
+Provider summaries share one local entry across assistant contexts. Credential
+bytes and authorization URLs/codes are excluded from persisted provider,
+integration and Agent Link display projections. Authentication, pairing, live
+permissions, editor revision reads, binary resources and conversation transport
+keep their specialized interfaces. The machine editor stores only its derived
+policy summary; a failed live read exposes that summary as read-only and never
+stores pending approvals or restores authorization. See [UI events](ui-events.md) for transcript
+commit boundaries.
+
+A returning page first queries its committed local data and refreshes in the
+background. Queries carry `lastConfirmed` and fresh/stale/retained state. Dynamic
+lists remain fresh for 5 seconds, configuration for 30 seconds; freshness checks
+on access create no polling. A retained directory cannot restore execution,
+approval counts or operation capabilities. Task and schedule controls wait for
+current authoritative metadata; approvals always read the server. Provider
+selection and creation flows explicitly wait for current configuration revisions.
+The server remains the business and permission authority for every command.
+
+Projections retain at most 256 entries and 64 MiB, with a seven-day expiry;
+command response receipts expire after one day and share those limits. Writes
+evict older confirmed projections when needed. Oversized values and transaction
+or quota failures retain the previous committed value and show a localized retry
+notice. A failed invalidation remains pending until it can commit. There is no
+memory fallback, offline command queue or automatic side-effect replay. If the
+server accepted a command but its local receipt failed to commit, a manual retry
+in the same client retries only the local commit using the accepted response.
+Reload discards that in-memory recovery receipt; existing server request identity
+and uncertain-result rules still apply.
+
+Task lists read the local operator catalogue; assistant count does not multiply
+reads. Task transcripts use `state/task-repository.mjs`: event cursor, input
+bookmarks and active-tool checkpoint commit with their changed message records.
+The current projection holds at most 640 messages within the shared 16 MiB
+window budget. Each Task retains up to 2048 records / 32 MiB on disk, with 64 MiB
+across Tasks. Message text, tool arguments/result and combined output streams are
+bounded to about one million characters each; truncated cached output is labeled.
+Task result metadata and retained guidance also have bounded display projections;
+guidance keeps at most 256 entries within 16 MiB, with the same truncation notice.
+The server retains the original output. A visible upper history boundary automatically
+queries an indexed page of 80 records, including when the initial window is
+shorter than the viewport. Prepending preserves the visible message anchor and
+pixel offset. One page may be in flight; unchanged cursors do not retry. Failures
+show a local Retry action and await explicit input. Latest returns to the committed
+current window and cancels pending historical reads. New live output preserves a
+reader's historical window. Navigation, disposal and a new run fence late results.
+
+If a historical range was evicted, the existing after-only event API requires the
+first reconstruction to start at cursor zero and stop before the requested
+boundary. Its working window remains bounded to 640 messages / 16 MiB. Processed
+ranges commit to the historical cache, so neighboring pages reuse that coverage
+while retained. Eviction removes only the affected coverage rather than discarding
+all ranges. Coverage metadata retains at most 128 intervals; discarded coverage
+requires a conservative backfill. Backfill never replaces the live cursor/checkpoint or replays commands.
+A new run has its own conversation boundary.
+
+Task and usage page offsets, reading positions and disclosures remain view state.
+The Chat background-task strip consumes committed query updates and holds only
+its current view projection; restored states omit running animation and clocks
+until confirmed. Background refresh preserves keyed rows, focus and editor sessions. Dirty forms
+keep their leave protection and have no cross-tab draft persistence. Cross-window
+notifications carry commit identities and invalidation domains; recipients query
+the database instead of consuming broadcast response bodies. Browser logout
+retires existing cache writers and clears business projections and transcripts,
+while retaining authentication storage, preferences and notification claims.
 
 ## Native editing and ownership
 

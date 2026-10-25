@@ -11,7 +11,8 @@ const wait=async(test)=>{for(let i=0;i<150;i++){if(test())return;await pause(20)
 let locale='en',failProviders=false,delays={},context={space:'a',owner:'alpha'};
 const profiles={profiles:[{id:'p',name:'Fixture Provider',provider:'fixture',model:'fixture-model',model_settings:{}}],connections:[],directory:[],default_provider_id:'p',configured_models:{}};
 const taskItems=Array.from({length:51},(_,i)=>({id:'t'+i,assistant_id:'alpha',title:'Fixture Task '+i,phase:'running',created_at_ms:1000-i,started_at_ms:Date.now()-10000}));
-const client={production:true,desktop:false,runtime:{runtime_id:'fixture-control',boot_id:'boot'},spaces:[{id:'a',control_id:'ca',name:'Space A',connected:true},{id:'b',control_id:'cb',name:'Space B',connected:true}],assistants:[{id:'alpha',space_id:'a',control_id:'ca',name:'Alpha'}],scope:()=>({...context}),setScope:value=>Object.assign(context,value),
+const cacheName='pot-cached-loading-'+crypto.randomUUID();
+const client={chatCacheName:cacheName,production:true,desktop:false,runtime:{runtime_id:'fixture-control',boot_id:'boot'},spaces:[{id:'a',control_id:'ca',name:'Space A',connected:true},{id:'b',control_id:'cb',name:'Space B',connected:true}],assistants:[{id:'alpha',space_id:'a',control_id:'ca',name:'Alpha'}],scope:()=>({...context}),setScope:value=>Object.assign(context,value),
   async request(path,options={}){const url=new URL(path,location.origin),base=url.pathname,key=options.space+':'+path;counts.set(key,(counts.get(key)||0)+1);await pause(delays[base]??150);
     if(base==='/api/v1/providers'){if(failProviders)throw Error('Fixture offline');return structuredClone({...profiles,profiles:profiles.profiles.map(p=>({...p,name:options.space==='b'?'Space B Provider':p.name}))});}
     if(base==='/api/v1/agent/routing')return {profile_limits:{},provider_limits:{}};
@@ -30,6 +31,7 @@ const client={production:true,desktop:false,runtime:{runtime_id:'fixture-control
     if(base==='/api/v1/about')return {version:'fixture',licenses:[]};
     return {};},downloadFile:()=>{}};
 if(!baseline){client.resources=createResourceReads(client);client.read=(...args)=>client.resources.read(...args);}
+window.addEventListener('pagehide',()=>{pages.dispose();client.resources?.clear();indexedDB.deleteDatabase(cacheName);indexedDB.deleteDatabase(cacheName+'-tasks');indexedDB.deleteDatabase(cacheName+'-chat');});
 const pages=createPages({client,host,approvalHost:document.querySelector('#approvals'),chatApprovalHost:document.querySelector('#chat-approvals'),chatVisible:()=>false,locale:()=>locale,notify:text=>{results.textContent+='NOTICE '+text+'\n';},changed:()=>{},titleChanged:()=>{},openChat:()=>{}});
 const button=text=>[...host.querySelectorAll('button')].find(node=>node.textContent===text);
 const click=text=>{const node=button(text);if(!node)throw Error('Missing button '+text);node.click();};
@@ -52,7 +54,7 @@ async function run(){results.textContent='Running '+(baseline?'baseline':'cached
   await pages.show('tasks',{force:true});delays['/api/v1/tasks/t0']=800;delays['/api/v1/tasks/t0/events']=800;
   const returning=pages.openTask({...taskItems[0],_space_id:'a'});await pause(40);check(host.textContent.includes('Cached task transcript'),'Task return keeps transcript during refresh');await returning;
   check([...counts.keys()].some(key=>key.includes('/events?after=3')),'Task return resumes from cached event cursor');
-  await pages.showProviders();failProviders=true;client.resources.invalidate(['providers'],{space:'a'});pages.refresh(['providers'],{space:'a'});await wait(()=>host.querySelector('.resource-refresh-error'));
+  await pages.showProviders();failProviders=true;client.resources.invalidate(['providers'],{space:'a'});pages.refresh(['providers'],{space:'a'});await wait(()=>host.querySelector('.page-refresh-status[role="alert"]'));
   check(host.textContent.includes('Fixture Provider'),'Refresh failure retains provider content');locale='zh-CN';window.dispatchEvent(new Event('pot:locale'));await pause(50);check(host.textContent.includes('刷新失败'),'Refresh failure follows the current locale');
   // Successful navigation keeps shared cache; the error notice uses current locale on its next failure.
   failProviders=false;locale='en';window.dispatchEvent(new Event('pot:locale'));await pause(50);
@@ -73,6 +75,7 @@ async function run(){results.textContent='Running '+(baseline?'baseline':'cached
   pages.dispose();client.resources.clear();await chatChecks();
 }
 document.querySelector('#run').onclick=()=>{document.querySelector('#run').disabled=true;return run().catch(error=>{results.textContent+='FAIL '+error.stack+'\n';});};
+document.querySelector('#run').disabled=false;
 document.querySelector('#providers').onclick=()=>pages.showProviders();
 document.querySelector('#tasks').onclick=()=>pages.show('tasks');
 window.addEventListener('pagehide',()=>{pages.dispose();client.resources?.clear();});
@@ -83,7 +86,8 @@ async function chatChecks(){
   context={space:'a',owner:'alpha'};delays={};failProviders=false;
   const raw=client.request;
   client.request=async(path,options={})=>{if(path==='/api/v1/spaces'){directoryReads.catalog++;return {items:client.spaces,active_space_id:'a'};}if(path==='/api/v1/assistants'){directoryReads[options.space]++;return {items:options.space==='a'?[{id:'alpha',name:'Alpha'},{id:'beta',name:'Beta'}]:[{id:'alpha',name:'Remote Alpha'}]};}return raw(path,options);};
-  const snapshot=(scope,cursor=1,text=scope.owner+' confirmed')=>({runtime_id:'fixture-control',boot_id:chatBoot,owner_id:JSON.stringify([scope.space,scope.owner]),conversation_id:scope.owner,cursor:String(cursor),replies:[],running:false,turn_id:null,messages:[{id:'reply',role:'assistant',text:scope.space+' '+text,status:'complete'}]});
+  const snapshot=(scope,cursor=1,text=scope.owner+' confirmed')=>({kind:'reset',base_cursor:'0',history:{before:'1',after:'1',has_more:false,has_newer:false},runtime_id:'fixture-control',boot_id:chatBoot,owner_id:JSON.stringify([scope.space,scope.owner]),conversation_id:scope.owner,cursor:String(cursor),replies:[],running:false,turn_id:null,messages:[{id:'reply',sequence:'1',version:cursor,role:'assistant',text:scope.space+' '+text,status:'complete'}]});
+  client.chatCacheName=cacheName+'-chat';client.resources=createResourceReads(client);
   client.snapshot=async()=>{snapshotReads++;return snapshot(client.scope());};
   client.subscribe=(receive,status)=>{subscriptions++;const scope=client.scope(),timer=setTimeout(()=>receive(snapshot(scope)),250);deliver=(cursor,text)=>receive(snapshot(scope,cursor,text));status('connected');return ()=>clearTimeout(timer);};
   client.changes=callback=>{change=callback;return ()=>{};};
@@ -98,7 +102,7 @@ async function chatChecks(){
   check(snapshotReads===0&&subscriptions===5,'Initial subscription eliminates duplicate snapshot GETs');
   const before={...directoryReads};change(['assistants'],{space:'a',boot:'boot'});await pause(200);
   check(directoryReads.catalog===before.catalog&&directoryReads.b===before.b&&directoryReads.a===before.a+1,'Directory invalidation reads only the affected Space');
-  chatBoot='boot2';deliver(1,'after restart');await pause(300);check(host.querySelector('.message-column').textContent.includes('a alpha confirmed')&&!host.textContent.includes('identity changed'),'Control restart establishes a new authoritative subscription');
+  chatBoot='boot2';deliver(1,'after restart');await pause(300);check(host.querySelector('.message-column').textContent.includes('a after restart')&&!host.textContent.includes('identity changed'),'Control restart accepts the committed authoritative reset');
   check(snapshotReads===0,'Boot recovery also uses the subscription initial snapshot');dispose();
   results.textContent+='ALL CHECKS PASSED\n';
 }

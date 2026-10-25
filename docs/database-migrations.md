@@ -107,11 +107,24 @@ product schema or legacy version markers exist. Never edit, rename or delete a
 released migration. Resolve concurrent branch version collisions before release.
 No runtime downgrade or Down migration is supported.
 
-The frontend's rebuildable Chat cache has a separate IndexedDB sequence in
+The frontend's rebuildable business projection cache has a separate IndexedDB sequence in
 `pkg/storage/migrations/ui-cache/`. Its existing `0001_chat_cache.mjs` remains the
 initial version. Browser and Wails asset hosts expose only these JavaScript
 migrations, never backend SQL. Clearing browser storage does not change
 authoritative history or initiate work.
+
+`0002_indexed_windows.mjs` adds indexed sequence/tool/surface access and incremental
+count/byte metadata. Its one-time upgrade scans existing records to initialize
+accounting while preserving messages, positions and disclosures.
+`0003_domain_projections.mjs` adds display projections and invalidation epochs;
+`0004_task_checkpoints.mjs` adds atomic Task transcript checkpoints. The shared
+IndexedDB opener applies pending versions in the browser upgrade transaction;
+a failed upgrade rolls back its stores and converted values. Open clients close
+on `versionchange`, and a later open can retry an aborted upgrade. Existing
+databases upgrade in place without wiping unrelated browser state. The same
+schema serves the separate bounded Task transcript database. Retention, logout
+and failure behavior are described in
+[Shared UI](shared-ui.md#committed-local-projections).
 
 ## Future persisted changes and operating upgrades
 

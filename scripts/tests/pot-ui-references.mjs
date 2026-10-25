@@ -1,3 +1,4 @@
+import {createMemoryProjectionStore} from '../../web/src/state/projection-store.mjs';
 import assert from 'node:assert/strict';
 import {createConversationState,beginSubscription,acceptSnapshot,setDraft,ownerKey,draftReferences,setDraftReferences,beginSend,settleSend} from '../../web/src/state/conversation.mjs';
 import {projectChatReplies} from '../../web/src/state/chat-replies.mjs';
@@ -25,7 +26,7 @@ assert(!referenceProblem(refs));
 const oldFetch=globalThis.fetch,requests=[];
 globalThis.fetch=async(url,options)=>{requests.push({url:String(url),options});return{ok:true,status:200,json:async()=>String(url).includes('/runtime')?{runtime_id:'control'}:{message_id:'accepted',duplicate:false}};};
 try{
- const client=await createProductionClient();client.setScope({owner:'alice',space:'remote'});
+ const client=await createProductionClient({resourceStorage:createMemoryProjectionStore()});client.setScope({owner:'alice',space:'remote'});
  await client.send({...receipt.request,user_message_id:'active'});
  assert.deepEqual(JSON.parse(requests.at(-1).options.body).references,refs,'Guidance carries references through the production adapter');
  assert.match(requests.at(-1).url,/turn\/steer/);

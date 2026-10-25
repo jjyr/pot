@@ -1,3 +1,4 @@
+import {createMemoryProjectionStore} from '../../web/src/state/projection-store.mjs';
 import assert from 'node:assert/strict';
 import {registerHooks} from 'node:module';
 import {createProductionClient} from '../../web/src/adapters/production.mjs';
@@ -54,8 +55,8 @@ const hooks=registerHooks({resolve(specifier,context,next){
   return next(specifier,context);
 }});
 try{
-  const browser=await createProductionClient();browser.setScope({owner:'alice',space:'remote'});
-  const desktop=await createProductionClient({desktop:true});desktop.setScope({owner:'alice',space:'remote'});
+  const browser=await createProductionClient({resourceStorage:createMemoryProjectionStore()});browser.setScope({owner:'alice',space:'remote'});
+  const desktop=await createProductionClient({desktop:true,resourceStorage:createMemoryProjectionStore()});desktop.setScope({owner:'alice',space:'remote'});
   for(const value of [labelled,{...labelled,download:file}]){
     await browser.downloadResource(value);await desktop.downloadResource(value);
     assert.equal(anchors.at(-1).download,value.download.path);
