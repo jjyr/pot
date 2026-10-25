@@ -90,7 +90,8 @@ async page=>{
       const movement=next.visible.find(row=>row.id===common.id).top-common.top;
       const expected=delta>0?Math.min(delta,previous.height-previous.viewport-previous.top):Math.max(delta,-previous.top);
       // DOMRect retains fractional CSS pixels; scrollHeight/clientHeight and
-      // native wheel boundary rounding have coarser precision. 3px is an error
+      // native wheel boundary rounding have coarser precision; the reading cursor
+      // can finish the last 1px when it recognizes Latest. 3px is an error
       // budget, never a claimed residual jump. Report raw input and clipped
       // expectation separately, together with the actual same-ID displacement.
       const drift=Math.abs(movement+expected);

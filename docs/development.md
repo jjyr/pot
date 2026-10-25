@@ -857,7 +857,8 @@ two-client and anonymous contexts.
 
 The 3px continuity threshold is a failure tolerance, not a measured residual
 jump. DOMRect positions retain fractional CSS pixels while scroll extents and
-native boundary rounding have coarser precision. Results report the actual worst
+native boundary rounding have coarser precision. The existing reading cursor also
+recognizes the last 1px as Latest and can finish that final pixel at the bottom. Results report the actual worst
 sample, raw wheel delta, boundary-clipped expected distance, actual scroll delta
 and same-message screen displacement. For example, +36px input with only 34px
 remaining expects 34px movement; the 2px boundary remainder is not drift. Keep
