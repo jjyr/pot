@@ -62,7 +62,11 @@ async page=>{
   step='reconnect';
   const reconnect=second.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/events'&&response.status()===200,{timeout:20000});assert((await page.request.post(state.coord+'/restart-web',{headers:{Authorization:'Bearer '+state.control_key}})).status()===200,'Independent browser service restarted');await reconnect;await page.waitForFunction(()=>!document.querySelector('#pot-composer')?.disabled);
   step='stream after reconnect';
-  const nextBefore=await second.locator('.role-assistant').count();await page.locator('#pot-composer').fill('After real SSE reconnect');await page.locator('#pot-composer').press('Enter');await second.waitForFunction(count=>document.querySelectorAll('.role-assistant').length>count,nextBefore);await second.waitForFunction(()=>document.querySelectorAll('.role-assistant').length&&[...document.querySelectorAll('.role-assistant')].at(-1).textContent.includes('Download binary proof'));
+  const nextBefore=await second.locator('.role-assistant').count();await page.locator('#pot-composer').fill('After real SSE reconnect');
+  // Cached drafts remain editable while transport reconnects. Enter becomes
+  // a send action only when the actual Send control is ready.
+  await page.waitForFunction(()=>{const send=document.querySelector('.send-button');return send?.getAttribute('aria-label')==='Send'&&!send.disabled;});
+  await page.locator('#pot-composer').press('Enter');await second.waitForFunction(count=>document.querySelectorAll('.role-assistant').length>count,nextBefore);await second.waitForFunction(()=>document.querySelectorAll('.role-assistant').length&&[...document.querySelectorAll('.role-assistant')].at(-1).textContent.includes('Download binary proof'));
   await page.waitForFunction(()=>document.querySelector('.send-button')?.getAttribute('aria-label')==='Send');
   const a=await(await page.request.get(state.origin+'/api/v1/snapshot?assistant_id='+state.assistant_id)).json(),b=await(await second.request.get(state.origin+'/api/v1/snapshot?assistant_id='+state.assistant_id)).json();assert(a.view.state.cursor===b.view.state.cursor&&JSON.stringify(a.view.messages)===JSON.stringify(b.view.messages),'Both real clients converge after service restart');assert(a.view.messages.map(value=>value.message).filter(value=>value.role==='user'&&value.text==='After real SSE reconnect').length===1,'Reconnect never replays send');
   step='logout';

@@ -49,6 +49,7 @@ async parentPage => {
 
   middle.tool.output=[{stream:'stdout',text:Array.from({length:90},(_,i)=>`line ${i}`).join('\n')}];middle.tool.result.stdout=middle.tool.output[0].text;
   await push();await node('check').locator(':scope > summary').getByText('执行中',{exact:true}).waitFor();
+  await output.getByText('line 89',{exact:false}).waitFor();
   const retained=await output.elementHandle();await output.evaluate(element=>{element.scrollTop=0;element.dispatchEvent(new Event('scroll'));});
   middle.tool.output[0].text+='\nLATEST';middle.tool.result.stdout=middle.tool.output[0].text;await push();await output.getByText('LATEST',{exact:false}).waitFor();
   assert(await output.evaluate((element,old)=>element===old,retained),'Output node survives session updates');assert(await output.evaluate(element=>element.scrollTop)===0,'Paused output following survives updates');
