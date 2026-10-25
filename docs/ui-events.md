@@ -59,6 +59,10 @@ reconcile by their scoped identities. Search inputs, focus, selection, disclosur
 state and scroll positions survive unchanged projections. Shell navigation,
 approval actions and Chat task strips retain their nodes too. Action handlers use
 the current projection; pending mutations stay disabled across refreshes.
+An open conversation menu revokes capability actions when directory authority is
+lost, while Settings remains available. Its handlers recheck current capability,
+scope and subscription identity; turn controls also require the same active turn,
+conversation boot and pause state before sending a request.
 
 Task details refresh metadata, results, files and guidance alongside their
 incremental execution transcript. Schedule details and run history share the same

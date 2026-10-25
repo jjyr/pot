@@ -86,7 +86,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let cancelPending = false;
   let editorOwner = null;
   let menuOpen = false;
-  let preferencesOpen = false,preferenceOwner='',restoringHistory=false;
+  let preferencesOpen = false,restoringHistory=false;
   let assistants = [], spaces = [], selectedAssistant = null, pendingSelection = null;
   let unsubscribe = () => {}, stopChanges = () => {};
   let directoryEpoch = 0, directorySignature = '';
@@ -355,6 +355,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     completions?.refresh();
     const status=titlebar.querySelector('.connection-status');
     if(status)reconcile(status,connectionStatus());
+    if(preferencesOpen)renderPreferences();
     renderMessages();
   }
   function connectionStatus() {
@@ -405,14 +406,20 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let preferenceControls;
   function renderPreferences() {
     if(client.production){
-      const owner=JSON.stringify([client.scope(),client.runtime.boot_id]);
-      if(selectedAssistant?.retained&&owner===preferenceOwner&&preferences.querySelector('.menu-destination')){for(const choice of preferences.querySelectorAll('.menu-destination'))if(choice.dataset.viewKey!=='settings')choice.setAttribute('aria-disabled','true');return;}
-      preferenceOwner=owner;
+      const captured={...client.scope()},receivedEpoch=epoch,selection=selectionGeneration,boot=client.runtime.boot_id;
+      const assistant=selectedAssistant,identity=assistant&&JSON.stringify([assistant.space_id,assistant.id,controlOf(assistant)]);
+      // Reconciliation may remove a button or replace its handler. A retained
+      // node/callback must still validate authority and its original destination.
+      const current=()=>!disposed&&receivedEpoch===epoch&&selection===selectionGeneration&&boot===client.runtime.boot_id&&JSON.stringify(captured)===JSON.stringify(client.scope())&&captured.owner===selectedAssistant?.id&&captured.space===selectedAssistant?.space_id&&identity===JSON.stringify([selectedAssistant?.space_id,selectedAssistant?.id,controlOf(selectedAssistant)])&&!selectedAssistant?.offline;
       preferences.classList.add('product-actions');const projection=preferences.cloneNode(false),close=button('close',t('close'));close.dataset.viewKey='close';close.onclick=()=>preferences.close();projection.append(close);
-      const action=(key,label,run)=>{const choice=el('button','menu-destination',label);choice.type='button';choice.dataset.viewKey=key;choice.onclick=event=>{if(event.currentTarget.getAttribute('aria-disabled')==='true')return;preferences.close();run();};projection.append(choice);};
-      if(selectedAssistant&&(can('assistant.configure')||can('assistant.profile')))action('assistant-settings',t('assistantSettings'),()=>{route='settings';pages.assistant(selectedAssistant);renderShell();});
-      if(selectedAssistant&&can('assistant.usage'))action('usage',t('usage'),()=>{route='usage';pages.conversationUsage(selectedAssistant.name);renderShell();});
-      if(state.snapshot?.running&&can('chat.control')){const captured={...client.scope()},target=state.snapshot.turn_id,paused=!!state.snapshot.turn?.paused;action('turn-control',t(paused?'chat.resume':'chat.pause'),async()=>{try{await client.controlTurn({user_message_id:target,action:paused?'resume':'pause'},captured);}catch(reason){error=reason.message;updateControls();}});}
+      const action=(key,label,run,valid=()=>true)=>{const choice=el('button','menu-destination',label);choice.type='button';choice.dataset.viewKey=key;choice.disabled=!valid();choice.onclick=event=>{if(disposed||event.currentTarget.getAttribute('aria-disabled')==='true'||!valid())return;preferences.close();run();};projection.append(choice);};
+      if(selectedAssistant&&(can('assistant.configure')||can('assistant.profile')))action('assistant-settings',t('assistantSettings'),()=>{route='settings';pages.assistant(selectedAssistant);renderShell();},()=>current()&&(can('assistant.configure')||can('assistant.profile')));
+      if(selectedAssistant&&can('assistant.usage'))action('usage',t('usage'),()=>{route='usage';pages.conversationUsage(selectedAssistant.name);renderShell();},()=>current()&&can('assistant.usage'));
+      if(state.snapshot?.running&&can('chat.control')){
+        const snapshot=state.snapshot,target=snapshot.turn_id,paused=!!snapshot.turn?.paused;
+        const valid=()=>current()&&can('chat.control')&&!chatCacheFailed&&connection==='connected'&&!!target&&state.snapshot?.running&&ownerKey(state.snapshot)===ownerKey(snapshot)&&state.snapshot.boot_id===snapshot.boot_id&&state.snapshot.turn_id===target&&!!state.snapshot.turn?.paused===paused;
+        action('turn-control',t(paused?'chat.resume':'chat.pause'),async()=>{try{await client.controlTurn({user_message_id:target,action:paused?'resume':'pause'},captured);}catch(reason){if(valid()){error=reason.message;updateControls();}}},valid);
+      }
       action('settings',t('settings'),()=>navigate('settings'));reconcile(preferences,projection);return;
     }
     if (!preferenceControls) {
