@@ -44,7 +44,8 @@ async page=>{
   await page.waitForFunction(()=>taskFixture.calls.length===3);
   await page.evaluate(async()=>{taskFixture.reply();await taskFixture.refresh;});
   await page.waitForFunction(()=>document.querySelector('.task-phase').textContent==='等待配额');
-  assert(await page.evaluate(()=>{const f=taskFixture;return f.calls.length===3&&f.rows.querySelector('.task-row')===f.row&&f.rows.scrollTop===f.scroll&&document.activeElement===f.input&&f.input.value==='未提交的搜索'&&f.input.selectionStart===2&&f.input.selectionEnd===4&&f.row.textContent.includes('2 条待处理指令');}),'One follow-up updates metadata while preserving nodes, draft, selection and scroll');
+  const followup=await page.evaluate(()=>{const f=taskFixture;return {calls:f.calls.length,pending:f.pending.length,sameRow:f.rows.querySelector('.task-row')===f.row,scroll:f.rows.scrollTop,savedScroll:f.scroll,focused:document.activeElement===f.input,draft:f.input.value,selection:[f.input.selectionStart,f.input.selectionEnd],updated:f.row.textContent.includes('2 条待处理指令')};});
+  assert(followup.calls===3&&followup.pending===0&&followup.sameRow&&followup.scroll===followup.savedScroll&&followup.focused&&followup.draft==='未提交的搜索'&&followup.selection[0]===2&&followup.selection[1]===4&&followup.updated,'One follow-up updates metadata while preserving nodes, draft, selection and scroll: '+JSON.stringify(followup));
   // Cached offline rows are retained and recover without repeated warnings.
   for(let attempt=0;attempt<2;attempt++){
    await page.evaluate(async()=>{const f=taskFixture;f.refresh=f.pages.refresh(['tasks']);for(const call of f.pending.splice(0))call.reject(Error('Offline fixture'));await f.refresh;});
