@@ -1,6 +1,6 @@
 // Behavior groups shared by selection, listing and the runner contract.
 export const groups = {
-  scroll: ['continuity', 'scroll-components'],
+  scroll: ['continuity', 'task-continuity', 'scroll-components'],
   nav: ['directory', 'switching'],
   history: ['task-history', 'task-history-edges'],
   domain: ['domain-repositories.html'],

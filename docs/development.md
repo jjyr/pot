@@ -832,7 +832,7 @@ mise run test:ui-regressions
 
 | Behavior / command | Coverage and fixtures |
 |---|---|
-| `test:ui-scroll` | Real Chromium 36px wheel input at 1280/390/320; stable message identity and screen displacement <=3px; messages 221–239 readable in both directions; bounded DOM, complete 80-record IDB page, no unexpected backend reads, historical output, Latest, page returns, async image growth, nested tool windows. Component fixture separately retains prepend/append/end boundaries, focus across virtual retirement, reorder/trim target identity, disposal and deferred tool/raw output. |
+| `test:ui-scroll` | Real Chromium 36px wheel input at 1280/390/320; stable message identity and screen displacement <=3px; messages 221–239 readable in both directions; bounded DOM, complete 80-record IDB page, no unexpected backend reads, historical output, Latest, page returns, async image growth, nested tool windows. Task continuity uses its real repository/page with mixed heights, messages 1181–1199, no event-prefix replay, historical output and Latest. Component fixture separately retains prepend/append/end boundaries, focus across virtual retirement, reorder/trim target identity, disposal and deferred tool/raw output. |
 | `test:ui-nav` | Real CDP touch taps and 12/13/14px drift, visible intermediate-frame directory geometry, committed/cancelled navigation, drafts, delayed refresh; switching fixture covers keyed cached navigation, delayed references, A → B → A and Latest superseding late IO. |
 | `test:ui-history` | Visible top automatically reads one 80-row indexed page/one cursor, stable prepend anchor, historical reading during new output, explicit Latest; short-window filling, error/Retry, single flight, same-cursor termination and Latest/run/dispose cancellation and late completion. |
 | `test:ui-domain` | Fast Node domain contracts plus real-IDB domain fixture: fast Space progress while another is held, shared reads, disposed/changed queries, explicit owner scope, commit-before-notify, accepted mutation receipt retry without another HTTP effect, evicted Task backfill and late-run fencing. |
@@ -843,6 +843,7 @@ List or isolate one scenario without implicit ordering:
 
 ```sh
 mise exec -- node scripts/tests/ui-regressions.mjs --list
+mise exec -- node scripts/tests/ui-regressions.mjs --group scroll --case task-continuity
 mise exec -- node scripts/tests/ui-regressions.mjs --group nav --case directory
 mise exec -- node scripts/tests/ui-regressions.mjs --group storage --case projection-store.html
 mise exec -- python scripts/tests/pot-ui-usage-browser.py --case trend --width 390
@@ -892,6 +893,7 @@ corresponding behavior assertion (a browser startup failure is not evidence):
 ```sh
 mise exec -- node scripts/tests/ui-regressions.mjs --group scroll --case continuity --fault scroll-measure
 mise exec -- node scripts/tests/ui-regressions.mjs --group scroll --case continuity --fault scroll-flow
+mise exec -- node scripts/tests/ui-regressions.mjs --group scroll --case task-continuity
 mise exec -- node scripts/tests/ui-regressions.mjs --group nav --case directory --fault directory-grid
 mise exec -- node scripts/tests/ui-regressions.mjs --group history --case task-history-edges --fault history-cursor
 mise exec -- node scripts/tests/ui-regressions.mjs --group domain --fault domain-progress

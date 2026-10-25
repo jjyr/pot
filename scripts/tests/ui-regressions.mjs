@@ -2,6 +2,7 @@ import {parseArgs} from 'node:util';
 import {performance} from 'node:perf_hooks';
 import {groups,faults,select,fixtures} from './ui-regression-plan.mjs';
 import {sourceServer,launchBrowser,isolatedPage,contract,fixture} from './browser-harness.mjs';
+import {taskContinuity} from './task-continuity-browser.mjs';
 import {taskHistoryBrowser,taskHistoryEdges} from './task-history-browser.mjs';
 const {values}=parseArgs({options:{group:{type:'string',default:'all'},list:{type:'boolean'},fault:{type:'string'},case:{type:'string'}}});
 let selected=select(values.group);
@@ -20,6 +21,7 @@ else {
       else result=await isolatedPage(browser,server.origin,async page=>{
         if(fixtures[name])return fixture(page,server.origin,name,fixtures[name]);
         if(name==='scroll-components')return fixture(page,server.origin,'chat-scroll.html?conversation=alpha&locale=en','DONE scrolling checks');
+        if(name==='task-continuity')return taskContinuity(page,{origin:server.origin});
         if(name==='task-history')return taskHistoryBrowser(page,{origin:server.origin});
         if(name==='task-history-edges')return taskHistoryEdges(page,{origin:server.origin});
         if(name==='switching'){
