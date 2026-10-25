@@ -20,10 +20,10 @@ export async function renderAbout({client,root,scope,locale,updates,signal}) {
     const version=node('div','about-version');version.append(node('span','hint',`${about.version||t('about.development')} · ${about.revision||''}${about.go_version?` · ${about.go_version}`:''}`));
     card.prepend(version);
     if(updates){
-      const check=action(t('updates.check'),()=>updates.check(captured));check.classList.add('icon-button','update-check');check.replaceChildren(icon('refresh'));version.append(check);
+      const check=action(t('updates.check'),()=>updates.check(captured));check.className='icon-button update-check';check.replaceChildren(icon('refresh'));version.append(check);
       const result=node('p','hint update-check-status');result.setAttribute('role','status');card.insertBefore(result,version.nextSibling);
       const stop=updates.watch(captured,value=>{if(!root.isConnected||signal?.aborted)return;check.disabled=value.checking;check.setAttribute('aria-busy',String(value.checking));check.setAttribute('aria-label',t('updates.check'));check.title=t('updates.check');result.textContent=value.feedback?t(`updates.${value.feedback}`):'';});
-      signal?.addEventListener('abort',stop,{once:true});
+      signal?.addEventListener('abort',()=>{stop();check.disabled=false;check.setAttribute('aria-busy','false');},{once:true});
       await updates.refresh(captured);
     }
     loading.remove();

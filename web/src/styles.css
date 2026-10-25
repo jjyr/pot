@@ -1010,7 +1010,9 @@ button.communication-task-endpoint:focus-visible{outline:2px solid var(--primary
 @media(max-width:430px){.communication-stack-routes{margin-left:0;}.communication-stack-route{gap:4px;}.communication-stack-count{font-size:10px;}.communication-stacked-record>.tool-body{padding-left:0;}}
 
 .about-version { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.update-check { min-width: 44px; min-height: 44px; }
+.update-check { width: 44px; height: 44px; padding: 12px; border: 0; background: transparent; color: var(--muted); }
+.update-check:hover, .update-check:active { background: transparent; color: var(--text); }
+.update-check svg { display: block; transform-box: view-box; transform-origin: 50% 50%; }
 .update-check[aria-busy="true"] svg { animation: update-check-spin 1s linear infinite; }
 .update-check:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 @keyframes update-check-spin { to { transform: rotate(360deg); } }
