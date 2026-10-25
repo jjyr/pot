@@ -56,10 +56,14 @@ async page=>{
   await page.getByRole('link',{name:'Download binary proof',exact:true}).last().click();
   const viewer=page.locator('dialog[open]');await viewer.locator('pot-resource').waitFor();
   const downloadPromise=page.waitForEvent('download');await viewer.getByRole('button',{name:'Download proof.bin',exact:true}).click();const download=await downloadPromise;assert(download.suggestedFilename()==='proof.bin','Actual download filename');await download.saveAs(state.download_path);await viewer.getByRole('button',{name:'Close',exact:true}).click();
+  // A rendered link precedes turn completion. Restart an idle subscription,
+  // then send a new turn rather than racing active-turn guidance.
+  await page.waitForFunction(()=>document.querySelector('.send-button')?.getAttribute('aria-label')==='Send');
   step='reconnect';
   const reconnect=second.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/events'&&response.status()===200,{timeout:20000});assert((await page.request.post(state.coord+'/restart-web',{headers:{Authorization:'Bearer '+state.control_key}})).status()===200,'Independent browser service restarted');await reconnect;await page.waitForFunction(()=>!document.querySelector('#pot-composer')?.disabled);
   step='stream after reconnect';
   const nextBefore=await second.locator('.role-assistant').count();await page.locator('#pot-composer').fill('After real SSE reconnect');await page.locator('#pot-composer').press('Enter');await second.waitForFunction(count=>document.querySelectorAll('.role-assistant').length>count,nextBefore);await second.waitForFunction(()=>document.querySelectorAll('.role-assistant').length&&[...document.querySelectorAll('.role-assistant')].at(-1).textContent.includes('Download binary proof'));
+  await page.waitForFunction(()=>document.querySelector('.send-button')?.getAttribute('aria-label')==='Send');
   const a=await(await page.request.get(state.origin+'/api/v1/snapshot?assistant_id='+state.assistant_id)).json(),b=await(await second.request.get(state.origin+'/api/v1/snapshot?assistant_id='+state.assistant_id)).json();assert(a.view.state.cursor===b.view.state.cursor&&JSON.stringify(a.view.messages)===JSON.stringify(b.view.messages),'Both real clients converge after service restart');assert(a.view.messages.map(value=>value.message).filter(value=>value.role==='user'&&value.text==='After real SSE reconnect').length===1,'Reconnect never replays send');
   step='logout';
   await page.request.post(state.origin+'/access/logout');assert((await page.request.get(state.origin+'/api/v1/runtime')).status()===401,'Logout revokes original client');assert((await second.request.get(state.origin+'/api/v1/runtime')).status()===200,'Logout preserves other independently authenticated session');

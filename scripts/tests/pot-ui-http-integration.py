@@ -108,7 +108,8 @@ def run(binary, base, env, cli_command, profile_only=False):
             data = response.read()
             connection.close()
             if response.status != 200:
-                raise RuntimeError(f"Private {method} {path}: HTTP {response.status}")
+                diagnostic = json.loads(data).get("message", "Request failed")
+                raise RuntimeError(f"Private {method} {path}: HTTP {response.status}: {diagnostic}")
             return json.loads(data)
 
         def start_web():
@@ -661,7 +662,7 @@ def main():
         }
     )
     cli_command = ["npx", "--offline", "--yes", "--package", "@playwright/cli", "playwright-cli"]
-    with tempfile.TemporaryDirectory(prefix="pot-web-http-", dir="/tmp") as temporary:
+    with tempfile.TemporaryDirectory(prefix="pot-web-http-") as temporary:
         base = Path(temporary).resolve()
         base.chmod(0o700)
         key = base / "key"

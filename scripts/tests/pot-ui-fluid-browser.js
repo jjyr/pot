@@ -3,7 +3,7 @@ async page=>{
   const origin=new URL(page.url()).origin,assert=(ok,message)=>{if(!ok)throw Error(message);};
   const context=await page.context().browser().newContext({serviceWorkers:'block'});page=await context.newPage();
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
-  await page.route('**/fluid-fixture',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"><body><main id="app"></main></body></html>'}));
+  await page.route('**/fluid-fixture*',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"><body><main id="app"></main></body></html>'}));
   await page.goto(origin+'/fluid-fixture');await page.setViewportSize({width:1200,height:820});
   await page.evaluate(async()=>{
     const {createReplyBubble}=await import('/components/reply.mjs');
@@ -35,7 +35,7 @@ async page=>{
   });
   await page.waitForFunction(()=>[...document.querySelectorAll('.task-event')].some(node=>node.textContent.includes('Task step 1999')));
   assert(await page.locator('.task-event').count()<50,'Long task mounts a bounded viewport');
-  await page.locator('.task-history').evaluate(node=>{node.scrollTop=0;node.dispatchEvent(new Event('scroll'));});
+  await page.locator('.task-history').evaluate(node=>{node.dispatchEvent(new WheelEvent('wheel',{deltaY:-100000,bubbles:true}));node.scrollTop=0;node.dispatchEvent(new Event('scroll'));});
   await page.waitForFunction(()=>[...document.querySelectorAll('.task-event')].some(node=>node.textContent.includes('Task step 0')));
   const before=await page.locator('.task-history').evaluate(node=>node.scrollTop);
   await page.evaluate(()=>{fluidFixture.state.messages.push({id:'new',role:'assistant',sequence:2001,text:'New offscreen task output',phase:'streaming'});fluidFixture.ui.update({state:fluidFixture.state});});
@@ -56,7 +56,7 @@ async page=>{
   await page.getByRole('button',{name:'Task fast 0',exact:true}).waitFor();
   assert(await page.evaluate(()=>fluidFixture.calls.length===2),'Task first paint reads one prefix per Space');
   await page.evaluate(async()=>{fluidFixture.release();await fluidFixture.loading;});
-  await page.getByText('10,000 items · Page 1',{exact:true}).waitFor();
+  await page.getByText('10,000 records · Page 1 · 20 on this page',{exact:true}).first().waitFor();
   const search=page.getByRole('searchbox');await search.focus();
   await search.evaluate(node=>{fluidFixture.search=node;node.dispatchEvent(new CompositionEvent('compositionstart'));node.value='中';node.dispatchEvent(new InputEvent('input',{isComposing:true}));});
   const reads=await page.evaluate(()=>fluidFixture.calls.length);await page.waitForTimeout(220);assert(await page.evaluate(()=>fluidFixture.calls.length)===reads,'IME composition does not query partial candidates');
@@ -64,16 +64,16 @@ async page=>{
   await page.waitForFunction(()=>fluidFixture.calls.some(call=>call.path.includes('q=%E4%B8%AD%E6%96%87')));
   assert(await search.evaluate(node=>node===fluidFixture.search&&document.activeElement===node),'Live search preserves its input and focus');
   await page.evaluate(async()=>{await fluidFixture.pages.leave();fluidFixture.pages.dispose();document.querySelector('#app').replaceChildren();});
-  await page.goto(origin+'/?locale=zh-CN&theme=light&conversation=main');
+  await page.goto(origin+'/fluid-fixture?locale=zh-CN&theme=light&conversation=main');
   await page.evaluate(async()=>{
     const {mountApp}=await import('/components/ui.js');const f=window.fluidFixture||{};window.fluidFixture=f;
-    const scope={space:'local',owner:'alpha'},snapshot={runtime_id:'fluid',boot_id:'boot',owner_id:JSON.stringify(['local','alpha']),conversation_id:'alpha',cursor:'1',running:false,turn_id:null,messages:[{id:'reply',role:'assistant',text:'Stable conversation',status:'complete'}]};
+    const scope={space:'local',owner:'alpha'},snapshot={runtime_id:'fluid',boot_id:'boot',owner_id:JSON.stringify(['local','alpha']),conversation_id:'alpha',cursor:'1',running:false,turn_id:null,kind:'reset',replies:[],history:{before:'1',after:'1',has_more:false,has_newer:false},messages:[{id:'reply',sequence:'1',version:1,role:'assistant',text:'Stable conversation',status:'complete'}]};
     const client={production:true,runtime:{runtime_id:'fluid',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>Object.assign(scope,value),snapshot:async()=>snapshot,subscribe:(receive,status)=>{queueMicrotask(()=>{status('connected');receive(snapshot);});return ()=>{};},changes:()=>()=>{},send:async()=>{},request:async path=>path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Local',control_id:'fluid'}]}:path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1}]:path==='/api/v1/permissions'?{pending:[],policy:{machines:{}}}:{items:[]}};
     const root=document.createElement('main');document.body.replaceChildren(root);f.dispose=mountApp(root,client);
   });
   await page.setViewportSize({width:390,height:844});await page.getByText('Stable conversation',{exact:true}).waitFor();
   await page.locator('#pot-composer').fill('中文草稿');
-  assert(await page.locator('.composer').evaluate(node=>node.getBoundingClientRect().height)<=80,'Phone composer stays compact with a single-line draft');
+  assert(await page.locator('.composer-input').evaluate(node=>node.getBoundingClientRect().height)<=44,'Phone text input stays one line alongside the selector toolbar');
   const gesture=async(points,cancel=false)=>page.evaluate(({points,cancel})=>{const root=document.querySelector('.pot-app');for(let index=0;index<points.length;index++){const event=new PointerEvent(index===0?'pointerdown':index===points.length-1?(cancel?'pointercancel':'pointerup'):'pointermove',{bubbles:true,cancelable:true,pointerId:9,pointerType:'touch',clientX:points[index],clientY:200});Object.defineProperty(event,'timeStamp',{value:index*50});root.dispatchEvent(event);}}, {points,cancel});
   await gesture([1,55,55],true);await page.waitForTimeout(280);assert(!await page.locator('.pot-app').evaluate(node=>node.classList.contains('show-directory')),'Cancelled Back springs to the same conversation');
   await gesture([1,150,150]);await page.waitForTimeout(280);assert(await page.locator('.pot-app').evaluate(node=>node.classList.contains('show-directory')),'Committed edge Back returns to the directory');

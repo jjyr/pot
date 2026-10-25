@@ -62,6 +62,10 @@ that retirement affects every client of that remote assistant. The receiver
 rejects ongoing replies, queued work and uncertain execution cleanup. Deleting
 one assistant preserves its node connection and other assistants.
 
+On phones, the notification permission invitation yields its space while a Chat
+or Task composer has focus. It returns after editing, keeping the transcript and
+composer usable when the on-screen keyboard reduces the visible viewport.
+
 Chat, task controls, assistant settings and notifications use the selected
 assistant's versioned Agent Link capabilities. They never infer support from
 local/remote placement or the Pot/Codex icon. Unsupported operations stay hidden

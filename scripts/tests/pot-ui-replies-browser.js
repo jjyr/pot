@@ -4,11 +4,12 @@ async page=>{
  const assert=(value,message)=>{if(!value)throw Error(message);},errors=[];
  const onError=error=>errors.push(error.message);page.on('pageerror',onError);
  await page.setViewportSize({width:1200,height:820});
- await page.goto(new URL('/?locale=zh-CN&theme=light&conversation=main',page.url()).href);
+ await page.route('**/replies-fixture?*',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"><body></body></html>'}));
+ await page.goto(new URL('/replies-fixture?locale=zh-CN&theme=light&conversation=main',page.url()).href);
  await page.evaluate(async()=>{
   const {mountApp}=await import('/components/ui.js');
   const root=document.createElement('div');document.body.replaceChildren(root);
-  const context={owner:'',space:''},empty={runtime_id:'reply-runtime',boot_id:'boot',owner_id:JSON.stringify(['local','main']),conversation_id:'main',cursor:'1',running:false,turn_id:null,messages:[]};
+  const context={owner:'',space:''},empty={runtime_id:'reply-runtime',boot_id:'boot',owner_id:JSON.stringify(['local','main']),conversation_id:'main',cursor:'1',running:false,turn_id:null,kind:'reset',replies:[],history:{before:'',after:'',has_more:false,has_newer:false},messages:[]};
   const fixture=window.replyFixture={snapshot:empty,requests:[],subscriptions:0,changeSubscriptions:0};
   const client={production:true,runtime:{runtime_id:'reply-runtime',boot_id:'boot'},scope:()=>({...context}),setScope:value=>Object.assign(context,value),
    snapshot:async()=>structuredClone(context.owner==='other'?{...empty,owner_id:JSON.stringify(['local','other']),conversation_id:'other'}:fixture.snapshot),
@@ -25,7 +26,9 @@ async page=>{
     throw Error('Unexpected reply fixture endpoint: '+path);
    },
   };
-  fixture.publish=value=>{fixture.snapshot={...fixture.snapshot,...value,cursor:String(Number(fixture.snapshot.cursor)+1)};fixture.deliver(structuredClone(fixture.snapshot));};
+  fixture.project=value=>{const cursor=String(Number(value.cursor)+1),messages=value.messages.map((message,index)=>({...message,sequence:String(index+1),version:Number(cursor)}));return {...value,cursor,messages,replies:messages.filter(message=>message.role==='user').map(input=>{const output=messages.findLast(message=>message.reply_to===input.id);return {input_id:input.id,state:value.running&&value.turn_id===input.id?'running':output?.status==='failed'?'failed':'completed',...(output?.error?{error:output.error}:{})};}),history:{before:messages.length?'1':'',after:messages.length?String(messages.length):'',has_more:false,has_newer:false}};};
+  fixture.publish=value=>{fixture.snapshot=fixture.project({...fixture.snapshot,...value});fixture.deliver(structuredClone(fixture.snapshot));};
+  fixture.restart=()=>{fixture.dispose?.();client.chatCacheName='reply-active-fixture-cache';fixture.snapshot=structuredClone(empty);fixture.dispose=mountApp(root,client);};
   fixture.dispose=mountApp(root,client);
  });
  await page.waitForFunction(()=>document.querySelector('#pot-composer')&&!document.querySelector('#pot-composer').disabled);
@@ -60,8 +63,14 @@ async page=>{
  await page.getByRole('button',{name:'聊天',exact:true}).click();
  await page.getByText('回复失败',{exact:true}).waitFor();
  assert(await page.locator('#pot-composer').inputValue()==='保留新草稿','Opening configuration keeps the chat draft');
+ // Start an independent active-reply scenario. Durable failures are not
+ // removed or rewound to a running input in a real conversation.
+ await page.evaluate(()=>replyFixture.restart());
+ await page.waitForFunction(()=>document.querySelector('#pot-composer')&&!document.querySelector('#pot-composer').disabled);
+ await page.locator('#pot-composer').fill('保留新草稿');
  await page.emulateMedia({reducedMotion:'reduce'});
  await page.evaluate(()=>replyFixture.publish({messages:[replyFixture.input],running:true,turn_id:'input'}));
+ await page.getByText('思考中',{exact:true}).waitFor();
  assert(await page.locator('.waiting-dots i').first().evaluate(node=>getComputedStyle(node).animationName)==='none','Reduced Motion disables thinking animation');
  await page.emulateMedia({reducedMotion:'no-preference'});
  await page.evaluate(()=>replyFixture.status('offline'));
@@ -81,7 +90,7 @@ async page=>{
   replyFixture.beforeResume={subscriptions:replyFixture.subscriptions,changes:replyFixture.changeSubscriptions,requests:replyFixture.requests.length};
   // The server finishes while the old stream cannot deliver. Returning to the
   // window must replace both subscriptions and fetch the terminal snapshot.
-  replyFixture.snapshot={...replyFixture.snapshot,cursor:String(Number(replyFixture.snapshot.cursor)+1),messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'complete',text:'切回后同步完成'}],running:false,turn_id:null};
+  replyFixture.snapshot=replyFixture.project({...replyFixture.snapshot,messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'complete',text:'切回后同步完成'}],running:false,turn_id:null});
  });
  await page.locator('.connection-status').getByText('实时连接已中断，正在重新连接…',{exact:true}).waitFor();
  await page.locator('.reply-bubble .reply-status').waitFor({state:'hidden'});

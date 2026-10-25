@@ -10,8 +10,8 @@ async page => {
     const {mountApp}=await import('./components/ui.js');
     const fixture=window.shellFixture={scope:{space:'local',owner:'alpha'},reads:0,sends:0};
     const space={id:'local',control_id:'shell-control',name:'Local Space',kind:'local',connected:true};
-    const assistants=Array.from({length:18},(_,i)=>({id:i?'assistant-'+i:'alpha',name:i?'Assistant '+i:'Alpha',revision:1}));
-    const snapshot=()=>({runtime_id:'shell-control',boot_id:'boot',owner_id:JSON.stringify(['local',fixture.scope.owner]),conversation_id:fixture.scope.owner,cursor:'1',running:false,turn_id:null,messages:Array.from({length:32},(_,i)=>({id:'message-'+i,sequence:String(i+1),version:1,role:i%2?'assistant':'user',text:i%2?'A detailed reply with enough content to wrap as the conversation width changes. '.repeat(5):'Please help with task '+i,status:'complete'}))});
+    const assistants=Array.from({length:18},(_,i)=>({id:i?'assistant-'+i:'alpha',name:i?'Assistant '+i:'Alpha',revision:1,capabilities:{version:1,scope:'owner',operations:['chat.read','chat.send','chat.subscribe','assistant.configure']}}));
+    const snapshot=()=>({runtime_id:'shell-control',boot_id:'boot',owner_id:JSON.stringify(['local',fixture.scope.owner]),conversation_id:fixture.scope.owner,cursor:'1',running:false,turn_id:null,kind:'reset',replies:[],history:{before:'1',after:'32',has_more:false,has_newer:false},messages:Array.from({length:32},(_,i)=>({id:'message-'+i,sequence:String(i+1),version:1,role:i%2?'assistant':'user',text:i%2?'A detailed reply with enough content to wrap as the conversation width changes. '.repeat(5):'Please help with task '+i,status:'complete'}))});
     const client={production:true,runtime:{runtime_id:'shell-control',boot_id:'boot'},spaces:[space],scope:()=>({...fixture.scope}),setScope:value=>fixture.scope={...value},
       async request(path){
         fixture.reads++;const name=new URL(path,location.href).pathname;
