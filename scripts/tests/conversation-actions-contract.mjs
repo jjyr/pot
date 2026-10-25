@@ -81,6 +81,6 @@ export async function conversationActionsContract(report=()=>{}){
   }finally{
     close();root.remove();await new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name);request.onsuccess=resolve;request.onerror=()=>reject(request.error);});
   }
-  report('DONE conversation actions authority contract');
   await conversationMenuRefreshContract(report);
+  report('DONE conversation actions authority contract');
 }
