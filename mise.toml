@@ -92,7 +92,7 @@ flag "--output <path>" default=".local/releases" help="Release artifact director
 run = 'python scripts/release "$usage_version" --output "$usage_output"'
 
 [tasks."verify:release"]
-description = "Verify a public release against a trusted source SHA and pinned key"
+description = "Verify a public version and signed downloads with a trusted pinned key"
 run = "python scripts/verify-release"
 
 [tasks."test:release"]

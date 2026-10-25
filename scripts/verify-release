@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only verification of public release bytes and installation pointers."""
+"""Verify a public release version, trusted feed signature and signed download bytes."""
 
 from public_release_verification import main
 

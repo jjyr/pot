@@ -35,7 +35,7 @@ the original cache and repository module files remain unchanged.
 | `mise run build:web-ui` | Embedded shared HTML/CSS/JS frontend |
 | `mise run build:plugins` | Tool manifests and declared sources |
 | `mise run release -- VERSION` | App/CLI archives, checksums, cask and configured signed update feed; publishing is separate |
-| `mise run verify:release -- VERSION SOURCE_SHA --macos-mode MODE` | On-demand, read-only public release verification; requires a trusted pinned key; [arguments and phases](releases.md#public-verification-after-publication) |
+| `mise run verify:release -- VERSION` | On-demand public version, signed feed and download verification; requires a trusted pinned key; [arguments and reports](releases.md#public-verification-after-publication) |
 
 `scripts/build-pot-app`, `scripts/build-pot-cli` and `scripts/pot_packaging.py` own
 layout and checksums. Standalone and embedded Runtime locate trusted tool assets

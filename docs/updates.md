@@ -118,9 +118,9 @@ that change schemas need a separate backup/migration/restore design; package-onl
 rollback must never reopen a migrated database with an older binary.
 
 On-demand public release verification reuses this signature verifier with an
-explicitly trusted pinned key and checks the final downloaded bytes. See the [unified verification
-command](releases.md#public-verification-after-publication) for publication and
-Homebrew installation phases and native-check limitations.
+explicitly trusted pinned key and checks the version and downloaded bytes listed
+in the signed feed. See the [verification command](releases.md#public-verification-after-publication)
+for dependencies, reports and exit codes.
 
 ## Release setup
 

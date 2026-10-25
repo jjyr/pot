@@ -6,25 +6,6 @@ import subprocess
 from release_contract import macos_mode
 
 
-REQUIRED_RESOURCE_FILES = [
-    "node/bin/node",
-    "node/bin/npm",
-    "node/bin/npx",
-    "web/index.html",
-    "sandbox/launcher.mjs",
-    "sandbox/node_modules/@anthropic-ai/sandbox-runtime/package.json",
-    "sandbox/THIRD-PARTY-NOTICES.txt",
-    "LICENSE.txt",
-    "GoDependencyLicenses.txt",
-    "ModelDirectoryLicense.txt",
-    "FrontendFontLicense.txt",
-    "FrontendDiagramLicense.txt",
-    "FrontendVirtualizerLicense.txt",
-    "FrontendIconLicense.txt",
-]
-REQUIRED_RESOURCE_DIRECTORIES = ("plugins", "skills")
-
-
 def macho_files(root):
     magics = {bytes.fromhex(value) for value in ["cffaedfe", "feedfacf", "cafebabe", "bebafeca"]}
     for path in sorted(root.rglob("*"), key=lambda p: len(p.parts), reverse=True):
@@ -42,10 +23,25 @@ def verify_resources(resources, version, kind):
         "darwin-arm64",
     ):
         raise ValueError("macOS installation metadata does not match release")
-    for name in REQUIRED_RESOURCE_FILES:
+    for name in [
+        "node/bin/node",
+        "node/bin/npm",
+        "node/bin/npx",
+        "web/index.html",
+        "sandbox/launcher.mjs",
+        "sandbox/node_modules/@anthropic-ai/sandbox-runtime/package.json",
+        "sandbox/THIRD-PARTY-NOTICES.txt",
+        "LICENSE.txt",
+        "GoDependencyLicenses.txt",
+        "ModelDirectoryLicense.txt",
+        "FrontendFontLicense.txt",
+        "FrontendDiagramLicense.txt",
+        "FrontendVirtualizerLicense.txt",
+        "FrontendIconLicense.txt",
+    ]:
         if not (resources / name).is_file():
             raise ValueError(f"missing bundled macOS resource: {name}")
-    for name in REQUIRED_RESOURCE_DIRECTORIES:
+    for name in ["plugins", "skills"]:
         if not (resources / name).is_dir() or not any((resources / name).iterdir()):
             raise ValueError(f"missing bundled macOS resources: {name}")
     for name in ["sandbox-image", "sandbox-image.json"]:

@@ -96,89 +96,56 @@ it is not an additional cross-channel publication gate.
 
 ## Public verification after publication
 
-Maintainers can run the read-only verifier on demand after publication or when
-rechecking a release. Supply the full expected source SHA from the reviewed
-release decision, the pinned Ed25519 public key from a trusted installation/release
-configuration, and the expected macOS mode. Neither the release nor its feed can
-choose these expectations. No private key or signing secret is needed.
+Maintainers can check a published version on demand with one read-only command:
 
 ```sh
 POT_UPDATE_PUBLIC_KEY=TRUSTED_BASE64_PUBLIC_KEY mise run verify:release -- \
-  1.2.3 TRUSTED_40_CHARACTER_SOURCE_SHA --macos-mode unsigned \
-  --phase publication --output .local/verify-1.2.3 --markdown
-# Recheck after the Homebrew package update PR has merged:
-POT_UPDATE_PUBLIC_KEY=TRUSTED_BASE64_PUBLIC_KEY mise run verify:release -- \
-  1.2.3 TRUSTED_40_CHARACTER_SOURCE_SHA --macos-mode unsigned \
-  --phase installation --output .local/verify-1.2.3-installed --markdown
+  1.2.3 --output .local/verify-1.2.3 --markdown
 ```
 
 `python scripts/verify-release` accepts the same arguments. `--public-key` can
-replace the environment variable. `installation` is the default phase; it requires
-both default-branch Homebrew pointers to match. `publication` checks all public
-bytes and reports older Homebrew pointers as `pending_update`, without waiting
-for review/merge. This status describes the observed pointer, not proof that a PR
-exists; inspect the separate Homebrew synchronization job if it remains pending.
-Equal-version hash/URL conflicts and newer Homebrew pointers fail visibly.
-The verifier never proposes or merges a PR.
+replace `POT_UPDATE_PUBLIC_KEY`. Obtain that pinned Ed25519 public key from trusted
+release configuration or an already trusted installation; a key in the feed is
+never a trust root. No source SHA, macOS mode, private signing key or GitHub token
+is required.
 
-Dependencies are Python 3.12+ and Go from `mise.toml`, HTTPS access to GitHub's
-API/download/CDN endpoints and GHCR, and temporary disk space for the full release
-assets. The preflight checks the explicit source/key and Go availability. The
-command installs no tools, needs no Docker runtime, and reads no Docker auth store,
-netrc or login session. GitHub API reads and release byte downloads are anonymous;
-GHCR uses an anonymous pull-only bearer token held in memory. Do not pass a GitHub
-token. API rate limits remain possible even when a maintainer is logged in.
+The script checks that the requested stable GitHub Release exists publicly and
+its tag matches the version. It downloads `update.json`, reuses the existing
+`sign-release verify` Ed25519 verifier with the supplied key, and checks the signed
+payload's version. Only after the signature passes does it anonymously download
+each file listed in that payload and compare its actual size and SHA-256 with the
+signed values. Duplicate downloads and URLs outside this repository's selected
+versioned release path are rejected. A valid signature alone does not establish
+that the downloadable bytes match the feed.
 
-The verifier derives the exact public asset union from `release_contract`'s server,
-desktop and macOS channels. The container archive is a qualified Actions artifact,
-not a GitHub Release asset. It verifies stable public release status, tag resolution
-and expected source, duplicate/unexpected/missing assets, actual anonymous download
-sizes and SHA-256 values, API digests when provided, sidecars and exact channel
-manifest membership. It reuses `sign-release verify` with the trusted key, checks
-every signed feed target/URL/size/hash, and inspects every bound package. The feed
-format has no source field: its signed hashes bind binaries whose VCS/source is
-checked independently. macOS disclosure must match the expected mode/version/source
-using the publisher's own disclosure generator.
+Dependencies are Python 3.12+ and the project Go toolchain from `mise.toml` for the
+existing signature helper, plus HTTPS access to GitHub's API/download/CDN hosts.
+There is no native cross-build, C compiler, SDK, Docker or package-analysis
+dependency. Package bytes are streamed and discarded; only reports are saved.
+The script installs no tools, uses no login session and never extracts or executes
+a downloaded package.
 
-Archive inspection rejects duplicate/traversing names and escaping links and reads
-regular metadata/binary members without extracting trees or executing package
-contents. It checks installation metadata, resource paths shared with macOS smoke,
-App plist versions, Debian metadata, and Go VCS/OS/architecture information.
-`-trimpath` builds omit linker arguments from Go build info, so the verifier reads
-exact linked Go string globals in ELF/Mach-O load segments for version, revision,
-pinned key and schema digest. For external-linked macOS binaries it decodes only
-declared dyld chained rebase slots (with page/segment bounds), including
-`DYLD_CHAINED_PTR_64_OFFSET`; imported binds are not local string evidence.
-This establishes embedded metadata, not runtime
-`--version` output or native execution. It does not infer Apple developer identity
-or notarization from the disclosure. Reports explicitly mark native CLI/service,
-App/WebView, codesign/notarization and container execution as `not_run`: those
-remain the existing prepublication platform jobs' qualifications.
+The scope is the public version, trusted feed signature and its listed download
+bytes. It does not inspect package internals, build source/schema/resource paths,
+OCI images, Homebrew pointers or other assets outside the feed. It does not
+qualify Apple Developer ID signing or notarization; Pot's Ed25519 signature does
+not make an ad-hoc macOS package Apple-approved. Existing release build, smoke and
+signing gates remain responsible for their qualifications.
 
-The default `--oci full` anonymously fetches the version index, verifies the index
-digest and shared archive/registry manifest/config rules, requires exactly Linux
-amd64/arm64 with matching version/source labels, and transfers and hashes every
-unique layer with its declared size. This is a full registry byte pull without
-loading or running images. `--oci metadata` is a diagnostic mode; it saves checked
-metadata but returns incomplete because layers were not downloaded.
+Downloads use at most three concurrent requests. The terminal reports completed
+checks and files. `report.json` is saved atomically as checks/downloads complete;
+`--markdown` also writes `report.md` on completion. Reports include the explicit
+scope, successful download receipts, failures and pending work. Exit codes are
+`0` for the selected checks passing, `1` for a signature/version/byte mismatch or
+other check failure, and `2` for an unavailable public resource or exhausted
+transient HTTP retries. Signature and byte conflicts are never retried. Only
+explicit rate limits and transient 502/503/504 responses receive at most three
+attempts, with delays capped at 30 seconds.
 
-The command bounds independent asset downloads to three concurrent requests and prints
-one start/completion line per asset plus a concise summary. It writes `report.json`
-atomically at each check/download completion, so interrupted downloads retain
-completed receipts and pending work. `--markdown` also writes `report.md` on completion. JSON retains successful
-download hashes, partial progress, failures, pending/blocked checks, OCI digests and
-layer receipts, retry events and native limitations. Exit codes are `0` for the
-selected public verification phase passing, `1` for a conflict/check failure, and
-`2` for incomplete publication/installation or diagnostic-only OCI verification.
-A missing resource is incomplete; signature/hash/source conflicts fail without retry.
-Only explicit HTTP rate limits and transient 502/503/504 responses receive at most
-three attempts, with delays capped at 30 seconds. There is no publication retry,
-rollback, asset replacement or settings mutation.
-
-Run the command again when a partial publication completes or after the Homebrew
-PR merges. Each invocation checks the selected version without changing its tag
-or republishing anything. Normal lightweight checks run deterministic verifier
-fixtures; they do not download public release assets.
+Run the command again when needed. There is no Actions acceptance workflow;
+normal lightweight checks run local deterministic fixtures without downloading
+public release artifacts. The verifier never publishes, replaces assets, changes
+a tag or proposes/merges a PR.
 
 ## Docker publication contract
 
