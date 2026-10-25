@@ -157,7 +157,7 @@ class AssetsFixture:
                 info = tarfile.TarInfo(name)
                 info.size = len(data)
                 archive.addfile(info, io.BytesIO(data))
-                return {"digest": "sha256:" + hashlib.sha256(data).hexdigest()}
+                return {"digest": "sha256:" + hashlib.sha256(data).hexdigest(), "size": len(data)}
 
             def blob(value):
                 data = json.dumps(value).encode()
@@ -171,6 +171,7 @@ class AssetsFixture:
                         "architecture": architecture,
                         "config": {
                             "Labels": {
+                                "org.opencontainers.image.source": "https://github.com/jjyr/pot",
                                 "org.opencontainers.image.version": version,
                                 "org.opencontainers.image.revision": SHA,
                             }

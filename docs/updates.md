@@ -117,6 +117,11 @@ use the [startup migration mechanism](database-migrations.md). Automatic upgrade
 that change schemas need a separate backup/migration/restore design; package-only
 rollback must never reopen a migrated database with an older binary.
 
+On-demand public release verification reuses this signature verifier with an
+explicitly trusted pinned key and checks the version and downloaded bytes listed
+in the signed feed. See the [verification command](releases.md#public-verification-after-publication)
+for dependencies, reports and exit codes.
+
 ## Release setup
 
 Provision one Ed25519 release key outside the checkout and retain it securely:

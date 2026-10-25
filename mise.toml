@@ -41,7 +41,7 @@ depends = ["test:go:ci", "check:ci", "test:contracts", "test:release", "test:san
 [tasks."ci:light"]
 description = "Run automatic PR/main core and static contracts on one Linux runner"
 depends = ["lint", "test:i18n", "test:core", "test:ui", "test:packaging"]
-run = ["go run ./scripts/check-go", "go test ./scripts/check-go", "python scripts/tests/ci-release.py", "python scripts/tests/homebrew-cask.py", "python scripts/tests/docker-entrypoint.py"]
+run = ["go run ./scripts/check-go", "go test ./scripts/check-go", "python scripts/tests/ci-release.py", "python scripts/tests/public-release-verification.py", "python scripts/tests/homebrew-cask.py", "python scripts/tests/docker-entrypoint.py"]
 
 [tasks."test:go:ci"]
 description = "Run complete normal Go coverage without test-result caching"
@@ -91,9 +91,13 @@ flag "--output <path>" default=".local/releases" help="Release artifact director
 '''
 run = 'python scripts/release "$usage_version" --output "$usage_output"'
 
+[tasks."verify:release"]
+description = "Verify a public version and signed downloads with a trusted pinned key"
+run = "python scripts/verify-release"
+
 [tasks."test:release"]
 description = "Verify macOS release packaging without building the App"
-run = "python scripts/tests/release-packaging.py"
+run = ["python scripts/tests/release-packaging.py", "python scripts/tests/public-release-verification.py"]
 
 [tasks."test:macos-update"]
 description = "Build two disposable App versions and simulate native upgrade/recovery"

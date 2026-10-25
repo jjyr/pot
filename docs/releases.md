@@ -94,6 +94,59 @@ jobs to succeed. Docker has no dependency on desktop packaging or macOS signing.
 The aggregate unsigned validation bundle verifies all implemented distributions;
 it is not an additional cross-channel publication gate.
 
+## Public verification after publication
+
+Maintainers can check a published version on demand with one read-only command:
+
+```sh
+POT_UPDATE_PUBLIC_KEY=TRUSTED_BASE64_PUBLIC_KEY mise run verify:release -- \
+  1.2.3 --output .local/verify-1.2.3 --markdown
+```
+
+`python scripts/verify-release` accepts the same arguments. `--public-key` can
+replace `POT_UPDATE_PUBLIC_KEY`. Obtain that pinned Ed25519 public key from trusted
+release configuration or an already trusted installation; a key in the feed is
+never a trust root. No source SHA, macOS mode, private signing key or GitHub token
+is required.
+
+The script checks that the requested stable GitHub Release exists publicly and
+its tag matches the version. It downloads `update.json`, reuses the existing
+`sign-release verify` Ed25519 verifier with the supplied key, and checks the signed
+payload's version. Only after the signature passes does it anonymously download
+each file listed in that payload and compare its actual size and SHA-256 with the
+signed values. Duplicate downloads and URLs outside this repository's selected
+versioned release path are rejected. A valid signature alone does not establish
+that the downloadable bytes match the feed.
+
+Dependencies are Python 3.12+ and the project Go toolchain from `mise.toml` for the
+existing signature helper, plus HTTPS access to GitHub's API/download/CDN hosts.
+There is no native cross-build, C compiler, SDK, Docker or package-analysis
+dependency. Package bytes are streamed and discarded; only reports are saved.
+The script installs no tools, uses no login session and never extracts or executes
+a downloaded package.
+
+The scope is the public version, trusted feed signature and its listed download
+bytes. It does not inspect package internals, build source/schema/resource paths,
+OCI images, Homebrew pointers or other assets outside the feed. It does not
+qualify Apple Developer ID signing or notarization; Pot's Ed25519 signature does
+not make an ad-hoc macOS package Apple-approved. Existing release build, smoke and
+signing gates remain responsible for their qualifications.
+
+Downloads use at most three concurrent requests. The terminal reports completed
+checks and files. `report.json` is saved atomically as checks/downloads complete;
+`--markdown` also writes `report.md` on completion. Reports include the explicit
+scope, successful download receipts, failures and pending work. Exit codes are
+`0` for the selected checks passing, `1` for a signature/version/byte mismatch or
+other check failure, and `2` for an unavailable public resource or exhausted
+transient HTTP retries. Signature and byte conflicts are never retried. Only
+explicit rate limits and transient 502/503/504 responses receive at most three
+attempts, with delays capped at 30 seconds.
+
+Run the command again when needed. There is no Actions acceptance workflow;
+normal lightweight checks run local deterministic fixtures without downloading
+public release artifacts. The verifier never publishes, replaces assets, changes
+a tag or proposes/merges a PR.
+
 ## Docker publication contract
 
 A stable tag such as `v1.2.3` automatically builds the production Dockerfile and,
