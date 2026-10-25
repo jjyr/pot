@@ -242,7 +242,7 @@ func TestTimeoutIdleCancellationAndNoDescendants(t *testing.T) {
 	}
 	r.Policy.SessionIdleTimeoutMS = 100
 	// A changed scope policy is intentionally rejected; expiry gets a fresh scope.
-	e2 := New(Options{Home: r.CWD})
+	e2 := New(Options{Home: r.CWD, ProcessWorker: testProcessWorker(t)})
 	defer e2.Close()
 	result := call(t, e2, r, "exec_command", map[string]any{"cmd": "sleep 60", "yield_time_ms": 10})
 	id := result["session_id"].(string)
@@ -252,7 +252,7 @@ func TestTimeoutIdleCancellationAndNoDescendants(t *testing.T) {
 		t.Fatal(result)
 	}
 	r.Policy.SessionIdleTimeoutMS = 1800000
-	e3 := New(Options{Home: r.CWD})
+	e3 := New(Options{Home: r.CWD, ProcessWorker: testProcessWorker(t)})
 	defer e3.Close()
 	// Start the deadline only after the descendant has atomically published its
 	// PID. Cancellation during startup need not finish a shell's file write.
@@ -276,8 +276,8 @@ func TestTimeoutIdleCancellationAndNoDescendants(t *testing.T) {
 	defer cancel()
 	r.Operation = "write_stdin"
 	r.Args = map[string]any{"session_id": result["session_id"], "yield_time_ms": 1000}
-	if _, err := e3.Execute(ctx, r, nil); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatal(err)
+	if _, err := e3.Execute(ctx, r, nil); !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrCleanupUnconfirmed) {
+		t.Fatalf("cancellation must confirm descendant cleanup: %v", err)
 	}
 	for range 100 {
 		if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {

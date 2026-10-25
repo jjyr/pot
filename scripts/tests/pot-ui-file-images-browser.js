@@ -13,7 +13,8 @@ async parentPage=>{
     await route.fulfill({json:{size:bytes.length,offset,revision:'fixture-image',data:bytes.subarray(offset,offset+192*1024).toString('base64')}});
   });
   try{
-    await page.setViewportSize({width:1000,height:760});await page.goto(new URL('/?locale=zh-CN&theme=light',parentPage.url()).href);
+    await page.route('**/file-images-fixture?*',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"><body></body></html>'}));
+    await page.setViewportSize({width:1000,height:760});await page.goto(new URL('/file-images-fixture?locale=zh-CN&theme=light',parentPage.url()).href);
     png=await page.evaluate(async task=>{
       const canvas=document.createElement('canvas');canvas.width=480;canvas.height=320;
       const c=canvas.getContext('2d');c.fillStyle='#deecf5';c.fillRect(0,0,480,320);c.fillStyle='#f3c35d';c.beginPath();c.arc(375,75,32,0,Math.PI*2);c.fill();
@@ -61,14 +62,21 @@ async parentPage=>{
       const {createToolCall}=await import('/components/tool-call.mjs');const tool=createToolCall({...imageFixture.options});imageFixture.bubble.append(tool.element);
       tool.update({id:'tool',tool:{id:'tool',name:'get_messages',phase:'completed',args:{},result:{content:[{type:'text',text:`![风景](pot-file://${task}/landscape.png)`}]} }});
     },task);
+    await page.locator('.tool-call > summary').click();
     await page.locator('pot-file-image[data-state="ready"]').waitFor({state:'attached'});
+    const digest=await page.evaluate(async png=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',Uint8Array.from(atob(png),char=>char.charCodeAt(0))))].map(byte=>byte.toString(16).padStart(2,'0')).join(''),png);
+    await page.route('**/api/v1/message-files/**',route=>{const bytes=Buffer.from(png,'base64');reads.push(new URL(route.request().url()));return route.fulfill({json:[{id:'task-image-binding',state:'ready',href:`pot-file://${task}/landscape.png`,resource:{id:'task-image',name:'landscape.png',entry:'landscape.png',mime_type:'image/png',size:bytes.length,files:[{path:'landscape.png',size:bytes.length,mime_type:'image/png',digest}],download:{path:'landscape.png'}}}]});});
+    await page.route('**/api/v1/resources/task-image/content?*',route=>{reads.push(new URL(route.request().url()));return route.fulfill({contentType:'image/png',body:Buffer.from(png,'base64')});});
+    await page.route('**/api/v1/resources/task-image/chunk?*',route=>{reads.push(new URL(route.request().url()));const bytes=Buffer.from(png,'base64');return route.fulfill({json:{size:bytes.length,offset:0,revision:digest,data:png}});});
     await page.evaluate(async task=>{
       const f=imageFixture,{createTaskConversation}=await import('/components/task-conversation.mjs'),{createTaskTranscript}=await import('/state/task-transcript.mjs');
       f.bubble.replaceChildren();const root=document.createElement('div');f.host.replaceChildren(root);
       f.taskView=createTaskConversation({root,task:{id:task,phase:'complete'},record:{info:{phase:'complete'},result:{text:f.source}},locale:()=>document.documentElement.lang,client:f.client,scope:{owner:'alpha',space:'remote'},draft:'',onDraft:()=>{},downloadFile:f.options.downloadFile,toolMemory:new Map(),approvalFor:()=>null});
       f.taskView.update({state:createTaskTranscript()});
     },task);
-    await page.locator('.task-transcript pot-file-image[data-state="ready"]').waitFor({state:'attached'});
+    await page.locator('.task-transcript pot-resource[data-kind="image"][data-state="ready"]').waitFor({state:'attached'});
+    assert(await page.locator('.task-transcript .resource-image').evaluate(img=>img.naturalWidth===480&&img.naturalHeight===320),'Task previews the original image bytes');
+    assert(reads.filter(url=>url.pathname.includes('message-files')||url.pathname.includes('/resources/')).every(url=>url.searchParams.get('assistant_id')==='alpha'&&url.searchParams.get('space_id')==='remote'),'Task saved-image reads retain owner and Space');
     await page.evaluate(()=>{imageFixture.taskView.dispose();imageFixture.host.replaceChildren();});
     assert(errors.length===0,errors.join('\n'));
     return {passed:true,inline:true,download:true,dialog:true,owner_scope:true,streaming:true,mobile:true,locale:true,failure:true,task:true,tool:true,errors};

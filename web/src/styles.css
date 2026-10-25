@@ -804,6 +804,7 @@ dialog[open]{animation:panel-enter var(--motion-normal) var(--ease-out);}
 .pot-app:has(> .notification-onboarding:not([hidden])) > .workspace { grid-row: 3; }
 @media(max-width:719px) {
   .notification-onboarding { grid-column: 1; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px; }
+  .pot-app:has(.composer-input:focus) > .notification-onboarding { display: none; }
   .pot-app:has(> .notification-onboarding:not([hidden])) > .assistant-directory { grid-row:3; }
 }
 

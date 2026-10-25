@@ -18,11 +18,16 @@ import (
 
 func newFixture(t *testing.T, source, mode string) *Client {
 	t.Helper()
+	return newFixtureWithWorker(t, source, mode, nil)
+}
+
+func newFixtureWithWorker(t *testing.T, source, mode string, worker []string) *Client {
+	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("Node unavailable: retained plugin protocol probe requires Node")
 	}
-	c, err := New(Config{Node: node, Identity: "trusted-fixture-digest", Entrypoint: "index.mjs", Files: map[string]string{"index.mjs": source}, Mode: mode})
+	c, err := New(Config{Node: node, ProcessWorker: worker, Identity: "trusted-fixture-digest", Entrypoint: "index.mjs", Files: map[string]string{"index.mjs": source}, Mode: mode})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,11 +226,11 @@ export function createPlugin({emit}) {return {async execute(){
 }
 
 func TestCancellationInvalidatesAndCleansDescendants(t *testing.T) {
-	c := newFixture(t, `import {spawn} from 'node:child_process';
+	c := newFixtureWithWorker(t, `import {spawn} from 'node:child_process';
 export function createPlugin({emit}) {return {async execute({input}){
  if(input.block) await new Promise(()=>{});
  else {const child=spawn('sleep',['60'],{stdio:'ignore'});emit({type:'text',text:String(child.pid)});}
-},async dispose(){}};}`, "text")
+},async dispose(){}};}`, "text", testProcessWorker(t))
 	first := execute(t, c, map[string]any{})
 	pid, err := strconv.Atoi(first.Content[0].Text)
 	if err != nil {
@@ -239,6 +244,9 @@ export function createPlugin({emit}) {return {async execute({input}){
 	}
 	if _, err = c.Execute(context.Background(), "fixture", map[string]any{}); !errors.Is(err, ErrSessionEnded) {
 		t.Fatalf("cancelled session reusable: %v", err)
+	}
+	if err = c.Close(); err != nil {
+		t.Fatalf("cancellation cleanup unconfirmed: %v", err)
 	}
 	if err = syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("descendant survived cancellation: %v", err)

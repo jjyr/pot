@@ -10,7 +10,7 @@ async page => {
  const event=(sequence,type,value={})=>({sequence,event:{turn_id:'run-one',update:{type,...value}}});
  let events=[event(1,'message_started'),event(2,'text_delta',{text:'我先检查当前系统，以及 gh 是否已经安装。'}),event(3,'message_finished'),event(4,'tool_started',{id:'probe',name:'exec_command',args:{cmd:'gh --version'}})];
  const add=(type,value={})=>events.push(event(events.length+1,type,value));
- await page.addInitScript(()=>{const toUIFrame=value=>({kind:'reset',base_cursor:0,view:{state:{...value,messages:[]},messages:value.messages.map((message,index)=>({message,sequence:String(index+1),version:value.cursor})),history:{before:'1',after:String(value.messages.length),has_more:false,has_newer:false}}});const sources=new Set();window.EventSource=class extends EventTarget{constructor(url){super();this.url=String(url);sources.add(this);queueMicrotask(async()=>{this.onopen?.({});if(this.url.includes('/events')){const target=new URL(this.url,location.href);target.pathname=target.pathname.replace(/\/events$/,'/snapshot');const snapshot=await(await fetch(target)).json();if(sources.has(this))this.dispatchEvent(new MessageEvent('conversation',{data:JSON.stringify(toUIFrame(snapshot))}));}});}close(){sources.delete(this);}};window.__taskChanges=value=>{for(const source of sources)if(source.url.includes('/changes'))source.dispatchEvent(new MessageEvent('changed',{data:JSON.stringify({tasks:value,permissions:value})}));};});
+ await page.addInitScript(()=>{const toUIFrame=value=>({kind:'reset',base_cursor:0,view:{replies:value.replies||[],state:{...value,messages:[]},messages:value.messages.map((message,index)=>({message,sequence:String(index+1),version:value.cursor})),history:{before:'1',after:String(value.messages.length),has_more:false,has_newer:false}}});const sources=new Set();window.EventSource=class extends EventTarget{constructor(url){super();this.url=String(url);sources.add(this);queueMicrotask(async()=>{this.onopen?.({});if(this.url.includes('/events')){const target=new URL(this.url,location.href);target.pathname=target.pathname.replace(/\/events$/,'/snapshot');const snapshot=await(await fetch(target)).json();if(sources.has(this))this.dispatchEvent(new MessageEvent('conversation',{data:JSON.stringify(snapshot)}));}});}close(){sources.delete(this);}};window.__taskChanges=value=>{for(const source of sources)if(source.url.includes('/changes'))source.dispatchEvent(new MessageEvent('changed',{data:JSON.stringify({tasks:value,permissions:value})}));};});
  const routeHandler=async route=>{
   const url=new URL(route.request().url()),path=url.pathname;
   if(path.startsWith('/api/v1/tasks/task-proof'))reads.push({path,after:url.searchParams.get('after'),owner:url.searchParams.get('assistant_id'),space:url.searchParams.get('space_id')});
@@ -28,7 +28,7 @@ async page => {
 
   if(path==='/api/v1/assistants')for(const assistant of data)assistant.capabilities=capabilities;
   if(path==='/api/v1/tasks/task-proof')data.capabilities=capabilities;
-  await route.fulfill({json:data});
+  await route.fulfill({json:path==='/api/v1/snapshot'?{kind:'reset',base_cursor:0,view:{replies:[],state:{...data,messages:[]},messages:data.messages.map((message,index)=>({message,sequence:String(index+1),version:data.cursor})),history:{before:data.messages.length?'1':'',after:data.messages.length?String(data.messages.length):'',has_more:false,has_newer:false}}}:data});
  };
  const access=route=>route.fulfill({json:{authenticated:true}});
  await page.route('**/access/status',access);await page.route('**/api/v1/**',routeHandler);
@@ -67,8 +67,9 @@ async page => {
   await page.setViewportSize({width:390,height:1000});await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));await page.screenshot({path:'output/playwright/task-lifecycle/task-mobile-after.png'});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Narrow task detail fits viewport');
   await page.setViewportSize({width:1200,height:1000});
-  await composer.fill('/skill:r');await page.locator('.task-composer-area .completion-option').first().waitFor();const beforeCompletion=posts.length;await composer.press('Enter');assert(await composer.inputValue()==='/skill:review '&&posts.length===beforeCompletion,'Scoped completion chooses a reference without sending');
+  await composer.fill('/skill:r');await page.locator('.task-composer-area .completion-option').first().waitFor();const beforeCompletion=posts.length;await composer.press('Enter');assert(await composer.inputValue()===''&&await page.locator('.task-composer-area .composer-selector[title="/skill:review"]').count()===1&&posts.length===beforeCompletion,'Scoped completion chooses a Skill chip without sending');
   assert(await composer.getAttribute('aria-controls')==='pot-task-task-proof-completions-options','Task and main composers use distinct completion identities');
+  await page.locator('.task-composer-area .composer-selector-remove').click();
   await page.locator('.task-goal > summary').click();await composer.fill('保留这条尚未发送的指导');await page.locator('.task-transcript .script-group > summary').click();await tool.locator(':scope > summary').click();
   await composer.evaluate(node=>{window.__taskComposer=node;});
   inputs.push({request_id:'reference',kind:'reference',sender:'peer',state:'pending',text:'已确认仓库访问可用。'});
@@ -125,7 +126,9 @@ async page => {
   const taskFocus=await composer.evaluate(node=>{node.setSelectionRange(30,40);node.scrollTop=40;return {inputScroll:node.scrollTop};}),keyboardReading=await readingPosition();
   for(const [height,top]of [[420,80],[420,110],[852,0]]){
     await page.evaluate(({height,top})=>{Object.defineProperties(window.visualViewport,{height:{configurable:true,value:height},offsetTop:{configurable:true,value:top}});window.visualViewport.dispatchEvent(new Event('resize'));window.visualViewport.dispatchEvent(new Event('scroll'));},{height,top});
-    const bounds=await composer.boundingBox();
+    const bounds=await composer.boundingBox(),sendBounds=await page.locator('.task-composer-area .send-button').boundingBox();
+    assert(await page.locator('.task-history').evaluate(node=>node.clientHeight>0),'Keyboard leaves a visible Task transcript');
+    assert(sendBounds.y+sendBounds.height<=top+height,'Task send control stays above the keyboard');
     assert(bounds.y>top+44&&bounds.y+bounds.height<=top+height,'Task composer stays above the keyboard after a tap');
     assert(await composer.evaluate(node=>document.activeElement===node&&node.selectionStart===30&&node.selectionEnd===40),'Task keyboard transitions retain native focus and selection: '+JSON.stringify(await composer.evaluate(node=>({focused:document.activeElement===node,active:document.activeElement?.tagName,selection:[node.selectionStart,node.selectionEnd]}))));
     assert(await composer.evaluate(node=>node.scrollTop)===taskFocus.inputScroll,'Task keyboard panning retains long-draft scrolling');
