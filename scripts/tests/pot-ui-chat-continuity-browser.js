@@ -113,7 +113,7 @@ async (page,{origin=new URL(page.url()).origin,witness}={})=>{
     await page.mouse.move(width-35,400);
     let nestedPrevious=await page.evaluate(()=>continuity.sample()),nestedWorst=0,nestedWorstSample=null;
     for(let step=0;step<40;step++){
-      const delta=step<20?36:-36;await wheel(delta);
+      const delta=step<20?-36:36;await wheel(delta);
       const next=await page.evaluate(()=>continuity.sample());
       diagnostic={scenario:'nested',width,step,delta,previous:nestedPrevious,next,reads:await page.evaluate(()=>continuity.reads)};
       const common=nestedPrevious.visible.find(row=>row.id!=='m242'&&next.visible.some(item=>item.id===row.id));
