@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/jjyr/pot/internal/testutil"
 )
 
 func fixture(t *testing.T) (*Engine, Request) {
@@ -182,6 +184,18 @@ func TestSeparateCommandsAndBoundedUTF8Output(t *testing.T) {
 	}
 }
 func TestPipePTYResizeInterruptAndFinishedRead(t *testing.T) {
+	for _, scenario := range []struct{ name, initialDelay string }{
+		{"immediate", ""},
+		{"delayed_initial_size", "sleep .2; "},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			testPipePTYResizeInterruptAndFinishedRead(t, scenario.initialDelay)
+		})
+	}
+}
+
+func testPipePTYResizeInterruptAndFinishedRead(t *testing.T, initialDelay string) {
+	t.Helper()
 	e, r := fixture(t)
 	result := call(t, e, r, "exec_command", map[string]any{"cmd": "read -r line; printf 'received=%s' \"$line\"", "yield_time_ms": 10})
 	id := result["session_id"].(string)
@@ -195,9 +209,22 @@ func TestPipePTYResizeInterruptAndFinishedRead(t *testing.T) {
 	if result["stdout"] != "received=hello" || result["session_id"] != nil {
 		t.Fatal(result)
 	}
-	result = call(t, e, r, "exec_command", map[string]any{"cmd": "test -t 0 && echo terminal; stty size; read -r line; stty size; printf 'input=%s\n' \"$line\"; sleep 60", "tty": true, "yield_time_ms": 30})
+	result = call(t, e, r, "exec_command", map[string]any{"cmd": "test -t 0 && echo terminal; " + initialDelay + "stty size; read -r line; stty size; printf 'input=%s\n' \"$line\"; sleep 60", "tty": true, "yield_time_ms": 30})
 	id = result["session_id"].(string)
 	output := result["stdout"].(string)
+	// A yield interval does not establish that the child has read its initial
+	// terminal size. Observe that output before changing the PTY and its input.
+	deadline := time.Now().Add(testutil.Timeout(t, 5*time.Second))
+	for !strings.Contains(output, "24 80") {
+		if time.Now().After(deadline) {
+			t.Fatalf("PTY did not report its initial size: %q", output)
+		}
+		result = call(t, e, r, "write_stdin", map[string]any{"session_id": id, "yield_time_ms": 100})
+		output += result["stdout"].(string)
+		if result["session_id"] == nil {
+			t.Fatalf("PTY finished before its initial size handshake: %v", result)
+		}
+	}
 	result = call(t, e, r, "write_stdin", map[string]any{"session_id": id, "rows": 40, "cols": 100, "chars": "hello\n", "yield_time_ms": 100})
 	output += result["stdout"].(string)
 	if !strings.Contains(output, "terminal") || !strings.Contains(output, "24 80") || !strings.Contains(output, "40 100") || !strings.Contains(output, "input=hello") {
