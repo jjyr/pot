@@ -1,4 +1,6 @@
 async page => {
+  let step='initial';
+  try{
   const ready=async()=>{await page.waitForFunction(()=>document.querySelector('.page-content')?.getAttribute('aria-busy')==='false'&&!!document.querySelector('.usage-trend'));await page.evaluate(()=>window.usageFixture.verify());};
   const selectedRange=()=>page.locator('.usage-range').evaluate(node=>({start:node.dataset.start,end:node.dataset.end}));
   await page.waitForFunction(()=>/^(PASS|FAIL)/.test(document.querySelector('#result').textContent));
@@ -17,6 +19,7 @@ async page => {
   const scenario=await page.locator('#fixture-case').inputValue();
   if(scenario==='trend'){
     for(const preset of ['month','quarter','halfyear','year']){
+      step='preset '+preset;
       const link=page.locator(`.usage-period-link[data-preset="${preset}"]`);
       await link.click();await ready();const current=await selectedRange();
       if(await page.locator('.usage-period-link[aria-pressed="true"]').count()!==1||await link.getAttribute('aria-pressed')!=='true')throw Error('Selected timescale must be marked');
@@ -37,11 +40,13 @@ async page => {
     await page.evaluate(()=>window.usageFixture.refresh());await ready();
     if(JSON.stringify(await selectedRange())!==JSON.stringify(retained))throw Error('Usage refresh lost the active range');
     for(const context of [null,{space:'local',owner:'helper',name:'Fixture assistant'},{space:'local',owner:'helper',scope:'task-fixture',name:'Fixture task'},{space:'local',owner:'main',name:'Fixture conversation'}]){
+      step='scope '+JSON.stringify(context);
       await page.evaluate(context=>window.usageFixture.open(context),context);await ready();
       if(JSON.stringify(await selectedRange())!==JSON.stringify(retained))throw Error('Usage entry lost shared range');
-      const row=await page.evaluate(()=>window.usageFixture.requests.at(-1));
-      if(row.scope!==(context?.scope||context?.owner||'')||row.owner!==(context?.owner||''))throw Error('Usage entry changed owner or scope');
+      const row=await page.evaluate(()=>window.usageFixture.queries.at(-1));
+      if(row.scope!==(context?.scope||context?.owner||'')||row.owner!==(context?.owner||'')||row.space!=='local')throw Error('Usage entry changed owner or scope: '+JSON.stringify({context,row}));
     }
+    step='calendar';
     const tile=page.locator('.usage-day:not(:disabled)').first();
     await tile.scrollIntoViewIfNeeded();await page.mouse.move(0,0);
     await tile.focus();await page.keyboard.press('Tab');await page.keyboard.press('Shift+Tab');
@@ -57,14 +62,16 @@ async page => {
     if(await page.locator('.chart-column').count()!==1||(await selectedRange()).start!=='2024-02-29')throw Error('Selecting calendar date must update all statistics');
     const request=await page.evaluate(()=>window.usageFixture.requests.find(row=>row.start==='2024-02-29'&&row.end==='2024-02-29'));
     if(request.scope!=='main'||request.owner!=='main')throw Error('Date selection lost conversation owner');
+    step='held range';
     await page.evaluate(()=>window.usageFixture.hold());
     await page.locator('.usage-period-link[data-preset="halfyear"]').click();
-    await page.waitForFunction(()=>document.querySelector('.page-content')?.getAttribute('aria-busy')==='true');
+    await page.waitForFunction(()=>window.usageFixture.pending);
     await page.locator('.usage-period-link[data-preset="month"]').click();await ready();
     const selected=await selectedRange();
     await page.evaluate(()=>window.usageFixture.release());
     await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));await ready();
     if(JSON.stringify(await selectedRange())!==JSON.stringify(selected))throw Error('Stale response replaced selected dates');
+    step='calendar failure';
     await page.evaluate(()=>window.usageFixture.failCalendar(true));
     await page.locator('.usage-calendar-controls button').first().click();await ready();
     if(!await page.locator('.usage-calendar-error').count())throw Error('Annual failure must leave selected statistics available');
@@ -72,16 +79,27 @@ async page => {
     await page.locator('.usage-calendar-error button').click();await ready();
     if(!await page.locator('.usage-calendar').count())throw Error('Calendar retry failed');
   }
+  step='pending locale';
   await page.evaluate(()=>window.usageFixture.hold());
   await page.locator('.usage-period-link[data-preset="quarter"]').click();
-  await page.waitForFunction(()=>document.querySelector('.page-content')?.getAttribute('aria-busy')==='true');
+  await page.waitForFunction(()=>window.usageFixture.pending);
   const language=await page.locator('#fixture-locale').inputValue(),selected=await selectedRange();
+  const heading=await page.locator('.usage-heading .page-heading').textContent();
   await page.locator('#fixture-locale').selectOption(language==='en'?'zh-CN':'en');
-  await page.waitForFunction(expected=>document.querySelector('.usage-trend h2')?.textContent===expected,language==='en'?'用量趋势':'Usage trend');await ready();
+  // A locale change shares the pending domain read. Its heading and selection
+  // update immediately; the chart can only render once that read is committed.
+  await page.waitForFunction(before=>{const text=document.querySelector('.usage-heading .page-heading')?.textContent;return text&&text!==before;},heading);
+  if(JSON.stringify(await selectedRange())!==JSON.stringify(selected))throw Error('Pending language switch lost date selection');
   await page.evaluate(()=>window.usageFixture.release());await ready();
+  await page.getByRole('heading',{name:language==='en'?'用量趋势':'Usage trend',exact:true}).waitFor();
   if(JSON.stringify(await selectedRange())!==JSON.stringify(selected))throw Error('Language switch lost date selection');
+  step='reload';
   await page.reload();await page.waitForFunction(()=>document.querySelector('.page-content')?.getAttribute('aria-busy')==='false'&&!!document.querySelector('.usage-trend'));
   if(await page.locator('.usage-range').getAttribute('data-preset')!=='month')throw Error('Full reload must use the current month, following window-only range memory');
   await page.evaluate(()=>window.usageFixture.verify());
   return 'Four timescales, natural period navigation, distributions, calendar selection, refresh, scoped entries, stale requests, pending locale and full reload passed';
+  }catch(error){
+    const state=await page.evaluate(()=>({scope:document.querySelector('.page-content')?.dataset.usageScope,range:document.querySelector('.usage-range')?.dataset.preset,busy:document.querySelector('.page-content')?.getAttribute('aria-busy'),pending:window.usageFixture?.pending,queries:window.usageFixture?.queries?.slice(-3),requests:window.usageFixture?.requests.slice(-3),result:document.querySelector('#result')?.textContent?.slice(-600),text:document.querySelector('#page')?.textContent?.slice(-600)}));
+    throw Error('Usage '+step+': '+error.message+'; '+JSON.stringify(state),{cause:error});
+  }
 }

@@ -845,6 +845,7 @@ List or isolate one scenario without implicit ordering:
 mise exec -- node scripts/tests/ui-regressions.mjs --list
 mise exec -- node scripts/tests/ui-regressions.mjs --group nav --case directory
 mise exec -- node scripts/tests/ui-regressions.mjs --group storage --case projection-store.html
+mise exec -- python scripts/tests/pot-ui-usage-browser.py --case trend --width 390
 ```
 
 Every source scenario gets a fresh context, locale, routes and isolated IDB names.
@@ -853,7 +854,11 @@ context is created. HTTP contracts consume the runner's context and its disposab
 authentication state. Providers and connection probes require the standard HTTP
 fixture's deterministic model connection and authenticated API; do not run them
 against the static source server. The real HTTP contract deliberately retains its
-two-client and anonymous contexts.
+two-client and anonymous contexts. The Usage matrix also creates a fresh context
+for each viewport/locale/case and retains all twenty default scenarios. Its fixture
+provides an explicit Runtime identity, observes committed projections, records
+domain reads separately from transport calls and holds authoritative reads for
+races. Cached reads must preserve owner/scope without requiring another HTTP call.
 
 The 3px continuity threshold is a failure tolerance, not a measured residual
 jump. DOMRect positions retain fractional CSS pixels while scroll extents and
