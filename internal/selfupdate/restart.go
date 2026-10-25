@@ -24,6 +24,7 @@ type restartCommand struct {
 type restartHost struct {
 	Participant
 	command          restartCommand
+	previousBoot     string
 	prepared, exited bool
 	childDone        chan struct{}
 }
@@ -31,7 +32,7 @@ type restartHost struct {
 func restartHosts(install string, peers []Participant) ([]*restartHost, error) {
 	result := make([]*restartHost, 0, len(peers))
 	for _, peer := range peers {
-		host := &restartHost{Participant: peer}
+		host := &restartHost{Participant: peer, previousBoot: peer.BootID}
 		if err := localCall(context.Background(), peer.Socket, "GET", "/restart", &host.command); err != nil {
 			return nil, err
 		}

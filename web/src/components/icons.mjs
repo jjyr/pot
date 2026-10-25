@@ -16,6 +16,7 @@ const paths = {
   topology:'M7 6h10M5 8v8m14-8v8M7 18h10M3 2h4v6H3zM17 2h4v6h-4zM3 16h4v6H3zM17 16h4v6h-4z',
   server:'M3 3h18v7H3zM3 14h18v7H3zM7 6h.01M7 17h.01',
   laptop:'M4 4h16v12H4zM2 20h20l-2-4H4z',
+  refresh: 'M20 7v5h-5M4 17v-5h5M6.1 6.1a8 8 0 0 1 13.2 3M4.7 14.9a8 8 0 0 0 13.2 3',
   update: 'M12 4v12m-5-5 5 5 5-5M4 16v4h16v-4',
   reply: 'm9 10-5 5 5 5M4 15h11a5 5 0 0 0 0-10h-1', menu: 'M4 6h16M4 12h16M4 18h16', back: 'm14 5-7 7 7 7', plus: 'M12 5v14M5 12h14',
   more: 'M5 12h.01M12 12h.01M19 12h.01', send: 'm6 10 6-6 6 6M12 4v16',

@@ -429,6 +429,7 @@ def update_metadata(resources, kind, target):
                 "kind": kind,
                 "platform": target,
                 "storage_format": storage_format(),
+                "protocol": 2,
             }
         )
         + "\n"
@@ -443,7 +444,22 @@ def storage_format():
 def schema_digest():
     root = ROOT / "pkg/storage/migrations"
     digest = hashlib.sha256()
-    for path in sorted(root.glob("*/*.sql")):
+    for path in sorted(root.rglob("*.sql")):
         digest.update(path.relative_to(root).as_posix().encode() + b"\0")
         digest.update(path.read_bytes() + b"\0")
     return digest.hexdigest()
+
+
+def schema_catalog():
+    """Match storage's checksum-bearing, append-only migration IDs."""
+    result = {}
+    for path in sorted((ROOT / "pkg/storage/migrations").glob("*/*.sql")):
+        kind = path.parent.name
+        result.setdefault(kind, []).append(
+            f"{path.stem}_{kind}_{hashlib.sha256(path.read_bytes()).hexdigest()}"
+        )
+    return result
+
+
+def ledger_digest():
+    return hashlib.sha256((ROOT / "pkg/storage/migrations/ledger.sql").read_bytes()).hexdigest()

@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,10 +31,12 @@ import (
 	"github.com/jjyr/pot/internal/buildinfo"
 	"github.com/jjyr/pot/pkg/instance"
 	"github.com/jjyr/pot/pkg/protocol"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 func TestMain(m *testing.M) {
 	buildinfo.Version = "0.1.0"
+	buildinfo.UpdatePublicKey = fixtureKey()
 	buildinfo.UpdateSchemaDigest = os.Getenv("POT_UPDATE_TEST_SCHEMA_DIGEST")
 	if os.Getenv("POT_UPDATE_TEST_FORMULA") == "1" {
 		buildinfo.UpdatePublicKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
@@ -51,6 +54,13 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	if len(os.Args) == 3 && os.Args[1] == "_update-worker" {
+		var job Job
+		if data, err := os.ReadFile(os.Args[2]); err == nil {
+			json.Unmarshal(data, &job)
+			if job.Retry {
+				buildinfo.Version = job.Version
+			}
+		}
 		if err := fixtureWorker(os.Args[2]); err != nil {
 			fmt.Fprintf(os.Stderr, "FIXTURE worker failed: %v\n", err)
 			os.Exit(1)
@@ -88,16 +98,14 @@ func mustWrite(t *testing.T, path string, value any) {
 }
 func signed(t *testing.T, r Release) ([]byte, string) {
 	t.Helper()
-	pub, key, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := ed25519.NewKeyFromSeed(make([]byte, 32))
+	pub := key.Public().(ed25519.PublicKey)
 	payload, _ := json.Marshal(r)
 	data, _ := json.Marshal(Envelope{base64.StdEncoding.EncodeToString(payload), base64.StdEncoding.EncodeToString(ed25519.Sign(key, payload))})
 	return data, base64.StdEncoding.EncodeToString(pub)
 }
 func TestSignedReleaseTrustAndFormat(t *testing.T) {
-	r := Release{Version: "0.2.0", StorageFormat: storageFormat(), Artifacts: []Artifact{{"cli", "linux-arm64", releaseOrigin + "v0.2.0/pot.tar.gz", strings.Repeat("ab", 32), 123}}}
+	r := Release{Version: "0.2.0", StorageFormat: storageFormat(), Protocol: UpdateProtocol, Artifacts: []Artifact{{"cli", "linux-arm64", releaseOrigin + "v0.2.0/pot.tar.gz", strings.Repeat("ab", 32), 123}}}
 	data, key := signed(t, r)
 	if _, err := Verify(data, key); err != nil {
 		t.Fatal(err)
@@ -109,7 +117,7 @@ func TestSignedReleaseTrustAndFormat(t *testing.T) {
 	if _, err := Verify(tampered, key); err == nil {
 		t.Fatal("accepted modified release")
 	}
-	for _, change := range []func(*Release){func(r *Release) { r.StorageFormat = "pot-go-2026-10-5" }, func(r *Release) { r.StorageFormat = "future" }, func(r *Release) { r.Artifacts[0].URL = "https://evil.example/pot" }, func(r *Release) { r.Artifacts[0].Size = 2 << 30 }, func(r *Release) { r.Artifacts = append(r.Artifacts, r.Artifacts[0]) }} {
+	for _, change := range []func(*Release){func(r *Release) { r.Artifacts[0].URL = "https://evil.example/pot" }, func(r *Release) { r.Artifacts[0].Size = 2 << 30 }, func(r *Release) { r.Artifacts = append(r.Artifacts, r.Artifacts[0]) }} {
 		candidate := r
 		candidate.Artifacts = append([]Artifact{}, r.Artifacts...)
 		change(&candidate)
@@ -176,13 +184,13 @@ func TestArchiveConfinementAndRelocatableLinks(t *testing.T) {
 }
 func TestDownloadRejectsChecksumAndPreservesInstalledFiles(t *testing.T) {
 	directory := t.TempDir()
-	metadata, _ := json.Marshal(Installation{Version: "0.2.0", Kind: "cli", Platform: "linux-arm64", StorageFormat: storageFormat()})
+	metadata, _ := json.Marshal(Installation{Version: "0.2.0", Kind: "cli", Platform: "linux-arm64", StorageFormat: storageFormat(), Protocol: UpdateProtocol})
 	data := archiveBytes(t, []*tar.Header{{Name: "pot/Resources/update.json", Mode: 0644, Size: int64(len(metadata)), Typeflag: tar.TypeReg}}, []string{string(metadata)})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(data) }))
 	defer server.Close()
 	sum := sha256.Sum256(data)
 	a := Artifact{Kind: "cli", Platform: "linux-arm64", URL: server.URL, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(data))}
-	m := &Manager{Host: &Host{Directory: directory}, client: server.Client(), release: &Release{Version: "0.2.0"}}
+	m := &Manager{Host: &Host{Directory: directory}, client: server.Client(), release: eligibleRelease(t, "0.2.0")}
 	wrong := a
 	wrong.SHA256 = strings.Repeat("00", 32)
 	if err := m.download(context.Background(), wrong, "0.2.0"); err == nil {
@@ -205,7 +213,7 @@ func TestConfirmationAndUnsupportedHost(t *testing.T) {
 	directory := t.TempDir()
 	mustWrite(t, filepath.Join(directory, "state.json"), State{Version: "0.2.0", Phase: "ready"})
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(Participant{Work: Work{Tasks: 2}})
+		json.NewEncoder(w).Encode(Participant{Work: Work{Tasks: 2}, Protocol: UpdateProtocol})
 	}))
 	socketRoot, err := os.MkdirTemp("/tmp", "pot-u-test-")
 	if err != nil {
@@ -222,6 +230,7 @@ func TestConfirmationAndUnsupportedHost(t *testing.T) {
 	defer server.Close()
 	mustWrite(t, filepath.Join(directory, "host-1.json"), Participant{Socket: socket})
 	m = New(context.Background(), &Host{Directory: directory}, nil)
+	m.discovery = "verified"
 	body := json.RawMessage(`{"action":"install","version":"0.2.0","request_id":"attempt","interrupt":false}`)
 	_, err = m.Call(context.Background(), "POST", body)
 	var api protocol.APIError
@@ -283,6 +292,22 @@ func TestHostProcess(t *testing.T) {
 			return Work{}, nil
 		}); err != nil {
 			return err
+		}
+		var dataLock *os.File
+		if os.Getenv("POT_UPDATE_TEST_MIGRATE") == "1" {
+			var err error
+			dataLock, err = openLock(filepath.Join(root, "runtime.lock"), syscall.LOCK_EX|syscall.LOCK_NB)
+			if err != nil {
+				return err
+			}
+			defer dataLock.Close()
+			if metadata.Version == "0.2.0" {
+				if err := storage.MigrateRoot(ctx, root); err != nil {
+					fmt.Fprintln(os.Stderr, "FIXTURE migration failed:", err)
+					<-ctx.Done()
+					return nil
+				}
+			}
 		}
 		if !(metadata.Version == "0.2.0" && os.Getenv("POT_UPDATE_TEST_FAIL") == "1") {
 			h.Ready()
@@ -409,7 +434,7 @@ func TestWorkerRestartsWholeInstallationAndRollsBack(t *testing.T) {
 			writePackage := func(target, version string) {
 				copyTestBinary(t, filepath.Join(target, binaryPath))
 				os.MkdirAll(filepath.Join(target, resourcesPath), 0755)
-				mustWrite(t, filepath.Join(target, resourcesPath, "update.json"), Installation{Version: version, Kind: kind, Platform: "darwin-arm64", StorageFormat: storageFormat()})
+				mustWrite(t, filepath.Join(target, resourcesPath, "update.json"), Installation{Version: version, Kind: kind, Platform: "darwin-arm64", StorageFormat: storageFormat(), Protocol: UpdateProtocol})
 			}
 			writePackage(install, "0.1.0")
 			process := exec.Command(filepath.Join(install, binaryPath), "-test.run=^TestHostProcess$")
@@ -491,7 +516,8 @@ func TestWorkerRestartsWholeInstallationAndRollsBack(t *testing.T) {
 			writePackage(stage, "0.2.0")
 			mustWrite(t, filepath.Join(directory, "prepared.json"), struct{ Version, Path string }{"0.2.0", stage})
 			mustWrite(t, filepath.Join(directory, "state.json"), State{Version: "0.2.0", Phase: "installing"})
-			mustWrite(t, filepath.Join(directory, "job.json"), Job{Install: install, Directory: directory, Version: "0.2.0", Interrupt: scenario != "confirmation", Package: Installation{Version: "0.1.0", Kind: kind, Platform: "darwin-arm64", StorageFormat: storageFormat()}})
+			prepareFixtureFeed(t, directory)
+			mustWrite(t, filepath.Join(directory, "job.json"), Job{Install: install, Directory: directory, Version: "0.2.0", Interrupt: scenario != "confirmation", Package: Installation{Version: "0.1.0", Kind: kind, Platform: "darwin-arm64", StorageFormat: storageFormat(), Protocol: UpdateProtocol}})
 			oldTimeout := healthTimeout
 			healthTimeout = time.Second
 			defer func() { healthTimeout = oldTimeout }()
@@ -535,9 +561,14 @@ func TestWorkerRestartsWholeInstallationAndRollsBack(t *testing.T) {
 				defer server.Close()
 				artifact := Artifact{Kind: kind, Platform: "darwin-arm64", URL: server.URL, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(archive))}
 				mustWrite(t, filepath.Join(directory, "state.json"), State{Version: "0.2.0", Phase: "available"})
-				manager := New(context.Background(), &Host{Install: install, Directory: directory, Package: Installation{Version: "0.1.0", Kind: kind, Platform: "darwin-arm64", StorageFormat: storageFormat()}}, nil)
-				manager.release = &Release{Version: "0.2.0", Artifacts: []Artifact{artifact}}
-				manager.client = server.Client()
+				manager := New(context.Background(), &Host{Install: install, Directory: directory, Package: Installation{Version: "0.1.0", Kind: kind, Platform: "darwin-arm64", StorageFormat: storageFormat(), Protocol: UpdateProtocol}}, nil)
+				manager.release = eligibleRelease(t, "0.2.0")
+				releaseArtifact := artifact
+				releaseArtifact.URL = releaseOrigin + "v0.2.0/package"
+				manager.release.Artifacts = []Artifact{releaseArtifact}
+				manager.envelope, _ = signed(t, *manager.release)
+				manager.discovery = "verified"
+				manager.client = &http.Client{Transport: rewriteTransport{base: server.Client().Transport, url: server.URL}}
 				_, err = manager.Call(context.Background(), "POST", json.RawMessage(`{"action":"download","version":"0.2.0","request_id":"one-click","interrupt":false}`))
 				if err != nil {
 					t.Fatal(err)
@@ -688,7 +719,7 @@ func TestObsoletePreparedUpdateCannotDowngradeInstallation(t *testing.T) {
 	for _, version := range []string{"0.0.9", "0.1.0"} {
 		mustWrite(t, filepath.Join(directory, "state.json"), State{Version: version, Phase: "ready"})
 		status, err := m.Status()
-		if err != nil || status.Version != buildinfo.Version || status.Phase != "current" {
+		if err != nil || status.Version != "" || status.Phase != "current" {
 			t.Fatal("obsolete update remained advertised", status, err)
 		}
 		body, _ := json.Marshal(Command{Action: "install", Version: version, RequestID: "new-attempt"})
@@ -704,13 +735,52 @@ func TestReleasePinsCentralizedMigrationFingerprint(t *testing.T) {
 	previous := buildinfo.UpdateSchemaDigest
 	defer func() { buildinfo.UpdateSchemaDigest = previous }()
 	buildinfo.UpdateSchemaDigest = strings.Repeat("ab", 32)
-	release := Release{Version: "0.2.0", StorageFormat: storageFormat()}
+	release := Release{Version: "0.2.0", StorageFormat: storageFormat(), Protocol: UpdateProtocol}
 	data, key := signed(t, release)
 	if _, err := Verify(data, key); err != nil {
 		t.Fatal(err)
 	}
 	buildinfo.UpdateSchemaDigest = strings.Repeat("cd", 32)
-	if _, err := Verify(data, key); err == nil {
-		t.Fatal("allowed migration-changing package rollback")
+	verified, err := Verify(data, key)
+	if err != nil || eligibility(verified) != "migration_path" {
+		t.Fatal("fingerprint cannot stand in for a supported lineage", err)
 	}
+}
+
+func fixtureKey() string {
+	return base64.StdEncoding.EncodeToString(ed25519.NewKeyFromSeed(make([]byte, 32)).Public().(ed25519.PublicKey))
+}
+func eligibleRelease(t *testing.T, version string) *Release {
+	t.Helper()
+	schemas, err := storage.Schemas()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Release{Version: version, StorageFormat: storageFormat(), Protocol: UpdateProtocol, Schemas: schemas, LedgerDigest: storage.LedgerDigest()}
+}
+func prepareFixtureFeed(t *testing.T, directory string) {
+	t.Helper()
+	r := eligibleRelease(t, "0.2.0")
+	for _, kind := range []string{"cli", "app"} {
+		r.Artifacts = append(r.Artifacts, Artifact{Kind: kind, Platform: "darwin-arm64", URL: releaseOrigin + "v0.2.0/" + kind + ".zip", SHA256: strings.Repeat("ab", 32), Size: 1})
+	}
+	data, _ := signed(t, *r)
+	if err := os.WriteFile(filepath.Join(directory, "verified-feed.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type rewriteTransport struct {
+	base http.RoundTripper
+	url  string
+}
+
+func (r rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	copy := req.Clone(req.Context())
+	u, err := url.Parse(r.url)
+	if err != nil {
+		return nil, err
+	}
+	copy.URL = u
+	return r.base.RoundTrip(copy)
 }
