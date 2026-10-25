@@ -11,7 +11,7 @@ export const groups = {
   storage: ['chat-cache-read-volume.html', 'chat-cache.html', 'projection-store.html', 'chat-cache-ui.html', 'cached-loading.html'],
 };
 export const fixtures = {
-  'domain-repositories.html': 'DONE domain repositories contract',
+  'domain-repositories.html': 'DONE directory storage UI contract',
   'chat-cache-read-volume.html': 'PASS bounded chat reads',
   'chat-cache.html': 'DONE cache contract',
   'projection-store.html': 'DONE projection store contract',

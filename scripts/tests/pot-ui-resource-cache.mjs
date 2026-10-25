@@ -1,6 +1,13 @@
 import {createMemoryProjectionStore} from '../../web/src/state/projection-store.mjs';
 import assert from 'node:assert/strict';
-import {createResourceCache,createResourceReads} from '../../web/src/state/resource-cache.mjs';
+import {createResourceCache,createResourceReads,displayProjection} from '../../web/src/state/resource-cache.mjs';
+import {utf8Bytes} from '../../web/src/state/projection-bytes.mjs';
+for(const text of ['中'.repeat(900000),'😀'.repeat(400000)]){
+  const record=displayProjection('/api/v1/tasks/t',{error:text,result:{text,outcome:{error:text}}});
+  assert(record.cache_truncated);for(const field of [record.error,record.result.text,record.result.outcome.error]){assert(utf8Bytes(field)<=1024*1024);assert(!field.includes('\ufffd'));}
+  const guidance=displayProjection('/api/v1/tasks/t/messages',Array.from({length:20},(_,id)=>({id,text})));
+  assert(guidance.cache_truncated);assert(utf8Bytes(JSON.stringify(guidance.items))<=16*1024*1024);assert(guidance.items.every(row=>utf8Bytes(row.text)<=1024*1024&&row.text.isWellFormed()));
+}
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
 const tick=async()=>{for(let i=0;i<10;i++)await Promise.resolve();};
 let time=0,reads=0;const notices=[],cache=createResourceCache({now:()=>time,onChange:(key,error)=>notices.push({key,error})});

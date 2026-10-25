@@ -1,3 +1,4 @@
+import {messageBytes} from './projection-bytes.mjs';
 const identity=value=>JSON.stringify([value.runtime_id,value.owner_id,value.conversation_id,value.boot_id]);
 
 // Only uncommitted transport work is buffered. Adjacent deltas coalesce while a
@@ -35,7 +36,7 @@ export function createChatSync({cache,key,context=()=>({}),committed,failed,dela
       // history ranges in the durable cache. The current write still finishes.
       if(frame.kind==='reset')pending=[frame];
       const messages=pending.flatMap(value=>value.messages);
-      if(messages.length>512||messages.reduce((bytes,message)=>bytes+message.text.length*2+(message.tool?JSON.stringify(message.tool).length*2:0)+512,0)>32*1024*1024){
+      if(messages.length>512||messages.reduce((bytes,message)=>bytes+messageBytes(message),0)>32*1024*1024){
         closed=true;pending=[];host.clearTimeout(timer);failed(Error('chat_cache_backpressure'));return;
       }
       if(frame.replies.some(reply=>['completed','failed','cancelled','unknown'].includes(reply.state))||frame.messages.some(message=>message.status==='failed'))drain();else schedule();

@@ -30,21 +30,24 @@ else {
         if(name==='task-history-edges')return taskHistoryEdges(page,{origin:server.origin});
         if(name==='switching'){
           const state=await fixture(page,server.origin,'chat-switching.html?conversation=alpha&locale=en&contract=navigation','ALL CHECKS PASSED');
-          await shellRetention(page);
+          const shell=await shellRetention(page);
           const trigger=page.getByRole('button',{name:'Assistant information',exact:true}),dialog=page.getByRole('dialog',{name:'Assistant information',exact:true}),composer=page.locator('#pot-composer');
           try{const draft=await composer.inputValue();await trigger.press('Enter');await dialog.waitFor();
           await composer.click();await dialog.waitFor({state:'hidden'});
           await trigger.press('Enter');await dialog.waitFor();
           await page.evaluate(()=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:'zh-CN'}})));
           const translated=page.getByRole('dialog',{name:'助手信息',exact:true});await translated.waitFor();
+          if(await translated.getByRole('button',{name:'助手设置',exact:true}).innerText()!=='助手设置')throw Error('Open assistant menu retained stale visible locale');
           await translated.getByRole('button',{name:'助手设置',exact:true}).click();await page.locator('.editor-form').waitFor();
+          if(await page.getByLabel('名称',{exact:true}).inputValue()!=='Alpha')throw Error('The profile menu opened another assistant');
+          const settings=await page.evaluate(()=>chatSwitchingIO().settings.slice(-2));if(settings.length!==2||settings.some(read=>read.space!=='one'||read.owner!=='alpha'))throw Error('Profile menu changed its captured settings target: '+JSON.stringify(settings));
           await page.locator('.titlebar').getByRole('button',{name:'返回',exact:true}).click();await composer.waitFor();
           if(await composer.inputValue()!==draft)throw Error('Selected assistant settings lost the draft');
           await page.evaluate(()=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:'en'}})));
           await trigger.press('Enter');await dialog.waitFor();await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});
           await page.waitForFunction(()=>document.querySelector('.assistant-profile-trigger')?.getAttribute('aria-expanded')==='false');
           if(await trigger.getAttribute('aria-expanded')!=='false'||await composer.inputValue()!==draft)throw Error('Assistant menu dismissal lost its accessible state or draft');
-          return {...state,menuKeyboardAndOutsideDismissal:true};
+          return {...state,shell,menuKeyboardAndOutsideDismissal:true,menuLocaleAndTarget:true};
           }finally{await page.evaluate(()=>window.chatSwitchingDispose?.());}
         }
         // The CLI expression derives its origin without loading the application.
@@ -64,24 +67,30 @@ async function shellRetention(page){
   const capture=()=>page.evaluate(()=>{const h=document.querySelector('.history'),top=h.getBoundingClientRect().top;const row=[...h.querySelectorAll('article.message')].find(node=>{const r=node.getBoundingClientRect();return r.height&&r.bottom>top&&r.top<top+h.clientHeight;});return {id:row?.dataset.messageId,offset:row?.getBoundingClientRect().top-top};});
   const anchor=await capture();if(!anchor.id)throw Error('Fold retention has no historical message identity');
   await search.fill('a');await list.hover();await page.mouse.wheel(0,180);await page.waitForFunction(()=>document.querySelector('.assistant-list').scrollTop>0);
-  await page.evaluate(()=>{window.shellRetention={composer:document.querySelector('#pot-composer'),search:document.querySelector('.assistant-search'),list:document.querySelector('.assistant-list'),scroll:document.querySelector('.assistant-list').scrollTop};});
+  await page.evaluate(anchor=>{window.shellRetention={anchor,composer:document.querySelector('#pot-composer'),search:document.querySelector('.assistant-search'),list:document.querySelector('.assistant-list'),scroll:document.querySelector('.assistant-list').scrollTop};},anchor);
   const draft=await composer.inputValue(),reads=await page.evaluate(()=>chatSwitchingIO());
-  const retained=async label=>{
-    await page.waitForFunction(saved=>{const h=document.querySelector('.history'),row=h.querySelector(`[data-message-id="${saved.id}"]`);return row&&Math.abs(row.getBoundingClientRect().top-h.getBoundingClientRect().top-saved.offset)<=3;},anchor);
-    const state=await page.evaluate(()=>({composer:shellRetention.composer===document.querySelector('#pot-composer'),search:shellRetention.search===document.querySelector('.assistant-search'),list:shellRetention.list===document.querySelector('.assistant-list'),query:document.querySelector('.assistant-search').value,scroll:document.querySelector('.assistant-list').scrollTop,savedScroll:shellRetention.scroll}));
-    if(!state.composer||!state.search||!state.list||state.query!=='a'||state.scroll!==state.savedScroll||await composer.inputValue()!==draft)throw Error(label+': '+JSON.stringify({anchor,state}));
+  let worstDrift=0;
+  const retained=async(label,{scroll=true}={})=>{
+    await page.waitForFunction(saved=>{const h=document.querySelector('.history'),row=h.querySelector(`article.message[data-message-id="${saved.id}"]`);return row&&Math.abs(row.getBoundingClientRect().top-h.getBoundingClientRect().top-saved.offset)<=3;},anchor);
+    const state=await page.evaluate(()=>({composer:shellRetention.composer===document.querySelector('#pot-composer'),search:shellRetention.search===document.querySelector('.assistant-search'),list:shellRetention.list===document.querySelector('.assistant-list'),query:document.querySelector('.assistant-search').value,scroll:document.querySelector('.assistant-list').scrollTop,savedScroll:shellRetention.scroll,offset:document.querySelector(`article.message[data-message-id="${shellRetention.anchor.id}"]`).getBoundingClientRect().top-document.querySelector('.history').getBoundingClientRect().top}));
+    worstDrift=Math.max(worstDrift,Math.abs(state.offset-anchor.offset));
+    if(!state.composer||!state.search||!state.list||state.query!=='a'||scroll&&state.scroll!==state.savedScroll||await composer.inputValue()!==draft)throw Error(label+': '+JSON.stringify({anchor,state}));
   };
-  await page.getByRole('button',{name:'Collapse assistant list',exact:true}).click();await page.locator('.assistant-directory').waitFor({state:'hidden'});await retained('Historical fold');
+  await page.getByRole('button',{name:'Collapse assistant list',exact:true}).click();await page.locator('.assistant-directory').waitFor({state:'hidden'});await retained('Historical fold',{scroll:false});
   await page.getByRole('button',{name:'Expand assistant list',exact:true}).click();await retained('Historical expand');
   if(JSON.stringify(await page.evaluate(()=>chatSwitchingIO()))!==JSON.stringify(reads))throw Error('Fold/expand fetched backend data');
   await page.getByRole('button',{name:'Collapse assistant list',exact:true}).click();
   await page.getByRole('button',{name:'Settings',exact:true}).first().click();await history.waitFor({state:'hidden'});await page.goBack();await history.waitFor();
-  if(!await page.getByRole('button',{name:'Expand assistant list',exact:true}).isVisible())throw Error('Settings return lost the collapsed preference');await retained('Collapsed settings return');
-  await page.setViewportSize({width:390,height:800});await page.locator('.narrow-navigation').click();await page.locator('.assistant-directory').waitFor();
-  if(await search.inputValue()!=='a')throw Error('Phone directory lost its search');
-  await page.locator('.assistant-row[data-view-key=\'["one","alpha"]\']').click();await history.waitFor();await page.setViewportSize({width:1280,height:800});
+  if(!await page.getByRole('button',{name:'Expand assistant list',exact:true}).isVisible())throw Error('Settings return lost the collapsed preference');await retained('Collapsed settings return',{scroll:false});
+  await page.setViewportSize({width:390,height:800});await page.waitForFunction(()=>!document.querySelector('.directory-toggle'));await page.locator('.narrow-navigation').click();await page.locator('.assistant-directory').waitFor();
+  const phone=await page.evaluate(()=>({query:document.querySelector('.assistant-search').value,scroll:document.querySelector('.assistant-list').scrollTop,saved:shellRetention.scroll}));if(phone.query!=='a'||phone.scroll!==phone.saved)throw Error('Phone directory lost retained search/scroll: '+JSON.stringify(phone));
+  // The reader scrolls back to the selected row before selecting it. Preserve
+  // that new directory position on the subsequent width change.
+  await list.hover();await page.mouse.wheel(0,-180);await page.waitForFunction(()=>document.querySelector('.assistant-list').scrollTop===0);await page.evaluate(()=>shellRetention.scroll=0);
+  await page.locator('.assistant-row[data-view-key=\'["one","alpha"]\']').click();await history.waitFor();await page.setViewportSize({width:1280,height:800});await page.waitForFunction(()=>!!document.querySelector('.directory-toggle'));
   if(!await page.getByRole('button',{name:'Expand assistant list',exact:true}).isVisible())throw Error('Phone-to-wide return lost the collapsed preference');
   await page.getByRole('button',{name:'Expand assistant list',exact:true}).click();await retained('Phone-to-wide return');
+  return {historicalAnchor:anchor,worstDrift,retainedNodesAndSearch:true,foldBackendReads:0,collapsedSettingsAndPhone:true};
 }
 
 async function focused(page,name,origin){

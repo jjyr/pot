@@ -96,7 +96,7 @@ controls follow the current UI language, including during asynchronous reads.
 
 ## Business repositories
 
-`state/domains/index.mjs` supplies one directory, Tasks, schedules and Providers
+`state/domains/index.mjs` supplies one Chat, directory, Tasks, schedules and Providers
 repository per client. Production and fixtures consume these same interfaces.
 A domain query exposes `watch(listener) -> unsubscribe`, a committed `data`
 value, `status`, `freshness`, `error`, `lastConfirmed` and derived `fresh`.
@@ -110,7 +110,7 @@ in-flight reads remain leased until their consumers finish.
 ```text
 shell / page / background strip
               | watch + typed business command
-    directory | Tasks | schedules | Providers
+    Chat | directory | Tasks | schedules | Providers
               | shared queries + command attempts
          resource / transcript repository
               | transaction commit
@@ -125,6 +125,18 @@ commands. Providers owns the shared catalog, routing and allowance settings,
 connection DTOs and quota monitor commands. Provider catalogs normalize away
 assistant/editor context; sensitive editor revision reads remain transient.
 
+Chat opens a scoped surface session through `chat.open(scope, {surface, context})`.
+`query` restores committed content and saved view hints; `watch` owns transport
+and same-client/cross-tab commit notifications; `refresh` commits an explicit
+snapshot read. `history` chooses indexed coverage or shared HTTP and returns a
+committed window for pagination and reset restoration. `saveView` stores reading,
+layout and disclosure hints against that window. The domain privately owns cache
+construction, persistent identities and IO. UI context supplies the controller's
+anchor/position, and a history validity guard only fences superseded navigation.
+The UI never provides an IO callback or receives a cache/key. Each surface has its
+own reading intent. Closing one leaves shared history IO available to another;
+retire, scope change and deletion fence late publication and cache resurrection.
+
 UI components keep focus, unsaved values, expanded disclosures, filters and the
 history sentinel. They pass business inputs to typed commands instead of building
 domain URLs or repeating mutation/refresh sequences. Command attempts share
@@ -135,7 +147,7 @@ a local commit failure retries that accepted receipt without sending the command
 again. Provider monitor revisions and exact-intent recovery retain their existing
 compare-and-swap behavior.
 
-Permissions, pairing/authentication, binary resources, conversation streaming,
+Permissions, pairing/authentication, binary resources,
 Topology and detailed Usage retain their specialized interfaces. These combine
 live authority, transport lifecycle or route-specific aggregation that is outside
 the migrated display domains; they still use the shared storage boundary where
@@ -199,7 +211,7 @@ bookmarks and active-tool checkpoint commit with their changed message records.
 The current projection holds at most 640 messages within the shared 16 MiB
 window budget. Each Task retains up to 2048 records / 32 MiB on disk, with 64 MiB
 across Tasks. Message text, tool arguments/result and combined output streams are
-bounded to about one million characters each; truncated cached output is labeled.
+bounded to 1 MiB of UTF-8 content each; truncated cached output is labeled.
 Task result metadata and retained guidance also have bounded display projections;
 guidance keeps at most 256 entries within 16 MiB, with the same truncation notice.
 The server retains the original output. A visible upper history boundary automatically

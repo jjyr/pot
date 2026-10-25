@@ -2,6 +2,7 @@ import {mergeUIFrame} from './chat-history.mjs';
 import {translate} from '../locales/messages.mjs';
 import {createChatCache} from './chat-cache.mjs';
 import {createTaskTranscript,appendTaskEvents} from './task-transcript.mjs';
+import {truncateUTF8,utf8Bytes} from './projection-bytes.mjs';
 const MAX_TEXT=1024*1024;
 // Copy only the bounded active projection. Strings remain shared; mutating a
 // working tool/compaction must never alter a previously committed view.
@@ -11,11 +12,11 @@ function working(state){
   return {...state,messages,active:byID.get(state.active?.id)||null,tools:new Map([...state.tools].flatMap(([id,message])=>byID.has(message.id)?[[id,byID.get(message.id)]]:[])),inputs:new Map(state.inputs)};
 }
 function boundMessage(message){
-  if(message.text.length>MAX_TEXT){message.text=message.text.slice(-MAX_TEXT);message.cache_truncated=true;}
+  const text=truncateUTF8(message.text,MAX_TEXT,{tail:true});if(text!==message.text){message.text=text;message.cache_truncated=true;}
   if(message.tool){
     const tool=message.tool;let left=MAX_TEXT;
-    tool.output=(tool.output||[]).slice().reverse().flatMap(chunk=>{if(left<=0){message.cache_truncated=true;return [];}const text=chunk.text.slice(-left);left-=text.length;if(text.length!==chunk.text.length)message.cache_truncated=true;return text?[{...chunk,text}]:[];}).reverse();
-    for(const field of ['args','result']){const value=JSON.stringify(tool[field]);if(value?.length>MAX_TEXT){tool[field]=value.slice(0,MAX_TEXT);message.cache_truncated=true;}}
+    tool.output=(tool.output||[]).slice().reverse().flatMap(chunk=>{if(left<=0){message.cache_truncated=true;return [];}const text=truncateUTF8(chunk.text,left,{tail:true});left-=utf8Bytes(text);if(text!==chunk.text)message.cache_truncated=true;return text?[{...chunk,text}]:[];}).reverse();
+    for(const field of ['args','result']){const value=typeof tool[field]==='string'?tool[field]:JSON.stringify(tool[field]);if(value&&utf8Bytes(value)>MAX_TEXT){tool[field]=truncateUTF8(value,MAX_TEXT);message.cache_truncated=true;}}
   }
   return message;
 }
@@ -31,10 +32,12 @@ export function createTaskRepository(client){
   const identity=(task,scope)=>({key:JSON.stringify([client.runtime.runtime_id,scope.space,scope.owner,task.id]),owner:JSON.stringify([scope.space,scope.owner,task.id]),conversation:task.run_id||task.id});
   async function read(task,scope){
     const {key}=identity(task,scope),saved=await stored(cache.read(key));if(!saved||task.run_id&&saved.snapshot.conversation_id!==task.run_id)return null;
-    const checkpoint=saved.checkpoint||{},messages=saved.snapshot.messages.map(message=>({...message}));
+    const checkpoint=saved.checkpoint||{};let messages=saved.snapshot.messages.map(message=>({...message}));
     const ids=new Set(messages.map(message=>message.id)),missing=[checkpoint.active,...(checkpoint.tools||[]).map(([,id])=>id)].filter(id=>id&&!ids.has(id));
     if(missing.length>32)throw Error('task_checkpoint_dependencies');
-    const context=missing.length?await stored(cache.readMessages(key,missing)):[];messages.push(...context.map(message=>({...message,context_only:true})));const byID=new Map(messages.map(message=>[message.id,message]));
+    const context=missing.length?await stored(cache.readMessages(key,missing)):[];messages.push(...context.map(message=>({...message,context_only:true})));
+    messages=mergeUIFrame(null,{kind:'reset',cursor:saved.snapshot.cursor,messages,replies:[],history:{}}).messages;
+    const byID=new Map(messages.map(message=>[message.id,message]));
     return {run_id:saved.snapshot.conversation_id,cursor:Number(saved.snapshot.cursor),messages,active:byID.get(checkpoint.active)||null,tools:new Map((checkpoint.tools||[]).flatMap(([id,message])=>byID.has(message)?[[id,byID.get(message)]]:[])),inputs:new Map(checkpoint.inputs||[]),firstSequence:checkpoint.firstSequence||messages[0]?.sequence,has_more:BigInt(messages[0]?.sequence||0)>BigInt(checkpoint.firstSequence||messages[0]?.sequence||0),cache_truncated:messages.some(message=>message.cache_truncated)};
   }
   return {

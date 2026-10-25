@@ -18,7 +18,7 @@ async function run(){
   results.textContent='';
   for(const taskDelay of [350]){
     let scope={space:'one',owner:'alpha'},subscription,taskCount=0;
-    const counts={alpha:80,beta:12},versions={alpha:1,beta:1},historyReads=[],requestCalls=[];
+    const counts={alpha:80,beta:12},versions={alpha:1,beta:1},historyReads=[],requestCalls=[],settingsReads=[];
     const snapshot=owner=>{
       const count=counts[owner],messages=Array.from({length:count},(_,index)=>({id:`${owner}-${index+1}`,sequence:String(index+1),role:index%2?'assistant':'user',...(index%2?{reply_to:`${owner}-${index}`} : {}),...(index===count-2?{references:[{message_id:`${owner}-2`,quote:'Jump to the earlier answer'}]}:{}),text:`${owner} message ${index+1}. `+'Synthetic chat text for checking assistant navigation. '.repeat(10),status:'complete'}));
       return {kind:'reset',base_cursor:0,runtime_id:'fixture',boot_id:'boot',owner_id:JSON.stringify(['one',owner]),conversation_id:owner,cursor:String(versions[owner]),replies:[],running:false,turn_id:null,messages,history:{before:'1',after:String(count),has_more:false,has_newer:false}};
@@ -26,17 +26,18 @@ async function run(){
     const client={chatCacheName:'pot-switching-'+crypto.randomUUID(),production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>scope={...scope,...value},
       changes:()=>()=>{},subscribe(receive,status){const owner=scope.owner,record={owner,receive};subscription=record;const timer=setTimeout(()=>{status('connected');receive(snapshot(owner));record.ready=true;},200);return()=>clearTimeout(timer);},
       history:async query=>{historyReads.push(query);return snapshot(scope.owner);},
-      async request(path){
+      async request(path,options={}){
         requestCalls.push(path);
         const url=new URL(path,location.href);
         if(url.pathname==='/api/v1/spaces')return {active_space_id:'one',items:[{id:'one',name:'Fixture',control_id:'fixture',connected:true}]};
         if(url.pathname==='/api/v1/assistants')return {items:[{id:'alpha',name:'Alpha'},{id:'beta',name:'Beta'},...Array.from({length:24},(_,i)=>({id:'extra-'+i,name:'Assistant '+i}))].map(item=>({...item,capabilities:{version:1,operations:['chat.read','chat.send','assistant.configure','task.list']}}))};
+        if(url.pathname==='/api/v1/agent'||url.pathname==='/api/v1/instructions'){settingsReads.push({path:url.pathname,space:options.space,owner:options.owner});return url.pathname.endsWith('/agent')?{generation:1,revision:0,config:{model:'fixture'}}:{text:'',revision:'fixture'};}
         if(url.pathname==='/api/v1/tasks/query'){await pause(taskDelay);return {items:Array.from({length:taskCount},(_,index)=>({id:`task-${index}`,title:`Background task ${index+1}`,phase:'running',assistant_id:scope.owner}))};}
         return {items:[],pending:[],policy:{}};
       },
     };
     const dispose=mountApp(root,client);
-    window.chatSwitchingIO=()=>({requests:requestCalls.length,history:historyReads.length});
+    window.chatSwitchingIO=()=>({requests:requestCalls.length,history:historyReads.length,settings:settingsReads.slice()});
     const history=()=>root.querySelector('.history');
     const bottom=()=>history().scrollHeight-history().clientHeight-history().scrollTop<2;
     const select=async(owner,{beforeSnapshot=false}={})=>{

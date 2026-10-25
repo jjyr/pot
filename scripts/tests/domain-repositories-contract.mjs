@@ -3,6 +3,7 @@ import {createProductionClient} from '../../web/src/adapters/production.mjs';
 import {createProjectionStore} from '../../web/src/state/projection-store.mjs';
 import {domainsFor} from '../../web/src/state/domains/index.mjs';
 import {createTaskRepository} from '../../web/src/state/task-repository.mjs';
+import {messageBytes,utf8Bytes} from '../../web/src/state/projection-bytes.mjs';
 const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {resolve,promise};};
 const wait=async test=>{for(let i=0;i<500;i++){if(await test())return;await new Promise(done=>setTimeout(done,10));}throw Error('Domain contract timed out');};
 const remove=name=>new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name);request.onsuccess=resolve;request.onerror=()=>reject(request.error);});
@@ -32,6 +33,27 @@ export async function domainRepositoriesContract(report=()=>{}){
   const taskClient={chatCacheName:taskName,runtime:{runtime_id:'task',boot_id:'boot'},request:async(path)=>{const after=Number(new URL(path,location.href).searchParams.get('after'));requests.push(after);const rows=events.slice(after,after+100);return {events:rows,has_more:after+rows.length<events.length};}};
   const repository=createTaskRepository(taskClient);
   try{
+    const bigTask={id:'multibyte',run_id:'run'},bigEvents=[];
+    const event=update=>bigEvents.push({sequence:bigEvents.length+1,event:{update}});
+    for(let i=0;i<12;i++){event({type:'message_started',id:'big'+i});event({type:'text_delta',text:'中'.repeat(900000)});event({type:'message_finished'});}
+    await repository.append(bigTask,scope,{events:bigEvents});const big=await repository.read(bigTask,scope);
+    check(big.cache_truncated&&big.messages.every(message=>utf8Bytes(message.text)<=1024*1024&&message.text.isWellFormed()),'Task CJK fields truncate at 1 MiB UTF-8 after a real IndexedDB commit with a visible truncation marker');
+    check(big.messages.reduce((sum,message)=>sum+messageBytes(message),0)<=16*1024*1024,'Task committed multibyte window stays within 16 MiB UTF-8 JSON accounting');
+    for(let i=0;i<2;i++){
+      event({type:'tool_started',id:'big-tool'+i,name:'synthetic',args:{text:'😀'.repeat(400000)}});
+      event({type:'tool_output',id:'big-tool'+i,stream:'stdout',text:'中'.repeat(400000)});
+      event({type:'tool_output',id:'big-tool'+i,stream:'stderr',text:'😀'.repeat(400000)});
+      if(i===0)event({type:'tool_finished',id:'big-tool'+i,result:{text:'中'.repeat(900000)}});
+    }
+    const tools=await repository.append(bigTask,scope,{events:bigEvents}),toolRows=tools.messages.filter(message=>message.tool);
+    check(toolRows.length===2&&toolRows.every(message=>message.cache_truncated&&message.tool.output.reduce((sum,chunk)=>sum+utf8Bytes(chunk.text),0)<=1024*1024&&message.tool.output.every(chunk=>chunk.text.isWellFormed())&&utf8Bytes(typeof message.tool.args==='string'?message.tool.args:JSON.stringify(message.tool.args))<=1024*1024),'Task emoji arguments and combined tool streams obey UTF-8 limits with truncation markers');
+    check(utf8Bytes(toolRows[0].tool.result)<=1024*1024&&tools.tools.has('big-tool1')&&utf8Bytes(JSON.stringify(tools.messages))<=16*1024*1024,'Task tool result truncation preserves the active tool dependency within the real JSON window budget');
+    const boundedArgs=toolRows[1].tool.args;event({type:'tool_state',id:'big-tool1',phase:'running'});
+    const continued=await repository.append(bigTask,scope,{events:bigEvents});check(continued.tools.get('big-tool1').tool.args===boundedArgs,'Later tool events do not repeatedly JSON-escape already bounded arguments');
+    const historical=await repository.earlier(bigTask,scope,tools.messages.find(message=>!message.context_only).sequence,{limit:1});
+    check(historical?.messages.length===1&&historical.messages[0].cache_truncated,'Multibyte byte eviction still allows committed earlier output to load with its truncation notice');
+    const huge=await repository.append({id:'single-huge',run_id:'run'},scope,{events:[{sequence:1,event:{update:{type:'message_started',id:'huge'}}},{sequence:2,event:{update:{type:'text_delta',text:'中'.repeat(6*1024*1024)}}}]});
+    check(huge.active&&huge.cache_truncated&&utf8Bytes(huge.active.text)<=1024*1024&&utf8Bytes(JSON.stringify(huge.messages))<=16*1024*1024,'A single Task message larger than the window budget retains its active dependency and explicit content truncation');
     for(let offset=0;offset<events.length;offset+=100)await repository.append(task,scope,{events:events.slice(offset,offset+100)});
     const older=await repository.earlier(task,scope,901);check(older.messages.length===80&&requests[0]===0&&requests.length===9,'First evicted page reconstructs the bounded prefix through after-only HTTP');
     const count=requests.length,adjacent=await repository.earlier(task,scope,older.messages[0].sequence);check(adjacent.messages.length===80&&requests.length===count,'Neighboring historical page reuses committed backfill without replay from zero');

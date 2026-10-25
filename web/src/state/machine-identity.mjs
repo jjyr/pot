@@ -20,7 +20,7 @@ export function machinePresentation(client){
     revision:0,
     async load(scope={}){
       const space=scope.space||client.scope?.().space||'',identity=key(space);
-      try{const runtime=await (client.read||client.request)('/api/v1/runtime',{...scope,space,owner:''});if(identity===key(space)){const machine=runtimeMachine(runtime),items=machine?[machine]:[];if(JSON.stringify(items)!==JSON.stringify(inventory.get(identity)))value.revision++;inventory.set(identity,items);}}catch(error){if(scope.signal?.aborted)throw error;/* Retain the last host metadata while offline. */}
+      try{const runtime=await (client.read||client.request)('/api/v1/runtime',{...scope,space,owner:''});if(identity===key(space)){const machine=runtimeMachine(runtime),items=machine?[machine]:[];if(JSON.stringify(items)!==JSON.stringify(inventory.get(identity)))value.revision++;inventory.set(identity,items);}}catch(error){if(error.storage||error.name==='AbortError'||scope.signal?.aborted)throw error;/* Retain the last host metadata while offline. */}
       return inventory.get(identity)||[];
     },
     label(id,scope,locale){if(!id)return '';const source=(client.assistants||[]).find(item=>item.id===scope?.owner&&item.space_id===scope?.space)?.origin;if(source)return source.host||translate(locale,'machine.unavailable');const machine=(inventory.get(key(scope?.space||client.scope?.().space||''))||[]).find(item=>(item.runtime_id||item.id)===id);return machineHostLabel(machine)||translate(locale,'machine.unavailable');},

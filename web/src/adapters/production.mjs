@@ -195,8 +195,8 @@ export async function createProductionClient({desktop = false, base = '', resour
       link.href=`${base}${url}`;link.download=path.split('/').at(-1);link.hidden=true;document.body.append(link);
       try{link.click();}finally{link.remove();}
     },
-    subscribe(onSnapshot, onStatus = () => {}) {
-      const scope = {...context};
+    subscribe(onSnapshot, onStatus = () => {}, options = {}) {
+      const scope = {...context,...options};
       let active = true, token;
       const deliver = value => {
         if (!active) return;
