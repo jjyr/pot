@@ -1,5 +1,6 @@
 import {translate} from '../locales/messages.mjs';
 import {createProjectionStore} from './projection-store.mjs';
+import {messageBytes,truncateUTF8} from './projection-bytes.mjs';
 // Memory-only resource reads. Cancellation belongs to a consumer, never shared IO.
 export function createResourceCache({now=Date.now,limit=256,onChange=()=>{}}={}) {
   const entries=new Map();
@@ -207,14 +208,14 @@ export function displayProjection(path,value){
   const redact=value=>{if(Array.isArray(value))return value.map(redact);if(!value||typeof value!=='object')return value;const result={};for(const [key,item]of Object.entries(value)){if(key==='default_credential'){result[key]=!!item;continue;}if(/^(api_key|access_token|refresh_token|client_secret|secret|secrets|credential|credentials|authorization|authorization_url|user_code|invitation|private_key|password|token|owner_key)$/i.test(key))continue;result[key]=redact(item);}return result;};
   if(/^\/api\/v1\/tasks\/[^/]+$/.test(base)){
     const result=value?.result;let truncated=!!value?.cache_truncated;
-    const text=value=>{if(typeof value==='string'&&value.length>1024*1024){truncated=true;return value.slice(-1024*1024);}return value;};
+    const text=value=>{if(typeof value!=='string')return value;const bounded=truncateUTF8(value,1024*1024,{tail:true});if(bounded!==value)truncated=true;return bounded;};
     const error=text(value?.error),resultText=text(result?.text),resultError=text(result?.outcome?.error);
     return {...value,error,...(result?{result:{...result,text:resultText,...(result.outcome?{outcome:{...result.outcome,error:resultError}}:{})}}:{}),...(truncated?{cache_truncated:true}:{})};
   }
   if(/^\/api\/v1\/tasks\/[^/]+\/messages$/.test(base)){
     const items=Array.isArray(value)?value:value?.items||[],selected=[];let bytes=0,truncated=false;
     for(const input of items.slice().reverse()){
-      const text=typeof input.text==='string'?input.text.slice(-1024*1024):input.text,row={...input,text},size=new TextEncoder().encode(JSON.stringify(row)).length;
+      const text=typeof input.text==='string'?truncateUTF8(input.text,1024*1024,{tail:true}):input.text,row={...input,text},size=messageBytes(row);
       if(selected.length===256||bytes+size>16*1024*1024){truncated=true;break;}
       if(text!==input.text)truncated=true;selected.push(row);bytes+=size;
     }

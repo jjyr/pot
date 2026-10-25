@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {mergeUIFrame,mergeHistoryPage,HISTORY_CACHE_LIMIT} from '../../web/src/state/chat-history.mjs';
 import {createConversationState,beginSubscription,acceptSnapshot} from '../../web/src/state/conversation.mjs';
 import {normalizeSnapshot} from '../../web/src/adapters/production.mjs';
+import {messageBytes,truncateUTF8,utf8Bytes} from '../../web/src/state/projection-bytes.mjs';
 const message=(n,text=`message ${n}`,version=10)=>({id:`m${n}`,conversation_id:'chat',sequence:String(n),version,role:n%2?'user':'assistant',reply_to:n%2?undefined:`m${n-1}`,text,status:'complete'});
 const frame=(cursor,kind,messages,base=0)=>({runtime_id:'r',owner_id:'a',conversation_id:'chat',boot_id:'boot',cursor:String(cursor),kind,base_cursor:base,replies:[],running:false,turn_id:null,messages,history:{before:messages[0]?.sequence||'',after:messages.at(-1)?.sequence||''}});
 let current=mergeUIFrame(null,frame(10,'reset',[message(9),message(10)]));
@@ -53,3 +54,19 @@ const unchanged=diskState.snapshot.messages[0];
 acceptSnapshot(diskState,frame(2,'reset',[message(1,'unchanged',1),message(2,'streamed',2)]),diskEpoch,{committed:true});
 assert.equal(diskState.snapshot.messages[0],unchanged,'Committed disk reads retain the active identity of unchanged rows');
 assert.equal(diskState.snapshot.messages[1].text,'streamed');
+
+const large=Array.from({length:12},(_,i)=>message(i+1,'中'.repeat(900000)));
+const multibyte=mergeUIFrame(null,frame(12,'reset',large));
+assert(multibyte.messages.reduce((sum,row)=>sum+messageBytes(row),0)<=16*1024*1024,'CJK windows obey the same UTF-8 JSON byte accounting as IndexedDB');
+assert(multibyte.history.has_more,'Byte eviction leaves earlier history loadable');
+assert.throws(()=>mergeUIFrame(null,frame(1,'reset',[message(1,'中'.repeat(6*1024*1024))])),/chat_cache_capacity/,'One oversized row cannot bypass the window budget');
+const active={...message(13,'😀'.repeat(1000)),status:'streaming'},dependency={...message(0,'input'),context_only:true};
+const anchored=mergeUIFrame(null,frame(13,'reset',[dependency,...large,active]),'1');
+assert(anchored.messages.some(row=>row.id===active.id)&&anchored.messages.some(row=>row.id===dependency.id),'Byte eviction retains active output and context dependencies');
+for(const text of ['中'.repeat(50),'😀'.repeat(50),'a中😀'.repeat(50)])for(const tail of [false,true])for(const limit of [0,1,2,3,4,7,17,128]){
+  const bounded=truncateUTF8(text,limit,{tail});assert(utf8Bytes(bounded)<=limit);assert(bounded.isWellFormed());assert(!bounded.includes('\ufffd'));assert(tail?text.endsWith(bounded):text.startsWith(bounded));
+}
+console.log('UTF-8 bounds: CJK/emoji windows, active dependencies, oversized-row rejection and legal prefix/tail truncation passed');
+const mutable=message(1,'initial');delete mutable.version;
+mergeUIFrame(null,frame(1,'reset',[mutable]));mutable.text='中'.repeat(6*1024*1024);
+assert.throws(()=>mergeUIFrame(null,frame(2,'reset',[mutable])),/chat_cache_capacity/,'Mutated raw Task backfill rows must not reuse an earlier smaller byte weight');

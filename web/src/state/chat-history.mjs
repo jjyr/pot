@@ -1,20 +1,30 @@
 // UI-only bounded projection. No UI window is ever submitted to the agent.
+import {messageBytes} from './projection-bytes.mjs';
+import {activeTool} from './tool-calls.mjs';
 export const HISTORY_CACHE_LIMIT = 640;
 const CACHE_BYTES = 16 * 1024 * 1024;
 const sequence = message => BigInt(message.sequence || 0);
 const weights = new WeakMap();
 function weight(message) {
-  if (!weights.has(message)) weights.set(message, message.text.length * 2 + (message.tool ? JSON.stringify(message.tool).length * 2 : 0) + (message.correspondence ? JSON.stringify(message.correspondence).length * 2 : 0) + 512);
-  return weights.get(message);
+  // Raw Task backfill rows mutate as events arrive; only versioned committed
+  // rows can reuse an identity's encoded size across projection merges.
+  if(message.version===undefined)return messageBytes(message);
+  const saved=weights.get(message);if(saved?.version===message.version)return saved.bytes;
+  const bytes=messageBytes(message);weights.set(message,{version:message.version,bytes});return bytes;
 }
 function bounded(messages, anchor) {
   let bytes = messages.reduce((sum, message) => sum + weight(message), 0);
   const pivot = BigInt(anchor || messages.at(-1)?.sequence || 0);
   while (messages.length > 1 && (messages.length > HISTORY_CACHE_LIMIT || bytes > CACHE_BYTES)) {
     const first = sequence(messages[0]), last = sequence(messages.at(-1));
-    const index = pivot - first > last - pivot ? 0 : messages.length - 1;
+    const preferred = pivot - first > last - pivot ? 0 : messages.length - 1;
+    const pinned=message=>message.context_only||message.status==='streaming'||['thinking','streaming'].includes(message.phase)||activeTool(message.tool);
+    let index=preferred;
+    if(pinned(messages[index]))index=preferred===0?messages.findIndex(message=>!pinned(message)):messages.findLastIndex(message=>!pinned(message));
+    if(index<0)throw Error('chat_cache_capacity');
     bytes -= weight(messages[index]); messages.splice(index, 1);
   }
+  if(bytes>CACHE_BYTES)throw Error('chat_cache_capacity');
   return messages;
 }
 function combine(previous, incoming, anchor, {replace = false, page = false} = {}) {
@@ -39,6 +49,7 @@ function combine(previous, incoming, anchor, {replace = false, page = false} = {
   }
   let updateBytes=[...updates.values()].reduce((sum,message)=>sum+weight(message),0);
   while(updates.size>1&&updateBytes>CACHE_BYTES){const key=updates.keys().next().value;updateBytes-=weight(updates.get(key));updates.delete(key);}
+  if(updateBytes>CACHE_BYTES)throw Error('chat_cache_capacity');
   const messages = bounded([...entries.values()].sort((a, b) => sequence(a) < sequence(b) ? -1 : sequence(a) > sequence(b) ? 1 : 0), anchor);
   const rows = messages.filter(message => !message.context_only);
   const latest = [previous?._latest || '0', incoming._latest || '0', incoming.history?.after || '0', ...incoming.messages.map(message => message.sequence || '0')].reduce((a, b) => BigInt(a) > BigInt(b) ? a : b);

@@ -1,10 +1,10 @@
 import {bindCacheLifecycle} from './cache-lifecycle.mjs';
 import {createIndexedStore,idbRequest as request,indexedRows} from './indexed-store.mjs';
 import {mergeUIFrame,mergeHistoryPage} from './chat-history.mjs';
+import {messageBytes} from './projection-bytes.mjs';
 
 const sequence=message=>BigInt(message.sequence||0);
 const order=message=>String(message.sequence||0).padStart(24,'0');
-const bodyBytes=message=>new TextEncoder().encode(JSON.stringify(message)).length+256;
 const latest=(a='0',b='0')=>BigInt(a)>BigInt(b)?a:b;
 const sameOwner=(a,b)=>a.runtime_id===b.runtime_id&&a.owner_id===b.owner_id&&a.conversation_id===b.conversation_id;
 
@@ -13,10 +13,10 @@ function hydrate(meta, records, window=meta?.window) {
   const byID=new Map(records.map(row=>[row.id,row]));
   const messages=(window||[]).flatMap(item=>{const row=byID.get(item.id);return row?[{...row.message,context_only:!!item.context_only}]:[];});
   const normal=messages.filter(message=>!message.context_only),ids=new Set(messages.map(message=>message.id));
-  return {...meta.projection,kind:'reset',base_cursor:0,messages,
+  return mergeUIFrame(null,{...meta.projection,kind:'reset',base_cursor:0,messages,
     replies:meta.replies.filter(reply=>ids.has(reply.input_id)),
     history:{before:normal[0]?.sequence||'',after:normal.at(-1)?.sequence||'',has_more:sequence(normal[0]||{})>1n,has_newer:sequence(normal.at(-1)||{})<BigInt(meta.latest)},
-    _latest:meta.latest,_updates:new Map((meta.updates||[]).flatMap(id=>byID.has(id)?[[id,byID.get(id).message]]:[]))};
+    _latest:meta.latest,_updates:new Map((meta.updates||[]).flatMap(id=>byID.has(id)?[[id,byID.get(id).message]]:[]))});
 }
 function capture(meta, snapshot) {
   const {messages,history,_updates,_latest,raw,...projection}=snapshot;
@@ -84,7 +84,7 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
     meta.count||=0;meta.bytes||=0;
     for(const message of messages){
       const old=byID.get(message.id),current=old&&(old.message.version||0)>(message.version||0)?{...old.message,context_only:message.context_only}:message;
-      const row={key,id:current.id,order:order(current),message:current,normal:old?.normal||!current.context_only,bytes:bodyBytes(current),used:Date.now()};
+      const row={key,id:current.id,order:order(current),message:current,normal:old?.normal||!current.context_only,bytes:messageBytes(current),used:Date.now()};
       store.put(row);meta.count+=old?0:1;meta.bytes+=row.bytes-(old?.bytes||0);byID.set(row.id,row);accepted.push(current);
     }
     return accepted;
@@ -184,7 +184,7 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
       const limit=Math.max(1,Math.min(640,query.limit||80)),options={accept:row=>row.normal,limit};let selected;
       if(query.before)selected=(await indexedRows(index,bounds(key,range.before,pivot),{...options,direction:'prev'})).reverse();
       else if(query.after)selected=await indexedRows(index,bounds(key,pivot,range.after),options);
-      else if(target){const earlier=(await indexedRows(index,bounds(key,range.before,BigInt(target.message.sequence)-1n),{...options,direction:'prev',limit:Math.floor(limit/2)})).reverse();const newer=await indexedRows(index,bounds(key,target.message.sequence,range.after),{...options,limit:limit-earlier.length});selected=[...earlier,...newer];}
+      else if(target){const earlier=sequence(target.message)>BigInt(range.before)?(await indexedRows(index,bounds(key,range.before,sequence(target.message)-1n),{...options,direction:'prev',limit:Math.floor(limit/2)})).reverse():[];const newer=await indexedRows(index,bounds(key,target.message.sequence,range.after),{...options,limit:limit-earlier.length});selected=[...earlier,...newer];}
       else selected=(await indexedRows(index,bounds(key,range.before,range.after),{...options,direction:'prev'})).reverse();
       if(!selected.length)return null;const messages=await dependencies(tx,key,selected);if(!messages)return null;
       return {boot_id:meta.projection.boot_id,conversation_id:meta.projection.conversation_id,cursor:meta.projection.cursor,messages,...(checkpoints?{checkpoint:await request(tx.objectStore('taskCheckpoints').get(key))}:{}),history:{before:selected[0].message.sequence,after:selected.at(-1).message.sequence,has_more:sequence(selected[0].message)>1n,has_newer:sequence(selected.at(-1).message)<BigInt(meta.latest)}};

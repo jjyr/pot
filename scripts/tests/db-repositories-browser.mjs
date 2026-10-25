@@ -13,7 +13,7 @@ if(!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(origin||''))throw Error('A lo
 const browser=await chromium.launch({executablePath:process.env.POT_CHROMIUM_EXECUTABLE,headless:true,args:['--no-sandbox']});
 const directory=process.env.POT_DB_SCREENSHOTS;
 try{
-  for(const [path,done]of [['domain-repositories.html','DONE domain repositories contract'],['chat-cache-read-volume.html','PASS bounded chat reads'],['chat-cache.html','DONE cache contract'],['projection-store.html','DONE projection store contract'],['chat-cache-ui.html','DONE'],['cached-loading.html','ALL CHECKS PASSED']]){
+  for(const [path,done]of [['domain-repositories.html','DONE directory storage UI contract'],['chat-cache-read-volume.html','PASS bounded chat reads'],['chat-cache.html','DONE cache contract'],['projection-store.html','DONE projection store contract'],['chat-cache-ui.html','DONE'],['cached-loading.html','ALL CHECKS PASSED']]){
     if(process.env.POT_DB_FIXTURE&&path!==process.env.POT_DB_FIXTURE)continue;
     const context=await browser.newContext({serviceWorkers:'block',viewport:{width:1280,height:800}}),page=await context.newPage();
     try{

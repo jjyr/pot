@@ -34,6 +34,14 @@ revokes stale selection eligibility; query subscribers consume only committed
 values. Storage failure retains the prior projection and retries the pending
 invalidation before another refresh.
 
+Shared domain queries serialize reads and coalesce changes into one later read.
+An explicit forced refresh upgrades that queued read to authoritative IO and
+waits for its own batch, including its commit or error. Commit notifications
+during that batch may schedule another local query without extending the forced
+call's wait. Storage failures remain explicit errors with the prior committed
+projection available for retry; directory and host metadata loaders must not
+turn them into successful offline results.
+
 Change callbacks retain their originating scope and boot identity. Each view
 declares the domains and scope it reads; unrelated notifications do not refresh
 it. General preferences and build information remain mounted without requesting
@@ -169,6 +177,14 @@ unknown or evicted intervals are fetched again. Reset gaps invalidate cached
 interval provenance. Versions fence late pages, transactions serialize writers,
 and retired boot identities cannot restore an earlier projection. This is a
 rebuildable UI cache, never the authoritative conversation store or a send queue.
+
+Window and persistent body budgets count UTF-8 encoded message JSON plus a
+256-byte allowance per row. Task text, combined tool output text, serialized
+arguments and results each retain at most 1 MiB of UTF-8 content; truncation keeps
+complete Unicode characters and marks the cached output as bounded. Window
+eviction retains active output and context dependencies. An oversized row or
+dependency set that cannot fit fails explicitly rather than publishing an
+over-budget projection.
 
 The reducer coalesces short stream bursts in a 16 ms window and drains terminal
 and error frames promptly. Its one active committed projection is checked against

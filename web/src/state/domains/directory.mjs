@@ -13,8 +13,8 @@ export function createDirectoryDomain(client,{resources,queries,commands}){
       const own=local(items,space,space.connected===false);
       try{const links=await resources.read('/api/v1/agent-links',{space:space.id,owner:'',authoritative:force}),fresh=!resources.state(links)||resources.state(links).freshness==='fresh';const linked=projectLinkedAssistants(links,space).map(item=>fresh?item:retained(item));
         for(const item of previous.filter(item=>item.origin&&item.space_id===space.id&&!linked.some(current=>current.id===item.id))){if(links.items?.some(link=>link.id===item.origin.link_id&&link.status!=='connected'))linked.push({...item,offline:true});}return [...own,...linked];
-      }catch{partial=true;return [...own,...previous.filter(item=>item.origin&&item.space_id===space.id).map(item=>({...retained(item),offline:true}))];}
-    }catch{partial=true;const cached=previous.filter(item=>item.space_id===space.id);return (cached.length?cached:local(space.assistants||[],space,true)).map(item=>({...retained(item),offline:true}));}}));
+      }catch(error){if(error.storage||error.name==='AbortError')throw error;partial=true;return [...own,...previous.filter(item=>item.origin&&item.space_id===space.id).map(item=>({...retained(item),offline:true}))];}
+    }catch(error){if(error.storage||error.name==='AbortError')throw error;partial=true;const cached=previous.filter(item=>item.space_id===space.id);return (cached.length?cached:local(space.assistants||[],space,true)).map(item=>({...retained(item),offline:true}));}}));
     previous=results.flat();client.assistants=previous;
     return {data:{spaces,assistants:previous,activeSpace:catalog.active_space_id||spaces[0].id,partial},freshness:partial?'stale':previous.some(item=>item.retained)?'retained':'fresh'};
   },{invalidationForce:false,topics:['spaces','assistants','assistant-mail','agent-links','conversation','runtime','permissions','tasks','runner','machines']});
