@@ -101,9 +101,72 @@ def cli_installation(extracted):
     return installation
 
 
+def verify_oci_metadata(index, read_blob, version, revision=None):
+    """Validate the same image metadata for an OCI archive or anonymous registry."""
+    platforms = set()
+    images = []
+    layers = {}
+
+    def blob(descriptor):
+        digest = descriptor["digest"]
+        if not re.fullmatch(r"sha256:[a-f0-9]{64}", digest):
+            raise ValueError("invalid OCI metadata digest")
+        data = read_blob(digest)
+        if (
+            len(data) != descriptor["size"]
+            or "sha256:" + hashlib.sha256(data).hexdigest() != digest
+        ):
+            raise ValueError("OCI metadata checksum/size mismatch")
+        return json.loads(data)
+
+    def visit(manifest, declared=None, descriptor=None):
+        if "manifests" in manifest:
+            for child in manifest["manifests"]:
+                platform = child.get("platform", {})
+                # BuildKit's separate provenance attestations are not runnable images.
+                if platform.get("os") != "unknown":
+                    visit(blob(child), platform, child)
+        elif "config" in manifest:
+            config = blob(manifest["config"])
+            labels = config.get("config", {}).get("Labels", {})
+            if labels.get("org.opencontainers.image.source") != "https://github.com/jjyr/pot":
+                raise ValueError("OCI image source repository does not match release")
+            if labels.get("org.opencontainers.image.version") != version:
+                raise ValueError("OCI image version does not match release version")
+            if revision and labels.get("org.opencontainers.image.revision") != revision:
+                raise ValueError("OCI image revision does not match validated commit")
+            platform = (config.get("os"), config.get("architecture"))
+            if declared and (declared.get("os"), declared.get("architecture")) != platform:
+                raise ValueError("OCI descriptor/config architecture mismatch")
+            if platform in platforms:
+                raise ValueError("duplicate OCI image architecture")
+            platforms.add(platform)
+            images.append(
+                {
+                    "platform": "/".join(platform),
+                    "labels": labels,
+                    "manifest_digest": descriptor["digest"] if descriptor else None,
+                    "config_digest": manifest["config"]["digest"],
+                }
+            )
+            for layer in manifest.get("layers", []):
+                digest, size = layer["digest"], layer["size"]
+                if not re.fullmatch(r"sha256:[a-f0-9]{64}", digest) or size < 0:
+                    raise ValueError("invalid OCI layer descriptor")
+                if digest in layers and layers[digest] != size:
+                    raise ValueError("conflicting OCI layer sizes")
+                layers[digest] = size
+        else:
+            raise ValueError("invalid OCI image manifest")
+
+    visit(index)
+    if platforms != {("linux", "amd64"), ("linux", "arm64")}:
+        raise ValueError(f"OCI distribution must contain Linux amd64 and arm64: {platforms}")
+    return {"images": images, "layers": layers}
+
+
 def verify_oci(archive, version, revision=None):
     """Read manifest/config blobs and require both actual Linux architectures."""
-    platforms = set()
     with tarfile.open(archive) as packed:
 
         def read(name):
@@ -113,35 +176,12 @@ def verify_oci(archive, version, revision=None):
                 raise ValueError("OCI metadata exceeds size limit")
             return data
 
-        def blob(descriptor):
-            algorithm, digest = descriptor["digest"].split(":", 1)
-            if algorithm != "sha256" or not re.fullmatch(r"[a-f0-9]{64}", digest):
-                raise ValueError("invalid OCI metadata digest")
-            data = read("blobs/sha256/" + digest)
-            if hashlib.sha256(data).hexdigest() != digest:
-                raise ValueError("OCI metadata checksum mismatch")
-            return json.loads(data)
-
-        def visit(manifest):
-            if "manifests" in manifest:
-                for child in manifest["manifests"]:
-                    # BuildKit may include separate provenance attestations.
-                    if child.get("platform", {}).get("os") != "unknown":
-                        visit(blob(child))
-            elif "config" in manifest:
-                config = blob(manifest["config"])
-                labels = config.get("config", {}).get("Labels", {})
-                if labels.get("org.opencontainers.image.version") != version:
-                    raise ValueError("OCI image version does not match release version")
-                if revision and labels.get("org.opencontainers.image.revision") != revision:
-                    raise ValueError("OCI image revision does not match validated commit")
-                platforms.add((config.get("os"), config.get("architecture")))
-            else:
-                raise ValueError("invalid OCI image manifest")
-
-        visit(json.loads(read("index.json")))
-    if platforms != {("linux", "amd64"), ("linux", "arm64")}:
-        raise ValueError(f"OCI distribution must contain Linux amd64 and arm64: {platforms}")
+        return verify_oci_metadata(
+            json.loads(read("index.json")),
+            lambda digest: read("blobs/sha256/" + digest.split(":")[1]),
+            version,
+            revision,
+        )
 
 
 def generate_cask(version, output):

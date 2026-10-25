@@ -331,3 +331,18 @@ jobs:
     with:
       sha: ${{ needs.source.outputs.sha }}
       version: ${{ needs.source.outputs.version }}
+
+
+  verify-release:
+    # All independent publication boundaries must succeed first. Homebrew PR
+    # creation is already downstream of macOS publication; merge is asynchronous.
+    needs: [source, publish-server, publish-desktop, publish-macos, publish-container]
+    if: needs.source.outputs.official == 'true'
+    uses: ./.github/workflows/verify-release.yml
+    permissions:
+      contents: read
+    with:
+      version: ${{ needs.source.outputs.version }}
+      source: ${{ needs.source.outputs.sha }}
+      public-key: ${{ needs.source.outputs.public-key }}
+      macos-mode: ${{ needs.publish-macos.outputs.macos-mode }}

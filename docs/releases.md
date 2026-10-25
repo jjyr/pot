@@ -94,6 +94,107 @@ jobs to succeed. Docker has no dependency on desktop packaging or macOS signing.
 The aggregate unsigned validation bundle verifies all implemented distributions;
 it is not an additional cross-channel publication gate.
 
+## Public verification after publication
+
+Use the same read-only entry point locally and in Actions. Supply the full expected
+source SHA from the reviewed release decision, the pinned Ed25519 public key from
+a trusted installation/release configuration, and the expected macOS mode. Neither
+the release nor its feed can choose these expectations. No private key or signing
+secret is needed.
+
+```sh
+POT_UPDATE_PUBLIC_KEY=TRUSTED_BASE64_PUBLIC_KEY mise run verify:release -- \
+  1.2.3 TRUSTED_40_CHARACTER_SOURCE_SHA --macos-mode unsigned \
+  --phase publication --output .local/verify-1.2.3 --markdown
+# Recheck after the Homebrew package update PR has merged:
+POT_UPDATE_PUBLIC_KEY=TRUSTED_BASE64_PUBLIC_KEY mise run verify:release -- \
+  1.2.3 TRUSTED_40_CHARACTER_SOURCE_SHA --macos-mode unsigned \
+  --phase installation --output .local/verify-1.2.3-installed --markdown
+```
+
+`python scripts/verify-release` accepts the same arguments. `--public-key` can
+replace the environment variable. `installation` is the default phase; it requires
+both default-branch Homebrew pointers to match. `publication` checks all public
+bytes and reports older Homebrew pointers as `pending_update`, without waiting
+for review/merge. This status describes the observed pointer, not proof that a PR
+exists; inspect the separate Homebrew synchronization job if it remains pending.
+Equal-version hash/URL conflicts and newer Homebrew pointers fail visibly.
+The verifier never proposes or merges a PR.
+
+Dependencies are Python 3.12+ and Go from `mise.toml`, HTTPS access to GitHub's
+API/download/CDN endpoints and GHCR, and temporary disk space for the full release
+assets. The preflight checks the explicit source/key and Go availability. The
+command installs no tools, needs no Docker runtime, and reads no Docker auth store,
+netrc or login session. GitHub API reads and release byte downloads are anonymous;
+GHCR uses an anonymous pull-only bearer token held in memory. Do not pass a GitHub
+token. API rate limits remain possible even when a maintainer is logged in.
+
+The verifier derives the exact public asset union from `release_contract`'s server,
+desktop and macOS channels. The container archive is a qualified Actions artifact,
+not a GitHub Release asset. It verifies stable public release status, tag resolution
+and expected source, duplicate/unexpected/missing assets, actual anonymous download
+sizes and SHA-256 values, API digests when provided, sidecars and exact channel
+manifest membership. It reuses `sign-release verify` with the trusted key, checks
+every signed feed target/URL/size/hash, and inspects every bound package. The feed
+format has no source field: its signed hashes bind binaries whose VCS/source is
+checked independently. macOS disclosure must match the expected mode/version/source
+using the publisher's own disclosure generator.
+
+Archive inspection rejects duplicate/traversing names and escaping links and reads
+regular metadata/binary members without extracting trees or executing package
+contents. It checks installation metadata, resource paths shared with macOS smoke,
+App plist versions, Debian metadata, and Go VCS/OS/architecture information.
+`-trimpath` builds omit linker arguments from Go build info, so the verifier reads
+exact linked Go string globals in ELF/Mach-O load segments for version, revision,
+pinned key and schema digest. This establishes embedded metadata, not runtime
+`--version` output or native execution. It does not infer Apple developer identity
+or notarization from the disclosure. Reports explicitly mark native CLI/service,
+App/WebView, codesign/notarization and container execution as `not_run`: those
+remain the existing prepublication platform jobs' qualifications.
+
+The default `--oci full` anonymously fetches the version index, verifies the index
+digest and shared archive/registry manifest/config rules, requires exactly Linux
+amd64/arm64 with matching version/source labels, and transfers and hashes every
+unique layer with its declared size. This is a full registry byte pull without
+loading or running images. `--oci metadata` is a diagnostic mode; it saves checked
+metadata but returns incomplete because layers were not downloaded.
+
+The command prints a concise summary and always writes `report.json` after parsed
+arguments/preflight; `--markdown` also writes `report.md`. JSON retains successful
+download hashes, partial progress, failures, pending/blocked checks, OCI digests and
+layer receipts, retry events and native limitations. Exit codes are `0` for the
+selected public verification phase passing, `1` for a conflict/check failure, and
+`2` for incomplete publication/installation or diagnostic-only OCI verification.
+A missing resource is incomplete; signature/hash/source conflicts fail immediately.
+Only explicit HTTP rate limits and transient 502/503/504 responses receive at most
+three attempts, with delays capped at 30 seconds. There is no publication retry,
+rollback, asset replacement or settings mutation.
+
+```text
+server publish ----+
+desktop publish ---+--> verify-release (publication phase) --> JSON/Markdown artifact
+macOS publish -----+          |                                  even on failure
+  + Homebrew PR ---+          +--> anonymous GitHub + GHCR bytes
+container publish -+
+
+Homebrew PR review/merge --> manual verify-release (installation phase)
+```
+
+CI invokes the independent reusable `Verify public release` workflow only after
+all four required publication jobs succeed, with the source job's SHA/pinned key
+and the macOS preflight's selected mode. A successful individual channel cannot
+trigger it. Homebrew merge is not a publication dependency. The verification job
+is read-only, has no release environment/signing secrets and saves reports even
+when checks fail. PR/main lightweight checks do not perform public downloads;
+deterministic verifier fixtures run alongside existing release contracts.
+
+For repeatable checks, dispatch `verify-release.yml` from a reviewed workflow ref
+containing the verifier (for example `main`), with explicit `version`, `source`,
+`macos-mode` and optional `phase`. Manual checks use the selected workflow's code
+and repository pinned public-key variable; the expected release source is still
+an independent required input. They can inspect a partial or historical release
+without changing its source tag or republishing anything.
+
 ## Docker publication contract
 
 A stable tag such as `v1.2.3` automatically builds the production Dockerfile and,
