@@ -54,14 +54,27 @@ export function mutationTopics(path,body,value) {
   if(path.startsWith('/api/v1/spaces'))return ['spaces','machines'];
   return [];
 }
-export async function createProductionClient({desktop = false, base = ''} = {}) {
+export async function createProductionClient({desktop = false, base = '', resourceStorage} = {}) {
   let runtimeAPI;
   if (desktop) runtimeAPI = await import('/wails/runtime.js');
   const service = 'github.com/jjyr/pot/internal/desktop.Service';
   const invoke = (method, ...args) => runtimeAPI.Call.ByName(`${service}.${method}`, ...args);
   const context = {owner: '', space: ''};
   let client;
-  const localized=error=>{if(error.uiKey){error.diagnostic=error.message;error.message=translate(client?.uiLocale?.()||'en',error.uiKey);}return error;};
+  const acceptedCommands=new Map();
+  async function commitCommand(path,method,body,value,capturedScope,signature){
+    const topics=mutationTopics(path,body,value);
+    if(!topics?.length)return value;
+    // Credential exchange, upload and live permission routes remain specialized.
+    const pairing=path.startsWith('/api/v1/agent-links')&&!['disconnect','reconnect','delete'].includes(body?.action);
+    const persistent=!capturedScope.transient&&!pairing&&!path.startsWith('/api/v1/permissions');
+    if(!persistent){client.resources?.invalidate(topics,capturedScope);return value;}
+    let receipt=acceptedCommands.get(signature);
+    if(!receipt){receipt={value,commandID:body?.request_id||crypto.randomUUID()};acceptedCommands.set(signature,receipt);}
+    try{const saved=await client.resources.applyCommand(path,{...capturedScope,body,commandID:receipt.commandID},receipt.value,topics);acceptedCommands.delete(signature);return saved;}
+    catch(error){error.accepted=true;error.uiKey='storage.commandAccepted';throw localized(error);}
+  }
+  const localized=error=>error.uiKey?Object.assign(new Error(translate(client?.uiLocale?.()||'en',error.uiKey),{cause:error}),error,{name:error.name,diagnostic:error.diagnostic||error.message}):error;
   async function request(path, options = {}) {
     let {method = 'GET', body, signal} = options;
     const capturedScope={...context,...options};
@@ -69,6 +82,8 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
     // destination and authorization on the host; presentation IDs never choose
     // an HTTP proxy or a local execution fallback.
     const fullPath = scopedPath(path, capturedScope);
+    const signature=method==='GET'?null:JSON.stringify([fullPath,method,body]);
+    if(signature&&acceptedCommands.has(signature))return commitCommand(path,method,body,acceptedCommands.get(signature).value,capturedScope,signature);
     if (signal?.aborted) throw signal.reason;
     if (desktop) {
       const pending = invoke('Call', method, fullPath, body === undefined ? '' : JSON.stringify(body));
@@ -77,7 +92,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
       try {
         const raw = await pending;
         if (signal?.aborted) throw signal.reason;
-        let value;try{value=decodeDesktopResponse(raw);}catch(error){throw localized(error);}if(method!=='GET'){const topics=mutationTopics(path,body,value);if(topics)client.resources?.invalidate(topics,capturedScope);}return value;
+        let value;try{value=decodeDesktopResponse(raw);}catch(error){throw localized(error);}if(method!=='GET')return commitCommand(path,method,body,value,capturedScope,signature);return value;
       } finally { signal?.removeEventListener('abort', abort); }
     }
     const response = await fetch(`${base}${fullPath}`, {method, signal, credentials: 'same-origin',
@@ -85,7 +100,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
       body: body === undefined ? undefined : JSON.stringify(body)});
     const value = response.status === 204 ? null : await response.json().catch(() => null);
     if (!response.ok) throw localized(new APIError(response.status, value));
-    if(method!=='GET'){const topics=mutationTopics(path,body,value);if(topics)client.resources?.invalidate(topics,capturedScope);}
+    if(method!=='GET')return commitCommand(path,method,body,value,capturedScope,signature);
     return value;
   }
   const runtime = await request('/api/v1/runtime', {owner: '', space: ''});
@@ -93,7 +108,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
   const readBaselines=desktop?await invoke('AssistantReads'):[];
   const attachmentURLs=new Map(),attachmentLeases=new Map();
   const attachmentKey=(attachment,options)=>{const scope={...context,...options};return JSON.stringify([scope.space,scope.owner,attachment.id]);};
-  client = {production: true, desktop, runtime, request,readBaselines,
+  client = {production: true, desktop, runtime, transport:request,request:(path,options={})=>(options.method||'GET')==='GET'?client.resources.read(path,options):request(path,options),readBaselines,
     messageFiles(message,options={}){return request(`/api/v1/message-files/${encodeURIComponent(message)}?${new URLSearchParams({task_id:options.task||''})}`,options);},
     retryMessageFile(message,ref,options={}){return request(`/api/v1/message-files/${encodeURIComponent(message)}/${encodeURIComponent(ref)}?${new URLSearchParams({task_id:options.task||''})}`,{...options,method:'POST'});},
     acquireResource:createDisplayResources(request,()=>context,(resource,path,scope,operation='content',token='')=>desktop?`/pot-resource-content?${new URLSearchParams({id:resource.id,path,assistant_id:scope.owner,space_id:scope.space,render:operation==='render'?'1':'0',token})}`:`${base}${scopedPath(`/api/v1/resources/${encodeURIComponent(resource.id)}/${operation}?${new URLSearchParams({path,token})}`,scope)}`),
@@ -231,7 +246,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
       return () => source.close();
     },
   };
-  client.resources=createResourceReads(client);
+  client.resources=createResourceReads(client,{storage:resourceStorage});
   client.read=(path,options)=>client.resources.read(path,options);
   return client;
 }
