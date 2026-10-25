@@ -4,6 +4,10 @@ export const groups = {
   nav: ['directory', 'switching'],
   history: ['task-history', 'task-history-edges'],
   domain: ['domain-repositories.html'],
+  management: ['assistant-start-phone','first-connection-codex','first-connection-antigravity','settings-phone'],
+  composer: ['composer-phone','composer-enter'],
+  approvals: ['linked-approvals','patch-approvals'],
+  usage: ['usage-empty','usage-unknown','usage-partial','usage-trend'],
   storage: ['chat-cache-read-volume.html', 'chat-cache.html', 'projection-store.html', 'chat-cache-ui.html', 'cached-loading.html'],
 };
 export const fixtures = {

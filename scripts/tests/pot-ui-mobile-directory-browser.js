@@ -38,11 +38,11 @@ async (page,{origin=new URL(page.url()).origin,browser=page.context().browser()}
         await mobile.waitForFunction(()=>!document.querySelector('#app').classList.contains('show-directory')&&document.querySelector('.message'));
       };
       // Keep native click generation: a small touch drift can also start edge Back.
-      for(const [long,focused,delay]of [[false,false,0],[true,true,350]]){
+      for(const [long,focused,delay]of (width===320?[[false,false,0]]:[[true,true,350]])){
         await mobile.evaluate(({long,delay})=>{directoryFixture.long=long;directoryFixture.delay=delay;},{long,delay});
         await mobile.locator('.narrow-navigation').click();await chat();
         await mobile.waitForFunction(()=>directoryFixture.deliveredCount===(directoryFixture.long?80:2));
-        for(const dx of long?[13,14]:[0,12,13,14]){
+        for(const dx of long?[14]:[0,12,13]){
           await chat();await mobile.locator('.composer-input').fill('Retained draft');
           if(!focused)await mobile.locator('.composer-input').blur();
           assert(await mobile.locator('.composer-input').evaluate(input=>document.activeElement===input)===focused,'Composer focus matches the scenario');

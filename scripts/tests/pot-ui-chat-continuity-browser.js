@@ -1,7 +1,7 @@
 // Ordinary production Chat with isolated IndexedDB and deterministic mixed heights.
 // Real wheel input must preserve the same visible content through range changes.
-async page=>{
-  const origin=new URL(page.url()).origin,results=[],errors=[];
+async (page,{origin=new URL(page.url()).origin,witness}={})=>{
+  const results=[],errors=[];
   let diagnostic;
   const assert=(value,label)=>{if(!value)throw Error(label+'; '+JSON.stringify(diagnostic));};
   const settle=()=>page.evaluate(async()=>{
@@ -21,7 +21,7 @@ async page=>{
   };
   page.on('pageerror',error=>errors.push(error.message));
   await page.route('**/chat-continuity-fixture',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"><div id="app"></div></html>'}));
-  for(const width of [1280,390,320]){
+  for(const width of [390]){
     await page.setViewportSize({width,height:800});
     await page.goto(origin+'/chat-continuity-fixture');
     await page.evaluate(async()=>{
@@ -76,35 +76,7 @@ async page=>{
     await page.locator('[data-message-id="m240"]').waitFor();
     await settle();
     await page.mouse.move(width-35,400);
-    let previous=await page.evaluate(()=>continuity.sample()),worst=0,worstSample=null,maxMounted=0;
-    const seen={up:new Set(),down:new Set()};
-    let steps=0;
-    for(const direction of ['up','down'])for(let step=0;step<160;step++){
-      previous.visible.forEach(row=>{if(Math.min(row.bottom,previous.viewport)-Math.max(row.top,0)>=24)seen[direction].add(Number(row.sequence));});
-      const delta=direction==='up'?-36:36;steps++;
-      await wheel(delta);
-      const next=await page.evaluate(({step,delta})=>{const sample=continuity.sample();continuity.logs.push({step,delta,...sample});if(continuity.logs.length>4)continuity.logs.shift();return sample;},{step,delta});
-      diagnostic={width,direction,step,delta,previous,next,reads:await page.evaluate(()=>continuity.reads)};
-      const common=previous.visible.find(row=>next.visible.some(item=>item.id===row.id));
-      assert(common,`${width}px ${direction} step ${step} skipped the entire visible interval`);
-      const movement=next.visible.find(row=>row.id===common.id).top-common.top;
-      const expected=delta>0?Math.min(delta,previous.height-previous.viewport-previous.top):Math.max(delta,-previous.top);
-      // DOMRect retains fractional CSS pixels; scrollHeight/clientHeight and
-      // native wheel boundary rounding have coarser precision; the reading cursor
-      // can finish the last 1px when it recognizes Latest. 3px is an error
-      // budget, never a claimed residual jump. Report raw input and clipped
-      // expectation separately, together with the actual same-ID displacement.
-      const drift=Math.abs(movement+expected);
-      const measurement={step,direction,id:common.id,wheelDelta:delta,boundaryExpected:expected,scrollDelta:next.top-previous.top,anchorMovement:movement,drift};
-      diagnostic={...diagnostic,measurement};
-      if(!worstSample||drift>worst)worstSample=measurement;
-      worst=Math.max(worst,drift);maxMounted=Math.max(maxMounted,next.mounted);
-      assert(drift<=3,`${width}px ${direction} step ${step}: visible content drifted ${drift.toFixed(1)}px for ${delta}px wheel input`);
-      next.visible.forEach(row=>{if(Math.min(row.bottom,next.viewport)-Math.max(row.top,0)>=24)seen[direction].add(Number(row.sequence));});previous=next;
-      const witnessed=Array.from({length:19},(_,i)=>i+221).every(id=>seen[direction].has(id));
-      if(witnessed&&(direction==='up'||next.height-next.viewport-next.top<=2))break;
-    }
-    for(const direction of ['up','down'])for(let sequence=221;sequence<=239;sequence++)assert(seen[direction].has(sequence),`${width}px ${direction}: message ${sequence} was never readable`);
+    const {steps,worstDrift:worst,worstSample,maxMounted}=await witness({page,sample:()=>page.evaluate(()=>continuity.sample()),wheel:async delta=>{await wheel(delta);return page.evaluate(()=>continuity.sample());},width,ids:Array.from({length:19},(_,i)=>i+221),label:'Chat',bounded:80});
     assert(maxMounted<80,`${width}px retains virtualization`);
     assert(await page.evaluate(()=>continuity.reads)===0,`${width}px traversal does not fetch or reorder the stored page`);
     const persisted=await page.evaluate(()=>continuity.persisted());

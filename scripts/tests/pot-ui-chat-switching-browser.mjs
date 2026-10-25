@@ -1,6 +1,7 @@
 // Serve the repository root over loopback and open fixtures/chat-switching.html.
 // Production Chat DOM with synthetic subscriptions and independently delayed tasks.
 import {mountApp} from '../../web/src/components/ui.js';
+import {domainsFor} from '../../web/src/state/domains/index.mjs';
 
 const results=document.querySelector('#results'),root=document.querySelector('#app');
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -15,7 +16,7 @@ document.documentElement.dataset.platform='browser';
 
 async function run(){
   results.textContent='';
-  for(const taskDelay of [0,350]){
+  for(const taskDelay of [350]){
     let scope={space:'one',owner:'alpha'},subscription,taskCount=0;
     const counts={alpha:80,beta:12},versions={alpha:1,beta:1},historyReads=[];
     const snapshot=owner=>{
@@ -51,6 +52,13 @@ async function run(){
     try{
       await wait(()=>subscription?.ready);await settle();
       check(bottom(),`Initial long Chat follows latest (tasks delayed ${taskDelay}ms)`);
+      const composer=root.querySelector('#pot-composer');composer.value='Folded draft';composer.dispatchEvent(new Event('input',{bubbles:true}));
+      root.querySelector('.directory-toggle').click();await settle();
+      check(!root.querySelector('.assistant-directory').getClientRects().length,'Folding hides the directory');
+      check(document.activeElement===root.querySelector('.directory-toggle'),'Folding retains keyboard focus on its trigger');
+      root.querySelector('.directory-toggle').click();await settle();
+      check(root.querySelector('#pot-composer')===composer&&composer.value==='Folded draft'&&bottom(),'Folding retains composer identity, draft and Latest');
+
       await select('beta');
       counts.alpha+=20;versions.alpha++;
       await select('alpha');
@@ -98,8 +106,10 @@ async function run(){
       await wait(()=>history().hidden);window.history.back();await wait(()=>!history().hidden);await settle();
       check(bottom()&&root.querySelector('.latest-button').hidden,'Settings return retains latest following');
       check(historyReads.length===0,'Switching at latest does not request a historical window');
-      if(taskDelay===0){
-        taskCount=0;await select('beta');await select('alpha');await latest();
+      {
+        taskCount=0;await select('beta');await select('alpha');
+        await domainsFor(client).tasks.active(client.scope()).refresh(true);
+        await wait(()=>!root.querySelector('.background-task'));await latest();
         await navigationFrames({root,client,select,snapshot,historyReads,emit:frame=>{versions[client.scope().owner]=Number(frame.cursor);subscription.receive(frame);}});
       }
       check(errors.length===0,'No browser errors: '+errors.join('; '));

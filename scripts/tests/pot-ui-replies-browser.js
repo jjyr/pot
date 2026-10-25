@@ -126,7 +126,118 @@ async page=>{
  await page.getByText('上一条消息可能已被接受，请先确认后再发送。',{exact:true}).waitFor();
  assert(await page.getByRole('button',{name:'发送',exact:true}).isDisabled(),'Unknown acceptance keeps the next send locked until confirmation');
  assert(await page.getByRole('button',{name:'重试',exact:true}).count()===0,'Unknown send outcomes offer state reconciliation instead of resending');
+  await page.evaluate(async()=>{
+    const {createReplyBubble}=await import('/components/reply.mjs');
+    const {renderMarkdown}=await import('/components/markdown.mjs');
+    const f=window.fluidFixture={};
+    const host=document.createElement('div');host.className='message-body';host.style.cssText='width:300px;position:fixed;left:-10000px';document.body.append(host);
+    const view=createReplyBubble(host),options={t:key=>key};
+    let text='Stable paragraph with **selected text**.\n\n```js\n'+'longLine(); '.repeat(100)+'\n```\n\nTail';
+    view.update({text,phase:'streaming'},options);const paragraph=host.querySelector('p'),code=host.querySelector('pre');code.scrollLeft=180;
+    const range=document.createRange();range.selectNodeContents(paragraph);getSelection().removeAllRanges();getSelection().addRange(range);const selected=getSelection().toString();
+    text+=' extended';view.update({text,phase:'streaming'},options);
+    f.markdown={sameParagraph:host.querySelector('p')===paragraph,sameCode:host.querySelector('pre')===code,scroll:code.scrollLeft,selection:getSelection().toString()===selected};
+    getSelection().removeAllRanges();
+    const samples=['Paragraph\n\n- item\n  - nested\n\n```js\na();\n```\n\n| A | B |\n| --- | --- |\n| C | D |','> Quote\n> **bold**\n\n## Header\n\n---\n\n![link](https://example.test/image.png)'];
+    f.incremental=true;
+    for(const source of samples){for(let end=1;end<=source.length;end++){view.update({text:source.slice(0,end),phase:'streaming'},options);const expected=document.createElement('div');expected.append(renderMarkdown(source.slice(0,end)));if(host.querySelector('.reply-content').innerHTML!==expected.innerHTML){f.incremental=false;throw Error('Incremental Markdown differs at '+JSON.stringify(source.slice(0,end)));}}}
+    host.remove();
+  });
+  const markdown=await page.evaluate(()=>fluidFixture.markdown);assert(markdown.sameParagraph&&markdown.sameCode&&markdown.scroll===180&&markdown.selection,'Appended text preserves completed blocks, selection and code scrolling');
+  assert(await page.evaluate(()=>fluidFixture.incremental),'Incomplete Markdown converges to the full renderer');
  await page.evaluate(()=>replyFixture.dispose());
+
+ await (// Production reply rendering with receiver-confirmed failure envelopes.
+async page=>{
+ const assert=(value,message)=>{if(!value)throw Error(message);},errors=[];
+ const onError=error=>errors.push(error.message);page.on('pageerror',onError);
+ await page.setViewportSize({width:1200,height:820});
+ await page.evaluate(async()=>{
+  const {createReplyBubble}=await import('/components/reply.mjs');
+  const {projectChatReplies}=await import('/state/chat-replies.mjs');
+  const {translate}=await import('/locales/messages.mjs');
+  const root=document.createElement('main');root.style.cssText='max-width:840px;margin:80px auto;padding:24px';document.body.replaceChildren(root);
+  const host=document.createElement('div');root.append(host);const bubble=createReplyBubble(host);
+  const input={id:'request',role:'user',text:'Hello',status:'complete'};
+  const fixture=window.outcomeFixture={root,host,bubble,locale:'zh-CN',input,project:projectChatReplies};
+  fixture.render=(state='failed',partial='',error='codex_thread_open_failed',project=true)=>{
+   const text=JSON.stringify({state,error,partial_output:partial});
+   const message={id:'reply',reply_to:input.id,role:'assistant',status:'complete',text};
+   const row=project?projectChatReplies({messages:[input,message],replies:[{input_id:input.id,state,error}]}).at(-1):{...message,phase:state,error};
+   bubble.update(row,{t:key=>translate(fixture.locale,key)});
+  };
+ });
+ for(const locale of ['en','zh-CN']){
+  await page.evaluate(locale=>{outcomeFixture.locale=locale;outcomeFixture.render();},locale);
+  await page.getByText(locale==='en'?'Reply failed':'回复失败',{exact:true}).waitFor();
+  assert(!await page.locator('.reply-content').isVisible(),'Empty remote failures hide protocol JSON');
+  await page.locator('.reply-error-details summary').click();
+  assert(await page.locator('.reply-error-details pre').innerText()==='codex_thread_open_failed','Remote diagnostic remains in details');
+  await page.evaluate(()=>outcomeFixture.render('failed','Partial answer','codex_thread_open_failed: session unavailable'));
+  assert(await page.locator('.reply-content').innerText()==='Partial answer','Only actual partial prose is rendered');
+  assert(await page.locator('.reply-error-details').evaluate(node=>node.open),'Diagnostic updates retain disclosure state');
+  await page.evaluate(()=>outcomeFixture.render('cancelled','Partial answer',''));
+  assert(await page.locator('.reply-content').innerText()==='Partial answer'&&await page.locator('.is-failed').count()===0,'Cancellation preserves prose with its stopped state');
+ }
+ for(const locale of ['en','zh-CN']){
+  await page.evaluate(locale=>{outcomeFixture.locale=locale;outcomeFixture.render('failed','','codex_thread_in_use: codex_rpc_rejected_thread_resume (-32600): thread busy-thread already has an active writer');},locale);
+  const summary=await page.locator('.reply-error-summary').innerText();
+  assert(locale==='en'?summary.includes('Another Codex client on the Codex host')&&summary.includes('archive and restore')&&summary.includes('history is retained'):summary.includes('另一个客户端占用')&&summary.includes('临时归档再恢复')&&summary.includes('聊天记录会保留'),'Writer conflict explains the cause and recovery in the current locale');
+  assert(!await page.locator('.reply-content').isVisible(),'Writer conflict keeps protocol JSON out of prose');
+  if(!await page.locator('.reply-error-details').evaluate(node=>node.open))await page.locator('.reply-error-details summary').click();
+  assert(await page.locator('.reply-error-details pre').innerText()==='codex_thread_in_use: codex_rpc_rejected_thread_resume (-32600): thread busy-thread already has an active writer','Writer diagnostics remain verbatim');
+  assert(await page.locator('.reply-status').getAttribute('role')==='alert','Writer conflict remains an accessible error');
+ }
+
+ page.off('pageerror',onError);assert(errors.length===0,errors.join('\n'));
+ return {passed:true,locales:['en','zh-CN'],empty_failure:true,partial_output:true,diagnostic_disclosure:true};
+}
+
+)(page);
+
+ await (async page=>{
+ const assert=(value,message)=>{if(!value)throw Error(message);};
+ await page.evaluate(async()=>{
+  const {createTurnContinuation}=await import('/components/turn-continuation.mjs');
+  const fixture=window.continuationTest={locale:'en',scope:{space:'remote',owner:'alpha'},requests:[]};
+  document.body.replaceChildren();
+  const draft=document.createElement('textarea');draft.value='Keep this draft';draft.id='saved-draft';document.body.append(draft);
+  const client={scope:()=>({...fixture.scope}),continueTurn:(body,scope)=>new Promise((resolve,reject)=>{fixture.requests.push({body,scope});fixture.resolve=resolve;fixture.reject=reject;})};
+  fixture.view=createTurnContinuation({client,locale:()=>fixture.locale});document.body.append(fixture.view.root);
+  fixture.snapshot={runtime_id:'runtime',owner_id:'remote/alpha',conversation_id:'alpha',cursor:'1',running:false,continuation:{user_message_id:'input',attempt_id:'original',recovery_required:true}};
+  fixture.update=()=>fixture.view.update(fixture.snapshot,{connected:!fixture.offline});fixture.update();
+ });
+ await page.getByRole('button',{name:'Continue task',exact:true}).click();
+ assert(await page.getByRole('button',{name:'Restoring progress…'}).isDisabled(),'Duplicate continuation clicks are disabled');
+ await page.evaluate(()=>{continuationTest.locale='zh-CN';continuationTest.update();});
+ assert(await page.getByRole('button',{name:'正在恢复进度…'}).isDisabled(),'Pending action uses the current locale');
+ await page.evaluate(()=>{const error=Error('original operation result unavailable: effect');error.code='turn_recovery_required';continuationTest.reject(error);});
+ await page.getByText('部分工具结果或进程停止状态尚未确认。Pot 已保留进度，请查看详情后重试。',{exact:true}).waitFor();
+ assert(await page.locator('#saved-draft').inputValue()==='Keep this draft','Recovery failure preserves the composer draft');
+ await page.getByRole('button',{name:'继续任务',exact:true}).click();
+ assert(await page.evaluate(()=>continuationTest.requests[0].body.request_id===continuationTest.requests[1].body.request_id),'Acknowledgment retries retain the same continuation identity');
+ assert(await page.evaluate(()=>continuationTest.requests[0].scope.space==='remote'&&continuationTest.requests[0].scope.owner==='alpha'&&continuationTest.requests[0].body.user_message_id==='input'),'Continuation binds the original owner, Space and input');
+ await page.evaluate(()=>{continuationTest.scope={space:'local',owner:'beta'};continuationTest.view.update({...continuationTest.snapshot,owner_id:'local/beta',continuation:null},{connected:true});continuationTest.reject(Error('late failure'));});
+ assert(!await page.locator('.turn-continuation').isVisible(),'A late failure cannot appear in another assistant');
+ await page.evaluate(()=>{continuationTest.scope={space:'remote',owner:'alpha'};continuationTest.update();});
+ await page.getByRole('button',{name:'继续任务',exact:true}).click();
+ await page.evaluate(()=>continuationTest.resolve({message_id:'input',duplicate:true}));
+ await page.locator('.turn-continuation').waitFor({state:'hidden'});
+ await page.evaluate(()=>{continuationTest.snapshot.cursor='2';continuationTest.snapshot.continuation.attempt_id='later-interruption';continuationTest.update();});
+ await page.getByRole('button',{name:'继续任务',exact:true}).click();
+ assert(await page.evaluate(()=>continuationTest.requests[3].body.request_id!==continuationTest.requests[0].body.request_id),'A later interruption gets a new continuation identity');
+ await page.evaluate(()=>{continuationTest.reject(Error('network lost'));});
+ await page.getByText('暂时无法继续任务，已保存的进度和草稿均保留，请重试。',{exact:true}).waitFor();
+ await page.evaluate(()=>{continuationTest.locale='en';continuationTest.offline=true;continuationTest.update();});
+ assert(await page.getByRole('button',{name:'Continue task',exact:true}).isDisabled(),'Offline conversations cannot submit continuation');
+ await page.getByText('Could not continue the task. Your saved progress and draft are kept. Try again.',{exact:true}).waitFor();
+ await page.evaluate(()=>{continuationTest.snapshot.continuation.summary=true;continuationTest.offline=false;continuationTest.update();});
+ await page.getByText('Restore the interrupted summary',{exact:true}).waitFor();
+ assert(await page.getByRole('button',{name:'Restore conversation',exact:true}).isEnabled(),'Failed task-result summaries expose their own recovery action');
+ return {passed:true,owner_fencing:true,draft_preserved:true,retry_identity:true,live_locale:true};
+}
+
+)(page);
  page.off('pageerror',onError);assert(errors.length===0,errors.join('\n'));
  return {passed:true,same_bubble:true,one_failure_style:true,partial_text_preserved:true,send_retry_identity:true,unknown_send_not_replayed:true,owner_fencing:true,reduced_motion:true,errors};
 }

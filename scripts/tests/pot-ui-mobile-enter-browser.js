@@ -2,9 +2,9 @@
 // responses are fixtures: no product data, model calls or user preferences.
 // Serve web/src with: python -m http.server 18729 --bind 127.0.0.1 --directory web/src
 // Run this expression with the project's Playwright run-code workflow.
-async (page, {base='http://127.0.0.1:18729',captureOnly=false}={}) => {
+async (page, {base='http://127.0.0.1:18729',captureOnly=false,browser=page.context().browser()}={}) => {
   const assert=(value,message)=>{if(!value)throw Error(message);};
-  const browser=page.context().browser(),results=[];
+  const results=[];
   for(const mobile of [false,true]){
     const context=await browser.newContext({viewport:{width:mobile?393:1200,height:852},locale:'en',
       ...(mobile?{isMobile:true,hasTouch:true,userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1'}:{hasTouch:true})});

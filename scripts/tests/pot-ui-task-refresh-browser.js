@@ -29,6 +29,14 @@ async page=>{
    f.pages.refresh(['usage']);f.pages.refresh(['permissions']);f.pages.refresh(['schedules']);
   });
   assert(await page.evaluate(()=>taskFixture.calls.length===1),'Unrelated changes do not reload task lists');
+  await page.clock.install();
+  await page.evaluate(()=>{const input=taskFixture.input;input.dispatchEvent(new CompositionEvent('compositionstart'));input.value='中';input.dispatchEvent(new InputEvent('input',{isComposing:true}));});
+  await page.clock.runFor(220);
+  assert(await page.evaluate(()=>taskFixture.calls.length===1),'Task search does not query IME preedit');
+  await page.evaluate(()=>{const input=taskFixture.input;input.value='';input.dispatchEvent(new CompositionEvent('compositionend'));});
+  await page.clock.runFor(220);
+  await page.evaluate(()=>{taskFixture.input.value='未提交的搜索';taskFixture.input.setSelectionRange(2,4);});
+
   await page.evaluate(()=>{const f=taskFixture;f.refresh=f.pages.refresh(['tasks']);for(let i=0;i<20;i++)f.pages.refresh(['tasks']);});
   assert(await page.evaluate(()=>{const f=taskFixture;return f.calls.length===2&&f.pending.length===1&&!f.pending[0].options.signal?.aborted&&f.input.isConnected&&f.rows.isConnected&&f.rows.children.length>0;}),'A burst retains the visible list and one active request');
   if(state.screenshot)await page.screenshot({path:state.screenshot});

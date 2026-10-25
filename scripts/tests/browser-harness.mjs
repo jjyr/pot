@@ -10,7 +10,7 @@ export async function sourceServer({fault}={}) {
     try {
       let path=decodeURIComponent(new URL(req.url,'http://localhost').pathname);
       if(path.split('/').includes('..'))throw Error('Outside fixture source paths');
-      if(path==='/')path='/web/src/index.html';
+      if(path==='/'||path==='/web/src/')path='/web/src/index.html';
       if(!path.startsWith('/web/')&&!path.startsWith('/scripts/')&&!path.startsWith('/pkg/'))path='/web/src'+path;
       const file=resolve(root,'.'+path);
       if(!file.startsWith(root+sep))throw Error('Outside fixture source root');
@@ -39,12 +39,12 @@ export async function isolatedPage(browser,origin,run) {
   try {const result=await run(page);if(errors.length)throw Error('Browser exceptions: '+errors.join('; '));return result;}
   catch(error){
     const state=await page.evaluate(()=>({result:document.querySelector('#results')?.textContent?.slice(-2200),scroll:window.continuity?.sample(),taskScroll:window.taskContinuity?.sample(),taskFrames:window.taskContinuity?.last,last:window.continuity?.logs?.slice(-2),reads:window.continuity?.reads,history:window.historyEdges&&{calls:historyEdges.calls.map(c=>({before:c.before,aborted:c.signal.aborted})),inflight:historyEdges.inflight},directory:window.directoryFixture?.measure()})).catch(()=>({}));
-    throw Error(error.message+'\n'+JSON.stringify({state,errors,pending:[...network.keys()].map(url=>new URL(url).pathname)}),{cause:error});
+    throw Error(error.message+'\n'+JSON.stringify({state,wheelFrames:await page.evaluate(()=>window.wheelFrames).catch(()=>undefined),errors,pending:[...network.keys()].map(url=>new URL(url).pathname)}),{cause:error});
   }finally{await context.close();}
 }
 export async function contract(script,page,options) {
   // Repository-owned CLI expressions, never website content.
-  const source=(await readFile(new URL(script,import.meta.url),'utf8')).replaceAll('STATE',JSON.stringify({origin:options.origin}));
+  const source=(await readFile(new URL(script,import.meta.url),'utf8')).replaceAll('STATE',JSON.stringify({origin:options.origin,...options.state}));
   return new Function('return ('+source+'\n)')()(page,options);
 }
 export async function fixture(page,origin,path,done) {

@@ -20,6 +20,15 @@ export async function tasksDomainContract(report=()=>{}) {
   }};
   const domain=createTasksDomain(client,{resources,queries,commands});let stop,stopOld,stopNew;
   try {
+    const writes=[];client.request=async(path,options)=>{writes.push({path,...options});return {accepted:true};};
+    const captured={space:'fast',owner:'original'},task={id:'task',run_id:'run-one'};
+    const pause=domain.pause(task,captured,true);captured.owner='changed';await pause;
+    check(writes[0].owner==='original'&&writes[0].space==='fast'&&writes[0].body.run_id==='run-one'&&writes[0].body.action==='pause','Task controls capture original owner, Space and run before dispatch');
+    const first=domain.sendInput(task,captured,'intent','same-intent'),second=domain.sendInput(task,captured,'intent','same-intent');
+    check(first===second,'Duplicate Task input shares one in-flight intent');await first;
+    check(writes.length===2&&writes[1].body.request_id==='same-intent','Task guidance sends its explicit idempotency identity once');
+    await domain.archive(task,captured,true);
+    check(writes[2].body.decisions[0].run_id==='run-one'&&writes[2].body.decisions[0].task_id==='task','Task archive retains exact task and run identity');
     stop=domain.watchList({scope:'active',q:'initial'},state=>updates.push(state));
     await flush();
     check(updates.at(-1)?.data?.partial===true&&updates.at(-1).status==='loading'&&updates.at(-1).data.pages[0].space.id==='fast','Domain publishes fast Space while slow Space is unresolved');

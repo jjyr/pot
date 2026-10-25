@@ -31,3 +31,21 @@ test('source fixture maps installed UI imports, forbids traversal and closes its
   }finally{await server.close();}
   await assert.rejects(fetch(server.origin));
 });
+
+test('standard smoke retains build/authentication first and stops on the first failing stage',()=>{
+  const listed=spawnSync('python',['scripts/tests/ui-http-suite.py','--list'],{encoding:'utf8'});
+  assert.equal(listed.status,0);assert.deepEqual(JSON.parse(listed.stdout),[['http','pot-ui-http-integration.py'],['source','ui-regressions.mjs']]);
+  const probe=spawnSync('python',['-c',`import importlib.util,io,json
+from contextlib import redirect_stdout
+from unittest.mock import patch
+from types import SimpleNamespace
+s=importlib.util.spec_from_file_location('suite','scripts/tests/ui-http-suite.py');m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+for codes,expected in [([0,0],0),([7],7)]:
+ out=io.StringIO()
+ with patch.object(m,'browser_environment',return_value={}),patch.object(m.subprocess,'run',side_effect=[SimpleNamespace(returncode=c) for c in codes]) as run,redirect_stdout(out):
+  actual=m.run_suite()
+ assert actual==expected and run.call_count==len(codes)
+ summary=json.loads(out.getvalue().splitlines()[-1]);assert summary['status']==('passed' if not expected else 'incomplete')
+`],{encoding:'utf8'});
+  assert.equal(probe.status,0,probe.stderr);
+});

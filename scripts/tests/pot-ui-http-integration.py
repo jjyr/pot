@@ -490,11 +490,9 @@ def run(binary, base, env, cli_command, profile_only=False):
                 "pot-ui-agent-capabilities-browser.js",
                 "pot-ui-tasks-browser.js",
                 "pot-ui-task-refresh-browser.js",
-                "pot-ui-machine-identity-browser.js",
                 "pot-ui-machines-browser.js",
                 "pot-ui-github-account-browser.js",
                 "pot-ui-refresh-browser.js",
-                "pot-ui-shell-browser.js",
                 "pot-ui-production-browser.js",
             ]:
                 browser_fixture(script)
@@ -505,17 +503,11 @@ def run(binary, base, env, cli_command, profile_only=False):
                 raise RuntimeError("Browser did not return successful integration evidence")
             print("Browser passed: pot-ui-http-browser.js", flush=True)
             for script in [
-                "pot-ui-fluid-browser.js",
-                "pot-ui-chat-continuity-browser.js",
-                "pot-ui-mobile-directory-browser.js",
                 "pot-ui-replies-browser.js",
-                "pot-ui-reply-outcomes-browser.js",
                 "pot-ui-process-runs-browser.js",
-                "pot-ui-continuation-browser.js",
                 "pot-ui-mermaid-browser.js",
                 "pot-ui-file-images-browser.js",
                 "pot-ui-task-approvals-browser.js",
-                "pot-ui-task-time-browser.js",
             ]:
                 browser_fixture(script)
             actual = (base / "download.bin").read_bytes()

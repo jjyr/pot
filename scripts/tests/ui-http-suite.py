@@ -9,14 +9,26 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
-CASES = (
-    ("http", "pot-ui-http-integration.py"),
-    ("assistant-start", "pot-ui-assistant-start-browser.py"),
-    ("assistant-settings", "pot-ui-assistant-settings-browser.py"),
-    ("linked-approvals", "pot-ui-linked-approvals-browser.py"),
-    ("composer", "pot-ui-composer-selectors-browser.py"),
-    ("usage", "pot-ui-usage-browser.py"),
-)
+CASES = (("http", "pot-ui-http-integration.py"), ("source", "ui-regressions.mjs"))
+
+
+def browser_environment():
+    # Resolve only existing cached tools; never install or change user profiles.
+    import os
+
+    env = dict(os.environ)
+    if not env.get("POT_PLAYWRIGHT_MODULE"):
+        cache = Path(env.get("npm_config_cache", Path.home() / ".npm"))
+        modules = list(cache.glob("_npx/*/node_modules/playwright/index.mjs"))
+        if len(modules) != 1:
+            raise RuntimeError("Set POT_PLAYWRIGHT_MODULE to the existing cached Playwright module")
+        env["POT_PLAYWRIGHT_MODULE"] = str(modules[0])
+    if not env.get("POT_CHROMIUM_EXECUTABLE") and env.get("PLAYWRIGHT_MCP_CONFIG"):
+        config = json.loads(Path(env["PLAYWRIGHT_MCP_CONFIG"]).read_text())
+        executable = config.get("browser", {}).get("launchOptions", {}).get("executablePath")
+        if executable:
+            env["POT_CHROMIUM_EXECUTABLE"] = executable
+    return env
 
 
 def run_suite():
@@ -27,7 +39,12 @@ def run_suite():
         for name, script in CASES:
             print(f"RUN standard HTTP smoke: {name}", flush=True)
             result = subprocess.run(
-                [sys.executable, str(ROOT / "scripts/tests" / script)], cwd=ROOT
+                [
+                    "node" if script.endswith(".mjs") else sys.executable,
+                    str(ROOT / "scripts/tests" / script),
+                ],
+                cwd=ROOT,
+                env=browser_environment() if script.endswith(".mjs") else None,
             )
             if result.returncode:
                 status = result.returncode
