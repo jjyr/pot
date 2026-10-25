@@ -140,7 +140,7 @@ func (a *Agent) compact(ctx context.Context, execution core.ExecutionContext, th
 	if estimate == nil {
 		estimate = EstimateTokens
 	}
-	summaryTokens, err := estimate(summaryInput)
+	summaryTokens, err := a.estimate(summaryInput, state.UsageAnchor, settings.UseProviderUsage)
 	if err != nil {
 		return err
 	}
