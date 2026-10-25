@@ -29,10 +29,10 @@ else {
         if(name==='task-history')return taskHistoryBrowser(page,{origin:server.origin});
         if(name==='task-history-edges')return taskHistoryEdges(page,{origin:server.origin});
         if(name==='switching'){
-          const state=await fixture(page,server.origin,'chat-switching.html?conversation=alpha&locale=en&contract=navigation','ALL CHECKS PASSED');
+          try{const state=await fixture(page,server.origin,'chat-switching.html?conversation=alpha&locale=en&contract=navigation','ALL CHECKS PASSED');
           const shell=await shellRetention(page);
           const trigger=page.getByRole('button',{name:'Assistant information',exact:true}),dialog=page.getByRole('dialog',{name:'Assistant information',exact:true}),composer=page.locator('#pot-composer');
-          try{const draft=await composer.inputValue();await trigger.press('Enter');await dialog.waitFor();
+          const draft=await composer.inputValue();await trigger.press('Enter');await dialog.waitFor();
           await composer.click();await dialog.waitFor({state:'hidden'});
           await trigger.press('Enter');await dialog.waitFor();
           await page.evaluate(()=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:'zh-CN'}})));
