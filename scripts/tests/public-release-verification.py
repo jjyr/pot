@@ -722,18 +722,16 @@ class HostileInputs(unittest.TestCase):
             self.assertEqual(network.open("https://example.org").read(), b"ok")
             self.assertEqual(len(network.retries), 1)
 
-    def test_workflow_dependencies_and_read_only_entrypoint(self):
-        ci = (ROOT / ".github/workflows/ci.yml").read_text().split("  verify-release:\n")[1]
-        self.assertIn(
-            "needs: [source, publish-server, publish-desktop, publish-macos, publish-container]", ci
-        )
-        workflow = (ROOT / ".github/workflows/verify-release.yml").read_text()
-        self.assertIn("workflow_dispatch:", workflow)
-        self.assertIn("scripts/verify-release", workflow)
-        self.assertIn("if: always()", workflow)
-        self.assertNotIn("contents: write", workflow)
-        self.assertNotIn("secrets.", workflow)
-        self.assertNotIn("GH_TOKEN", workflow)
+    def test_public_verification_stays_out_of_workflows(self):
+        self.assertFalse((ROOT / ".github/workflows/verify-release.yml").exists())
+        # Normal checks may run deterministic fixtures, but public downloads
+        # remain an explicit maintainer command.
+        for path in (ROOT / ".github/workflows").glob("*.yml"):
+            with self.subTest(workflow=path.name):
+                workflow = path.read_text()
+                self.assertNotIn("scripts/verify-release", workflow)
+                self.assertNotIn("mise run verify:release", workflow)
+                self.assertNotIn("./.github/workflows/verify-release.yml", workflow)
 
 
 if __name__ == "__main__":

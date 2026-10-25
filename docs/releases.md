@@ -96,11 +96,11 @@ it is not an additional cross-channel publication gate.
 
 ## Public verification after publication
 
-Use the same read-only entry point locally and in Actions. Supply the full expected
-source SHA from the reviewed release decision, the pinned Ed25519 public key from
-a trusted installation/release configuration, and the expected macOS mode. Neither
-the release nor its feed can choose these expectations. No private key or signing
-secret is needed.
+Maintainers can run the read-only verifier on demand after publication or when
+rechecking a release. Supply the full expected source SHA from the reviewed
+release decision, the pinned Ed25519 public key from a trusted installation/release
+configuration, and the expected macOS mode. Neither the release nor its feed can
+choose these expectations. No private key or signing secret is needed.
 
 ```sh
 POT_UPDATE_PUBLIC_KEY=TRUSTED_BASE64_PUBLIC_KEY mise run verify:release -- \
@@ -175,30 +175,10 @@ Only explicit HTTP rate limits and transient 502/503/504 responses receive at mo
 three attempts, with delays capped at 30 seconds. There is no publication retry,
 rollback, asset replacement or settings mutation.
 
-```text
-server publish ----+
-desktop publish ---+--> verify-release (publication phase) --> JSON/Markdown artifact
-macOS publish -----+          |                                  even on failure
-  + Homebrew PR ---+          +--> anonymous GitHub + GHCR bytes
-container publish -+
-
-Homebrew PR review/merge --> manual verify-release (installation phase)
-```
-
-CI invokes the independent reusable `Verify public release` workflow only after
-all four required publication jobs succeed, with the source job's SHA/pinned key
-and the macOS preflight's selected mode. A successful individual channel cannot
-trigger it. Homebrew merge is not a publication dependency. The verification job
-is read-only, has no release environment/signing secrets and saves reports even
-when checks fail. PR/main lightweight checks do not perform public downloads;
-deterministic verifier fixtures run alongside existing release contracts.
-
-For repeatable checks, dispatch `verify-release.yml` from a reviewed workflow ref
-containing the verifier (for example `main`), with explicit `version`, `source`,
-`macos-mode` and optional `phase`. Manual checks use the selected workflow's code
-and repository pinned public-key variable; the expected release source is still
-an independent required input. They can inspect a partial or historical release
-without changing its source tag or republishing anything.
+Run the command again when a partial publication completes or after the Homebrew
+PR merges. Each invocation checks the selected version without changing its tag
+or republishing anything. Normal lightweight checks run deterministic verifier
+fixtures; they do not download public release assets.
 
 ## Docker publication contract
 

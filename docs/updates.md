@@ -117,8 +117,8 @@ use the [startup migration mechanism](database-migrations.md). Automatic upgrade
 that change schemas need a separate backup/migration/restore design; package-only
 rollback must never reopen a migrated database with an older binary.
 
-Public release verification reuses this signature verifier with an explicitly trusted
-pinned key and checks the final downloaded bytes. See the [unified verification
+On-demand public release verification reuses this signature verifier with an
+explicitly trusted pinned key and checks the final downloaded bytes. See the [unified verification
 command](releases.md#public-verification-after-publication) for publication and
 Homebrew installation phases and native-check limitations.
 

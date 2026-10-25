@@ -3,10 +3,6 @@ name: macOS release and authenticated updates
 # Only CI can enter after shared checks and this channel's packaging gates.
 on:
   workflow_call:
-    outputs:
-      macos-mode:
-        description: Mode selected before sealing the published macOS packages
-        value: ${{ jobs.preflight.outputs.mode }}
     inputs:
       sha:
         required: true
