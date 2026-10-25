@@ -264,6 +264,9 @@ These are narrow container checks inside the browser, not physical device tests.
 The browser runner also exercises these checks at actual Chromium viewport sizes.
 The backend catalogue contract is covered
 separately by `TestCatalog*` and `TestTaskCatalogHTTPFiltersAndValidation`.
+`node scripts/tests/pot-ui-query-resource-refresh.mjs` exercises the real shared
+query and resource schedulers together, including event bursts, explicit force
+waiting, pagination, multiple resources and epoch-fenced commits.
 
 For assistant-switching scroll checks without a backend, serve the repository
 root on loopback and open

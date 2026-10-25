@@ -35,8 +35,18 @@ values. Storage failure retains the prior projection and retries the pending
 invalidation before another refresh.
 
 Shared domain queries serialize reads and coalesce changes into one later read.
+Event batches use blocking `authoritative: 'invalidated'` resource reads: they
+wait for each invalidated resource, reusing a committed read that already crossed
+that resource's version fence. The later query still reassembles all resources
+and pagination from the beginning, so an earlier resource cannot escape an event
+that arrived while a later one was loading. A query that crosses an event stays
+stale until this reassembly completes. Persistent commit retries report their
+last IO's starting version to the resource fence; events after that start still
+require revalidation. The operator Task catalogue also depends on assistant
+directory changes, which can change its owner membership.
 An explicit forced refresh upgrades that queued read to authoritative IO and
-waits for its own batch, including its commit or error. Commit notifications
+waits for its own batch, including its commit or error. Explicit `true` takes
+precedence over event revalidation when batches merge. Commit notifications
 during that batch may schedule another local query without extending the forced
 call's wait. Storage failures remain explicit errors with the prior committed
 projection available for retry; directory and host metadata loaders must not
