@@ -18,7 +18,9 @@ async page=>{
    subscribe:(deliver,status)=>{fixture.deliver=deliver;fixture.status=status;fixture.subscriptions++;status('connected');queueMicrotask(async()=>deliver(await client.snapshot()));return ()=>{};},
    request:async path=>{
     if(path==='/api/v1/spaces')return {active_space_id:'local',items:[{id:'local',control_id:'reply-runtime',name:'Local',kind:'local',connected:true}]};
-    if(path==='/api/v1/assistants')return [{id:'main',name:'Pot',phase:'ready'},{id:'other',name:'Other assistant',phase:'ready'}];
+    if(path==='/api/v1/runtime')return client.runtime;
+    if(path==='/api/v1/agent-links')return {items:[]};
+    if(path==='/api/v1/assistants')return [{id:'main',name:'Pot',phase:'ready'},{id:'other',name:'Other assistant',phase:'ready'}].map(assistant=>({...assistant,capabilities:{version:1,scope:'owner',operations:['chat.read','chat.send','chat.subscribe','chat.cancel','assistant.configure','assistant.usage','task.list','task.outcomes','approvals.manage']}}));
     if(path==='/api/v1/permissions')return {pending:[],policy:{machines:{}}};
     if(path==='/api/v1/providers')return {profiles:[],connections:[],directory:[],default_provider_id:''};
     if(path.startsWith('/api/v1/tasks/query'))return {items:[],counts:{}};

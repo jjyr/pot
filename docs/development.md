@@ -212,6 +212,12 @@ that private origin. This opt-in fixture adds no product data or native notifica
 with a deterministic loopback model fixture; it needs cached Playwright CLI and
 an installed browser.
 
+Each synthetic browser contract gets a fresh context, including its own init
+scripts, routes and transcript cache. It receives the fixture browser's disposable
+authentication state for provider probes. The real HTTP contract keeps its two
+independent authenticated clients. Set `TMPDIR` to a private directory when the
+default temporary filesystem is quota constrained.
+
 For Markdown resource previews, start `POT_MARKDOWN_RESOURCE_FIXTURE=1
 POT_RESOURCE_FIXTURE_URL_FILE=/tmp/pot-markdown-url mise exec -- go test
 ./internal/transport -run '^TestResourceBrowserFixture$' -count=1 -v -timeout=30m`.

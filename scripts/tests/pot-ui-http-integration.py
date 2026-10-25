@@ -85,6 +85,37 @@ def run(binary, base, env, cli_command, profile_only=False):
                 raise RuntimeError("Playwright browser check failed.\n" + output[:2500])
             return output
 
+        def browser_fixture(script, code=None):
+            # Init scripts, route handlers and IndexedDB belong to one synthetic
+            # contract. They must not survive into a later contract or the real
+            # authenticated HTTP client, even when a check throws.
+            print("Browser contracts: " + script, flush=True)
+            if code is None:
+                code = (ROOT / "scripts/tests" / script).read_text()
+            code = (
+                code.replace("http://127.0.0.1:17702", origin)
+                .replace("STATE", json.dumps({"origin": origin}))
+                .replace("docs/pr-images/", str(ROOT / "output/pr-images/regression") + "/")
+            )
+            output = browser_cli(
+                "run-code",
+                "async page => { const context = await page.context().browser().newContext({serviceWorkers:'block',storageState:await page.context().storageState()}); "
+                "try { const fixture = await context.newPage(); await fixture.goto("
+                + json.dumps(origin)
+                + "); return await ("
+                + code
+                + ")(fixture); } finally { await context.close(); } }",
+            )
+            marker = (
+                '"errors":[]'
+                if script in {"pot-ui-shell-browser.js", "pot-ui-production-browser.js"}
+                else '"passed":true'
+            )
+            if marker not in output:
+                raise RuntimeError(script + " did not pass")
+            print("Browser passed: " + script, flush=True)
+            return output
+
         def api(method, path, body=None):
             endpoint = json.loads((base / "runtime/runtime.json").read_text())
 
@@ -331,7 +362,9 @@ def run(binary, base, env, cli_command, profile_only=False):
             }
             (ROOT / "output/pr-images").mkdir(parents=True, exist_ok=True)
             code = (ROOT / "scripts/tests/pot-ui-onboarding-browser.js").read_text()
+            print("Browser contracts: pot-ui-onboarding-browser.js", flush=True)
             browser_cli("run-code", code.replace("STATE", json.dumps(onboarding)))
+            print("Browser passed: pot-ui-onboarding-browser.js", flush=True)
             welcome = json.loads((ROOT / "web/src/locales/server.json").read_text())["zh-CN"][
                 "assistant.welcome"
             ]
@@ -439,16 +472,11 @@ def run(binary, base, env, cli_command, profile_only=False):
                 + json.dumps("Bearer " + state["token"])
                 + "}}); }",
             )
+            browser_fixture("pot-ui-codex-connections-browser.js")
             code = (ROOT / "scripts/tests/pot-ui-providers-browser.js").read_text()
-            codex_connections = browser_cli(
-                "run-code",
-                (ROOT / "scripts/tests/pot-ui-codex-connections-browser.js").read_text(),
+            browser_fixture(
+                "pot-ui-providers-browser.js", code.replace("STATE", json.dumps(provider_state))
             )
-            if '"passed":true' not in codex_connections:
-                raise RuntimeError("Codex connection page browser contracts did not pass")
-            providers = browser_cli("run-code", code.replace("STATE", json.dumps(provider_state)))
-            if '"passed":true' not in providers:
-                raise RuntimeError("Provider editor browser contracts did not pass")
             (ROOT / "output/pr-images/task-progress").mkdir(parents=True, exist_ok=True)
             for script in [
                 "pot-ui-agent-capabilities-browser.js",
@@ -456,110 +484,30 @@ def run(binary, base, env, cli_command, profile_only=False):
                 "pot-ui-task-refresh-browser.js",
                 "pot-ui-machine-identity-browser.js",
                 "pot-ui-machines-browser.js",
+                "pot-ui-github-account-browser.js",
+                "pot-ui-refresh-browser.js",
+                "pot-ui-shell-browser.js",
+                "pot-ui-production-browser.js",
             ]:
-                print("Browser contracts: " + script, flush=True)
-                code = (
-                    (ROOT / "scripts/tests" / script)
-                    .read_text()
-                    .replace("http://127.0.0.1:17702", origin)
-                )
-                output = browser_cli(
-                    "run-code",
-                    "async page => { const context = await page.context().browser().newContext({serviceWorkers:'block'}); "
-                    "try { const fixture = await context.newPage(); await fixture.goto("
-                    + json.dumps(origin)
-                    + "); return await ("
-                    + code.replace("STATE", json.dumps({"origin": origin}))
-                    + ")(fixture); } finally { await context.close(); } }",
-                )
-                if '"passed":true' not in output:
-                    raise RuntimeError(script + " did not pass")
-            github_code = (ROOT / "scripts/tests/pot-ui-github-account-browser.js").read_text()
-            github_result = browser_cli(
-                "run-code", github_code.replace("STATE", json.dumps({"origin": origin}))
-            )
-            if '"passed":true' not in github_result:
-                raise RuntimeError("GitHub account DOM checks did not pass")
-
-            code = (ROOT / "scripts/tests/pot-ui-refresh-browser.js").read_text()
-            refresh = browser_cli("run-code", code.replace("STATE", json.dumps({"origin": origin})))
-            if '"passed":true' not in refresh:
-                raise RuntimeError("Background refresh browser contracts did not pass")
-            code = (ROOT / "scripts/tests/pot-ui-shell-browser.js").read_text()
-            shell = browser_cli(
-                "run-code",
-                "async page => { const context = await page.context().browser().newContext({serviceWorkers:'block'}); "
-                "try { return await ("
-                + code.replace("STATE", json.dumps({"origin": origin}))
-                + ")(await context.newPage()); } finally { await context.close(); } }",
-            )
-            if '"errors":[]' not in shell:
-                raise RuntimeError("Application shell browser contracts did not pass")
-            code = (ROOT / "scripts/tests/pot-ui-production-browser.js").read_text()
-            code = code.replace("http://127.0.0.1:17702", origin).replace(
-                "docs/pr-images/", str(ROOT / "output/pr-images/regression") + "/"
-            )
-            production = browser_cli(
-                "run-code",
-                "async page => { const context = await page.context().browser().newContext({serviceWorkers:'block'}); "
-                "try { return await ("
-                + code
-                + ")(await context.newPage()); } finally { await context.close(); } }",
-            )
-            if '"errors":[]' not in production:
-                raise RuntimeError("Production UI browser contracts did not pass")
+                browser_fixture(script)
+            print("Browser contracts: pot-ui-http-browser.js", flush=True)
             code = (ROOT / "scripts/tests/pot-ui-http-browser.js").read_text()
             output = browser_cli("run-code", code.replace("STATE", json.dumps(state)))
             if '"errors":[]' not in output:
                 raise RuntimeError("Browser did not return successful integration evidence")
-            fluid = browser_cli(
-                "run-code", (ROOT / "scripts/tests/pot-ui-fluid-browser.js").read_text()
-            )
-            if '"passed":true' not in fluid:
-                raise RuntimeError("Fluid UI browser contracts did not pass")
-            replies = browser_cli(
-                "run-code", (ROOT / "scripts/tests/pot-ui-replies-browser.js").read_text()
-            )
-            if '"passed":true' not in replies:
-                raise RuntimeError("Reply bubble browser contracts did not pass")
-            reply_outcomes = browser_cli(
-                "run-code", (ROOT / "scripts/tests/pot-ui-reply-outcomes-browser.js").read_text()
-            )
-            if '"passed":true' not in reply_outcomes:
-                raise RuntimeError("Reply outcome browser contracts did not pass")
-            process_checks = browser_cli(
-                "run-code", (ROOT / "scripts/tests/pot-ui-process-runs-browser.js").read_text()
-            )
-            if '"passed":true' not in process_checks:
-                raise RuntimeError("Process session browser contracts did not pass")
-            continuation = browser_cli(
-                "run-code", (ROOT / "scripts/tests/pot-ui-continuation-browser.js").read_text()
-            )
-            if '"passed":true' not in continuation:
-                raise RuntimeError("Interrupted turn continuation contracts did not pass")
-            mermaid = browser_cli(
-                "run-code", (ROOT / "scripts/tests/pot-ui-mermaid-browser.js").read_text()
-            )
-            if '"passed":true' not in mermaid:
-                raise RuntimeError("Mermaid browser contracts did not pass")
-            images = browser_cli(
-                "run-code", (ROOT / "scripts/tests/pot-ui-file-images-browser.js").read_text()
-            )
-            if '"passed":true' not in images:
-                raise RuntimeError("Artifact image browser contracts did not pass")
-            approvals = browser_cli(
-                "run-code", (ROOT / "scripts/tests/pot-ui-task-approvals-browser.js").read_text()
-            )
-            if '"passed":true' not in approvals:
-                raise RuntimeError("Task approval browser contracts did not pass")
-            task_time = browser_cli(
-                "run-code",
-                (ROOT / "scripts/tests/pot-ui-task-time-browser.js")
-                .read_text()
-                .replace("STATE", json.dumps({"origin": origin})),
-            )
-            if '"passed":true' not in task_time:
-                raise RuntimeError("Task elapsed-time browser contracts did not pass")
+            print("Browser passed: pot-ui-http-browser.js", flush=True)
+            for script in [
+                "pot-ui-fluid-browser.js",
+                "pot-ui-replies-browser.js",
+                "pot-ui-reply-outcomes-browser.js",
+                "pot-ui-process-runs-browser.js",
+                "pot-ui-continuation-browser.js",
+                "pot-ui-mermaid-browser.js",
+                "pot-ui-file-images-browser.js",
+                "pot-ui-task-approvals-browser.js",
+                "pot-ui-task-time-browser.js",
+            ]:
+                browser_fixture(script)
             actual = (base / "download.bin").read_bytes()
             assert len(actual) == len(content)
             assert hashlib.sha256(actual).digest() == hashlib.sha256(content).digest()
