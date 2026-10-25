@@ -17,6 +17,7 @@ import (
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/peer"
 	"github.com/jjyr/pot/pkg/protocol"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 func managementValue(value string) *string { return &value }
@@ -29,6 +30,64 @@ func managementCatalog(t *testing.T, b *backend) agentlink.AssistantManagementRe
 	}
 	return v
 }
+
+func TestManagementCreatesAssistantsWithSymlinkedHostRoot(t *testing.T) {
+	for _, adapter := range []Runtime{Codex(), Antigravity()} {
+		t.Run(adapter.Kind, func(t *testing.T) {
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			alias := filepath.Join(t.TempDir(), "host")
+			if err = os.Symlink(root, alias); err != nil {
+				t.Fatal(err)
+			}
+			db, err := storage.OpenDatabase(filepath.Join(alias, "tasks.sqlite"), storage.TasksDatabase)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { db.Close() })
+			adapter.Binary = fakeBinary
+			if adapter.Kind == "antigravity" {
+				adapter.Binary = fakeAgyBinary
+			}
+			b, err := newBackend(db, "symlink-root-test", alias, adapter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			catalog := managementCatalog(t, b)
+			if len(catalog.Workspaces) != 1 {
+				t.Fatal(catalog.Workspaces)
+			}
+			request := agentlink.AssistantManagementRequest{
+				From:   protocol.AgentRef{NodeID: "caller", Kind: "user", AgentID: "operator"},
+				Action: "create", RequestID: "create", ID: "review", Name: managementValue("Review"),
+				Model: managementValue("model-one"), Workspace: catalog.Workspaces[0].ID,
+			}
+			created, err := b.ManageAssistant(t.Context(), request)
+			if err != nil || created.Assistant == nil {
+				t.Fatal("host-root alias made its advertised workspace unusable", created, err)
+			}
+			workspace := filepath.Join(root, "workspace")
+			assistant, err := b.resolve(t.Context(), request.ID)
+			if err != nil || assistant.Workspace != workspace || b.root != root {
+				t.Fatal("host did not register the resolved workspace", assistant, b.root, err)
+			}
+			// Replacing the registered directory with a symlink must still fail.
+			if err = os.Rename(workspace, workspace+"-moved"); err != nil {
+				t.Fatal(err)
+			}
+			if err = os.Symlink(workspace+"-moved", workspace); err != nil {
+				t.Fatal(err)
+			}
+			request.ID, request.RequestID = "replacement", "replacement"
+			if _, err = b.ManageAssistant(t.Context(), request); !errors.Is(err, agentlink.ErrWorkspaceUnavailable) {
+				t.Fatal("replaced workspace accepted", err)
+			}
+		})
+	}
+}
+
 func TestManagementContractAcrossRuntimes(t *testing.T) {
 	for _, kind := range []string{"codex", "antigravity"} {
 		t.Run(kind, func(t *testing.T) {
