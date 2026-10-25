@@ -20,7 +20,7 @@ async page=>{
     // Known initial sizes isolate one controlled delta from unrelated estimate
     // rebases. The later inserted row deliberately has no cached measurement.
     const heights=new Map(rows.map(message=>[message.viewKey,message.height+8]));
-    const list=createMessageWindow({scroller,host,heights,scrolled:delta=>inputs.push({phase,delta}),requestRender:()=>list.setMessages(rows),render(message,old){const record=old||{row:document.createElement('article')};record.row.className='message controlled-row';record.row.dataset.messageId=message.id;record.row.dataset.sequence=message.id.slice(1);record.row.dataset.scrollAnchor='message:'+message.id;record.row.style.height=message.wrap?'auto':message.height+'px';record.row.textContent=message.text;return record;},dispose:record=>record.row.remove()});
+    const list=createMessageWindow({scroller,host,heights,scrolled:delta=>inputs.push({phase,delta}),requestRender:()=>list.setMessages(rows),render(message,old){const record=old||{row:document.createElement('article')};record.row.className='message controlled-row';record.row.dataset.sequence=message.id.slice(1);record.row.style.height=message.wrap?'auto':message.height+'px';record.row.textContent=message.text;return record;},dispose:record=>record.row.remove()});
     list.subscribeReading(state=>states.push({phase,state,anchor:readingAnchor(scroller)}));list.setMessages(rows);
     const row=id=>host.querySelector(`[data-message-id="${id}"]`);
     const sample=()=>({top:scroller.scrollTop,height:scroller.scrollHeight,offset:row('r40')?.getBoundingClientRect().top-scroller.getBoundingClientRect().top,anchor:readingAnchor(scroller),state:list.snapshot(),mounted:host.querySelectorAll('article').length});

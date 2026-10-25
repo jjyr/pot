@@ -109,6 +109,9 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       const record=render(message,old);
       sources.set(record,message);
       record.row.dataset.windowKey=item.key;record.row.dataset.virtualIndex=String(item.index);
+      // Stable reading identity belongs to the list contract, including callers
+      // whose renderer only supplies content and a row element.
+      record.row.dataset.messageId=message.id;record.row.dataset.scrollAnchor=`message:${item.key}`;
       layout.push({record});if(changed||!record.row.isConnected)pending.add(record);
       offset=item.end-margin;
     }

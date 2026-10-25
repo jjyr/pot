@@ -72,8 +72,13 @@ async function run(){
     for(let i=0;i<10;i++){scroll(100);await pause(190);await settle();}
     check(reads.filter(query=>query.before).length>=9,'traversal pages beyond the 640-message data window');
     const persisted=createChatCache({name:client.chatCacheName}),cacheKey=JSON.stringify(['fixture','fixture','alpha']);
-    const beforePrefetch=(await persisted.read(cacheKey)).snapshot.history.after;scroll(h.scrollHeight-h.clientHeight*2.5);await pause(80);
-    const afterPrefetch=(await persisted.read(cacheKey)).snapshot.history.after;persisted.close();
+    const beforePrefetch=(await persisted.read(cacheKey)).snapshot.history.after;scroll(h.scrollHeight-h.clientHeight*2.1);
+    check(h.scrollHeight-h.clientHeight-h.scrollTop>h.clientHeight,'newer prefetch starts before the last viewport');
+    // Observe the committed window, not a fixed 80 ms slice of its asynchronous
+    // cache read, transaction and geometry reconciliation.
+    let afterPrefetch=beforePrefetch;
+    for(let attempt=0;attempt<40&&afterPrefetch===beforePrefetch;attempt++){await pause(25);afterPrefetch=(await persisted.read(cacheKey)).snapshot.history.after;}
+    persisted.close();
     check(BigInt(afterPrefetch)>BigInt(beforePrefetch),'newer history prefetch reads disk or backend more than one viewport before the edge');
     await pause(190);await settle();
     scroll(h.scrollTop-h.clientHeight*.2);await settle();

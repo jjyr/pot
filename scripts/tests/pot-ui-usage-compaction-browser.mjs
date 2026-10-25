@@ -23,7 +23,7 @@ function summary(start,end){
   if(scenario==='partial'){compaction_totals[0].output_known=false;compaction_totals[0].output=0;}
   return {days,start,end,today,timezone:'Asia/Shanghai',total,lifetime:{input:999000000,output:1000000},routing_total:{},buckets,agents:[{agent:'task',...portion(.7)},{agent:'pot',...portion(.3)}],models:[{model:'fixture-model-a',...portion(.7)},{model:'fixture-model-b',...portion(.3)}],compaction_totals,quota:{policy:{period:'none'},active:false},waiting:null};
 }
-const client={production:true,desktop:false,spaces:[{id:'local',name:'Fixture',connected:true}],scope:()=>({space:'local',owner:'main'}),changes:()=>()=>{},request:async(path,options={})=>{
+const client={chatCacheName:'pot-usage-'+crypto.randomUUID(),runtime:{runtime_id:'fixture',boot_id:'boot'},production:true,desktop:false,spaces:[{id:'local',control_id:'fixture',name:'Fixture',connected:true}],scope:()=>({space:'local',owner:'main'}),changes:()=>()=>{},request:async(path,options={})=>{
   const url=new URL(path,location.origin);
   if(url.pathname!=='/api/v1/usage/summary')return {items:[],providers:[]};
   const end=url.searchParams.get('end')||today,start=url.searchParams.get('start')||usageDateAdd(end,1-Number(url.searchParams.get('days')||365)),calendar=start.endsWith('-01-01')&&end.endsWith('-12-31');
@@ -34,6 +34,19 @@ const client={production:true,desktop:false,spaces:[{id:'local',name:'Fixture',c
 }};
 const host=document.querySelector('#page'),result=document.querySelector('#result');
 const pages=createPages({client,host,approvalHost:document.querySelector('#approvals'),chatApprovalHost:document.querySelector('#chat-approvals'),chatVisible:()=>false,locale:()=>language,notify:()=>{},changed:()=>{},titleChanged:()=>{},openChat:()=>{}});
+// Record domain reads as well as transport calls: a cache hit must retain its
+// owner/scope but need not issue HTTP again. Held IO explicitly requests a fresh
+// selected range so the race does not depend on cache warmth.
+const queries=[],readProjection=client.read;
+client.read=(path,options={})=>{
+  const url=new URL(path,location.origin);
+  if(url.pathname==='/api/v1/usage/summary'){
+    const start=url.searchParams.get('start'),end=url.searchParams.get('end'),calendar=start.endsWith('-01-01')&&end.endsWith('-12-31');
+    queries.push({start,end,scope:url.searchParams.get('scope'),owner:options.owner,space:options.space,calendar});
+    if(holdNext&&!calendar)options={...options,authoritative:true};
+  }
+  return readProjection(path,options);
+};
 function verify(){
   const checks=[],check=(value,message)=>{if(!value)throw Error(message);checks.push(message);};
   const range=host.querySelector('.usage-range'),start=range.dataset.start,end=range.dataset.end,data=summary(start,end),numbers=usageNumbers(language),preset=range.dataset.preset;
@@ -66,14 +79,22 @@ function verify(){
 async function render(){
   if(params.has('conversation'))await pages.openUsage({space:'local',owner:'main',name:'Fixture conversation'},false);
   else await pages.show('usage',{force:true});
-  if(!review)verify();
+  // Domain queries publish committed data after page selection returns.
+  // Observe that boundary rather than assuming show() means the DOM is ready.
+  for(let frame=0;frame<300;frame++){
+    if(host.querySelector('.usage-trend')&&host.querySelector('.page-content')?.getAttribute('aria-busy')==='false'){
+      if(!review)verify();return;
+    }
+    await new Promise(requestAnimationFrame);
+  }
+  throw Error('Usage fixture did not receive its committed projection: '+JSON.stringify({scope:client.scope(),requests,busy:host.querySelector('.page-content')?.getAttribute('aria-busy'),text:host.textContent.slice(-500)}));
 }
 const localeSelect=document.querySelector('#fixture-locale'),themeSelect=document.querySelector('#fixture-theme'),caseSelect=document.querySelector('#fixture-case');
 localeSelect.value=language;themeSelect.value=document.documentElement.dataset.theme;caseSelect.value=scenario;
 localeSelect.onchange=()=>{language=localeSelect.value;document.documentElement.lang=language;window.dispatchEvent(new Event('pot:locale'));};
 themeSelect.onchange=()=>document.documentElement.dataset.theme=themeSelect.value;
 caseSelect.onchange=async()=>{scenario=caseSelect.value;await render();};
-window.usageFixture={verify,requests,refresh:()=>pages.show('usage'),open:context=>context?pages.openUsage(context,false):pages.show('usage'),hold(){holdNext=true;},release(){release?.();release=null;},failCalendar(value){failCalendar=value;}};
+window.usageFixture={verify,requests,queries,get pending(){return !!release;},refresh:()=>pages.show('usage'),open:context=>context?pages.openUsage(context,false):pages.show('usage'),hold(){holdNext=true;},release(){release?.();release=null;},failCalendar(value){failCalendar=value;}};
 window.addEventListener('error',event=>{result.textContent='FAIL '+event.message;});
 window.addEventListener('unhandledrejection',event=>{result.textContent='FAIL '+event.reason;});
 window.addEventListener('pagehide',()=>pages.dispose());
