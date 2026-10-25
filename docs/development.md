@@ -829,6 +829,17 @@ mise run test:ui-storage
 mise run test:ui-http-integration
 ```
 
+The HTTP stage also needs cached `@playwright/cli`. Set `npm_config_cache` when
+that cache lives outside the npm default. For a nondefault Chrome location, set
+`PLAYWRIGHT_MCP_CONFIG` to an existing CLI JSON configuration whose
+`browser.launchOptions.executablePath` names the installed executable (and
+`browser.launchOptions.headless` is `true` for headless runs).
+`POT_CHROMIUM_EXECUTABLE` selects the source runner's browser; it does not
+configure the CLI. The standard runner can derive that source executable from
+the CLI configuration, and the Playwright module from a cache containing exactly
+one installation. Ambiguous or missing module discovery fails with an explicit
+override instruction. No runner downloads a tool or browser.
+
 | Group | Behavior and fixture boundary |
 |---|---|
 | `scroll` | Controller: held/reversed/repeated measurements and wheel/key/touch interleaving; phone Chat: real 36px wheel, every message 221–239 readable in both directions, same-ID screen displacement, complete ordered 80-row IDB page, async image growth, nested tools, reading/new output/Latest. Desktop Task: smaller mixed-height wheel witness 1189–1199 through its actual repository/page. One shared adapter contract covers focus during virtual retirement, prepend/append/end, reorder/trim, disposal and deferred tool/raw output. |
