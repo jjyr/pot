@@ -8,13 +8,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/jjyr/pot/internal/hooks"
 	"github.com/jjyr/pot/internal/pwapush"
 	"github.com/jjyr/pot/internal/systemnotifications"
 	"github.com/jjyr/pot/internal/testutil"
+	"github.com/jjyr/pot/pkg/protocol"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -39,42 +40,31 @@ type notificationFixture struct {
 // blocked-body authority races, instead of maintaining two copies of startup.
 func notificationHarness(t *testing.T) notificationFixture {
 	t.Helper()
-	var mu sync.Mutex
-	reply, count, version := "old", 1, 1
-	updates := make(chan struct{}, 16)
+	updates := make(chan protocol.LifecycleEvent, 16)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer private-control" {
 			t.Error("missing server credential")
 			w.WriteHeader(401)
 			return
 		}
-		if r.URL.Path == "/api/v1/changes" {
-			w.Header().Set("Content-Type", "text/event-stream")
-			for {
-				mu.Lock()
-				v := version
-				mu.Unlock()
-				fmt.Fprintf(w, "event: changed\ndata: {\"assistant-mail\":%d}\n\n", v)
-				w.(http.Flusher).Flush()
-				select {
-				case <-r.Context().Done():
-					return
-				case <-updates:
-				}
-			}
-		}
-		mu.Lock()
-		defer mu.Unlock()
-		switch r.URL.Path {
-		case "/api/v1/runtime":
-			json.NewEncoder(w).Encode(map[string]string{"runtime_id": "node", "boot_id": "boot"})
-		case "/api/v1/assistants":
-			json.NewEncoder(w).Encode([]any{map[string]any{"id": "alpha", "name": "Alpha", "reply_id": reply, "reply_count": count, "preview": "Synthetic completed reply"}})
-		case "/api/v1/agent-links":
-			w.Write([]byte(`{"items":[]}`))
-		default:
-			t.Error("unexpected upstream", r.URL.Path)
+		if r.URL.Path != "/api/v1/lifecycle" {
+			t.Error("notification consumer scanned business resources", r.URL.Path)
 			w.WriteHeader(404)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		authority, _ := json.Marshal(hooks.Authority{Control: "node", Boot: "boot", Owners: []hooks.Owner{{ID: "alpha", Name: "Alpha", Boot: "boot", Control: "node", Space: "node"}}})
+		fmt.Fprintf(w, "event: authority\ndata: %s\n\n", authority)
+		w.(http.Flusher).Flush()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case e := <-updates:
+				data, _ := json.Marshal(e)
+				fmt.Fprintf(w, "event: lifecycle\ndata: %s\n\n", data)
+				w.(http.Flusher).Flush()
+			}
 		}
 	}))
 	t.Cleanup(upstream.Close)
@@ -100,11 +90,9 @@ func notificationHarness(t *testing.T) notificationFixture {
 		t.Fatal(err)
 	}
 	server.notifications = n
-	devices := n.devices
 	t.Cleanup(func() { server.Close() })
 	for deadline := time.Now().Add(testutil.Timeout(t, time.Second)); ; {
-		var baseline int
-		if devices.DB.QueryRow("SELECT count(*) FROM notification_sources WHERE reply_id='old'").Scan(&baseline) == nil && baseline == 1 {
+		if n.events.ValidateScope("node", "node", []string{"alpha"}) {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -136,12 +124,7 @@ func notificationHarness(t *testing.T) notificationFixture {
 		return w.Result().Cookies()[0]
 	}
 	return notificationFixture{server: server, config: config, pushed: pushed, advance: func(id string) {
-		mu.Lock()
-		reply = id
-		count++
-		version++
-		mu.Unlock()
-		updates <- struct{}{}
+		updates <- protocol.LifecycleEvent{ID: id, Kind: "reply_completed", Owner: "alpha", Preview: "Synthetic completed reply"}
 	}, invoke: invoke, login: login}
 }
 func TestAuthenticatedNotificationDevicesAndClosedPageDelivery(t *testing.T) {
@@ -192,8 +175,8 @@ func TestAuthenticatedNotificationDevicesAndClosedPageDelivery(t *testing.T) {
 		t.Fatal("local device accepted Push", got)
 	}
 	delete(local, "subscription")
-	// No browser/SSE client is running. Only the host source reader observes a
-	// committed reply change, and the shared dispatcher reaches the Push sender.
+	// No page is running. The authenticated stream carries the committed fact
+	// directly, without catalogue/task/approval resource reads.
 	f.advance("new")
 	select {
 	case got := <-pushed:

@@ -53,6 +53,8 @@ func exercisePotHumanReview(t *testing.T, ctx context.Context, pot *control.Serv
 	}
 	a, _ := h.backend.resolve(ctx, "codex")
 	marker := filepath.Join(a.Workspace, "approval-executed")
+	facts, stopFacts := pot.Lifecycle.Subscribe()
+	defer stopFacts()
 	task, err := pot.CreateTask(ctx, owner.ID, protocol.CreateTask{Target: &protocol.AgentRef{NodeID: h.identity.Address.NodeID, Kind: "node", AgentID: h.identity.Address.NodeID}, RequestID: "direct-task", Text: "approve\nReview this operation"})
 	if err != nil {
 		t.Fatal(err)
@@ -73,6 +75,21 @@ func exercisePotHumanReview(t *testing.T, ctx context.Context, pot *control.Serv
 	}
 	if approvalID == "" {
 		t.Fatal("task approval did not reach its owner", read(owner.ID))
+	}
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for received := false; !received; {
+		select {
+		case fact := <-facts:
+			if fact.Kind == "approval_requested" {
+				if fact.ID != approvalID || fact.Owner != owner.ID || fact.Task != task.ID || fact.Preview != "" {
+					t.Fatal("unscoped approval fact", fact)
+				}
+				received = true
+			}
+		case <-timer.C:
+			t.Fatal("committed peer approval produced no direct business event")
+		}
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatal("executed before approval")

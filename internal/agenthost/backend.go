@@ -39,6 +39,7 @@ type job struct {
 // backend owns accepted work independently of link lifecycle. Its work queue is
 // independent for explicit tasks and serialized per assistant for messages.
 type backend struct {
+	approvalCommitted    func(context.Context, agentlink.ApprovalEvent) error
 	adapter              Runtime
 	db                   *sql.DB
 	nodeID, binary, root string

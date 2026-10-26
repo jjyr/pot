@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ type Hub struct {
 	db          *sql.DB
 	mu          sync.Mutex
 	owners      map[string]Owner
+	sources     map[string]string
 	control     string
 	subscribers map[*Subscription]struct{}
 }
@@ -37,7 +39,7 @@ func (h *Hub) Control() string      { h.mu.Lock(); defer h.mu.Unlock(); return h
 func (h *Hub) Current(e Event) bool { h.mu.Lock(); defer h.mu.Unlock(); return h.current(e) }
 func (h *Hub) current(e Event) bool {
 	o, ok := h.owners[e.Owner]
-	return ok && h.control != "" && e.Control == h.control && e.Space == h.control && o.Boot == e.Boot
+	return ok && (e.Source == "" || h.sources[e.Source] == e.SourceBoot) && h.control != "" && e.Control == h.control && e.Space == h.control && o.Boot == e.Boot
 }
 func (h *Hub) signalLocked() {
 	for sub := range h.subscribers {
@@ -46,14 +48,6 @@ func (h *Hub) signalLocked() {
 		default:
 		}
 	}
-}
-func (h *Hub) resetSource(context.Context) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.control = ""
-	h.owners = map[string]Owner{}
-	h.signalLocked()
-	return nil
 }
 func (h *Hub) ValidateScope(control, space string, owners []string) bool {
 	h.mu.Lock()
@@ -68,51 +62,37 @@ func (h *Hub) ValidateScope(control, space string, owners []string) bool {
 	}
 	return true
 }
-func (h *Hub) commitSource(ctx context.Context, owner string, next sourceState, events []Event, reader ...string) error {
+
+// Accept converts an already committed business fact, without transport policy.
+func (h *Hub) Accept(ctx context.Context, fact protocol.LifecycleEvent) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	owner, ok := h.owners[fact.Owner]
+	if !ok || fact.Suppressed || fact.ID == "" || (fact.Source != "" && (fact.SourceBoot == "" || h.sources[fact.Source] != fact.SourceBoot)) {
+		return nil
+	}
+	kind := ""
+	switch fact.Kind {
+	case "reply_completed":
+		kind = "reply"
+	case "task_completed":
+		kind = "task-complete"
+	case "task_interrupted":
+		kind = "task-failed"
+	case "approval_requested":
+		kind = "approval"
+	default:
+		return nil // failed Tasks first enter assistant recovery
+	}
+	e := event(owner, kind, fact.ID, fact.Task, fact.Name, fact.Preview)
+	e.Source, e.SourceBoot = fact.Source, fact.SourceBoot
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	approvals := ""
-	if next.Approvals != nil {
-		body, _ := json.Marshal(next.Approvals)
-		approvals = string(body)
-	}
-	part := "all"
-	if len(reader) > 0 {
-		part = reader[0]
-	}
-	switch part {
-	case "reply":
-		_, err = tx.ExecContext(ctx, `INSERT INTO notification_sources(owner,boot,reply_id,reply_count,task_cursor,approvals) VALUES(?,?,?,?,NULL,NULL)
- ON CONFLICT(owner) DO UPDATE SET boot=excluded.boot,reply_id=excluded.reply_id,reply_count=excluded.reply_count`, owner, next.Boot, next.Reply, next.Count)
-	case "task", "approval":
-		var result sql.Result
-		if part == "task" {
-			result, err = tx.ExecContext(ctx, "UPDATE notification_sources SET task_cursor=? WHERE owner=? AND boot=?", next.Cursor, owner, next.Boot)
-		} else {
-			result, err = tx.ExecContext(ctx, "UPDATE notification_sources SET approvals=? WHERE owner=? AND boot=?", approvals, owner, next.Boot)
-		}
-		if err == nil {
-			rows, _ := result.RowsAffected()
-			if rows != 1 {
-				return ErrSourceChanged
-			}
-		}
-	default:
-		_, err = tx.ExecContext(ctx, `INSERT INTO notification_sources(owner,boot,reply_id,reply_count,task_cursor,approvals) VALUES(?,?,?,?,?,?)
- ON CONFLICT(owner) DO UPDATE SET boot=excluded.boot,reply_id=excluded.reply_id,reply_count=excluded.reply_count,task_cursor=excluded.task_cursor,approvals=excluded.approvals`, owner, next.Boot, next.Reply, next.Count, next.Cursor, approvals)
-	}
-	if err != nil {
+	if err = h.publish(ctx, tx, e); err != nil {
 		return err
-	}
-	for _, event := range events {
-		if err = h.publish(ctx, tx, event); err != nil {
-			return err
-		}
 	}
 	if err = tx.Commit(); err == nil {
 		h.signalLocked()

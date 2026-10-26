@@ -48,6 +48,13 @@ func TestRestartOutboxAndAppendOnlyEvents(t *testing.T) {
 	if err != nil || len(events) != 2 || events[0].Message.Status != protocol.Streaming || events[1].Message.Status != protocol.Failed {
 		t.Fatalf("append-only history changed: %+v %v", events, err)
 	}
+	calls := 0
+	s.ReplyCommitted = func(m protocol.Message) {
+		calls++
+		if _, err := s.Cursor(ctx); err != nil {
+			t.Fatal("callback preceded commit", err)
+		}
+	}
 	m.Status = protocol.Complete
 	for i := 0; i < 2; i++ {
 		if _, err := s.Save(ctx, m); err != nil {
@@ -61,6 +68,9 @@ func TestRestartOutboxAndAppendOnlyEvents(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if calls != 1 {
+		t.Fatal("reply event duplicated or silent output published", calls)
+	}
 	count, err := s.NotificationCount(ctx)
 	if err != nil || count != 1 {
 		t.Fatalf("completed reply count: %d %v", count, err)
@@ -73,6 +83,8 @@ func TestAtomicSaveRollbackAndContextCorruption(t *testing.T) {
 	ctx := context.Background()
 	s, _ := testStore(t)
 	r := "unique"
+	calls := 0
+	s.ReplyCommitted = func(protocol.Message) { calls++ }
 	m := message("one", protocol.Complete)
 	m.RequestID = &r
 	if _, err := s.Save(ctx, m); err != nil {
@@ -84,6 +96,12 @@ func TestAtomicSaveRollbackAndContextCorruption(t *testing.T) {
 	}
 	if _, ok, err := s.Get(ctx, "should-not-commit"); err != nil || ok {
 		t.Fatal(ok, err)
+	}
+	if _, err := s.SaveMessagesWithMetadataMutation(ctx, []Message{message("staged-before-rollback", protocol.Complete), m}, nil, nil); err == nil {
+		t.Fatal("late batch failure did not roll back")
+	}
+	if calls != 1 {
+		t.Fatal("rollback published reply", calls)
 	}
 	cursor, _ := s.Cursor(ctx)
 	if cursor != 1 {

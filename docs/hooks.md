@@ -1,7 +1,7 @@
 # Runtime lifecycle hooks
 
 `internal/hooks` defines trusted lifecycle events and their delivery routes.
-Hooks reference authoritative state; they carry no new user authority and are
+Hooks carry committed structured business facts; they carry no new user authority and are
 not exposed as model tools. `send_message` remains the Agent messaging primitive.
 
 ```text
@@ -77,7 +77,10 @@ routing meaning. Result envelopes preserve the final reply, execution error, art
 paths, collection diagnostics and notification suppression reason. Silent schedule outcomes enter the
 same inbox as `suppressed`, retain their history and do not wake a model.
 
-After commit, UI invalidations wake the current projections. The existing assistant
+After commit, the shared typed lifecycle feed publishes the full fact independently
+of UI invalidations. The authenticated owner lifecycle SSE stream carries it to
+notification conversion; notification consumers never infer these events from
+version hints or resource snapshots. UI invalidations still wake current projections. The existing assistant
 receiver claims the durable result when user chat is available. Eligible failed
 manual Tasks first allow model-directed recovery; accepted recovery is
 silent. The assistant replies only with a useful result, an unresolved blocker or
@@ -105,3 +108,20 @@ Known errors default to normal Task admission only after confirmed cleanup;
 unknown execution/cleanup stays blocked under the existing operation receipt
 fence. See [before-run probes](scheduled-tasks.md#before-run-probes) for the
 copyable script, protocol, directory/policy rules, manual triggers and recovery.
+
+## Completed replies and independent consumers
+
+The first eligible completed reply/outbox insert publishes only after its
+transaction commits; rollback and repeated completion do not publish. Silent
+reports use the existing non-notifying save path. Linked user replies publish
+from their incoming reply transaction. Caller-owned remote Task execution already
+commits terminal state through the same Task hooks. Remote executor human approval
+requests carry IDs and the original delegating address through Agent Link; they
+never send tool arguments or broadcast another owner's private events.
+
+`hooks.Feed` has independent bounded subscriptions and no historical replay.
+Cross-process consumers use the authenticated `/api/v1/lifecycle` typed stream,
+with current access epochs and no business-state baseline reads. The feed is not
+a durable delivery broker. Notification persistence, per-device uncertainty,
+foreground suppression and consumer lifetime are described in
+[System notifications](shared-ui.md#system-notifications).

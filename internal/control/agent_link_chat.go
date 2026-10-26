@@ -111,18 +111,23 @@ func (s *Service) captureLinkChat(ctx context.Context, message protocol.Envelope
 	if message.From.NodeID != c.PeerHost.NodeID || message.From.AgentID != assistant {
 		return agentlink.ErrConflict
 	}
+	inserted := false
 	e = storage.Transaction(ctx, s.integrationDB, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, "INSERT INTO agent_link_chat(id,link_id,assistant_id,request_id,role,text,created_at,reply_to) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET reply_to=excluded.reply_to WHERE agent_link_chat.reply_to=''", message.ID, link, assistant, message.ID, "assistant", message.Text, time.Now().UnixMilli(), *message.ReplyTo)
 		if err != nil {
 			return err
 		}
 		if n, _ := result.RowsAffected(); n != 0 {
+			inserted = true
 			_, err = tx.ExecContext(ctx, "UPDATE agent_link_chat_sessions SET revision=revision+1 WHERE link_id=? AND assistant_id=?", link, assistant)
 		}
 		return err
 	})
 	if e != nil {
 		return e
+	}
+	if inserted {
+		s.publishReply("agent-link:"+link+":"+assistant, protocol.Message{ID: message.ID, Text: message.Text})
 	}
 	s.Changes.Notify("agent-links")
 	s.Changes.Notify("assistants")

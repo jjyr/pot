@@ -63,7 +63,7 @@ func startNotifications(root string, upstream Upstream, origin string, config Co
 	n := &notificationService{events: events, devices: devices, local: &browsernotifications.Local{Store: devices, Events: events}, push: push, cancel: cancel}
 	caller := localui.NewHTTPClient(upstream.URL, upstream.Client, upstream.Credential, upstream.ControlID)
 	n.wg.Add(3)
-	go func() { defer n.wg.Done(); events.Observe(ctx, caller) }()
+	go func() { defer n.wg.Done(); events.Consume(ctx, caller) }()
 	go func() { defer n.wg.Done(); devices.Run(ctx, browserSub) }()
 	go func() { defer n.wg.Done(); push.Run(ctx) }()
 	return n, nil

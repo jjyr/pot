@@ -13,16 +13,18 @@ type Authority interface{ Current(Event) bool }
 // Event is the sole notification contract, independent of presentation channel.
 // It contains no tool arguments, credentials or arbitrary navigation URL.
 type Event struct {
-	ID      string `json:"id"`
-	Boot    string `json:"boot"`
-	Space   string `json:"space"`
-	Control string `json:"control"`
-	Owner   string `json:"owner"`
-	Task    string `json:"task,omitempty"`
-	Kind    string `json:"kind"`
-	Name    string `json:"name"`
-	Preview string `json:"preview,omitempty"`
-	BodyKey string `json:"body_key"`
+	Source     string `json:"source,omitempty"`
+	SourceBoot string `json:"source_boot,omitempty"`
+	ID         string `json:"id"`
+	Boot       string `json:"boot"`
+	Space      string `json:"space"`
+	Control    string `json:"control"`
+	Owner      string `json:"owner"`
+	Task       string `json:"task,omitempty"`
+	Kind       string `json:"kind"`
+	Name       string `json:"name"`
+	Preview    string `json:"preview,omitempty"`
+	BodyKey    string `json:"body_key"`
 }
 type View struct {
 	Sequence uint64 `json:"sequence"`

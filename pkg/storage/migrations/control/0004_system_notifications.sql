@@ -1,10 +1,6 @@
 -- +migrate Up
 -- +migrate StatementBegin
 CREATE TABLE notification_secrets (id TEXT PRIMARY KEY, value BLOB NOT NULL);
-CREATE TABLE notification_sources (
- owner TEXT PRIMARY KEY, boot TEXT NOT NULL, reply_id TEXT NOT NULL,
- reply_count INTEGER NOT NULL, task_cursor INTEGER, approvals TEXT
-);
 CREATE TABLE notification_events (
  sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
  body TEXT NOT NULL, created_ms INTEGER NOT NULL

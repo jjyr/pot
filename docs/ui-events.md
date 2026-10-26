@@ -7,6 +7,16 @@ adapters own native wakeups, peer polling and reconnection (see the
 imply token streaming support at every endpoint. Input events, preference changes, request completion
 and subscriptions wake the shared DOM components.
 
+## Committed business event stream
+
+`GET /api/v1/lifecycle` requires the same operator identity as other owner APIs.
+It carries full structured reply, Task and approval facts after business commit,
+plus current access metadata and heartbeat frames. Native and browser-service
+notification consumers use this stream independently of page lifetime. It has no
+history replay; a reconnect does not scan old business state. `/changes` remains
+an invalidation interface for UI projections and is not a notification source.
+See [Lifecycle hooks](hooks.md) and [System notifications](shared-ui.md#system-notifications).
+
 ## Local invalidation stream
 
 `GET /api/v1/changes` requires operator authorization. The standalone browser

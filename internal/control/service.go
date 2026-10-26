@@ -8,6 +8,7 @@ import (
 	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/attachments"
 	"github.com/jjyr/pot/internal/gateway"
+	"github.com/jjyr/pot/internal/hooks"
 	"github.com/jjyr/pot/internal/linkhost"
 	"github.com/jjyr/pot/internal/nodeidentity"
 	"github.com/jjyr/pot/internal/resources"
@@ -79,6 +80,8 @@ type Service struct {
 	Permissions         *PermissionStore
 	Operations          *Operations
 	Changes             core.Changes
+	Lifecycle           hooks.Feed
+	lifecycleAuthority  lifecycleAuthority
 	conversations       map[string]*assistant.Conversation
 	hosts               map[string]*executor.Engine
 	hostGenerations     map[string]uint64
@@ -151,6 +154,7 @@ func Open(options Options) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.Registry.Changed = func() { s.Lifecycle.Publish(protocol.LifecycleEvent{Kind: "authority_changed"}) }
 	s.Resources.ValidateOwner = func(ctx context.Context, owner string) error {
 		deleted, err := s.Registry.Deleted(ctx, owner)
 		if err != nil || deleted {
@@ -227,7 +231,7 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 	if err != nil {
 		return nil, err
 	}
-	options := assistant.ConversationOptions{InitialWelcome: welcome, InitialIntent: intent, Context: s.ctx, Owner: id, RuntimeID: s.options.RuntimeID, BootID: s.options.BootID, Manager: s.options.Manager, InitialSpec: initial, InitialRules: rules, RefreshConfiguration: s.refreshAssistantConfiguration, OnFinished: func(ctx context.Context, r protocol.SendMessage, result execution.Result) error {
+	options := assistant.ConversationOptions{ReplyCommitted: func(m protocol.Message) { s.publishReply(id, m) }, InitialWelcome: welcome, InitialIntent: intent, Context: s.ctx, Owner: id, RuntimeID: s.options.RuntimeID, BootID: s.options.BootID, Manager: s.options.Manager, InitialSpec: initial, InitialRules: rules, RefreshConfiguration: s.refreshAssistantConfiguration, OnFinished: func(ctx context.Context, r protocol.SendMessage, result execution.Result) error {
 		return s.finishAgentDelivery(ctx, id, r, result)
 	}}
 	options.IdlePolicy = s.idleCompactPolicy

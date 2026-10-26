@@ -27,7 +27,7 @@ func (s *Service) startNotificationEvents(ctx context.Context, root string, sour
 	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); events.Observe(ctx, source) }()
+	go func() { defer wg.Done(); events.Consume(ctx, source) }()
 	go func() {
 		defer wg.Done()
 		defer sub.Close()

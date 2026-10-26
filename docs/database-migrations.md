@@ -209,7 +209,7 @@ scopes use the same registry; deleting an assistant does not delete its scope.
 
 ## Unified system notification delivery
 
-`control/0004_system_notifications` adds source baselines, structured events,
+`control/0004_system_notifications` adds structured notification events,
 browser installations, reading leases and per-installation receipts. Push
 subscription JSON/fingerprints and private VAPID material have separate tables
 owned by the Push service. An activation event sequence prevents delayed consumers
@@ -220,8 +220,8 @@ registration/receipt protocol. This migration is new after the released Control
 
 Existing Control business tables and JSON records are unchanged. The native host
 uses its Control database; a standalone browser service keeps a Control database
-in its private service root. Source reconnection establishes a fresh authority
-cycle/baseline. Browser interrupted sends become uncertain receipts, never an
+in its private service root. Lifecycle stream reconnection establishes a fresh
+access lifetime without storing business-source baselines or reading history. Browser interrupted sends become uncertain receipts, never an
 automatic resend. No retired Push store is imported.
 
 The separate rebuildable notification installation database uses

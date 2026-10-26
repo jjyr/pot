@@ -460,69 +460,79 @@ remain independent; native preference/authorization history stays in the private
 
 ### Events and independent delivery services
 
-`internal/systemnotifications` produces the notification event contract. Its
-resident source adapter reads authenticated Control resources after `/changes`
-invalidations, independently of any page lifetime. It owns stable event IDs,
-business selection, source cursors and current owner/boot authority. It has no
-Push sender, subscription, permission, device registration or local/Push branch.
-The adapter exists because committed reply catalogue, Task outcome and approval
-resources have different cursors and capability boundaries; it does not deliver
-notifications or request model work.
+Business owners publish full lifecycle facts after their authoritative writes
+commit. `internal/hooks.Feed` is the shared, typed, process-local subscription
+boundary; each subscriber receives its own events. The authenticated owner
+`/api/v1/lifecycle` SSE connection transports the complete fact across processes.
+It does not send a topic hint followed by catalogue, outcome or permission GETs.
+`internal/systemnotifications` converts those facts to bounded notifications,
+persists their IDs/content and offers independent consumers. It has no Push
+sender, subscription, permission, device registration or local/Push branch.
 
 ```text
-Control commits -> /changes -> source rules + owner/cursor fences
-                                      |
-                           durable notification event log
-                         independent consumer subscriptions
-                           /                         \
-                  native consumer              browser recipients
-                         |                     single chosen channel
-               existing preferences,            /               \
-               window state, claims      local receipts       Push receipts
-                         |                      |                   |
-                 native notifier        page Notification    PWA Push service
-                                                               subscriptions,
-                                                        VAPID, retry, invalidation
-                                                                   |
-                                                           encrypted HTTP -> SW
+Task terminal transaction / pending approval / eligible reply commit
+                              |
+                    typed lifecycle facts
+             /api/v1/lifecycle (authenticated SSE)
+                              |
+                 notification selection + event log
+                   independent subscriptions
+                       /                     \
+              native consumer          browser recipients
+           pref/window/claim           one selected channel
+                     |                   /             \
+             native notifier      local receipts     Push receipts
+                                        |                |
+                                page Notification  pwapush.Service
+                                                  subscription/VAPID
+                                                  HTTP/retry/expiry
+                                                         |
+                                                 push provider -> SW
 ```
 
-- A changed completed `reply_id` with an increased `reply_count` produces a reply,
-  including for linked assistants. Preview whitespace collapses and content is
-  bounded to 120 Unicode code points; empty previews use the localized phrase.
-- Task outcome sequences identify `complete` and `interrupted`. Failure first
-  enters assistant recovery; only an unresolved assistant reply alerts.
-  Cancellation/intermediate phases never alert. The compact owner-scoped
-  [Task outcome API](task-coordination.md#client-notification-outcomes) supplies
-  cursors, without polling tool/output histories.
-- New pending approval IDs produce bounded names and a localized description;
-  notification events never read tool arguments.
+- Reply facts come from the first eligible completed reply/outbox write after
+  commit. Catalogue and lifecycle presentation share the same 120-code-point
+  whitespace-collapsed preview. Empty/silent Task reports do not create replies.
+- Task `complete` and `interrupted` facts come from the existing terminal
+  transaction's hook, including Tasks whose execution is remote. Schedule
+  notification policy remains part of the prepared authoritative outcome.
+  `failed` first allows assistant recovery and does not notify ahead of it;
+  only an unresolved completed assistant reply alerts. Cancellation/start never
+  alert. The outcome API remains available to its existing UI consumers, but
+  notification production does not read it.
+- Approval facts come from committed pending state and contain only IDs, owner
+  and exact Task, with no tool arguments. Remote executor approvals use a small
+  authenticated Agent Link event targeted to the original delegating node. The
+  receiver validates the already committed delegation and current capability.
+- Linked user replies publish when their incoming reply transaction commits.
+  Linked user Task ownership maps through the saved user route, independently
+  of whether that conversation has sent text.
 
-Reply, Task and approval baselines are independent. A slow or failing reader
-cannot block another reader/owner. A transient resource read keeps its successful
-cursor and retries with cancellable backoff from 250 milliseconds to 15 seconds,
-even if no new topic arrives. Named heartbeats do not change business versions.
-An initial snapshot schedules baselines once. Startup, source reconnect and
-Runtime replacement establish fresh baselines, with no historical flood. Late
-reads revalidate owner, boot and linked capabilities before committing. Retained
-catalogue data never grants authority.
+The stream begins with current access metadata: Control/boot, authorized owners,
+capabilities and access epochs. Registry and Agent Link mutations update this
+metadata directly. This does not read reply counters, Task cursors or pending
+approval lists. Retained data cannot grant authority; deleted/revoked owners,
+capability changes, old boots and old peer approval epochs retire queued events.
+The consumer makes no HTTP authority recheck or business-resource scan.
 
-Each consumer has an independent in-process cursor over the persisted log. Its
-buffered memory channel is only a coalesced wakeup; notifications are not passed
-through a competing Go channel. A failed consumer queue write leaves the record
-unacknowledged for retry. New subscriptions start at the log tail, intentionally
-not replaying old events after startup. This is not an exactly-once broker.
-Browser recipients record their activation sequence in the same SQLite writer
-transaction as intent changes, so delayed event consumption cannot notify a new
-or re-enabled installation about events committed before activation.
+The lifecycle feed has no durable replay. Its bounded per-subscriber buffers
+close a slow subscription rather than silently treating missed facts as current;
+reconnection starts a new authority lifetime without scanning history. Memory
+channels do not cross processes and are not persistent delivery queues.
+Notification event/device receipts are durable once conversion and queueing
+commit. This is not an exactly-once broker: a disconnected consumer does not
+backfill historical business events. Each notification-log subscription has its
+own in-memory cursor; failed queue writes retain its current record for retry.
+A new subscriber starts at the log tail. Installation activation sequences,
+committed with intent changes, prevent delayed consumption from delivering old
+notifications to a new or re-enabled installation.
 
 `internal/browsernotifications` stores browser intent, session bindings, reading
-leases and per-installation receipts. Its single event consumer
-queues each installation once on its selected channel; local receivers and
-`internal/pwapush.Service` consume their own receipts. Push owns subscription
-registration, private VAPID material, encrypted HTTP sending, provider retries
-and invalidation. Composition/startup connects these services;
-the source never starts or selects a delivery mechanism.
+leases and per-installation receipts. One event consumer queues each installation
+once on its chosen channel. Local receivers and `internal/pwapush.Service` consume
+their own receipts. Push owns subscription registration, private VAPID material,
+encrypted HTTP sending, retries and invalidation. Composition/startup connects
+these services; business publishers do not know any delivery mechanism.
 
 Events use stable Control identity as canonical Space. Browser presentation may
 call that Space `local`; current confirmed identity is mapped at lease/click
@@ -542,7 +552,7 @@ consume each other's work. Network errors/interruption never trigger a blind
 resend or another channel. Push owns at most three attempts for explicit temporary
 provider rejection, with backoff bounded to one minute; 404/410 clears that
 subscription. Local age/lease limits are 25 seconds; Push queue age/TTL is five
-minutes. Event history is bounded to seven days. Source authority cycles fence
+minutes. Event history is bounded to seven days. Access authority lifetimes fence
 queued events from disconnected/replaced owners.
 
 Local browser receivers retain one Web Lock per installation during transient

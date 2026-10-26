@@ -2,6 +2,8 @@ package systemnotifications
 
 import (
 	"context"
+	"fmt"
+	"github.com/jjyr/pot/pkg/protocol"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,7 +17,7 @@ func testHub(t *testing.T) *Hub {
 		t.Fatal(err)
 	}
 	h.control = "node"
-	h.owners = map[string]Owner{"alpha": {ID: "alpha"}}
+	h.owners = map[string]Owner{"alpha": {ID: "alpha", Name: "Alpha", Control: "node", Space: "node"}}
 	t.Cleanup(func() { h.Close() })
 	return h
 }
@@ -33,10 +35,10 @@ func TestIndependentSubscriptionsReadDurableEventsWithoutHistory(t *testing.T) {
 	}
 	defer b.Close()
 	e := event(Owner{ID: "alpha", Control: "node", Space: "node", Name: "Alpha"}, "reply", "new", "", "", strings.Repeat("😀", 130))
-	if err = h.commitSource(ctx, e.Owner, sourceState{}, []Event{e}); err != nil {
+	if err = h.Accept(ctx, protocol.LifecycleEvent{ID: "new", Kind: "reply_completed", Owner: e.Owner, Preview: e.Preview}); err != nil {
 		t.Fatal(err)
 	}
-	if err = h.commitSource(ctx, e.Owner, sourceState{}, []Event{e}); err != nil {
+	if err = h.Accept(ctx, protocol.LifecycleEvent{ID: "new", Kind: "reply_completed", Owner: e.Owner, Preview: e.Preview}); err != nil {
 		t.Fatal(err)
 	}
 	first, err := a.Next(ctx)
@@ -66,5 +68,28 @@ func TestIndependentSubscriptionsReadDurableEventsWithoutHistory(t *testing.T) {
 	_, body := e.Text("zh-CN")
 	if len([]rune(body)) != 120 || !strings.HasSuffix(body, "…") {
 		t.Fatal(body)
+	}
+}
+
+func TestCommittedFactSelection(t *testing.T) {
+	h := testHub(t)
+	for i, tt := range []struct {
+		kind   string
+		silent bool
+		want   int
+	}{
+		{"task_completed", false, 1}, {"task_interrupted", false, 1}, {"task_failed", false, 0},
+		{"task_cancelled", false, 0}, {"task_completed", true, 0}, {"approval_requested", false, 1},
+		{"approval_resolved", false, 0}, {"reply_completed", false, 1},
+	} {
+		var before, after int
+		h.db.QueryRow("SELECT count(*) FROM notification_events").Scan(&before)
+		if err := h.Accept(context.Background(), protocol.LifecycleEvent{ID: fmt.Sprint(i), Kind: tt.kind, Owner: "alpha", Task: "exact-task", Suppressed: tt.silent}); err != nil {
+			t.Fatal(err)
+		}
+		h.db.QueryRow("SELECT count(*) FROM notification_events").Scan(&after)
+		if after-before != tt.want {
+			t.Fatal(tt, after-before)
+		}
 	}
 }
