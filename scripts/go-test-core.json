@@ -24,7 +24,12 @@
       "TestModelReservationSettlementAndDuplicateFence",
       "TestPermanentCommandIsExactAndEditable",
       "TestDefaultSandboxAndExplicitMachineTrust",
-      "TestRulesDenyHostBeforeTrustedAndManualCRUD"
+      "TestRulesDenyHostBeforeTrustedAndManualCRUD",
+      "TestLocalMessageFilesShareOrdinaryFilesAcrossPolicies",
+      "TestLocalMessageFilesAuthenticationAliasesAndDependencies",
+      "TestMessageFilesUnifiedPolicyAndRetry",
+      "TestLocalMessageFileRejectsMutationDuringRead",
+      "TestLocalTaskUsesSharedCapacityOwnerModelAndSummary"
     ],
     "./internal/assistant": [
       "TestConversationRealAgentStreamDedupRestartAndCounts",
@@ -40,7 +45,8 @@
     ],
     "./internal/transport": [
       "TestSocketProductCreateEventsAuthAndRestart",
-      "TestSendReceiptHTTPIdentityAndAuthorization"
+      "TestSendReceiptHTTPIdentityAndAuthorization",
+      "TestExternalMessageFileCompletionToHTTPPreviewAndDownload"
     ],
     "./internal/agenthost": [
       "TestCodexTaskAndPeerApprovalFromPot",

@@ -11,7 +11,7 @@ import (
 )
 
 // Source is minted only by the execution host, never from Markdown or HTTP.
-// Root is the captured execution directory; Config permits only own AGENTS.md.
+// Root is the captured execution directory and relative-path anchor.
 type Source struct {
 	RootID   string `json:"root_id"`
 	ConfigID string `json:"config_id,omitempty"`
@@ -27,9 +27,12 @@ type MessageFile struct {
 	Message  string `json:"message"`
 	Revision string `json:"revision"`
 	Link
-	Source   Source    `json:"-"`
-	State    string    `json:"state"`
-	Resource *Resource `json:"resource,omitempty"`
+	Source Source `json:"-"`
+	// ReceiptSource preserves the saved serialization solely for immutable receipt lookup.
+	// Unknown fields never select file-reading authority.
+	ReceiptSource json.RawMessage `json:"-"`
+	State         string          `json:"state"`
+	Resource      *Resource       `json:"resource,omitempty"`
 }
 
 func (s *Store) BindMessage(ctx context.Context, owner, conversation, message, text string, source Source) error {
@@ -102,6 +105,7 @@ func (s *Store) queryFiles(ctx context.Context, query string, args ...any) ([]Me
 		if err = json.Unmarshal([]byte(source), &f.Source); err != nil {
 			return nil, err
 		}
+		f.ReceiptSource = json.RawMessage(source)
 		if resource != "" {
 			if err = json.Unmarshal([]byte(resource), &f.Resource); err != nil {
 				return nil, err
