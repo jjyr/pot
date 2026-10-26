@@ -8,6 +8,7 @@ import (
 
 	"github.com/jjyr/pot/internal/hooks"
 	"github.com/jjyr/pot/internal/testutil"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 func TestApprovalHooksUpdateUIWithoutAssistantDelivery(t *testing.T) {
@@ -16,6 +17,10 @@ func TestApprovalHooksUpdateUIWithoutAssistantDelivery(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			p := permissionFixture(t)
 			s := &Service{}
+			factsA, stopA := s.Lifecycle.Subscribe()
+			defer stopA()
+			factsB, stopB := s.Lifecycle.Subscribe()
+			defer stopB()
 			events := make(chan hooks.Event, 8)
 			p.PublishHook = func(event hooks.Event) { s.publishHook(event); events <- event }
 			sub := s.Changes.Subscribe()
@@ -34,6 +39,16 @@ func TestApprovalHooksUpdateUIWithoutAssistantDelivery(t *testing.T) {
 			}
 			if requested.Kind != hooks.ApprovalRequested || requested.Owner != r.Owner || requested.TaskID != r.Task || requested.RunID != r.Turn || requested.Generation != r.Generation || requested.Result != nil {
 				t.Fatal(requested)
+			}
+			for _, facts := range []<-chan protocol.LifecycleEvent{factsA, factsB} {
+				select {
+				case fact := <-facts:
+					if fact.ID != requested.ID || fact.Owner != r.Owner || fact.Kind != "approval_requested" || fact.Task != r.Task || fact.Preview != "" {
+						t.Fatal("lifecycle consumer lost committed approval", fact)
+					}
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
 			}
 			if len(p.Pending(r.Owner)) != 1 {
 				t.Fatal("UI cannot read pending approval")

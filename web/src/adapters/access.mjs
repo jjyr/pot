@@ -1,3 +1,4 @@
+import {disableNotificationInstallation} from './pwapush.mjs';
 import {clearBusinessCaches} from '../state/cache-lifecycle.mjs';
 // The installation token is origin-scoped in IndexedDB. API calls use the
 // server's HttpOnly session cookie; credentials never enter routes or logs.
@@ -45,22 +46,13 @@ export async function ensureBrowserAccess(root) {
     form.onsubmit=async event=>{event.preventDefault();submit.disabled=true;error.textContent='';try{await exchange(input.value.trim());try{await tokenStore('put',input.value.trim());}catch{}input.value='';root.replaceChildren();stopViewport();resolve({...status,authenticated:true});}catch(reason){error.textContent=reason.message;}finally{submit.disabled=false;}};
   });
 }
-export async function forgetBrowserAccess() {try{await tokenStore('remove');}catch{}try{await fetch('/access/logout',{method:'POST',credentials:'same-origin'});}finally{try{await clearBusinessCaches();localStorage.removeItem('pot-ui-read-v1');}finally{location.reload();}}}
+export async function forgetBrowserAccess() {try{await disableNotificationInstallation();}catch{/* Server session revocation remains authoritative when local storage is blocked. */}try{await tokenStore('remove');}catch{}try{await fetch('/access/logout',{method:'POST',credentials:'same-origin'});}finally{try{await clearBusinessCaches();localStorage.removeItem('pot-ui-read-v1');}finally{location.reload();}}}
 export async function configureBrowserAccess(token) {await exchange(token.trim());try{await tokenStore('put',token.trim());}catch{}}
 export async function requestPWAInstall() {
   if(!installationPrompt)return false;
   const prompt=installationPrompt;installationPrompt=null;await prompt.prompt();await prompt.userChoice;return true;
 }
 export async function installPWA() {
-  if('serviceWorker'in navigator&&isSecureContext)return navigator.serviceWorker.register('/service-worker.js',{scope:'/',updateViaCache:'none'});
+  if('serviceWorker'in navigator&&isSecureContext)return navigator.serviceWorker.register('/service-worker.js',{scope:'/',type:'module',updateViaCache:'none'});
   return null;
-}
-// Best-effort local cleanup for browsers upgrading from Web Push. The server
-// no longer accepts or sends subscriptions; cleanup must never delay startup.
-export async function retireBrowserPush() {
-  try {
-    const registration=await navigator.serviceWorker?.getRegistration('/');
-    const subscription=await registration?.pushManager?.getSubscription();
-    await subscription?.unsubscribe();
-  } catch {/* Restricted/offline browsers can still use local system notifications. */}
 }

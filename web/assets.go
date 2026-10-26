@@ -26,7 +26,7 @@ type frontendAssets struct{ fs.FS }
 
 func (f frontendAssets) Open(name string) (fs.File, error) {
 	const prefix = "pkg/storage/migrations/"
-	if strings.HasPrefix(name, prefix+"ui-cache/") {
+	if strings.HasPrefix(name, prefix+"ui-cache/") || strings.HasPrefix(name, prefix+"ui-notifications/") {
 		return migrations.FrontendSchemas().Open(strings.TrimPrefix(name, prefix))
 	}
 	return f.FS.Open(name)

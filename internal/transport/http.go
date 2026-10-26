@@ -42,6 +42,10 @@ func Handler(app *Application, token string) http.Handler {
 			streamSnapshots(w, r, app)
 			return
 		}
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/lifecycle" {
+			streamLifecycle(w, r, app)
+			return
+		}
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/changes" {
 			streamChanges(w, r, app)
 			return
@@ -213,4 +217,20 @@ func streamChanges(w http.ResponseWriter, r *http.Request, app *Application) {
 			}
 		}
 	}
+}
+
+func streamLifecycle(w http.ResponseWriter, r *http.Request, app *Application) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("X-Accel-Buffering", "no")
+	controller := http.NewResponseController(w)
+	if controller.Flush() != nil {
+		return
+	}
+	_ = app.Control.StreamLifecycle(r.Context(), func(kind string, value any) error {
+		body, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		return writeSSE(controller, w, kind, "", body)
+	})
 }

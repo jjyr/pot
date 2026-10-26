@@ -15,6 +15,7 @@ type NotificationView struct {
 	Task    string `json:"task"`
 	Route   string `json:"route"`
 	Focused bool   `json:"focused"`
+	Locale  string `json:"locale"`
 }
 type SystemNotification struct {
 	ID      string `json:"id"`
@@ -75,9 +76,10 @@ func (s *Service) SetNotificationView(surface string, view NotificationView) err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.notificationViews[surface] = view
+	s.notificationLocale = view.Locale
 	return nil
 }
-func (s *Service) NotifySystem(event SystemNotification) error {
+func (s *Service) sendSystemNotification(event SystemNotification) error {
 	_, validOwner := localui.AttentionID(event.Owner)
 	if event.ID == "" || len(event.ID) > 2048 || !validOwner || len(event.Title) > 512 || len(event.Body) > 512 {
 		return errors.New("invalid system notification")
@@ -89,35 +91,14 @@ func (s *Service) NotifySystem(event SystemNotification) error {
 	if space.ControlID != event.Control {
 		return errors.New("notification Control identity changed")
 	}
-	claimed, err := s.notificationStore.Claim(event.ID)
-	if err != nil || !claimed {
-		return err
-	}
 	if !s.notificationStore.Enabled() {
 		return nil
 	}
-	s.mu.Lock()
-	views := make(map[string]NotificationView, len(s.notificationViews))
-	for surface, view := range s.notificationViews {
-		views[surface] = view
-	}
-	s.mu.Unlock()
-	viewing := false
-	for surface, view := range views {
-		window := s.main
-		if surface == "tray" {
-			window = s.tray
-		}
-		if view.Focused && window.IsVisible() && window.IsFocused() && view.Space == event.Space && view.Owner == event.Owner && ((view.Task != "" && view.Task == event.Task) || (view.Task == "" && view.Route == "chat")) {
-			viewing = true
-			break
-		}
-	}
-	if viewing || notificationAuthorization() != "granted" {
+	if notificationAuthorization() != "granted" {
 		return nil
 	}
 	return s.notifier.SendNotification(notifications.NotificationOptions{ID: event.ID, Title: event.Title, Body: event.Body,
-		Data: map[string]interface{}{"space": event.Space, "control": event.Control, "owner": event.Owner, "task": event.Task, "kind": event.Kind, "name": event.Name}})
+		Data: map[string]interface{}{"id": event.ID, "space": event.Space, "control": event.Control, "owner": event.Owner, "task": event.Task, "kind": event.Kind, "name": event.Name}})
 }
 
 // TakeSystemNotification lets the main WebView recover a click received before

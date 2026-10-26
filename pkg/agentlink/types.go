@@ -89,11 +89,12 @@ type Options struct {
 	DB      *sql.DB
 	Secrets SecretStore
 	// Identity resolves the node for an empty selector, and assistants for explicit IDs.
-	Identity     func(context.Context, string) (Identity, error)
-	Mailbox      Mailbox
-	HostIdentity peer.Identity
-	HostKey      ed25519.PrivateKey
-	Changed      func()
+	Identity         func(context.Context, string) (Identity, error)
+	Mailbox          Mailbox
+	HostIdentity     peer.Identity
+	HostKey          ed25519.PrivateKey
+	Changed          func()
+	ApprovalReceived func(context.Context, string, ApprovalEvent) error
 	// PollInterval is bounded below by 100 ms; default is two seconds.
 	PollInterval time.Duration
 	// InvitationTTL defaults to one hour and cannot exceed 24 hours.

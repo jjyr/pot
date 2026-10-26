@@ -13,6 +13,11 @@
     "./pkg/storage",
     "./pkg/storage/migrations",
     "./internal/access",
+    "./internal/systemnotifications",
+    "./internal/browsernotifications",
+    "./internal/pwapush",
+    "./internal/webui",
+    "./internal/localui",
     "./internal/secrets",
     "./internal/inbox",
     "./internal/schedule"
@@ -46,7 +51,8 @@
     "./internal/transport": [
       "TestSocketProductCreateEventsAuthAndRestart",
       "TestSendReceiptHTTPIdentityAndAuthorization",
-      "TestExternalMessageFileCompletionToHTTPPreviewAndDownload"
+      "TestExternalMessageFileCompletionToHTTPPreviewAndDownload",
+      "TestCommittedApprovalStreamAndOwnerRevocation"
     ],
     "./internal/agenthost": [
       "TestCodexTaskAndPeerApprovalFromPot",

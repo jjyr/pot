@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jjyr/pot/pkg/core"
 	"strings"
 	"time"
 
@@ -99,6 +100,18 @@ func (s *Service) handler(id string, remote peer.Identity) peer.Handler {
 			result = connection
 		case "directory", "observe", "task.submit", "task.status", "task.cancel", "task.input", "chat.status", "assistant.profile", "assistant.delete", "assistant.management", "execution.review":
 			return s.business(ctx, connection, remote, request)
+		case "approval.event":
+			var e ApprovalEvent
+			if decodeJSON(request.Params, &e) != nil || !e.To.Valid() || e.To.Kind != "assistant" || e.To.NodeID != s.options.HostIdentity.NodeID || !core.Identifier(e.ID) || !core.Identifier(e.JobID) || !core.Identifier(e.RequestID) {
+				return nil, ErrInvalid
+			}
+			if s.options.ApprovalReceived == nil {
+				return nil, ErrUnsupported
+			}
+			if err = s.options.ApprovalReceived(ctx, connection.ID, e); err != nil {
+				return nil, err
+			}
+			result = struct{}{}
 		case "exchange":
 			var input exchangeRequest
 			if decodeJSON(request.Params, &input) != nil || input.ID != id {

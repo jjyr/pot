@@ -27,7 +27,7 @@ func localAssistantID(t testing.TB, service *control.Service) string {
 
 func TestSocketProductCreateEventsAuthAndRestart(t *testing.T) {
 	ctx := context.Background()
-	temporary, err := os.MkdirTemp("/tmp", "pot-api-")
+	temporary, err := os.MkdirTemp("", "pot-api-")
 	if err != nil {
 		t.Fatal(err)
 	}

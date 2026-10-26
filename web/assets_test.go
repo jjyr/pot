@@ -18,3 +18,13 @@ func TestFrontendIncludesChatCacheMigration(t *testing.T) {
 		t.Fatal("backend database migrations must not be served to the frontend")
 	}
 }
+
+func TestNotificationMigrationIsServedWithoutBackendSchema(t *testing.T) {
+	body, err := fs.ReadFile(FS(), "pkg/storage/migrations/ui-notifications/0001_installation.mjs")
+	if err != nil || !strings.Contains(string(body), "migrateNotificationInstallation") {
+		t.Fatal(string(body), err)
+	}
+	if _, err = fs.ReadFile(FS(), "pkg/storage/migrations/control/0004_system_notifications.sql"); err == nil {
+		t.Fatal("notification SQL exposed to browser")
+	}
+}

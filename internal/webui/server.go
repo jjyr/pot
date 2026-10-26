@@ -47,6 +47,7 @@ type Upstream struct {
 	ControlID  string
 }
 type Options struct {
+	Root     string // private browser service root; empty only for isolated transport fixtures.
 	Origin   string
 	Config   Config
 	Upstream Upstream
@@ -54,15 +55,17 @@ type Options struct {
 	Persist  func(Config) error
 }
 type Server struct {
-	mu       sync.Mutex
-	config   Config
-	origin   *url.URL
-	upstream Upstream
-	assets   http.Handler
-	streams  map[uint64]browserStream
-	persist  func(Config) error
-	next     uint64
-	failures map[string]attempt
+	notifications *notificationService
+	closeOnce     sync.Once
+	mu            sync.Mutex
+	config        Config
+	origin        *url.URL
+	upstream      Upstream
+	assets        http.Handler
+	streams       map[uint64]browserStream
+	persist       func(Config) error
+	next          uint64
+	failures      map[string]attempt
 }
 type browserStream struct {
 	cancel context.CancelFunc
@@ -92,7 +95,14 @@ func New(o Options) (*Server, error) {
 	if len(o.Config.Token) < 20 || len(o.Config.SessionKey) < 20 || o.Config.Generation == 0 || o.Assets == nil {
 		return nil, errors.New("invalid browser access configuration")
 	}
-	return &Server{config: o.Config, origin: origin, upstream: o.Upstream, assets: http.FileServer(http.FS(o.Assets)), streams: map[uint64]browserStream{}, persist: o.Persist, failures: map[string]attempt{}}, nil
+	server := &Server{config: o.Config, origin: origin, upstream: o.Upstream, assets: http.FileServer(http.FS(o.Assets)), streams: map[uint64]browserStream{}, persist: o.Persist, failures: map[string]attempt{}}
+	if o.Root != "" {
+		server.notifications, err = startNotifications(o.Root, o.Upstream, o.Origin, o.Config, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return server, nil
 }
 
 // ReplaceAccess invalidates active streams and every previously issued cookie.
@@ -104,6 +114,11 @@ func (s *Server) ReplaceAccess(c Config) error {
 	defer s.mu.Unlock()
 	if c.Generation <= s.config.Generation {
 		return errors.New("access generation must advance")
+	}
+	if s.notifications != nil {
+		if err := s.notifications.revoke(context.Background(), ""); err != nil {
+			return err
+		}
 	}
 	s.config = c
 	for _, stream := range s.streams {
@@ -119,6 +134,15 @@ func (s *Server) cookie(c Config, expires int64, nonce string) string {
 	return text + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 func (s *Server) authenticated(r *http.Request, c Config) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.authenticatedLocked(r, c)
+}
+
+// authenticatedLocked checks the current authority while the caller holds mu.
+// Notification registration holds this same lock through its database commit,
+// in the same server -> hub order used by logout and ReplaceAccess.
+func (s *Server) authenticatedLocked(r *http.Request, c Config) bool {
 	if c.Disabled {
 		return false
 	}
@@ -137,9 +161,7 @@ func (s *Server) authenticated(r *http.Request, c Config) bool {
 	if !hmac.Equal([]byte(cookie.Value), []byte(s.cookie(c, expires, parts[2]))) {
 		return false
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.config.Generation == c.Generation && s.config.Revoked[sessionOwner(r)] == 0
+	return !s.config.Disabled && s.config.Generation == c.Generation && s.config.Revoked[sessionOwner(r)] == 0
 }
 func (s *Server) sameOrigin(r *http.Request) bool {
 	return r.Host == s.origin.Host && (r.Header.Get("Origin") == "" || r.Header.Get("Origin") == s.origin.String()) && r.Header.Get("Sec-Fetch-Site") != "cross-site"
@@ -209,6 +231,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			failure(w, 401, "access token rejected")
 			return
 		}
+		if auth && s.notifications != nil {
+			if err := s.notifications.revoke(r.Context(), notificationBinding(r, c.Generation)); err != nil {
+				failure(w, 500, "notification revocation could not be saved")
+				return
+			}
+		}
 		http.SetCookie(w, &http.Cookie{Name: "pot_session", Value: s.cookie(c, time.Now().Add(30*24*time.Hour).Unix(), rand.Text()), Path: "/", Secure: s.origin.Scheme == "https", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 30 * 24 * 60 * 60})
 		reply(w, 200, map[string]bool{"accepted": true})
 		return
@@ -234,6 +262,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
+			if s.notifications != nil {
+				if err := s.notifications.revoke(r.Context(), notificationBinding(r, c.Generation)); err != nil {
+					s.mu.Unlock()
+					failure(w, 500, "notification revocation could not be saved")
+					return
+				}
+			}
 			s.config = next
 			for _, stream := range s.streams {
 				if stream.owner == sessionOwner(r) {
@@ -254,6 +289,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		if !auth {
 			failure(w, 401, "browser authentication required")
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v1/notifications/") {
+			s.notificationRoute(w, r, c)
 			return
 		}
 		if !Allowed(r.Method, r.URL.Path) {
@@ -461,6 +500,11 @@ func (s *Server) proxy(w http.ResponseWriter, r *http.Request, generation uint64
 	}
 }
 func (s *Server) Close() {
+	s.closeOnce.Do(func() {
+		if s.notifications != nil {
+			s.notifications.close()
+		}
+	})
 	s.mu.Lock()
 	for _, stream := range s.streams {
 		stream.cancel()

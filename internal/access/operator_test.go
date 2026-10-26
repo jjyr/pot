@@ -12,7 +12,7 @@ import (
 )
 
 func TestPrivateOperatorControlsOnlyIndependentBrowserService(t *testing.T) {
-	root, err := os.MkdirTemp("/tmp", "pot-access-")
+	root, err := os.MkdirTemp("", "pot-access-")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -21,8 +21,10 @@ func Now() int64 { return time.Now().UnixMilli() }
 type Message = protocol.Message
 type Event = protocol.Event
 type Store struct {
-	db        *sql.DB
-	directory string
+	// ReplyCommitted runs only after the first eligible completed-reply insert commits.
+	ReplyCommitted func(protocol.Message)
+	db             *sql.DB
+	directory      string
 }
 
 func Open(path string) (*Store, error) {
@@ -227,6 +229,7 @@ func (s *Store) saveMessages(ctx context.Context, messages []Message, metadata m
 		}
 	}
 	var events []Event
+	var replies []Message
 	err := Transaction(ctx, s.db, func(tx *sql.Tx) error {
 		if mutation != nil {
 			if err := mutation(tx); err != nil {
@@ -256,8 +259,12 @@ func (s *Store) saveMessages(ctx context.Context, messages []Message, metadata m
 				return err
 			}
 			if notify && m.Role == "assistant" && m.Status == "complete" && (strings.TrimSpace(m.Text) != "" || m.Presentation != nil) && !strings.HasPrefix(m.ID, "task-report-") {
-				if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO main_message_outbox(message_id,body) VALUES (?,?)", m.ID, string(body)); err != nil {
+				result, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO main_message_outbox(message_id,body) VALUES (?,?)", m.ID, string(body))
+				if err != nil {
 					return err
+				}
+				if n, _ := result.RowsAffected(); n == 1 {
+					replies = append(replies, m)
 				}
 			}
 			eventBody, err := json.Marshal(e)
@@ -284,6 +291,11 @@ func (s *Store) saveMessages(ctx context.Context, messages []Message, metadata m
 	})
 	if err != nil {
 		return nil, err
+	}
+	if s.ReplyCommitted != nil {
+		for _, m := range replies {
+			s.ReplyCommitted(m)
+		}
 	}
 	return events, nil
 }

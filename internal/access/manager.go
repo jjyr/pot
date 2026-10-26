@@ -44,7 +44,7 @@ func Open(o Options) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	m.browser, err = webui.New(webui.Options{Origin: o.Origin, Config: config, Upstream: o.Upstream, Assets: o.Assets, Persist: m.store.SaveSessions})
+	m.browser, err = webui.New(webui.Options{Root: o.Root, Origin: o.Origin, Config: config, Upstream: o.Upstream, Assets: o.Assets, Persist: m.store.SaveSessions})
 	if err != nil {
 		return nil, err
 	}

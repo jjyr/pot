@@ -135,6 +135,7 @@ func openAgentHost(root string, runtimes ...Runtime) (*agentHost, error) {
 	if err != nil {
 		return nil, err
 	}
+	h.backend.approvalCommitted = h.links.PublishApproval
 	h.peerRegistry = linkhost.NewRegistry(h.peerIdentity, h.peerKey)
 	if err = h.peerRegistry.Register(agentlink.ServiceName, h.links.Authorize, h.links.Attach); err != nil {
 		return nil, err
