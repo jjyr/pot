@@ -97,7 +97,7 @@ else{
    await config({hold:block});await page.reload({waitUntil:'domcontentloaded'});
    await editor(page).waitFor();await page.waitForFunction(()=>document.querySelector('textarea.composer-input')?.value==='Persistent synthetic draft');
    assert((await page.locator('.history').innerText()).includes('ALPHA cached message'));
-   const state=await record(page,'held-'+block+'-'+viewport.width);assert.equal(reading(state)?.position?.anchor?.id,anchor);assert(state.controller);assert.equal(state.caches.find(cache=>cache.name==='pot-ui-shell-'+original.version)?.assets.length,original.assets.length);assert(!state.text.includes('Could not start'));assert(!state.text.split('\n').includes('Connected'),'cached directory must not claim a live connection');if(viewport.width>500)assert(await page.getByRole('button',{name:'Tasks',exact:true}).isDisabled());
+   const state=await record(page,'held-'+block+'-'+viewport.width);assert.equal(reading(state)?.position?.anchor?.id,anchor);assert(state.controller);assert.equal(state.caches.find(cache=>cache.name==='pot-ui-shell-'+original.version)?.assets.length,original.assets.length);assert(!state.text.includes('Could not start'));assert.equal(await page.getByRole('button',{name:'Allow notifications',exact:true}).count(),0);assert(!state.text.split('\n').includes('Connected'),'cached directory must not claim a live connection');if(viewport.width>500)assert(await page.getByRole('button',{name:'Tasks',exact:true}).isDisabled());
    assert(await page.locator('.send-button').isDisabled());
    await editor(page).fill('Typed while '+block+' pending');await page.waitForTimeout(500);
    await page.screenshot({path:resolve(output,'held-'+block+'-'+viewport.width+'.png')});

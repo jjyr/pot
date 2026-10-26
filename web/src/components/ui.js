@@ -173,7 +173,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   if(onboarding)root.append(onboarding.element);
   let notificationReady=false;
   function mainReady(){
-    if(notificationReady)return;notificationReady=true;
+    if(notificationReady||client.onlineReady===false)return;notificationReady=true;
     // The successful initial directory read has mounted the main interface.
     // Wait for a paint; rendering, reconnects and tray setup do not authorize.
     requestAnimationFrame(()=>requestAnimationFrame(()=>{if(!disposed)notifications?.ready();}));
@@ -586,6 +586,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     root.querySelector('.assistant-profile-trigger')?.setAttribute('aria-expanded', String(event.newState === 'open'));
   });
   function renderShell() {
+    root.classList.toggle('is-local-startup',client.onlineReady===false);
     root.classList.toggle('is-background',document.visibilityState==='hidden');
     const showingChat=route==='chat'&&!(media.matches&&directoryOpen);
     if(chatShown&&!showingChat){rememberChatPosition();cancelChatPosition();initialLayout.cancel();messageWindow.suspend();}
@@ -1054,7 +1055,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     messageWindow.setMessages([]);messageNodes.clear();windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);
     input.value='';directoryOpen=true;error='';
   }
-  const stopResources=domains.directory.watch(snapshot=>{if(disposed)return;if(snapshot.error){directoryStorageFailed=!!snapshot.error.storage;error=t(directoryStorageFailed?'storage.failed':'loading.stale');updateControls();}else if(snapshot.data){if(directoryStorageFailed){directoryStorageFailed=false;if(error===t('storage.failed'))error='';}loadDirectory();}});
+  const stopResources=domains.directory.watch(snapshot=>{if(disposed)return;if(snapshot.error){if(client.onlineReady===false&&!snapshot.error.storage){updateControls();return;}directoryStorageFailed=!!snapshot.error.storage;error=t(directoryStorageFailed?'storage.failed':'loading.stale');updateControls();}else if(snapshot.data){if(error===t('loading.stale'))error='';if(directoryStorageFailed){directoryStorageFailed=false;if(error===t('storage.failed'))error='';}loadDirectory();}});
   const directoryQueue=createRefreshQueue(()=>readDirectory(),{active:()=>!disposed});
   function loadDirectory(){return directoryQueue.run();}
   async function readDirectory() {

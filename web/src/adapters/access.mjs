@@ -35,6 +35,7 @@ export async function ensureBrowserAccess(root,{signal,onSetup=()=>{}}={}) {
   if(response.status===404)return null; // Isolated fixture is checked by bootstrap.
   if(!response.ok)throw Object.assign(Error(`Browser access: HTTP ${response.status}`),{status:response.status});
   const status=await response.json();signal?.throwIfAborted();
+  if(typeof status?.authenticated!=='boolean')throw Error('Invalid browser access status');
   let saved=fragment;
   if(!saved)try{saved=await tokenStore('get');}catch{/* A restricted browser can use a session-only token. */}
   signal?.throwIfAborted();

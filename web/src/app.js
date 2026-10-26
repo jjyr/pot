@@ -38,6 +38,7 @@ function bindIdentity(value){
     const saved=await store.save(value.runtime,scope,surface);if(value===client&&!stopped)identity=saved;
   };
 }
+const online=()=>{if(!client||client.onlineReady===false)verify();};
 function suspend(){if(client?.production){client.onlineReady=false;client.startupConfirmed();status('startup.local');}}
 async function verify(force=false,resetScope=false){
   if(stopped||verifying&&force!==true)return;currentAbort?.abort();suspend();verifying=true;clearTimeout(retryTimer);
@@ -87,7 +88,7 @@ try{
     else status('startup.loading');
     verify();
     window.addEventListener('offline',suspend);
-    window.addEventListener('online',verify);
+    window.addEventListener('online',online);
   }
 }catch(error){console.error('Pot startup:',error);status('startup.unavailable');}
-window.addEventListener('pagehide',event=>{if(!event.persisted){stopped=true;clearTimeout(retryTimer);dispose();client?.resources?.clear();store?.close();window.removeEventListener('online',verify);window.removeEventListener('offline',suspend);}});
+window.addEventListener('pagehide',event=>{if(!event.persisted){stopped=true;clearTimeout(retryTimer);dispose();client?.resources?.clear();store?.close();window.removeEventListener('online',online);window.removeEventListener('offline',suspend);}});

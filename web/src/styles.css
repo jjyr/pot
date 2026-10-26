@@ -1028,3 +1028,5 @@ button.communication-task-endpoint:focus-visible{outline:2px solid var(--primary
 .startup-status { pointer-events: none; }
 .startup-status button { pointer-events: auto; }
 @media (max-width: 640px) { .startup-status { top: calc(env(safe-area-inset-top) + 56px); } }
+
+.is-local-startup .notification-onboarding { display: none; }

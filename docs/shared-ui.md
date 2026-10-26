@@ -700,7 +700,8 @@ While verification is pending or the device is offline, cached conversations are
 readable, cached assistants can be selected, and drafts can be edited and saved.
 Sending and online management require current access and Control verification,
 fresh advertised capabilities, and the existing operation/session checks. Cached
-capabilities never grant authority. Network recovery revalidates identity and
+capabilities never grant authority. Notification permission invitations also wait
+for verified online startup. Network recovery revalidates identity and
 refreshes the directory and conversation without replacing the editor or its
 reading anchor. Interrupted sends keep their existing immutable confirmation
 fences; recovery never automatically submits or retries a message.
