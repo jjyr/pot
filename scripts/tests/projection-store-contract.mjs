@@ -6,7 +6,9 @@ import {createResourceReads,displayProjection} from '../../web/src/state/resourc
 import {createTaskRepository} from '../../web/src/state/task-repository.mjs';
 import {createChatCache} from '../../web/src/state/chat-cache.mjs';
 import {migrateChatCache} from '../../pkg/storage/migrations/ui-cache/0001_chat_cache.mjs';
-import {UI_CACHE_VERSION} from '../../pkg/storage/migrations/ui-cache/0005_assistant_drafts.mjs';
+import {UI_CACHE_VERSION,migrateStartupIdentity} from '../../pkg/storage/migrations/ui-cache/0006_startup_identity.mjs';
+import {migrateAssistantDrafts} from '../../pkg/storage/migrations/ui-cache/0005_assistant_drafts.mjs';
+import {createStartupIdentity} from '../../web/src/state/startup-identity.mjs';
 const remove=name=>new Promise((resolve,reject)=>{const op=indexedDB.deleteDatabase(name);op.onsuccess=resolve;op.onerror=()=>reject(op.error);});
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
 export async function projectionStoreContract(report=()=>{}){
@@ -61,6 +63,25 @@ export async function projectionStoreContract(report=()=>{}){
     await clearBusinessCaches({name:commandName});let retired=false;try{await transport.resources.storage.commit('late',{control:'commands',space:'local',topics:[]},{},'[0]');}catch{retired=true;}check(retired,'Logout retires old repository writers');
     const reopened=createProjectionStore({name:commandName});check(await reopened.read(contents[0].key)===null,'Logout clears committed business projections');reopened.close();
   }finally{transport?.resources.clear();globalThis.fetch=originalFetch;await remove(commandName);await remove(commandName+'-tasks');}
+  const startupName='pot-startup-v5-'+crypto.randomUUID(),v5=createIndexedStore({name:startupName,version:5,migrate:migrateAssistantDrafts});
+  await v5.transaction(['composerDrafts','composerFiles','views'],'readwrite',tx=>{
+    tx.objectStore('composerDrafts').put({key:'fixture',text:'preserved draft',pending:{request_id:'fixed-request'}});
+    tx.objectStore('composerFiles').put({key:'fixture-file',id:'original',blob:new Blob(['original'])});
+    tx.objectStore('views').put({key:'fixture-view',position:{following:false,anchor:{id:'reading'}}});
+  });v5.close();
+  const brokenStartup=createIndexedStore({name:startupName,migrate:(db,tx,old)=>{migrateStartupIdentity(db,tx,old);tx.abort();}});let upgradeAborted=false;
+  try{await brokenStartup.transaction(['startup'],'readonly',()=>{});}catch{upgradeAborted=true;}brokenStartup.close();
+  const startup=createStartupIdentity({name:startupName}),startupDB=createIndexedStore({name:startupName});
+  try{
+    check(upgradeAborted&&await startup.read()===null,'Failed v5→v6 startup upgrade rolls back and retries without a fabricated identity');
+    const kept=await startupDB.transaction(['composerDrafts','composerFiles','views'],'readonly',async tx=>Promise.all(['composerDrafts','composerFiles','views'].map(name=>idbRequest(tx.objectStore(name).getAll()))));
+    check(kept[0][0].text==='preserved draft'&&kept[0][0].pending.request_id==='fixed-request'&&await kept[1][0].blob.text()==='original'&&kept[2][0].position.anchor.id==='reading','v5→v6 preserves drafts, immutable pending requests, original Blobs and reading positions');
+    await startup.save({runtime_id:'confirmed-control',boot_id:'boot'},{space:'local',owner:'alice'},'browser:old');
+    const locator=await startup.read();check(locator.runtime_id==='confirmed-control'&&locator.owner==='alice'&&!('capabilities' in locator)&&!('authenticated' in locator),'Startup persists only a local locator, never authority');
+    await startupDB.transaction(['startup'],'readwrite',tx=>tx.objectStore('startup').put({key:'last',schema_version:99,runtime_id:'bad'}));check(await startup.read()===null,'Corrupt startup data cannot select another identity');
+    const put=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(...args){if(this.name==='startup')throw new DOMException('Synthetic quota','QuotaExceededError');return put.apply(this,args);};let failed=false;try{await startup.save({runtime_id:'uncommitted'});}catch{failed=true;}finally{IDBObjectStore.prototype.put=put;}check(failed&&await startup.read()===null,'Failed startup writes do not publish an uncommitted locator');
+    await startup.save({runtime_id:'confirmed-control'});await startup.clear();check(await startup.read()===null,'Clearing startup removes the locator');
+  }finally{startup.close();startupDB.close();await remove(startupName);}
   const upgradeName='pot-upgrade-abort-'+crypto.randomUUID(),before=createIndexedStore({name:upgradeName});
   await before.transaction(['cacheStats'],'readwrite',tx=>tx.objectStore('cacheStats').put({key:'preserved',value:42}));
   const broken=createIndexedStore({name:upgradeName,version:UI_CACHE_VERSION+1,migrate:(db,tx)=>{db.createObjectStore('uncommitted');tx.abort();}});let aborted=false;try{await broken.transaction(['cacheStats'],'readonly',()=>{});}catch{aborted=true;}broken.close();

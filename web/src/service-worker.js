@@ -1,17 +1,45 @@
 import {notificationInstallation,validNotificationTarget} from './adapters/notification-installation.mjs';
 
-// Only immutable UI assets are cached. API, token and remote desktop traffic
-// always goes to the network and never enters the offline cache.
-const CACHE='pot-ui-v4';
-const ASSETS=['/index.html','/app.js','/styles.css','/assets/PotCompanion.png','/assets/IBMPlexSans-Regular.ttf'];
-self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting())));
-self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('pot-ui-')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
+// Injected from the complete embedded resource tree by webassets.FS(). A failed
+// install never activates; the installed version keeps serving its own resources.
+const SHELL=/* POT_SHELL_MANIFEST */ null;
+const CACHE='pot-ui-shell-'+SHELL.version;
+const paths=new Map(SHELL.assets.map(asset=>[asset.url,asset]));
+async function verified(response,asset){
+ if(!response?.ok||response.redirected)return false;
+ const bytes=await response.clone().arrayBuffer();
+ const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),byte=>byte.toString(16).padStart(2,'0')).join('');
+ return hash===asset.sha256;
+}
+async function download(asset){
+ const response=await fetch(asset.url,{cache:'no-store',credentials:'same-origin'});
+ if(!await verified(response,asset))throw Error('Incomplete or mismatched Pot shell');
+ return response;
+}
+self.addEventListener('install',event=>event.waitUntil((async()=>{
+ const cache=await caches.open(CACHE);
+ try{
+  // Bounded IO, integrity checked before the browser may activate this worker.
+  for(let offset=0;offset<SHELL.assets.length;offset+=8)await Promise.all(SHELL.assets.slice(offset,offset+8).map(async asset=>{
+   const response=await download(asset);
+   await cache.put(asset.url,response);
+  }));
+ }catch(error){await caches.delete(CACHE);throw error;}
+ // No skipWaiting: existing documents keep their complete installed version.
+})()));
+self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('pot-ui-')&&key!==CACHE).map(key=>caches.delete(key))))));
 self.addEventListener('fetch',event=>{
  const request=event.request,url=new URL(request.url);
  if(request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/')||url.pathname.startsWith('/access/')||url.pathname.startsWith('/wails/'))return;
- if(request.mode==='navigate'){event.respondWith(fetch(request).catch(()=>caches.open(CACHE).then(cache=>cache.match('/index.html'))));return;}
- if(!/\.(?:m?js|css|png|ttf|webmanifest)$/.test(url.pathname))return;
- event.respondWith(fetch(request).then(response=>{if(response.ok){const clone=response.clone();caches.open(CACHE).then(cache=>cache.put(request,clone));}return response;}).catch(()=>caches.open(CACHE).then(cache=>cache.match(request))));
+ const path=request.mode==='navigate'?'/index.html':url.pathname;
+ if(!paths.has(path))return;
+ // Repair an evicted member only from the exact installed version. Never
+ // substitute another release's file, even when that server is reachable.
+ event.respondWith(caches.open(CACHE).then(async cache=>{
+  const asset=paths.get(path),saved=await cache.match(path);
+  if(await verified(saved,asset))return saved;
+  try{const response=await download(asset);await cache.put(path,response.clone());return response;}catch{return Response.error();}
+ }));
 });
 
 // Push carries one already-selected event. Policy, leases and deduplication stay

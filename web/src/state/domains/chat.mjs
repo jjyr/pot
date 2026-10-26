@@ -11,7 +11,7 @@ export function createChatDomain(client){
   const storage=()=>client.production?(cache ||= createChatCache({name:client.chatCacheName||'pot-chat-cache'})):null;
   const keyFor=scope=>JSON.stringify([(client.spaces||[]).find(item=>item.id===scope.space)?.control_id||client.runtime?.runtime_id||'',scope.space||'',scope.owner||'']);
   const stored=promise=>promise.catch(error=>{if(error.name==='AbortError'||['conversation_gap','history_gap'].includes(error.message))throw error;throw Object.assign(new Error(translate(client.uiLocale?.()||'en','storage.failed'),{cause:error}),{storage:true,uiKey:'storage.failed',diagnostic:error.message});});
-  function open(scope={}, {surface='main',context=()=>({})}={}){
+  function open(scope={}, {surface='main',initialSurface,context=()=>({})}={}){
     if(closed)throw new DOMException('Chat domain disposed','AbortError');
     scope={space:scope.space||'',owner:scope.owner||''};
     const key=keyFor(scope),cache=storage(),abort=new AbortController();
@@ -23,7 +23,7 @@ export function createChatDomain(client){
     function stop(){generation++;stopTransport();stopTransport=()=>{};stopCommits();stopCommits=()=>{};}
     const session={
       hasHistory:typeof client.history==='function',
-      async query(){current();const saved=cache?await stored(cache.read(key,surface)):null;current();if(saved)snapshot=saved.snapshot;return saved;},
+      async query(){current();let saved=cache?await stored(cache.read(key,surface)):null;if(cache&&!saved?.view&&initialSurface)saved=await stored(cache.read(key,initialSurface));current();if(saved)snapshot=saved.snapshot;return saved;},
       async history(query,{around=false,signal,valid=()=>true}={}){
         const version=generation;
         const check=()=>{current();if(signal?.aborted)throw signal.reason;if(version!==generation||!valid())throw new DOMException('Chat history retired','AbortError');};

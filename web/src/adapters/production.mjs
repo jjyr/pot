@@ -56,7 +56,7 @@ export function mutationTopics(path,body,value) {
   if(path.startsWith('/api/v1/spaces'))return ['spaces','machines'];
   return [];
 }
-export async function createProductionClient({desktop = false, base = '', resourceStorage} = {}) {
+export async function createProductionClient({desktop = false, base = '', resourceStorage, startupIdentity} = {}) {
   let runtimeAPI;
   if (desktop) runtimeAPI = await import('/wails/runtime.js');
   const service = 'github.com/jjyr/pot/internal/desktop.Service';
@@ -103,6 +103,7 @@ export async function createProductionClient({desktop = false, base = '', resour
   }
   async function request(path, options = {}) {
     let {method = 'GET', body, signal} = options;
+    if(client?.onlineReady===false)throw localized(Object.assign(new APIError(503,{code:'startup_unconfirmed'}),{uiKey:'startup.local'}));
     const capturedScope={...context,...options};
     // Every assistant uses the same product routes. Agent Link resolves its
     // destination and authorization on the host; presentation IDs never choose
@@ -129,12 +130,15 @@ export async function createProductionClient({desktop = false, base = '', resour
     if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);
     return value;
   }
-  const runtime = await request('/api/v1/runtime', {owner: '', space: ''});
+  const runtime = startupIdentity?{runtime_id:startupIdentity.runtime_id,boot_id:startupIdentity.boot_id}:await request('/api/v1/runtime', {owner: '', space: ''});
   if (!runtime || !(runtime.runtime_id || runtime.id)) throw Error('Runtime identity is unavailable');
   const readBaselines=desktop?await invoke('AssistantReads'):[];
   const attachmentURLs=new Map(),attachmentLeases=new Map();
   const attachmentKey=(attachment,options)=>{const scope={...context,...options};return JSON.stringify([scope.space,scope.owner,attachment.id]);};
-  client = {production: true, desktop, runtime, transport:request,request:(path,options={})=>(options.method||'GET')==='GET'?client.resources.read(path,options):request(path,options),readBaselines,
+  const onlineWaiters=new Set();
+  const whenOnline=handler=>{onlineWaiters.add(handler);return()=>onlineWaiters.delete(handler);};
+  client = {production: true, desktop, runtime, startup:startupIdentity,onlineReady:!startupIdentity,
+    confirmStartup(value){if((value.runtime_id||value.id)!==runtime.runtime_id)throw Error('Startup identity changed');Object.assign(runtime,value);client.onlineReady=true;for(const handler of [...onlineWaiters])handler();onlineWaiters.clear();}, transport:request,request:(path,options={})=>(options.method||'GET')==='GET'?client.resources.read(path,options):request(path,options),readBaselines,
     messageFiles(message,options={}){return request(`/api/v1/message-files/${encodeURIComponent(message)}?${new URLSearchParams({task_id:options.task||''})}`,options);},
     retryMessageFile(message,ref,options={}){return request(`/api/v1/message-files/${encodeURIComponent(message)}/${encodeURIComponent(ref)}?${new URLSearchParams({task_id:options.task||''})}`,{...options,method:'POST'});},
     acquireResource:createDisplayResources(request,()=>context,(resource,path,scope,operation='content',token='')=>desktop?`/pot-resource-content?${new URLSearchParams({id:resource.id,path,assistant_id:scope.owner,space_id:scope.space,render:operation==='render'?'1':'0',token})}`:`${base}${scopedPath(`/api/v1/resources/${encodeURIComponent(resource.id)}/${operation}?${new URLSearchParams({path,token})}`,scope)}`),
@@ -222,9 +226,10 @@ export async function createProductionClient({desktop = false, base = '', resour
     },
     subscribe(onSnapshot, onStatus = () => {}, options = {}) {
       const scope = {...context,...options};
+      if(!client.onlineReady){let active=true,stop;onStatus('connecting');const cancel=whenOnline(()=>{if(active)stop=client.subscribe(onSnapshot,onStatus,scope);});return ()=>{active=false;cancel();stop?.();};}
       let active = true, token;
       const deliver = value => {
-        if (!active) return;
+        if (!active||!client.onlineReady) return;
         let snapshot;
         try { snapshot = normalizeSnapshot(value, runtime, scope.owner, scope.space); }
         catch (reason) { onStatus('offline', reason); return; }
@@ -246,13 +251,16 @@ export async function createProductionClient({desktop = false, base = '', resour
       }
       return createEventStream({url:`${base}${scopedPath('/api/v1/events?'+new URLSearchParams({locale:client.uiLocale?.()||'en'}),scope)}`,
         events:{conversation:(event,initial)=>{
+          if(!client.onlineReady)return false;
           const snapshot=normalizeSnapshot(JSON.parse(event.data),runtime,scope.owner,scope.space);
           if(!validSnapshot(snapshot)||initial&&snapshot.kind!=='reset')throw Error('Invalid initial conversation frame');
           return ()=>onSnapshot(snapshot);
         }},onStatus,terminal:terminalStreamFailure});
     },
     changes(onChange,{space=context.space}={}) {
-      const scope = {...context,space},versions=createTopicVersions();
+      const scope = {...context,space};
+      if(!client.onlineReady){let active=true,stop;const cancel=whenOnline(()=>{if(active)stop=client.changes(onChange,{space});});return ()=>{active=false;cancel();stop?.();};}
+      const versions=createTopicVersions();
       const notify=(topics,sourceSpace,boot)=>{const changed=versions(topics,sourceSpace,boot);if(changed.length)onChange(changed,{space:sourceSpace,boot});};
       if (desktop) return runtimeAPI.Events.On('pot:changed', event => {
         if(scope.space&&event.data.space_id!==scope.space)return;

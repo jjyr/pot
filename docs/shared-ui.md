@@ -667,3 +667,54 @@ queries/fragments and common credential patterns are redacted. Diagnostics do
 not collect request bodies, fields or transcripts, and are never automatically
 uploaded. Storage/clipboard failure does not interrupt reporting. A blocked JS
 main thread cannot run exception handlers.
+
+## Browser cold start
+
+After a successful visit, the browser stores a minimal last-confirmed startup
+locator: Control, boot, Space, assistant and reading surface. This locator only
+selects local namespaces. It contains no credential, capability or assertion of
+current authentication, permission or connection. Existing directory projections,
+conversation windows, reading positions and [assistant drafts](assistant-drafts.md)
+can render before either `/access/status` or `/api/v1/runtime` completes.
+
+```text
+installed shell -> startup locator -> committed directory/chat/view/draft -> UI
+                           |                                      |
+                           +-> access -> current Control ----------+
+                                          |                       |
+                                  fresh directory + chat session -> online actions
+```
+
+While verification is pending or the device is offline, cached conversations are
+readable, cached assistants can be selected, and drafts can be edited and saved.
+Sending and online management require current access and Control verification,
+fresh advertised capabilities, and the existing operation/session checks. Cached
+capabilities never grant authority. Network recovery revalidates identity and
+refreshes the directory and conversation without replacing the editor or its
+reading anchor. Interrupted sends keep their existing immutable confirmation
+fences; recovery never automatically submits or retries a message.
+
+A changed Control retires the old UI and writers before opening the new namespace.
+Drafts remain under their original Control/Space/assistant/conversation. An access
+token supplied in the URL does not open the previous cached identity. Explicit
+logout clears the startup locator together with disposable business projections,
+while preserving separately scoped drafts. First use, evicted data or unavailable
+browser storage requires a network connection. Startup and storage failures expose
+retry; authentication and permission failures retain their normal access flows.
+
+The Go embedded asset tree is also the shell version boundary. Its generated
+worker contains every embedded frontend dependency and frontend migration, each
+with a SHA-256 digest. Installation downloads and verifies the complete tree into
+a separate cache. Failure or interruption cannot activate that version. Existing
+documents continue using their installed HTML, modules, CSS and fonts from the
+same cache; a complete new worker waits until old controlled documents close.
+There is no forced worker activation or live page replacement. Activation removes
+obsolete UI asset caches. A missing or corrupt member can only be repaired from a
+network response matching its installed digest; another release's file is refused.
+API, access, native transport and foreign-origin requests never enter this cache.
+
+Browser storage eviction can remove local availability. An origin needs one
+successful online shell installation before offline reopening works. Offline
+support covers cached chat windows and local drafts, not all history, attachments'
+remote content or management pages. It adds neither background connections nor an
+outbox. Native startup continues through the native runtime adapter.

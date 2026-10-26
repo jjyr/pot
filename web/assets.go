@@ -29,5 +29,9 @@ func (f frontendAssets) Open(name string) (fs.File, error) {
 	if strings.HasPrefix(name, prefix+"ui-cache/") || strings.HasPrefix(name, prefix+"ui-notifications/") {
 		return migrations.FrontendSchemas().Open(strings.TrimPrefix(name, prefix))
 	}
-	return f.FS.Open(name)
+	file, err := f.FS.Open(name)
+	if err == nil && name == "service-worker.js" {
+		return generatedWorker(file)
+	}
+	return file, err
 }
