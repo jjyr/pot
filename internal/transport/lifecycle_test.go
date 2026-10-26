@@ -13,11 +13,12 @@ import (
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/localui"
 	"github.com/jjyr/pot/internal/systemnotifications"
+	"github.com/jjyr/pot/internal/testutil"
 )
 
 func TestCommittedApprovalStreamAndOwnerRevocation(t *testing.T) {
 	app := extensionApplication(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 5*time.Second))
 	defer cancel()
 	owner, err := app.Control.Registry.Create(ctx, "lifecycle-owner", "Lifecycle owner")
 	if err != nil {

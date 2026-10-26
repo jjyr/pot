@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/jjyr/pot/internal/control"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/protocol"
 	"os"
@@ -76,7 +77,7 @@ func exercisePotHumanReview(t *testing.T, ctx context.Context, pot *control.Serv
 	if approvalID == "" {
 		t.Fatal("task approval did not reach its owner", read(owner.ID))
 	}
-	timer := time.NewTimer(5 * time.Second)
+	timer := time.NewTimer(testutil.Timeout(t, 5*time.Second))
 	defer timer.Stop()
 	for received := false; !received; {
 		select {
