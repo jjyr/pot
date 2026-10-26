@@ -9,6 +9,8 @@ import { randomUUID } from 'node:crypto';
 let chrome, profile, target, session, ownerSession, closing, cleanupError, gracefulExit = false, sequence = 0, nextId = 0, startupDiagnostics = '';
 let pending = new Map(), nodes = new Map(), buffer = Buffer.alloc(0);
 const MAX_IMAGE = 1024 * 1024;
+const KEY_BINDINGS = Object.freeze({ Enter: ['Enter', 13], Tab: ['Tab', 9], Escape: ['Escape', 27], Backspace: ['Backspace', 8], ArrowDown: ['ArrowDown', 40], ArrowUp: ['ArrowUp', 38] });
+export const SUPPORTED_KEYS = Object.freeze(Object.keys(KEY_BINDINGS));
 export function browserAvailability() {
   const configured = process.env.POT_BROWSER_EXECUTABLE;
   const candidates = configured ? [configured] : [
@@ -196,8 +198,8 @@ async function operation(args) {
         if (result.exceptionDetails) throw new Error('Field fill failed');
       } else {
         await command('DOM.focus', { backendNodeId });
-        const key = { Enter: ['Enter', 13], Tab: ['Tab', 9], Escape: ['Escape', 27], Backspace: ['Backspace', 8], ArrowDown: ['ArrowDown', 40], ArrowUp: ['ArrowUp', 38] }[args.key];
-        if (!key) throw new Error('Unsupported key');
+        const key = typeof args.key === 'string' && Object.hasOwn(KEY_BINDINGS, args.key) && KEY_BINDINGS[args.key];
+        if (!key) throw new Error(`Unsupported press key; key must be one of: ${SUPPORTED_KEYS.join(', ')}`);
         await command('Input.dispatchKeyEvent', { type: 'keyDown', key: key[0], code: key[0], windowsVirtualKeyCode: key[1], ...(args.key === 'Enter' ? { text: '\r' } : {}) });
         await command('Input.dispatchKeyEvent', { type: 'keyUp', key: key[0], code: key[0], windowsVirtualKeyCode: key[1] });
       }
