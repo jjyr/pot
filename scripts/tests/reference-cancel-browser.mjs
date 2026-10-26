@@ -11,7 +11,10 @@ export async function referenceCancellation(page,origin){
   const select=()=>page.evaluate(()=>referenceFixture.select());
   const cancel=async()=>{assert.equal(await remove.isEnabled(),true,'Draft removal remains available during acceptance');if(phone)await remove.tap();else await remove.click();};
   await input.fill('Keep text and attachment');
-  await page.locator('input[type=file]').setInputFiles({name:'synthetic.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4 synthetic fixture')});
+  await page.locator('.attachment-plus').click();
+  const chooser=page.waitForEvent('filechooser');
+  await page.getByRole('menuitem',{name:'PDF',exact:true}).click();
+  await (await chooser).setFiles({name:'synthetic.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4 synthetic fixture')});
   await page.waitForSelector('.attachment-card');
   await select();await cancel();
   assert.deepEqual(await state(),{cards:0,selection:'',text:'Keep text and attachment',attachments:1},'Idle cancellation releases selection and preserves other draft content');
