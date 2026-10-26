@@ -154,6 +154,10 @@ or change its row height when it finishes. Explicit expansion can resize that
 slot. If the web font is still loading, the surface retains a system font until
 the next preparation. This stabilizes the initial history; live business updates,
 user expansion, viewport changes and interactive resource contents remain dynamic.
+Pending block file references reserve the preview slot before their binding
+arrives; inline file links retain their measured link box instead. A preview's
+Expand action also releases a containing file-reference slot, and Collapse
+restores its reserved height.
 
 UI components keep focus, unsaved values, expanded disclosures, filters and the
 history sentinel. They pass business inputs to typed commands instead of building

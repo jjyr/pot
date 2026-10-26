@@ -43,4 +43,4 @@ function register(){
     disconnectedCallback(){queueMicrotask(()=>{if(this.isConnected)return;clearTimeout(this.timer);this.abort?.abort();window.removeEventListener('pot:locale',this.refresh);this.dialog?.remove();if(this.row&&this.options.previewClaims?.get(this.row.resource?.id)===this)this.options.previewClaims.delete(this.row.resource.id);this.started=false;this.replaceChildren();this.preview=null;this.status=null;this.retry=null;});}
   });
 }
-export function createMessageFile(reference,message,options){register();const element=document.createElement('pot-message-file');Object.assign(element,{reference,message,options,identity:JSON.stringify([message,reference.href,reference.block,reference.label])});return element;}
+export function createMessageFile(reference,message,options){register();const element=document.createElement('pot-message-file');element.dataset.block=String(!!reference.block);Object.assign(element,{reference,message,options,identity:JSON.stringify([message,reference.href,reference.block,reference.label])});return element;}

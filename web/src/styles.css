@@ -8,7 +8,7 @@
 @font-face { font-family: 'Pot Web Sans'; src: url('./assets/IBMPlexSans-Regular.ttf') format('truetype'); font-style: normal; font-weight: 400; font-display: swap; }
 .chat-font-fallback { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 .initial-layout-slot { box-sizing: border-box; height: var(--initial-layout-height); min-height: var(--initial-layout-height); max-height: var(--initial-layout-height); overflow: auto; contain: size; }
-.initial-layout-slot.is-expanded { height: auto; min-height: 0; max-height: none; contain: none; }
+.initial-layout-slot.is-expanded,.initial-layout-slot:has(> pot-resource.is-expanded) { height: auto; min-height: 0; max-height: none; contain: none; }
 :root {
   color-scheme: light;
   --canvas: #f8f6f1; --surface: #fffefa; --navigation: #f0ede6;
@@ -903,6 +903,8 @@ pot-resource.is-expanded .resource-text{max-height:75vh}
 
 pot-message-file { display: inline; overflow-wrap: anywhere; }
 pot-message-file:has(> pot-resource) { display: block; margin-block: 12px; }
+pot-message-file.initial-layout-slot[data-block="false"] { display: inline-block; width: var(--initial-layout-width); max-width: 100%; vertical-align: bottom; scrollbar-width: none; }
+pot-message-file.initial-layout-slot[data-block="true"] { display: block; width: auto; margin-block: 12px; }
 .file-reference-status { margin-inline-start: .6em; color: var(--muted); font-size: .85em; }
 .file-reference-dialog { width: min(960px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 16px; border: 1px solid var(--divider); border-radius: 12px; background: var(--surface); color: inherit; }
 .file-reference-dialog::backdrop { background: #0008; }

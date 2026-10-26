@@ -29,7 +29,11 @@ export function createInitialChatLayout({history, layout, position = ()=>{}, rea
         // A stalled/offline preview must not hide the conversation forever or
         // resize it later. Its contents remain usable inside a reserved slot.
         for(const node of waiting){
-          node.style.setProperty('--initial-layout-height',`${Math.max(240,node.getBoundingClientRect().height)}px`);
+          const box=node.getBoundingClientRect(),inline=node.matches('pot-message-file[data-block="false"]');
+          // Inline references stay links, even after binding. Reserve their
+          // measured link box, not the minimum height used for block previews.
+          if(inline)node.style.setProperty('--initial-layout-width',`${box.width}px`);
+          node.style.setProperty('--initial-layout-height',`${inline?box.height:Math.max(240,box.height)}px`);
           node.classList.add('initial-layout-slot');
         }
         if(document.fonts?.status==='loading')fontFallback();

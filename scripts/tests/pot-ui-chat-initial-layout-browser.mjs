@@ -1,7 +1,7 @@
 // Production Chat with independently held historical image reads. No model calls.
 import {mountApp} from '../../web/src/components/ui.js';
 import {createInitialChatLayout} from '../../web/src/components/initial-chat-layout.mjs';
-import {createResourceView} from '../../web/src/components/resource-view.mjs';
+import {createMessageFile} from '../../web/src/components/message-file.mjs';
 const root=document.querySelector('#app'),results=document.querySelector('#results');
 const frame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
 const wait=async test=>{for(let i=0;i<400;i++){if(test())return;await frame();}throw Error('Timed out: '+test);};
@@ -55,9 +55,30 @@ try{
   await select('alpha');await wait(()=>releases.length===1);dispose();dispose=null;releases.shift()();await frame();await frame();
   check(root.childElementCount===0,'Disposal cancels pending preparation and late resource completion');
   // Short deadline exercises the production timeout policy without a slow test.
-  const h=document.createElement('div'),resource=createResourceView({resource:{id:'pending',name:'pending.png',entry:'pending.png',size:1,mime_type:'image/png',files:[],download:{path:'pending.png'}},mode:'preview'},{acquireResource:()=>({url:()=>new Promise(()=>{}),release(){}})});h.style.cssText='width:360px;height:300px;overflow:auto;visibility:hidden';h.append(resource);document.body.append(h);
-  let revealed=false;const gate=createInitialChatLayout({history:h,layout:()=>{},ready:()=>true,fontFallback:()=>{},timeout:30,reveal:()=>{revealed=true;h.style.visibility='';}});gate.start();await wait(()=>revealed);
-  const height=resource.getBoundingClientRect().height;resource.textContent='Late content '.repeat(2000);resource.dataset.state='ready';await frame();await frame();
-  check(height>=240&&resource.getBoundingClientRect().height===height,'A stalled preview reveals a fixed usable slot and late content cannot resize history');
+  // Hold the real file binding AND its subsequent resource read past reveal.
+  // This covers the inline-to-block transition, not just a resource's contents.
+  const h=document.createElement('div'),row=document.createElement('article'),body=document.createElement('div'),block=document.createElement('p'),inline=document.createElement('p'),tail=document.createElement('div');
+  h.style.cssText='width:min(360px,100%);height:300px;overflow:auto;visibility:hidden';row.className='message';body.className='message-body';tail.textContent='Final history anchor';
+  const earlier=document.createElement('div');earlier.style.height='480px';earlier.textContent='Earlier history';
+  let bind,read;const binding=new Promise(resolve=>bind=resolve),bytes=new Promise(resolve=>read=resolve);
+  const resource={id:'delayed',name:'notes.txt',entry:'notes.txt',size:100,mime_type:'text/plain',files:[],download:{path:'notes.txt'}};
+  const options={messageFiles:()=>binding,previewClaims:new Map(),acquireResource:()=>({read:()=>bytes,release(){}})};
+  const file=createMessageFile({href:'notes.txt',label:'notes.txt',block:true},'delayed',options),link=createMessageFile({href:'inline.txt',label:'inline.txt',block:false},'delayed',options);
+  block.append(file);inline.append('Inline file: ',link);body.append(block,inline);row.append(body);h.append(earlier,row,tail);document.body.append(h);
+  const metrics=()=>({row:row.getBoundingClientRect().height,scroll:h.scrollTop,height:h.scrollHeight,tail:tail.getBoundingClientRect().y,file:file.getBoundingClientRect().height,linkHeight:link.getBoundingClientRect().height,linkWidth:link.getBoundingClientRect().width});
+  let firstLayout,sampling=true;const samples=[];
+  const sample=()=>{if(!sampling)return;if(firstLayout)samples.push(metrics());requestAnimationFrame(sample);};requestAnimationFrame(sample);
+  const gate=createInitialChatLayout({history:h,layout:()=>{},position:()=>{h.scrollTop=h.scrollHeight;},ready:()=>true,fontFallback:()=>{},timeout:30,reveal:()=>{h.style.visibility='';firstLayout=metrics();}});gate.start();await wait(()=>firstLayout);
+  check(firstLayout.file>=240&&firstLayout.linkHeight<40&&getComputedStyle(file).display==='block','Deadline reserves a block preview while keeping inline file links compact');
+  bind([{href:'notes.txt',state:'ready',resource},{href:'inline.txt',state:'ready',resource:{...resource,id:'inline'}}]);await wait(()=>file.querySelector('pot-resource')?.dataset.state==='loading');await frame();await frame();
+  const bound=metrics();read(new Blob(['Late file content\n'.repeat(200)]));await wait(()=>file.querySelector('pot-resource')?.dataset.state==='ready');for(let i=0;i<4;i++)await frame();
+  sampling=false;const ready=metrics();
+  check(samples.length>2&&samples.every(value=>JSON.stringify(value)===JSON.stringify(firstLayout))&&JSON.stringify(ready)===JSON.stringify(firstLayout),'Every visible sampled frame keeps row height, scroll and anchor through late binding and resource readiness');
+  const expand=file.querySelector('.resource-actions button');expand.click();await frame();await frame();const expanded=metrics();
+  check(expanded.file>firstLayout.file&&expanded.row>firstLayout.row,'Explicit Expand releases the containing file-reference slot');
+  expand.click();await frame();await frame();const collapsed=metrics();
+  check(collapsed.file===firstLayout.file&&collapsed.row===firstLayout.row,'Collapse restores the original reserved file-reference height');
+  link.querySelector('a').click();check(!!document.querySelector('dialog[open] pot-resource'),'Late inline file binding remains openable in its dialog');document.querySelector('dialog[open]').close();
+  window.initialFileLayoutEvidence={firstLayout,bound,ready,expanded,collapsed,samples};
   gate.cancel();h.remove();results.textContent+='DONE initial Chat layout';
 }catch(error){results.textContent+='FAIL '+error.stack;}finally{dispose?.();URL.revokeObjectURL(image);}
