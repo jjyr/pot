@@ -8,6 +8,7 @@ export function attachmentKind(mime) {return attachmentTypes.image.includes(mime
 export function attachmentAllowed(caps,mime) {return !!caps?.[attachmentKind(mime)];}
 export function attachmentProblem(items,caps,zh=false) {
   const t=key=>translate(zh?'zh-CN':'en',key);
+  if(items.length>8||items.reduce((size,item)=>size+item.attachment.size,0)>attachmentLimit)return t('attachments.restoredLimit');
   for(const item of items) {
     if(caps&&!attachmentAllowed(caps,item.attachment.mime_type))return t(attachmentKind(item.attachment.mime_type)==='image'?'attachments.imagesUnsupported':'attachments.typeUnsupported');
     if(item.phase!=='ready')return t(item.phase==='failed'?'attachments.failed':item.phase==='waiting'?'attachments.waiting':'attachments.uploading');
@@ -134,14 +135,19 @@ export function createAttachmentComposer({client,form,input,getKey,getCaps,canSe
     clearSubmitted(key,refs){const ids=new Set(refs.map(a=>a.id));for(const item of list(key))if(ids.has(item.attachment.id)&&item.url){URL.revokeObjectURL(item.url);urls.delete(item.url);}set(key,list(key).filter(item=>!ids.has(item.attachment.id)));},
     restore(key,refs,scope){if(list(key).length)return;set(key,refs.map(attachment=>({attachment,scope,phase:'ready',progress:1})));},
     hydrate(key,records,files,scope){
+      // Paste/drop may already have accepted Files while the disk read (or its
+      // retry) was pending. Keep those exact live items, including upload state.
+      // Retain every saved original too; an oversized merge blocks Send until
+      // the user chooses what to remove instead of silently discarding files.
+      const local=list(key),ids=new Set(local.map(item=>item.attachment.id));
       const originals=new Map(files.map(file=>[file.id,file]));
-      const items=records.map(record=>{
+      const items=records.filter(record=>!ids.has(record.attachment.id)).map(record=>{
         const original=originals.get(record.attachment.id),file=original&&new File([original.blob],record.attachment.name,{type:record.attachment.mime_type,lastModified:original.lastModified});
         const item={...record,scope:{...scope},file,phase:file&&record.phase==='ready'?'waiting':record.phase,progress:0};
         if(file&&attachmentKind(item.attachment.mime_type)==='image'){item.url=URL.createObjectURL(file);urls.add(item.url);}
         return item;
       });
-      set(key,items);
+      set(key,[...items,...local]);
     },
     discard(key){for(const item of list(key)){item.removed=true;item.abort?.abort();if(item.url){URL.revokeObjectURL(item.url);urls.delete(item.url);}}drafts.delete(key);notices.delete(key);},
     forget(scope){

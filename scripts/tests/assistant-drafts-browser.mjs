@@ -85,6 +85,54 @@ export async function assistantDraftsBrowser(browser,{sourceOrigin,captureDir,ba
    await page.locator('#pot-composer').fill('New draft during projection failure');await saved();await page.evaluate(()=>window.failProjectionWrites=false);await page.locator('.connection-status').getByRole('button',{name:'Retry',exact:true}).click();await ready();assert.equal((await server()).trace.filter(row=>row.kind==='post').length,1);assert.equal((await server()).trace.filter(row=>row.kind==='receipt').length,0);
    await page.reload();await ready();await saved();assert.equal(await page.locator('#pot-composer').inputValue(),'New draft during projection failure');
   });
+  await scenario('late-load-files-overflow',async({page,context,saved,uploaded,disk})=>{
+   await page.getByRole('button',{name:'Add attachment',exact:true}).click();const picker=page.waitForEvent('filechooser');await page.getByRole('menuitem',{name:'Images',exact:true}).click();await(await picker).setFiles(Array.from({length:8},(_,i)=>({...file,name:'saved-'+i+'.png'})));await uploaded();await saved();
+   await context.addInitScript(()=>{
+    if(localStorage.getItem('holdDraftRead')!=='yes')return;
+    const complete=Object.getOwnPropertyDescriptor(IDBTransaction.prototype,'oncomplete');
+    Object.defineProperty(IDBTransaction.prototype,'oncomplete',{...complete,set(handler){complete.set.call(this,function(event){if(localStorage.getItem('holdDraftRead')==='yes'&&this.mode==='readonly'&&this.objectStoreNames.contains('composerDrafts')){window.releaseDraftRead=()=>handler.call(this,event);return;}return handler.call(this,event);});}});
+   });
+   await page.evaluate(()=>localStorage.setItem('holdDraftRead','yes'));await page.reload();await page.waitForFunction(()=>!!window.releaseDraftRead);
+   await page.evaluate(()=>{
+    for(const type of ['paste','drop']){const event=new Event(type,{bubbles:true,cancelable:true}),data=new DataTransfer();data.items.add(new File(['new'],type+'.png',{type:'image/png'}));Object.defineProperty(event,type==='paste'?'clipboardData':'dataTransfer',{value:data});document.querySelector(type==='paste'?'#pot-composer':'.composer').dispatchEvent(event);}
+   });
+   assert.equal(await page.locator('.attachment-card').count(),2);
+   await page.evaluate(()=>{localStorage.removeItem('holdDraftRead');window.releaseDraftRead();});await saved();await uploaded();await saved();
+   assert.equal(await page.locator('.attachment-card').count(),10);assert.equal((await disk()).files.length,10);assert.match(await page.locator('.attachment-hint').innerText(),/All files are kept/);assert(await page.getByRole('button',{name:'Send',exact:true}).isDisabled());
+   if(captureDir){await mkdir(captureDir,{recursive:true});await page.screenshot({path:captureDir+'/restored-attachment-limit-after.png'});}
+   await page.reload();await saved();await uploaded();assert.equal(await page.locator('.attachment-card').count(),10);assert.equal((await disk()).files.length,10);
+   await page.getByRole('button',{name:'Remove attachment',exact:true}).first().click();await page.getByRole('button',{name:'Remove attachment',exact:true}).first().click();await saved();
+   assert.equal((await disk()).files.length,8);assert(await page.getByRole('button',{name:'Send',exact:true}).isEnabled());
+  });
+  for(const committedPost of [false,true])await scenario(committedPost?'explicit-original-duplicate':'preflight-before-post',async({page,control,saved,choose,uploaded,server,disk,reference})=>{
+   await page.locator('#pot-composer').fill('Original fixed snapshot');await reference();await choose('original.png');await uploaded();await saved();
+   if(committedPost)await control({holdSend:true});
+   else await page.evaluate(()=>{
+    const complete=Object.getOwnPropertyDescriptor(IDBTransaction.prototype,'oncomplete'),put=IDBObjectStore.prototype.put;
+    Object.defineProperty(IDBTransaction.prototype,'oncomplete',{...complete,set(handler){complete.set.call(this,function(event){if(this.__holdPending){window.pendingCommitted=true;return;}return handler.call(this,event);});}});
+    IDBObjectStore.prototype.put=function(value,...args){if(this.name==='composerDrafts'&&value.pending)this.transaction.__holdPending=true;return put.call(this,value,...args);};
+   });
+   await page.getByRole('button',{name:'Send',exact:true}).click();
+   if(committedPost){await page.waitForFunction(()=>document.querySelector('.connection-status')?.textContent.includes('Confirming'));await saved();}
+   else await page.waitForFunction(()=>window.pendingCommitted);
+   const original=(await disk()).drafts[0].pending.request;
+   assert.equal((await server()).trace.filter(row=>row.kind==='post').length,committedPost?1:0,'Snapshot committed before transport starts');
+   await page.reload();await saved();await uploaded();
+   await page.locator('#pot-composer').fill('New editor contents after reload');await page.locator('.message-reference-remove').click();await reference();await choose('new-after-reload.png');await uploaded();await saved();
+   const retry=page.getByRole('button',{name:'Check and retry',exact:true});await retry.waitFor({timeout:30000});
+   const bounds=await retry.boundingBox();assert(bounds.x>=0&&bounds.x+bounds.width<=390,'Recovery action remains fully visible on a phone');
+   assert.equal((await server()).trace.filter(row=>row.kind==='post').length,committedPost?1:0,'Reload and automatic receipt checks never POST');
+   await page.evaluate(()=>dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:'zh-CN'}})));
+   const zhRetry=page.getByRole('button',{name:'查证并重试',exact:true});assert.match(await zhRetry.getAttribute('title'),/相同请求 ID/);
+   await page.evaluate(()=>dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:'en'}})));
+   if(captureDir&&!committedPost){await mkdir(captureDir,{recursive:true});await page.screenshot({path:captureDir+'/preflight-recovery-after.png'});}
+   await control({holdSend:false});await retry.click();await page.waitForFunction(()=>document.querySelector('.connection-status')?.classList.contains('is-connected'));await saved();
+   const evidence=await server(),posts=evidence.trace.filter(row=>row.kind==='post'),current=await disk();
+   assert.equal(posts.length,committedPost?2:1);assert(posts.every(row=>JSON.stringify(row.body)===JSON.stringify(posts[0].body)&&row.body.request_id===original.request_id&&row.owner==='alpha'));
+   assert.equal(evidence.rows.length,1,'Same-ID replay creates one accepted row');assert.equal(evidence.trace.findLast(row=>row.kind==='post-response').duplicate,committedPost);
+   assert.equal(current.drafts[0].pending,null);assert.equal(current.drafts[0].text,'New editor contents after reload');assert.equal(current.drafts[0].references.length,1);assert.equal(current.files.length,1);assert.equal(current.drafts[0].attachments[0].attachment.name,'new-after-reload.png');
+   assert.equal(posts[0].body.text,'Original fixed snapshot');assert.equal(posts[0].body.attachments[0].name,'original.png');
+  });
   return results;
  }finally{await fixture.close();}
 }

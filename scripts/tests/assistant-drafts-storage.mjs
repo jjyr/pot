@@ -5,6 +5,7 @@ import {createConversationState,ownerKey,setDraft,setDraftReferences,beginSend,s
 import {clearBusinessCaches} from '../../web/src/state/cache-lifecycle.mjs';
 import {migrateChatCache} from '../../pkg/storage/migrations/ui-cache/0001_chat_cache.mjs';
 import {migrateTaskCheckpoints} from '../../pkg/storage/migrations/ui-cache/0004_task_checkpoints.mjs';
+import {assistantDraftAttachments} from './assistant-drafts-attachments.mjs';
 
 const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};};
 const remove=name=>new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name);request.onsuccess=resolve;request.onerror=()=>reject(request.error);});
@@ -63,5 +64,6 @@ export async function assistantDraftStorage(report=()=>{}){
  check(assistantDraftKey(client,{space:'two',owner:'a'})!==key&&assistantDraftKey({...client,spaces:[],runtime:{runtime_id:'another'}},scope)!==key,'Draft identities include Control, Space and assistant');
  storage.close();await remove(name);
  const unavailable=createDraftStore({indexedDB:null});let explicit=false;try{await unavailable.read('x');}catch(error){explicit=error.message==='chat_cache_unavailable';}unavailable.close();check(explicit,'Unavailable IndexedDB is an explicit failure');
+ await assistantDraftAttachments(report);
  return true;
 }

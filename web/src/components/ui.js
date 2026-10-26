@@ -323,6 +323,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function requestID() { return crypto.randomUUID(); }
   const confirmations=createSendConfirmation({state,client,
+    canRetry:receipt=>can('chat.send')&&route==='chat'&&connection==='connected'&&!selectedAssistant?.offline&&!!state.snapshot&&ownerKey(state.snapshot)===receipt.key,
     accepted:receipt=>{attachmentUI?.clearSubmitted(receipt.key,receipt.request.attachments||[]);assistantDrafts?.change(receipt.key,true);},
     rejected:receipt=>{assistantDrafts?.change(receipt.key,true);if(receipt.key===editorOwner)error=t('send.rejected');},
     cacheFailed:(receipt,reason,retry)=>{sendCacheFailures.set(receipt,retry);updateControls();},
@@ -407,7 +408,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     projection.classList.toggle('is-connected',!pending&&!error&&!connectionError&&!cacheFailures.length&&visibleConnection==='connected');
     if(pending){
       projection.append(label(t(pending.phase==='preparing'?'drafts.saving':pending.phase==='uncertain'?'send.unknown':'send.confirming')));
-      if(pending.recoverable){const retry=el('button','text-button',t(pending.restored?'drafts.checkSend':'send.checkRetry'));retry.type='button';retry.disabled=visibleConnection!=='connected';retry.onclick=()=>confirmations.recover(pending);projection.append(retry);}
+      if(pending.recoverable){const retry=el('button','text-button',t('send.checkRetry'));retry.type='button';if(pending.restored)retry.title=t('drafts.retrySubmissionHelp');retry.disabled=visibleConnection!=='connected'||!can('chat.send');retry.onclick=()=>confirmations.recover(pending);projection.append(retry);}
     }
     projection.append(label(error || (connectionError?.uiKey?t(connectionError.uiKey):connectionError) || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
     if(cacheFailures.length){

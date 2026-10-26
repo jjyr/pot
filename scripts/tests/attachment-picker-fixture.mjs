@@ -34,9 +34,11 @@ export async function attachmentPickerFixture(sourceOrigin){
   }
   if((p==='/api/v1/messages'||p==='/api/v1/turn/steer')&&body){
    s.trace.push({kind:'post',owner,body});if(s.rejectSend)return json(res,{message:'Synthetic rejection'},409);
+   const duplicate=!!db.prepare('SELECT 1 FROM accepted WHERE scenario=? AND owner=? AND request=?').get(name,owner,body.request_id);
    if(s.acceptSend!==false)db.prepare('INSERT OR IGNORE INTO accepted VALUES (?,?,?,?)').run(name,owner,body.request_id,JSON.stringify(body));
    if(s.holdSend){(s.heldSends||=[]).push(res);return;}
-   return json(res,{message_id:body.request_id,duplicate:false});
+   s.trace.push({kind:'post-response',owner,request_id:body.request_id,duplicate});
+   return json(res,{message_id:body.request_id,duplicate});
   }
   if(p==='/api/v1/messages/receipt'){
    const query=Object.fromEntries(url.searchParams);s.trace.push({kind:'receipt',owner,query});

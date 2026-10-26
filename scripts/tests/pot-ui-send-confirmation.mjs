@@ -15,14 +15,14 @@ const user=(request,extra={})=>({id:request.request_id,role:'user',text:request.
 function fixture(){
   const state=createConversationState(),clock=new Clock(),calls=[],queries=[],accepted=[],rejected=[];
   beginSubscription(state);acceptSnapshot(state,snapshot(),state.epoch);
-  let queryState='unconfirmed',scope={space:'space',owner:'a'},queryError=false,sendError,online=true;
+  let queryState='unconfirmed',scope={space:'space',owner:'a'},queryError=false,sendError,online=true,canRetry=true;
   const client={production:true,runtime:{runtime_id:'runtime'},spaces:[{id:'space',control_id:'control'}],scope:()=>scope,
     send:(request,options)=>new Promise((resolve,reject)=>{calls.push({request,options,resolve,reject});if(sendError)reject(sendError);}),
     sendReceipt:async(request,options)=>{queries.push({request,options});if(queryError)throw Error('Offline');return {request_id:request.request_id,conversation_id:request.conversation_id,user_message_id:request.user_message_id,retry_user_message_id:request.retry_user_message_id,runtime_id:'control',owner_id:'a',state:queryState,...(queryState==='accepted'?{message_id:'accepted'}:{})};},
   };
-  const manager=createSendConfirmation({state,client,clock,now:()=>clock.now,online:()=>online,timeout:10,delays:[1,2,4],changed:()=>{},accepted:r=>accepted.push(r),rejected:r=>rejected.push(r)});
+  const manager=createSendConfirmation({state,client,clock,now:()=>clock.now,online:()=>online,canRetry:()=>canRetry,timeout:10,delays:[1,2,4],changed:()=>{},accepted:r=>accepted.push(r),rejected:r=>rejected.push(r)});
   const start=(text='same text',attachments=[])=>{setDraft(state,text);const r=beginSend(state,'id-'+calls.length,{allowRunning:true,attachments});manager.start(r);return r;};
-  return {state,clock,calls,queries,accepted,rejected,manager,client,start,set queryState(v){queryState=v;},set queryError(v){queryError=v;},set scope(v){scope=v;},set sendError(v){sendError=v;},set online(v){online=v;}};
+  return {state,clock,calls,queries,accepted,rejected,manager,client,start,set canRetry(v){canRetry=v;},set queryState(v){queryState=v;},set queryError(v){queryError=v;},set scope(v){scope=v;},set sendError(v){sendError=v;},set online(v){online=v;}};
 }
 // A known submit result owns the normal path. Recovery signals and the old
 // first-query deadline must not cause receipt reads while its POST is pending.
@@ -273,11 +273,42 @@ console.log('Send confirmation: response-first production acceptance independent
   const f=fixture();setDraft(f.state,'Restored unsent editor');const receipt=beginSend(f.state,'persisted-request',{allowRunning:true});
   f.scope={space:'other',owner:'b'};f.manager.restore(receipt,{space:'space',owner:'a'});await flush();await f.clock.advance(40);
   assert.equal(f.calls.length,0,'Reload confirmation never submits automatically');assert(f.queries.length>0);assert(f.queries.every(query=>query.options.owner==='a'&&query.options.space==='space'));
-  await f.manager.recover(receipt);assert.equal(f.calls.length,0,'Explicit recovery of a restored unknown request remains read-only');assert.equal(f.state.pending.get(receipt.key),receipt);
+  assert.equal(f.state.pending.get(receipt.key),receipt);
   f.queryState='accepted';await f.manager.recover(receipt);assert.equal(f.state.pending.size,0);assert.equal(f.accepted.length,1);f.manager.close();
 }
 {
   const f=fixture();setDraft(f.state,'Captured before storage wait');const receipt=beginSend(f.state,'saved-before-post',{allowRunning:true}),captured={space:'space',owner:'a'};
   f.scope={space:'other',owner:'b'};f.manager.start(receipt,captured);await flush();assert.equal(f.calls[0].options.owner,'a');assert.equal(f.calls[0].options.space,'space','Navigation while saving cannot retarget the deferred POST');f.manager.close();
 }
-console.log('Persistent send recovery: read-only reload and preflight scope contracts passed');
+console.log('Persistent send recovery: read-only automatic reload and preflight scope contracts passed');
+
+{
+  const f=fixture();setDraft(f.state,'Saved before POST');setDraftReferences(f.state,[{message_id:'original-reference'}]);
+  const receipt=beginSend(f.state,'pre-post-fixed',{allowRunning:true,attachments:[{id:'original-file'}]});
+  const original=structuredClone(receipt.request);f.manager.restore(receipt,{space:'space',owner:'a'});await f.clock.advance(40);
+  assert.equal(f.calls.length,0);assert.equal(beginSend(f.state,'blocked',{allowRunning:true}),null);
+  setDraft(f.state,'New editor content');setDraftReferences(f.state,[{message_id:'new-reference'}]);f.scope={space:'other',owner:'b'};
+  const retry=f.manager.recover(receipt);await flush();const same=f.manager.recover(receipt);await flush();
+  assert.equal(f.calls.length,1,'Concurrent explicit retry clicks share one request');assert.deepEqual(f.calls[0].request,original);
+  assert.equal(f.calls[0].options.space,'space');assert.equal(f.calls[0].options.owner,'a');
+  f.calls[0].resolve({message_id:'accepted',duplicate:false});await Promise.all([retry,same]);
+  assert.equal(f.state.pending.size,0);assert.equal(f.state.drafts.get(receipt.key),'New editor content');assert.equal(f.state.referenceDrafts.get(receipt.key)[0].message_id,'new-reference');f.manager.close();
+}
+for(const outcome of ['accepted','rejected','error']){
+  const f=fixture();setDraft(f.state,'Restored request');const receipt=beginSend(f.state,'fixed-'+outcome,{allowRunning:true});
+  f.manager.restore(receipt,{space:'space',owner:'a'});await f.clock.advance(40);
+  if(outcome==='error')f.queryError=true;else f.queryState=outcome;
+  await f.manager.recover(receipt);assert.equal(f.calls.length,0,'Explicit restored retry does not POST after '+outcome+' receipt');
+  assert.equal(f.state.pending.size,outcome==='error'?1:0);f.manager.close();
+}
+console.log('Restored pre-POST request: explicit immutable same-ID retry, read-first acceptance/rejection/error, concurrency and newer edits passed');
+
+for(const change of ['permission','conversation','confirmed']){
+  const f=fixture();setDraft(f.state,'Original');const receipt=beginSend(f.state,'fixed-'+change,{allowRunning:true});f.manager.restore(receipt,{space:'space',owner:'a'});await f.clock.advance(40);
+  let release;f.client.sendReceipt=request=>new Promise(resolve=>release=()=>resolve(receiptValue(request,'unconfirmed')));
+  const recovery=f.manager.recover(receipt);await flush();
+  if(change==='permission')f.canRetry=false;
+  else if(change==='conversation')f.state.pending.delete(receipt.key);
+  else {settleSend(f.state,receipt,true);f.manager.confirmed(receipt);}
+  release();await recovery;assert.equal(f.calls.length,0,'A late query cannot replay after '+change+' changes');f.manager.close();
+}

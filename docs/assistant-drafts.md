@@ -27,6 +27,12 @@ was pending. Closing a page before an unsaved write completes can still lose
 those edits; clearing site storage or browser storage eviction also removes
 local drafts.
 
+Files pasted or dropped while a load or its Retry is pending merge with saved
+attachments without replacing accepted local Files or their upload state. If
+the combined draft exceeds eight attachments or 8 MiB, all originals remain
+visible and saved. Chat explains the limit and blocks Send until the user
+removes enough files; recovery never chooses which originals to discard.
+
 Restored originals become `File` objects and local preview URLs. Waiting and
 interrupted uploads resume only when the selected assistant has connection,
 transfer permission and a compatible model. Previously ready files validate
@@ -55,10 +61,18 @@ Only confirmed business acceptance clears submitted content. New typing,
 reference edits and files added during submission survive the older response.
 Normal successful responses do not wait for Agent completion. Explicit rejection
 retains the draft, and an unknown result retains the fixed request identity.
-After reload, only bounded, read-only receipt checks for that original request
-can resolve acceptance or rejection. Check submission repeats that read without
-creating a new request ID or issuing a POST. An unresolved request continues to
-block another submission in that conversation.
+After reload, bounded, read-only receipt checks for that original request
+can resolve acceptance or rejection. An unresolved request continues to block
+another submission in that conversation.
+
+An interrupted save may have committed the request fence before any POST began.
+For a restored unresolved request, the explicit Check and retry action first
+checks the original receipt. Only an unconfirmed result resubmits the identical
+saved payload with its original request ID and scope. An accepted or rejected
+receipt resolves without another POST;
+a failed receipt check keeps the fence. Automatic recovery, including reload,
+focus and network recovery, remains read-only. New editor contents are never
+substituted into that retry.
 
 If acceptance cleanup cannot commit, the composer reports the unsaved state.
 The older disk record still carries its original request fence, so another
