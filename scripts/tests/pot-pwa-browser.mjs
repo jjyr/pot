@@ -169,7 +169,8 @@ try{
     // Current queued work must survive transport retry; no second baseline.
     const sibling=await context.newPage();await sibling.goto(origin);await sibling.waitForTimeout(100);
     assert.equal(calls.filter(call=>call.path.endsWith('/baseline')).length,1,'standby tab rebuilt the live receiver baseline during backoff');
-    queue.push({event:{...event,id:'current-after-503'},attempt:1});
+    const current={event:{...event,id:'current-after-503'},attempt:1};
+    if(pending.length)pending.shift().end(JSON.stringify({delivery:current}));else queue.push(current);
     await page.waitForFunction(()=>localNotifications.length===1);
     assert.equal(calls.filter(call=>call.path.endsWith('/baseline')).length,1);
     assert.equal(await page.evaluate(()=>intervals.size),1);
