@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/localui"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/agentlink"
 )
 
@@ -254,11 +255,11 @@ func TestResidentSourceIgnoresHeartbeatWithoutLosingBusinessVersions(t *testing.
 	events <- localui.Event{Type: "changed", Data: []byte(`{"assistants":1}`)}
 	select {
 	case <-reads:
-	case <-time.After(time.Second):
+	case <-time.After(testutil.Timeout(t, time.Second)):
 		t.Fatal("missing initial business baseline")
 	}
 	// Wait for the initial committed baseline, not just its resource read.
-	for deadline := time.Now().Add(time.Second); ; {
+	for deadline := time.Now().Add(testutil.Timeout(t, time.Second)); ; {
 		var n int
 		if h.db.QueryRow("SELECT count(*) FROM notification_sources").Scan(&n) == nil && n == 1 {
 			break
@@ -280,10 +281,10 @@ func TestResidentSourceIgnoresHeartbeatWithoutLosingBusinessVersions(t *testing.
 	events <- localui.Event{Type: "changed", Data: []byte(`{"assistants":2}`)}
 	select {
 	case <-reads:
-	case <-time.After(time.Second):
+	case <-time.After(testutil.Timeout(t, time.Second)):
 		t.Fatal("business event after heartbeat was lost")
 	}
-	for deadline := time.Now().Add(time.Second); ; {
+	for deadline := time.Now().Add(testutil.Timeout(t, time.Second)); ; {
 		var n int
 		if h.db.QueryRow("SELECT count(*) FROM notification_events").Scan(&n) == nil && n == 1 {
 			break

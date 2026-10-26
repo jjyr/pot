@@ -20,6 +20,7 @@ import (
 	"github.com/jjyr/pot/internal/localui"
 	"github.com/jjyr/pot/internal/pwapush"
 	"github.com/jjyr/pot/internal/systemnotifications"
+	"github.com/jjyr/pot/internal/testutil"
 )
 
 func TestNotificationRegistrationCannotOutliveAuthority(t *testing.T) {
@@ -94,7 +95,7 @@ func TestNotificationRegistrationCannotOutliveAuthority(t *testing.T) {
 				}()
 				go func() { defer n.wg.Done(); hub.Dispatch(ctx) }()
 				defer server.Close()
-				for deadline := time.Now().Add(time.Second); hub.Control() == ""; {
+				for deadline := time.Now().Add(testutil.Timeout(t, time.Second)); hub.Control() == ""; {
 					if time.Now().After(deadline) {
 						t.Fatal("source did not establish baseline")
 					}
@@ -153,7 +154,7 @@ func TestNotificationRegistrationCannotOutliveAuthority(t *testing.T) {
 				go func() { defer close(done); server.ServeHTTP(response, request) }()
 				select {
 				case <-blocked.entered:
-				case <-time.After(2 * time.Second):
+				case <-time.After(testutil.Timeout(t, 2*time.Second)):
 					t.Fatal("registration did not reach body after authentication")
 				}
 				// Body IO must not hold the authority lock: revocation completes before release.
@@ -173,7 +174,7 @@ func TestNotificationRegistrationCannotOutliveAuthority(t *testing.T) {
 				close(blocked.release)
 				select {
 				case <-done:
-				case <-time.After(2 * time.Second):
+				case <-time.After(testutil.Timeout(t, 2*time.Second)):
 					t.Fatal("registration did not finish")
 				}
 				if response.Code != 401 {
@@ -198,7 +199,7 @@ func TestNotificationRegistrationCannotOutliveAuthority(t *testing.T) {
 						if device != other+":alpha" {
 							t.Errorf("revoked device received event: %s", device)
 						}
-					case <-time.After(2 * time.Second):
+					case <-time.After(testutil.Timeout(t, 2*time.Second)):
 						t.Fatal("logout wrongly revoked another device")
 					}
 				}

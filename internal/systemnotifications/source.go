@@ -421,7 +421,11 @@ func (h *Hub) Observe(ctx context.Context, source localui.Caller) {
 				}
 			}
 			if previous == nil {
+				previous = versions
 				wakeSource(manager.directory)
+				// Fresh owners schedule their own Task/approval baselines. Do not
+				// also enqueue directory work for this same initial snapshot.
+				return nil
 			}
 			previous = versions
 			manager.notify(dirty)
