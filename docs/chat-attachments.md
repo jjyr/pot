@@ -30,8 +30,8 @@ No document text extraction, OCR substitution or format conversion is performed.
 Other document/image formats are disabled. A PDF flag does not require an image
 flag, and an image flag does not enable PDF.
 
-Picker options, drop and paste reject unavailable types. The plus control always
-stays visible. It is disabled when neither type is usable, with a hover and
+Picker options restrict known unsupported types; drop and paste explain rejected
+types. The plus control always stays visible. It is disabled when neither type is usable, with a hover and
 keyboard-focus explanation of the model limitation. If PDF alone is supported,
 the plus control remains enabled and the image menu item explains its disabled
 state. Capability changes retain incompatible
@@ -97,8 +97,23 @@ bytes with an image floor; actual provider token usage remains authoritative.
 Drafts and in-progress File objects follow the existing in-memory composer
 lifetime, scoped by Control/Space, assistant and conversation. Navigation keeps
 them; restarting the client restores sent history, not unsent editor contents.
+Local file selection and removal do not depend on agent activity, a pending send
+receipt or the stream connection. The chooser captures its Space, owner and
+conversation before opening. Changing conversations or leaving chat cancels that
+selection with an explanation; late chooser results are ignored. Closing the
+chooser also retires its intent. Selecting files creates visible in-memory cards
+before upload eligibility is checked. Missing connection or upload permission
+retains the files with a waiting explanation. Restoring eligibility starts one
+upload attempt per waiting file; unsupported model types remain visible and block
+Send until removed or supported again. Upload failures expose an explicit retry;
+rendering progress does not erase selection-limit warnings.
+
 Uploads expose progress, cancellation/removal and retry with the same ID and
-confirmed offset. A lost send receipt reconciles the same request identity.
+confirmed offset. Removing a pending send's submitted original only changes the
+local draft; Control retains that immutable send snapshot. Its later confirmation
+clears only submitted IDs, preserving files selected afterwards. Browser File
+objects cannot survive closing or reloading the whole page; no unsent Blob data
+is persisted. A lost send receipt reconciles the same request identity.
 A confirmed provider rejection restores the latest attachment draft when it does
 not overwrite newer typing. Retrying unchanged input uses
 `POST /api/v1/turn/retry` to resume the original failed message and checkpoint;
