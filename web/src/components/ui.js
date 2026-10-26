@@ -133,7 +133,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const send = button('send', t('send'), 'send-button');
   form.append(input, send);
   composerArea.append(latest, form);
-  const continuation=client.production?createTurnContinuation({client,locale:()=>locale}):null;
+  const continuation=client.production?createTurnContinuation({client,locale:()=>locale,changed:()=>{if(!disposed)updateControls();}}):null;
   if(continuation)composerArea.prepend(continuation.root);
   const unavailable = el('div', client.production ? 'page-host' : 'unavailable');
   workspace.append(notice, notificationError, approvals, resourceNotices, history, composerArea, unavailable);
@@ -334,6 +334,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     state.draftChanged=key=>assistantDrafts.change(key);
   }
   async function submit() {
+    if(continuation?.state().pending)return;
     if (!can('chat.send')||chatCacheFailed||(!client.production&&state.snapshot?.running) || selectedAssistant?.offline || connection !== 'connected' || editorOwner !== (state.snapshot && ownerKey(state.snapshot))) return;
     if(attachmentUI?.problem())return;
     if(assistantDrafts&&!assistantDrafts.ready(editorOwner))return;
@@ -365,7 +366,15 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     finally { cancelPending = false; if (!disposed) updateControls(); }
   }
   form.addEventListener('submit', event => { event.preventDefault(); if(!editor.mobile)submit(); });
-  send.addEventListener('click', () => state.snapshot?.running&&!draft(state).trim()&&!attachmentUI?.items().length ? cancel() : submit());
+  const hasComposerInput=()=>!!(draft(state).trim()||attachmentUI?.items().length||draftReferences(state).length);
+  send.addEventListener('click', () => {
+    if(send.disabled)return;
+    if(!hasComposerInput()&&continuation?.state().available){
+      if(assistantDrafts&&!assistantDrafts.ready(editorOwner))return;
+      return continuation.resume();
+    }
+    return state.snapshot?.running&&!draft(state).trim()&&!attachmentUI?.items().length ? cancel() : submit();
+  });
   function updateControls() { return updateControlsLayout(); }
   function updateControlsLayout() {
     if(chatCacheFailed)error=t('chatCache.failed');
@@ -381,13 +390,16 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     const pending = snapshot && state.pending.get(ownerKey(snapshot));
     const running = snapshot?.running;
-    continuation?.update(snapshot,{connected:connection==='connected'&&can('chat.continue')&&!selectedAssistant?.offline&&!pending});
+    const draftReady=!assistantDrafts||assistantDrafts.ready(editorOwner);
+    continuation?.update(snapshot,{connected:draftReady&&connection==='connected'&&can('chat.continue')&&!selectedAssistant?.offline&&!pending&&!!snapshot&&editorOwner===ownerKey(snapshot)});
+    const recovery=continuation?.state(),restoring=recovery?.pending,resuming=draftReady&&recovery?.available&&!hasComposerInput();
     const stopping=running&&(!client.production||(!draft(state).trim()&&!attachmentUI?.items().length));
-    const label = stopping ? (cancelPending ? t('stopping') : t('stop')) : running?t('send.guidance'):t('send');
-    send.replaceChildren(icon(stopping ? 'stop' : 'send'));
+    const label = restoring||resuming ? recovery.label : stopping ? (cancelPending ? t('stopping') : t('stop')) : running?t('send.guidance'):t('send');
+    send.replaceChildren(icon(restoring ? 'refresh' : resuming ? 'play' : stopping ? 'stop' : 'send'));
+    send.setAttribute('aria-busy',String(!!restoring));
     send.title = label;
     send.setAttribute('aria-label', label);
-    send.disabled = stopping ? !can('chat.cancel')||selectedAssistant?.offline||cancelPending || connection !== 'connected' : !can('chat.send')||chatCacheFailed||saved?.loading||selectedAssistant?.offline|| !snapshot || editorOwner !== ownerKey(snapshot) || pending || (!draft(state).trim()&&!attachmentUI?.items().length) || !!attachmentUI?.problem() || connection !== 'connected';
+    send.disabled = restoring || (resuming ? recovery.disabled : stopping ? !can('chat.cancel')||selectedAssistant?.offline||cancelPending || connection !== 'connected' : !can('chat.send')||chatCacheFailed||saved?.loading||selectedAssistant?.offline|| !snapshot || editorOwner !== ownerKey(snapshot) || pending || (!draft(state).trim()&&!attachmentUI?.items().length) || !!attachmentUI?.problem() || connection !== 'connected');
     attachmentUI?.update();
     updateReferenceDraft();
     input.disabled = !snapshot && !editorOwner;

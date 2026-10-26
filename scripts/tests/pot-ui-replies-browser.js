@@ -203,9 +203,11 @@ async page=>{
   document.body.replaceChildren();
   const draft=document.createElement('textarea');draft.value='Keep this draft';draft.id='saved-draft';document.body.append(draft);
   const client={scope:()=>({...fixture.scope}),continueTurn:(body,scope)=>new Promise((resolve,reject)=>{fixture.requests.push({body,scope});fixture.resolve=resolve;fixture.reject=reject;})};
-  fixture.view=createTurnContinuation({client,locale:()=>fixture.locale});document.body.append(fixture.view.root);
+  const action=document.createElement('button');action.id='continuation-action';
+  const render=()=>{const state=fixture.view.state();action.textContent=state.label;action.disabled=state.disabled;action.hidden=!state.available;};
+  fixture.view=createTurnContinuation({client,locale:()=>fixture.locale,changed:render});action.onclick=()=>fixture.view.resume();document.body.append(fixture.view.root,action);
   fixture.snapshot={runtime_id:'runtime',owner_id:'remote/alpha',conversation_id:'alpha',cursor:'1',running:false,continuation:{user_message_id:'input',attempt_id:'original',recovery_required:true}};
-  fixture.update=()=>fixture.view.update(fixture.snapshot,{connected:!fixture.offline});fixture.update();
+  fixture.update=()=>{fixture.view.update(fixture.snapshot,{connected:!fixture.offline});render();};fixture.update();
  });
  await page.getByRole('button',{name:'Continue task',exact:true}).click();
  assert(await page.getByRole('button',{name:'Restoring progress…'}).isDisabled(),'Duplicate continuation clicks are disabled');
@@ -218,11 +220,11 @@ async page=>{
  assert(await page.evaluate(()=>continuationTest.requests[0].body.request_id===continuationTest.requests[1].body.request_id),'Acknowledgment retries retain the same continuation identity');
  assert(await page.evaluate(()=>continuationTest.requests[0].scope.space==='remote'&&continuationTest.requests[0].scope.owner==='alpha'&&continuationTest.requests[0].body.user_message_id==='input'),'Continuation binds the original owner, Space and input');
  await page.evaluate(()=>{continuationTest.scope={space:'local',owner:'beta'};continuationTest.view.update({...continuationTest.snapshot,owner_id:'local/beta',continuation:null},{connected:true});continuationTest.reject(Error('late failure'));});
- assert(!await page.locator('.turn-continuation').isVisible(),'A late failure cannot appear in another assistant');
+ assert(!await page.locator('.turn-continuation-error').isVisible(),'A late failure cannot appear in another assistant');
  await page.evaluate(()=>{continuationTest.scope={space:'remote',owner:'alpha'};continuationTest.update();});
  await page.getByRole('button',{name:'继续任务',exact:true}).click();
  await page.evaluate(()=>continuationTest.resolve({message_id:'input',duplicate:true}));
- await page.locator('.turn-continuation').waitFor({state:'hidden'});
+ await page.locator('.turn-continuation-error').waitFor({state:'hidden'});
  await page.evaluate(()=>{continuationTest.snapshot.cursor='2';continuationTest.snapshot.continuation.attempt_id='later-interruption';continuationTest.update();});
  await page.getByRole('button',{name:'继续任务',exact:true}).click();
  assert(await page.evaluate(()=>continuationTest.requests[3].body.request_id!==continuationTest.requests[0].body.request_id),'A later interruption gets a new continuation identity');
@@ -232,8 +234,18 @@ async page=>{
  assert(await page.getByRole('button',{name:'Continue task',exact:true}).isDisabled(),'Offline conversations cannot submit continuation');
  await page.getByText('Could not continue the task. Your saved progress and draft are kept. Try again.',{exact:true}).waitFor();
  await page.evaluate(()=>{continuationTest.snapshot.continuation.summary=true;continuationTest.offline=false;continuationTest.update();});
- await page.getByText('Restore the interrupted summary',{exact:true}).waitFor();
+ assert(await page.locator('.turn-continuation-error button').count()===0,'Recovery errors do not add an independent action');
  assert(await page.getByRole('button',{name:'Restore conversation',exact:true}).isEnabled(),'Failed task-result summaries expose their own recovery action');
+ await page.getByRole('button',{name:'Restore conversation',exact:true}).click();
+ await page.evaluate(()=>continuationTest.resolve({message_id:'wrong-input',duplicate:false}));
+ await page.getByText('Could not continue the task. Your saved progress and draft are kept. Try again.',{exact:true}).waitFor();
+ assert(await page.getByRole('button',{name:'Restore conversation',exact:true}).isEnabled(),'A mismatched receipt is rejected and remains retryable');
+ await page.getByRole('button',{name:'Restore conversation',exact:true}).click();
+ await page.evaluate(()=>continuationTest.resolve({message_id:'input',duplicate:'invalid'}));
+ await page.getByText('Could not continue the task. Your saved progress and draft are kept. Try again.',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Restore conversation',exact:true}).click();
+ await page.evaluate(()=>continuationTest.resolve({message_id:'input',duplicate:false}));
+ await page.locator('#continuation-action').waitFor({state:'hidden'});
  return {passed:true,owner_fencing:true,draft_preserved:true,retry_identity:true,live_locale:true};
 }
 

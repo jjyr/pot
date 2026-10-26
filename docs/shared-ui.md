@@ -272,6 +272,17 @@ do not rewrite its value. Only explicit restoration, matching send receipts and
 completion replace text. Composition events, `isComposing` and key code 229 keep
 candidate confirmation from choosing a completion or sending a message.
 
+When an interrupted turn has a continuation and Chat is not running, the empty
+composer's main button shows a right-pointing play icon after the assistant's
+local draft has finished loading. A pending or failed draft load cannot enable
+restoration. Activating it resumes
+the original turn through the continuation command and its captured owner, input
+and attempt identities. Text (after trimming), attachments or message references
+switch the button back to sending; removing them restores play. Restoration
+disables the main button until its response arrives. Recovery errors remain
+visible above the composer, including unconfirmed tool results. Running turns
+retain their existing stop and guidance actions.
+
 Assistant references use compact `@name` text in the native textarea and an
 inert, scroll-synchronized highlight layer. Identity ranges serialize to the same
 full-address links used in messages and drafts; ordinary typed names never resolve
