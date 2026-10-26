@@ -6,6 +6,7 @@ import {taskContinuity,witnessMessages} from './task-continuity-browser.mjs';
 import {attachmentPickerBrowser} from './attachment-picker-browser.mjs';
 import {chatStreamRecovery} from './chat-stream-recovery-browser.mjs';
 import {taskHistoryBrowser,taskHistoryEdges} from './task-history-browser.mjs';
+import {referenceCancellation} from './reference-cancel-browser.mjs';
 const {values}=parseArgs({options:{group:{type:'string',default:'all'},list:{type:'boolean'},fault:{type:'string'},case:{type:'string'}}});
 let selected=select(values.group);
 if(values.case){if(!selected.includes(values.case))throw Error('Unknown scenario in selected group: '+values.case);selected=[values.case];}
@@ -19,7 +20,14 @@ else {
       const start=performance.now();let result;
       console.log('RUN '+name);
       // The directory matrix owns its device contexts. No unused outer context.
-      if(name==='attachment-picker')result=await attachmentPickerBrowser(browser,{sourceOrigin:server.origin});
+      if(name==='reference-cancel'){
+        result=[];
+        for(const phone of [false,true]){
+          const context=await browser.newContext({viewport:phone?{width:390,height:844}:{width:1280,height:800},hasTouch:phone,isMobile:phone});
+          try{result.push(await referenceCancellation(await context.newPage(),server.origin));}finally{await context.close();}
+        }
+      }
+      else if(name==='attachment-picker')result=await attachmentPickerBrowser(browser,{sourceOrigin:server.origin});
       else if(name==='chat-stream-recovery')result=await chatStreamRecovery(browser,{sourceOrigin:server.origin});
       else if(name==='directory')result=await contract('pot-ui-mobile-directory-browser.js',null,{browser,origin:server.origin});
       else if(name==='composer-enter')result=await contract('pot-ui-mobile-enter-browser.js',null,{browser,origin:server.origin,base:server.origin+'/web/src'});

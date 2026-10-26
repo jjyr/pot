@@ -409,10 +409,33 @@ The response repeats that identity plus `runtime_id`, `owner_id` and `state`:
 means an absent steer targets a turn that no longer accepts guidance. Reads do
 not start or interrupt Agent work.
 
-The client ends each HTTP wait after ten seconds and keeps the fixed payload and
-request ID while acceptance is unknown. Five receipt reads use bounded backoff;
-a matching persisted message or query unlocks the next send even if the HTTP
-receipt is still held. If unresolved, a localized Check and retry action queries
+The normal submit path waits only for its business response: success confirms
+immediately, and an explicit rejection retains the draft and reports the error.
+No receipt query runs while that POST is pending, including on foreground/online
+signals. A matching persisted SSE message may also confirm the same request
+without waiting for the POST; Agent execution completion is not required.
+
+The production send adapter returns a valid acceptance response before local
+command projection saving completes. Its `committed` promise and `retryCommit`
+function track that separate save; the submit timeout never covers it. Saving
+still uses the original command ID and invalidates conversation/directory reads
+after commit. A local save failure shows the existing accepted-action storage
+notice in the captured owner's Chat. Retry saves that response locally without
+another POST or receipt read; it cannot restore the submitted draft or erase a
+newer one. Other mutation commands retain their commit-before-return behavior.
+
+A timeout, network failure or another inconclusive submit error makes the result
+unknown and enables receipt checks. Each HTTP wait is bounded to ten seconds.
+Five reads then use bounded backoff for the fixed payload and request ID. If they
+are exhausted, foreground/online signals trigger one further read-only check.
+Each unknown attempt has one active check; bursts coalesce with a one-second
+cooldown and never restart periodic polling. Unconfirmed results or unavailable
+reads retain the unknown attempt; 401/403 pauses automatic checks. Backgrounding
+pauses receipt checks but lets a pending POST return its definitive response.
+Offline/disposal cancels waits and revokes ownership before abort, so late results
+cannot affect a newer check. Automatic recovery never transmits a message.
+
+If unresolved, a localized Check and retry action queries
 first and, only after an unconfirmed result, retries the same ID/payload in the
 captured scope. Unavailable reads retain the unknown attempt. Subscription/boot
 renewals and navigation retain it in the mounted client; newer drafts, references

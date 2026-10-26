@@ -1,0 +1,38 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/web/src/styles.css"><title>Reference cancellation fixture</title><div id="app"></div>
+<script type="module">
+import {mountApp} from '/web/src/components/ui.js';
+const params=new URLSearchParams(location.search);
+let scope={space:'fixture',owner:'alpha'};
+const calls=[],uploads=new Map(),pending=[];
+const snapshot=owner=>({kind:'reset',runtime_id:'fixture',boot_id:'boot',owner_id:JSON.stringify(['fixture',owner]),conversation_id:owner,cursor:'1',replies:[],running:false,turn_id:null,
+  agent:{attachments:{image:true,pdf:true}},messages:[{id:owner+'-source',sequence:'1',role:'assistant',status:'complete',text:'Synthetic source for '+owner+'. Select this text to reference it.'}]});
+const client={production:!params.has('volatile'),chatCacheName:'reference-cancel',runtime:{runtime_id:'fixture',boot_id:'boot'},
+  scope:()=>({...scope}),setScope:value=>scope={...scope,...value},changes:()=>()=>{},
+  snapshot:async()=>snapshot(scope.owner),
+  subscribe(receive,status,captured={...scope}){queueMicrotask(()=>{status('connected');receive(snapshot(captured.owner));});return()=>{};},
+  send(request,captured){calls.push({request:structuredClone(request),scope:{...captured,signal:undefined}});return new Promise(resolve=>pending.push(resolve));},
+  async request(path,{body}={}){
+    const url=new URL(path,location.href);
+    if(url.pathname==='/api/v1/spaces')return {active_space_id:'fixture',items:[{id:'fixture',name:'Fixture',control_id:'fixture',connected:true}]};
+    if(url.pathname==='/api/v1/assistants')return {items:[{id:'alpha',name:'Alpha'},{id:'beta',name:'Beta'}].map(item=>({...item,capabilities:{version:1,operations:['chat.read','chat.send','chat.references','chat.attachments']}}))};
+    if(url.pathname==='/api/v1/attachments'){
+      if(body.action==='begin')uploads.set(body.id,{id:body.id,name:body.name,size:body.size,mime_type:body.mime_type});
+      return {ready:true,attachment:uploads.get(body.id)};
+    }
+    return {items:[],pending:[],policy:{}};
+  },
+};
+mountApp(document.querySelector('#app'),client);
+window.referenceFixture={calls,accept(){pending.shift()?.({message_id:'captured-only',duplicate:false});},select(){
+  const source=document.querySelector('[data-reference-source]'),range=document.createRange();range.selectNodeContents(source);
+  getSelection().removeAllRanges();getSelection().addRange(range);
+  source.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));source.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));
+}};
+// Explicit fixture controls allow computer-use observation without page eval.
+const controls=document.createElement('div');controls.style.cssText='position:fixed;right:8px;top:70px;z-index:100';
+for(const [label,action]of [['Select synthetic source',()=>referenceFixture.select()],['Accept captured send',()=>referenceFixture.accept()]]){
+  const button=document.createElement('button');button.type='button';button.textContent=label;button.onclick=action;controls.append(button);
+}
+document.body.append(controls);
+</script></html>

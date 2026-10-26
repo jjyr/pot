@@ -77,6 +77,16 @@ export async function createProductionClient({desktop = false, base = '', resour
     catch(error){error.accepted=true;error.uiKey='storage.commandAccepted';throw localized(error);}
   }
   const localized=error=>error.uiKey?Object.assign(new Error(translate(client?.uiLocale?.()||'en',error.uiKey),{cause:error}),error,{name:error.name,diagnostic:error.diagnostic||error.message}):error;
+  function completeCommand(path,method,body,value,scope,signature,submission){
+    const commit=()=>commitCommand(path,method,body,value,scope,signature);
+    if(submission&&typeof value?.message_id==='string'&&typeof value?.duplicate==='boolean'){
+      // Server acceptance is independent of local projection persistence. Keep
+      // saving and its local-only retry, without extending the submit deadline.
+      const committed=commit();committed.catch(()=>{});
+      return {...value,committed,retryCommit:commit};
+    }
+    return commit();
+  }
   async function terminalStreamFailure(signal){
     const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),5000);
     const cancel=()=>abort.abort();signal.addEventListener('abort',cancel,{once:true});if(signal.aborted)cancel();
@@ -99,7 +109,7 @@ export async function createProductionClient({desktop = false, base = '', resour
     // an HTTP proxy or a local execution fallback.
     const fullPath = scopedPath(path, capturedScope);
     const signature=method==='GET'?null:JSON.stringify([fullPath,method,body]);
-    if(signature&&acceptedCommands.has(signature))return commitCommand(path,method,body,acceptedCommands.get(signature).value,capturedScope,signature);
+    if(signature&&acceptedCommands.has(signature))return completeCommand(path,method,body,acceptedCommands.get(signature).value,capturedScope,signature,options.submission);
     if (signal?.aborted) throw signal.reason;
     if (desktop) {
       const pending = invoke('Call', method, fullPath, body === undefined ? '' : JSON.stringify(body));
@@ -108,7 +118,7 @@ export async function createProductionClient({desktop = false, base = '', resour
       try {
         const raw = await pending;
         if (signal?.aborted) throw signal.reason;
-        let value;try{value=decodeDesktopResponse(raw);}catch(error){throw localized(error);}if(method!=='GET')return commitCommand(path,method,body,value,capturedScope,signature);return value;
+        let value;try{value=decodeDesktopResponse(raw);}catch(error){throw localized(error);}if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);return value;
       } finally { signal?.removeEventListener('abort', abort); }
     }
     const response = await fetch(`${base}${fullPath}`, {method, signal, credentials: 'same-origin',
@@ -116,7 +126,7 @@ export async function createProductionClient({desktop = false, base = '', resour
       body: body === undefined ? undefined : JSON.stringify(body)});
     const value = response.status === 204 ? null : await response.json().catch(() => null);
     if (!response.ok) throw localized(new APIError(response.status, value));
-    if(method!=='GET')return commitCommand(path,method,body,value,capturedScope,signature);
+    if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);
     return value;
   }
   const runtime = await request('/api/v1/runtime', {owner: '', space: ''});
@@ -143,7 +153,7 @@ export async function createProductionClient({desktop = false, base = '', resour
       return normalizeSnapshot(value, runtime, scope.owner, scope.space);
     },
     history: async (query, options = {}) => {const page=await request(`/api/v1/history?${new URLSearchParams(query)}`,options);return {...page,messages:page.messages.map(({message,...meta})=>({...message,...meta}))};},
-    send: ({boot_id,user_message_id,retry_user_message_id,...body},options={}) => retry_user_message_id ? request('/api/v1/turn/retry',{...options,method:'POST',body:{request_id:body.request_id,user_message_id:retry_user_message_id}}) : request(user_message_id?'/api/v1/turn/steer':'/api/v1/messages', {...options,method: 'POST', body:user_message_id?{request_id:body.request_id,user_message_id,text:body.text,attachments:body.attachments,references:body.references}:body}),
+    send: ({boot_id,user_message_id,retry_user_message_id,...body},options={}) => retry_user_message_id ? request('/api/v1/turn/retry',{...options,submission:true,method:'POST',body:{request_id:body.request_id,user_message_id:retry_user_message_id}}) : request(user_message_id?'/api/v1/turn/steer':'/api/v1/messages', {...options,submission:true,method: 'POST', body:user_message_id?{request_id:body.request_id,user_message_id,text:body.text,attachments:body.attachments,references:body.references}:body}),
     sendReceipt: (requestValue,options={}) => {
       const {request_id,conversation_id,user_message_id,retry_user_message_id}=requestValue;
       const query=new URLSearchParams({request_id,conversation_id});

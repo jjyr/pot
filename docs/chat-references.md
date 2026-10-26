@@ -6,7 +6,10 @@ separate cards; duplicate message/quote pairs are ignored. A selection spanning
 messages creates one reference per message. Tool details, attachment controls and
 existing reference cards are excluded. Each card shows its source and up to two
 lines of the selected text, with the full excerpt in its tooltip. Remove affects
-only that reference. Clicking the card scrolls to the original message.
+only that reference and clears the original prose selection. Clicking the card
+scrolls to the original message. Removal remains available while a send awaits
+confirmation: it changes the draft for the next input, while the submitted input
+keeps its captured references.
 
 References are in-memory drafts scoped by Control, assistant and conversation,
 alongside the text and attachment drafts. Navigation retains them; client restart

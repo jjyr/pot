@@ -137,6 +137,28 @@ The UI never provides an IO callback or receives a cache/key. Each surface has i
 own reading intent. Closing one leaves shared history IO available to another;
 retire, scope change and deletion fence late publication and cache resurrection.
 
+Initial Chat history, including a return from the assistant directory, keeps its
+layout width while hidden. Before revealing it, the UI waits for the mounted
+history's font, image, resource and diagram states, then commits the virtual
+range and initial reading position until their measured geometry is stable.
+The original navigation intent is reapplied after resource readiness so a
+temporarily shorter row cannot replace the saved reading anchor.
+Markdown and code formatting are synchronous; resource previews and diagrams
+participate through their loading/ready/error states. Preparation is cancelled
+on navigation or disposal, so an old resource completion cannot reveal a new Chat.
+It does not hide subsequent streamed output or ordinary history pagination.
+
+Preparation allows five seconds for resources. Unresolved previews then retain a
+fixed, scrollable slot, so a slow or offline resource cannot hide Chat indefinitely
+or change its row height when it finishes. Explicit expansion can resize that
+slot. If the web font is still loading, the surface retains a system font until
+the next preparation. This stabilizes the initial history; live business updates,
+user expansion, viewport changes and interactive resource contents remain dynamic.
+Pending block file references reserve the preview slot before their binding
+arrives; inline file links retain their measured link box instead. A preview's
+Expand action also releases a containing file-reference slot, and Collapse
+restores its reserved height.
+
 UI components keep focus, unsaved values, expanded disclosures, filters and the
 history sentinel. They pass business inputs to typed commands instead of building
 domain URLs or repeating mutation/refresh sequences. Command attempts share
