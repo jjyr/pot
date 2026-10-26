@@ -7,7 +7,7 @@ export function referenceProblem(refs) {
   return refs.length>8||refs.some(ref=>bytes(ref.quote||'')>4096)||refs.reduce((n,ref)=>n+bytes(ref.quote||''),0)>16384;
 }
 
-export function renderMessageReferences(refs,{messages,locale,onJump,onRemove,disabled=false}) {
+export function renderMessageReferences(refs,{messages,locale,onJump,onRemove}) {
   const t=key=>translate(locale(),key),host=node('div','message-references');host.setAttribute('aria-label',t('references.list'));
   for(const [index,ref]of refs.entries()){
     const source=messages.find(m=>m.id===ref.message_id),card=node('div','message-reference');
@@ -17,7 +17,7 @@ export function renderMessageReferences(refs,{messages,locale,onJump,onRemove,di
     const text=ref.quote||source?.text||t('references.unavailable'),excerpt=node('span','message-reference-excerpt',text);
     open.title=text;open.setAttribute('aria-label',t('references.open').replace('{source}',label));open.onclick=()=>onJump(ref.message_id);
     inner.append(heading,excerpt);open.append(inner);card.append(open);
-    if(onRemove){const remove=node('button','message-reference-remove','×');remove.type='button';remove.title=t('references.remove');remove.setAttribute('aria-label',remove.title);remove.disabled=disabled;remove.onclick=()=>onRemove(index);card.append(remove);}
+    if(onRemove){const remove=node('button','message-reference-remove','×');remove.type='button';remove.title=t('references.remove');remove.setAttribute('aria-label',remove.title);remove.onclick=()=>onRemove(index);card.append(remove);}
     host.append(card);
   }
   return host;
