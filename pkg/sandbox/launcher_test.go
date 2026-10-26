@@ -28,6 +28,90 @@ func TestUnavailableNeverReturnsUnconfinedCommand(t *testing.T) {
 	}
 }
 
+func TestProtectedRootAliasesKeepNestedWorkspaceWritable(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	workspace := filepath.Join(root, "state", "workspace")
+	outside := filepath.Join(root, "other-state")
+	sdk := filepath.Join(root, "sdk")
+	for _, path := range []string{workspace, outside, sdk} {
+		if err := os.MkdirAll(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	alias := filepath.Join(root, "state-alias")
+	outsideAlias := filepath.Join(root, "other-alias")
+	for link, target := range map[string]string{alias: filepath.Dir(workspace), outsideAlias: outside} {
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Inspect the actual request sent to the SDK adapter without executing a workload.
+	helper := `import {createInterface} from 'node:readline';
+const lines=createInterface({input:process.stdin});
+const first=await lines[Symbol.asyncIterator]().next();
+process.stdout.write(JSON.stringify({argv:['/bin/sh','-c',first.value]})+'\n');
+for await(const line of lines){if(line==='close')break;}
+lines.close();`
+	if err := os.WriteFile(filepath.Join(sdk, "launcher.mjs"), []byte(helper), 0600); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command("/bin/sh", "-c", "true")
+	command.Dir = workspace
+	finish, err := (Launcher{Node: node, Directory: sdk, ProtectedPaths: []string{alias, outsideAlias}}).Prepare(context.Background(), command, workspace, nil, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := finish(); err != nil {
+			t.Error(err)
+		}
+	}()
+	var request launch
+	if err := json.Unmarshal([]byte(command.Args[2]), &request); err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := filepath.EvalSymlinks(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range request.DenyWrite {
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if within(canonical, resolved) {
+			t.Fatalf("protected alias denies its nested workspace: %s", path)
+		}
+	}
+	for _, path := range []string{filepath.Dir(workspace), outside} {
+		canonical, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, denied := range request.DenyRead {
+			found = found || denied == canonical
+		}
+		if !found {
+			t.Fatalf("canonical authority root lost read protection: %s", canonical)
+		}
+	}
+	canonicalOutside, err := filepath.EvalSymlinks(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range request.DenyWrite {
+		if path == canonicalOutside {
+			return
+		}
+	}
+	t.Fatal("unrelated authority root lost write protection")
+}
+
 // Run explicitly on each execution platform; never silently skip a requested
 // real sandbox suite because dependencies or kernel support are missing.
 func TestRealFileNetworkAndSocketIsolation(t *testing.T) {

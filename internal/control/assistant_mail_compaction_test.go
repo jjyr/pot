@@ -90,7 +90,7 @@ func TestAssistantMailAcceptsDuringRecipientCompaction(t *testing.T) {
 			}
 			select {
 			case <-entered:
-			case <-time.After(2 * time.Second):
+			case <-time.After(testutil.Timeout(t, 2*time.Second)):
 				thread, _ := c.Thread(ctx)
 				p, _ := c.Snapshot(ctx)
 				t.Fatalf("compact did not start auto=%v turn=%+v error=%v", thread.Config.Params.Agent.AutoCompact, p.Turn, p.Agent)
