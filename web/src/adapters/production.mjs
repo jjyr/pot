@@ -83,10 +83,13 @@ export async function createProductionClient({desktop = false, base = '', resour
     try{
       const response=await fetch(`${base}/access/status`,{credentials:'same-origin',signal:abort.signal});
       if(response.status===401)return {uiKey:'connection.authenticationRequired',code:'stream_authentication'};
+      if(response.status===403)return {uiKey:'connection.streamUnavailable',code:'stream_forbidden'};
       if(response.ok){const value=await response.json();if(value.authenticated===false)return {uiKey:'connection.authenticationRequired',code:'stream_authentication'};if(value.authenticated===true)return {retry:true};}
-    }catch{/* A terminal transport failure is distinct from unconfirmed authentication. */}
+    }catch{/* An unavailable probe cannot establish an authentication failure. */}
     finally{clearTimeout(timer);signal.removeEventListener('abort',cancel);}
-    return {uiKey:'connection.streamUnavailable',code:'stream_closed'};
+    // Both conversation and changes streams must recover from transient status
+    // failures without depending on a consumer Retry button or foreground remount.
+    return {retry:true};
   }
   async function request(path, options = {}) {
     let {method = 'GET', body, signal} = options;

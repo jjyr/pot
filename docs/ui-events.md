@@ -110,14 +110,19 @@ Hidden pages pause watchdog/retry timers. Visible, focus, pageshow and online
 wakeups compare wall-clock deadlines before resuming them, so a suspended PWA
 can replace an expired stream without waiting for a throttled timer. Healthy
 streams survive these wakeups. Offline transitions close the stream; owner
-changes and disposal cancel its timers and terminal-status request. Old source
-callbacks cannot update the new generation.
+changes and disposal cancel its timers and terminal-status request. Cancellation
+revokes probe ownership synchronously, so online recovery does not wait for an
+aborted request to settle. Old source and probe callbacks cannot update the new
+generation or clear a newer probe.
 
 A terminal EventSource response triggers one bounded, cancellable same-origin
 access-status check. An expired session remains offline with an explicit
-reconnection message instead of a retry loop; a confirmed valid session may
-retry with the same backoff. Unknown terminal failures remain offline for an
-explicit retry. Opening the stream and receiving heartbeats never bypass the
+reconnection message instead of a retry loop; an explicit access denial (403)
+also pauses recovery. Both remain paused across lifecycle wakeups and
+offline/online transitions. A confirmed valid session or an unknown result
+(including a probe timeout or network failure) retries with the same backoff.
+This also lets the global changes stream recover without a consumer Retry
+button. Opening the stream and receiving heartbeats never bypass the
 conversation cache: only a committed current snapshot makes Chat connected.
 Storage failures remain visible and retain drafts; transport reconnects neither
 replay sends nor recreate the composer or its reading position.

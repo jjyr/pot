@@ -3,11 +3,16 @@
 export const streamDeadlines={initial:20000,idle:45000,stable:15000,maxRetry:30000};
 export function createEventStream({url,events,onStatus=()=>{},terminal,host=globalThis,page=globalThis.document,now=()=>Date.now(),random=Math.random,deadlines=streamDeadlines}) {
   let source=null,generation=0,closed=false,opened=false,received=false,started=0,readyAt=0,lastData=0,attempt=0;
-  let watchdog,retryTimer,retryAt=now()||1,checking=null,terminalAbort;
+  let watchdog,retryTimer,retryAt=now()||1,checking=null,paused=false;
   const visible=()=>!page||page.visibilityState!=='hidden';
   const online=()=>host.navigator?.onLine!==false;
   const clear=()=>{host.clearTimeout(watchdog);host.clearTimeout(retryTimer);watchdog=retryTimer=undefined;};
-  function stop(){generation++;clear();source?.close();source=null;terminalAbort?.abort();terminalAbort=null;}
+  function stop(){
+    generation++;clear();source?.close();source=null;
+    // Revoke ownership before abort: online may run before the old promise
+    // settles, and its callbacks must not clear or publish into a newer probe.
+    const probe=checking;checking=null;probe?.abort.abort();
+  }
   function schedule(){
     host.clearTimeout(watchdog);watchdog=undefined;
     if(closed||!source||!visible())return;
@@ -27,7 +32,7 @@ export function createEventStream({url,events,onStatus=()=>{},terminal,host=glob
     else schedule();
   }
   function connect(){
-    if(closed||!visible()||!online())return;
+    if(closed||paused||!visible()||!online())return;
     stop();retryAt=0;opened=received=false;started=lastData=now();
     const version=generation,stream=source=new host.EventSource(url);
     const current=()=>!closed&&version===generation&&source===stream;
@@ -53,24 +58,32 @@ export function createEventStream({url,events,onStatus=()=>{},terminal,host=glob
       // through the authenticated status route before choosing retry vs auth.
       stop();onStatus('offline',{uiKey:'streamDisconnected',code:'stream_closed'});
       if(terminal){
-        const ticket=generation,abort=terminalAbort=new AbortController();
-        checking=Promise.resolve().then(()=>terminal(abort.signal)).then(reason=>{
-          if(!closed&&ticket===generation&&reason){if(reason.retry)retry('stream_closed');else onStatus('offline',reason);}
-        }).catch(()=>{}).finally(()=>{checking=null;if(terminalAbort===abort)terminalAbort=null;});
+        const probe=checking={generation,abort:new AbortController()};
+        const ownsProbe=()=>!closed&&checking===probe&&generation===probe.generation;
+        Promise.resolve().then(()=>ownsProbe()?terminal(probe.abort.signal):undefined).then(reason=>{
+          if(!ownsProbe())return;
+          checking=null;
+          if(!reason||reason.retry)retry('stream_closed');
+          else{paused=true;onStatus('offline',reason);}
+        }).catch(cause=>{
+          if(!ownsProbe())return;
+          checking=null;retry('stream_closed',cause);
+        }).finally(()=>{if(ownsProbe())checking=null;});
       }
     };
   }
   function resume(){
-    if(closed||!visible())return;
-    if(!online()){stop();onStatus('offline',{uiKey:'streamDisconnected',code:'stream_offline'});return;}
+    if(closed||paused||!visible())return;
+    if(!online()){offline();return;}
     if(source){expired();return;}
     if(checking)return;
-    // A terminal CLOSED response waits for an explicit consumer retry/remount.
+    // A pending terminal check owns recovery; a confirmed denial stays paused
+    // until an explicit consumer remount creates a new stream owner.
     if(!retryAt)return;
     host.clearTimeout(retryTimer);retryTimer=host.setTimeout(connect,Math.max(0,retryAt-now()));
   }
   function visibility(){if(!visible()){host.clearTimeout(watchdog);host.clearTimeout(retryTimer);watchdog=retryTimer=undefined;}else resume();}
-  function offline(){stop();retryAt=now()||1;onStatus('offline',{uiKey:'streamDisconnected',code:'stream_offline'});}
+  function offline(){stop();retryAt=paused?0:now()||1;if(!paused)onStatus('offline',{uiKey:'streamDisconnected',code:'stream_offline'});}
   for(const name of ['focus','pageshow','online'])host.addEventListener?.(name,resume);
   host.addEventListener?.('offline',offline);page?.addEventListener('visibilitychange',visibility);
   connect();

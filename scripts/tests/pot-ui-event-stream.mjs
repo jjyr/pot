@@ -50,4 +50,66 @@ function fixture(){
 {
  const f=fixture(),a=f.start();f.reset();a();const b=f.start({url:'/owner/b/events'});f.tick(20000);assert(f.sources.slice(0,-1).every(s=>s.readyState===2));assert.equal(f.current().url,'/owner/b/events');assert(!f.statuses.some(([status])=>status==='connected'),'Only the committed domain may report business readiness');b();
 }
-console.log('Event streams: bounded first reset, heartbeat liveness, backoff, paused clocks, lifecycle coalescing, terminal cancellation and owner fencing passed');
+// A lifecycle cancellation detaches probe ownership synchronously; settling
+// the cancelled promise cannot be required to make online recovery runnable.
+{
+ const f=fixture();let terminalSignal;
+ const stop=f.start({terminal:signal=>{terminalSignal=signal;return new Promise(resolve=>signal.addEventListener('abort',()=>resolve({retry:true}),{once:true}));}});
+ f.current().readyState=2;f.current().emit('error');await Promise.resolve();
+ f.host.navigator.onLine=false;f.host.dispatchEvent(new Event('offline'));
+ f.host.navigator.onLine=true;f.host.dispatchEvent(new Event('online'));
+ for(let i=0;i<8;i++)await Promise.resolve();f.tick(0);
+ const state={sources:f.sources.length,activeSources:f.sources.filter(source=>source.readyState!==2).length,scheduledTimers:f.timers.size,terminalAborted:terminalSignal.aborted};
+ assert.equal(state.activeSources,1,'Offline/online during a cancelled terminal probe must recover: '+JSON.stringify(state));
+ assert.equal(state.sources,2);assert.equal(state.terminalAborted,true);
+ for(let round=0;round<3;round++){
+  f.current().readyState=2;f.current().emit('error');await Promise.resolve();
+  f.host.navigator.onLine=false;f.host.dispatchEvent(new Event(round%2?'focus':'offline'));f.host.navigator.onLine=true;f.host.dispatchEvent(new Event('online'));
+  for(let i=0;i<8;i++)await Promise.resolve();f.tick(0);assert.equal(f.sources.length,round+3);assert.equal(f.sources.filter(source=>source.readyState!==2).length,1);assert(terminalSignal.aborted);
+ }
+ stop();assert.equal(f.timers.size,0);
+}
+{
+ const f=fixture(),probes=[],flush=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};
+ const stop=f.start({terminal:signal=>new Promise(resolve=>probes.push({signal,resolve}))});
+ f.current().readyState=2;f.current().emit('error');await flush();
+ f.host.navigator.onLine=false;f.host.dispatchEvent(new Event('offline'));
+ f.host.navigator.onLine=true;f.host.dispatchEvent(new Event('online'));f.tick(0);
+ f.current().readyState=2;f.current().emit('error');await flush();
+ assert.equal(probes.length,2);assert(probes[0].signal.aborted);assert(!probes[1].signal.aborted);
+ probes[0].resolve({uiKey:'connection.authenticationRequired'});await flush();
+ f.host.dispatchEvent(new Event('focus'));f.host.dispatchEvent(new Event('online'));f.tick(0);
+ assert.equal(f.sources.length,2,'The old finally cannot release the newer pending probe');
+ assert(!f.statuses.some(([,reason])=>reason?.uiKey==='connection.authenticationRequired'),'A revoked probe cannot publish late authentication failure');
+ probes[1].resolve({retry:true});await flush();f.tick(0);assert.equal(f.sources.length,3);assert.equal(f.sources.filter(s=>s.readyState!==2).length,1);stop();
+}
+{
+ const f=fixture();let resolve;const old=f.start({terminal:()=>new Promise(yes=>resolve=yes)});
+ f.current().readyState=2;f.current().emit('error');await Promise.resolve();old();
+ const next=f.start({url:'/owner/b/events'}),count=f.statuses.length;
+ resolve({uiKey:'connection.authenticationRequired'});for(let i=0;i<8;i++)await Promise.resolve();
+ f.reset();f.host.dispatchEvent(new Event('focus'));f.tick(0);assert.equal(f.statuses.length,count);assert.equal(f.current().url,'/owner/b/events');assert.equal(f.current().readyState,0);next();
+}
+{
+ const f=fixture(),stop=f.start({terminal:async()=>({uiKey:'connection.authenticationRequired',code:'stream_authentication'})});
+ f.current().readyState=2;f.current().emit('error');for(let i=0;i<8;i++)await Promise.resolve();
+ assert.equal(f.statuses.at(-1)[1].code,'stream_authentication');
+ for(let i=0;i<3;i++){
+  f.host.dispatchEvent(new Event('focus'));f.host.dispatchEvent(new Event('pageshow'));f.visible(false);f.visible(true);
+  f.host.navigator.onLine=false;f.host.dispatchEvent(new Event('offline'));f.host.navigator.onLine=true;f.host.dispatchEvent(new Event('online'));f.tick(100000);
+ }
+ assert.equal(f.sources.length,1,'Confirmed authentication failures remain paused across timers and lifecycle events');assert.equal(f.timers.size,0);assert.equal(f.statuses.at(-1)[1].code,'stream_authentication');stop();
+}
+{
+ const f=fixture(),failure=Error('status probe network failure'),stop=f.start({terminal:async()=>{throw failure;}});
+ f.current().readyState=2;f.current().emit('error');for(let i=0;i<8;i++)await Promise.resolve();f.tick(0);assert.equal(f.sources.length,2);
+ assert.equal(f.statuses.at(-2)[1].cause,failure);
+ f.current().readyState=2;f.current().emit('error');for(let i=0;i<8;i++)await Promise.resolve();f.tick(499);assert.equal(f.sources.length,2);f.tick(1);assert.equal(f.sources.length,3,'Unknown probe failures retain bounded backoff');stop();
+}
+{
+ const f=fixture();let calls=0;const stop=f.start({terminal:()=>{calls++;return {retry:true};}});
+ f.current().readyState=2;f.current().emit('error');stop();
+ for(let i=0;i<8;i++)await Promise.resolve();f.tick(100000);f.host.dispatchEvent(new Event('online'));f.host.dispatchEvent(new Event('focus'));f.tick(0);
+ assert.equal(calls,0,'Disposal before the probe microtask prevents subsequent IO');assert.equal(f.sources.length,1);assert.equal(f.timers.size,0);
+}
+console.log('Event streams: bounded deadlines/backoff, lifecycle recovery, real probe abort, probe identity/generation fences, owner isolation and confirmed-auth pause passed');
