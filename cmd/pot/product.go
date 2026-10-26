@@ -112,7 +112,7 @@ func productCommand(ctx context.Context, args []string, out io.Writer) (result e
 			client := socket.Endpoint.Client()
 			client.Timeout = 0
 			origin := "http://" + listener.Addr().String()
-			browser, err := webui.New(webui.Options{Origin: origin, Config: config, Upstream: webui.Upstream{URL: "http://runtime", Credential: socket.Endpoint.Token, Client: client}, Assets: assets.FS(), Persist: store.SaveSessions})
+			browser, err := webui.New(webui.Options{Root: runtime.Root.Path, Origin: origin, Config: config, Upstream: webui.Upstream{URL: "http://runtime", Credential: socket.Endpoint.Token, Client: client}, Assets: assets.FS(), Persist: store.SaveSessions})
 			if err != nil {
 				return err
 			}

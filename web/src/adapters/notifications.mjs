@@ -1,211 +1,147 @@
 import {claimNotificationOnboarding} from './notification-onboarding.mjs';
-import {createNotificationProjection,taskOutcomeNotifications,viewingNotification,notificationText} from '../state/notifications.mjs';
-import {supportsCapability} from '../state/agent-links.mjs';
-import {createRefreshQueue} from '../state/refresh.mjs';
+import {notificationText} from '../state/notifications.mjs';
+import {notificationCapabilities,notificationPermission,createPushInstallation} from './pwapush.mjs';
+import {notificationInstallation,validNotificationTarget} from './notification-installation.mjs';
 
 const preferenceKey='pot-system-notifications-browser-v1';
 const failureText=reason=>reason?.message||String(reason??'Unknown notification failure');
-// A read/write IndexedDB transaction serializes claims across same-origin tabs,
-// including browsers without Web Locks. No server/account preference is written.
-export async function claimBrowserNotification(id,indexedDB=globalThis.indexedDB) {
-  return new Promise((resolve,reject)=>{
-    const open=indexedDB.open('pot-system-notifications',1);
-    open.onupgradeneeded=()=>open.result.createObjectStore('events');
-    open.onerror=()=>reject(open.error||Error('Notification storage could not be opened'));
-    open.onsuccess=()=>{
-      const db=open.result;let tx;
-      try{
-        tx=db.transaction('events','readwrite');const store=tx.objectStore('events');let claimed=false;
-        const get=store.get(id);get.onsuccess=()=>{if(get.result===undefined){claimed=true;store.put(Date.now(),id);}};
-        // Keep recent claims through reload/reconnect without unbounded storage.
-        const cursor=store.openCursor();cursor.onsuccess=()=>{const row=cursor.result;if(!row)return;if(row.value<Date.now()-7*86400000)row.delete();row.continue();};
-        tx.oncomplete=()=>{db.close();resolve(claimed);};
-        // Request errors bubble before tx.error is necessarily populated.
-        tx.onabort=tx.onerror=event=>{db.close();reject(event.target?.error||tx.error||Error('Notification storage transaction failed'));};
-      }catch(reason){try{tx?.abort();}catch{}db.close();reject(reason instanceof Error?reason:Error(failureText(reason)));}
-    };
-  });
-}
+export const browserNotificationPermission=notificationPermission;
 
-export function browserNotificationPermission(host=globalThis) {
-  if(!host.isSecureContext)return 'insecure';
-  // Delivery currently uses the desktop Notification constructor. Mobile
-  // browsers require a Service Worker delivery path; iOS also requires an
-  // installed Home Screen app. Neither is implemented by this coordinator.
-  const nav=host.navigator||{},ua=nav.userAgent||'';
-  if(/iPhone|iPad|iPod/.test(ua)||(nav.platform==='MacIntel'&&nav.maxTouchPoints>1))return 'ios';
-  if(nav.userAgentData?.mobile||/Android|Mobile/.test(ua))return 'mobile';
-  if(typeof host.Notification!=='function'||typeof host.Notification.requestPermission!=='function')return 'unsupported';
-  return ['default','granted','denied'].includes(host.Notification.permission)?host.Notification.permission:'unavailable';
-}
-
-export function createSystemNotifications({client,surface,view,open,locale,host=window,claim=claimBrowserNotification,onboardingClaim=claimNotificationOnboarding}) {
-  const projection=createNotificationProjection(),listeners=new Set(),owners=new Map();
-  let disposed=false,enabled=true,permission='loading',error='',generation=0,awaitingDirectory=true,pendingClick=null,statusEpoch=0;
-  const channel=!client.desktop&&host.BroadcastChannel?new host.BroadcastChannel('pot-system-notifications-v1'):null;
-  let ready=false,onboardingAttempted=false,onboarding=false,authorization=null,authorizing=false;
-  const pending=new Map();
+// Business event selection, device deduplication and foreground suppression live
+// in the backend hub. This adapter owns permission, host presentation and leases.
+export function createSystemNotifications({client,surface,view,open,locale,host=window,onboardingClaim=claimNotificationOnboarding}){
+  const listeners=new Set();let disposed=false,enabled=true,permission='loading',error='',generation=0,ready=false,awaitingDirectory=true,pendingClick=null;
+  let onboardingAttempted=false,onboarding=false,authorization=null,authorizing=false,statusEpoch=0,initialized=null,registered=false,loop=null,leaseTimer=null,synchronizing=Promise.resolve(),suspended=false,leaseSequence=0,lastLease='',lastLeaseAt=0;
+  const session=host.crypto.randomUUID();
+  const installation=!client.desktop&&client.transport?createPushInstallation({client,host,locale}):null;
   const emit=()=>listeners.forEach(listener=>listener());
-  const context=()=>({...view(),focused:host.document.visibilityState==='visible'&&host.document.hasFocus()});
-  const report=()=>{if(client.desktop)client.notificationView(surface,context()).catch(()=>{});};
-  const status=async()=>{
+  const capability=()=>client.desktop?{channel:'native'}:notificationCapabilities(host);
+  const destination=event=>{const space=(client.spaces||[]).find(space=>space.control_id===event.control&&space.connected!==false);return space?{...event,space:space.id}:event};
+  const context=()=>({...view(),focused:host.document.visibilityState==='visible'&&host.document.hasFocus(),locale:locale()});
+  const fail=reason=>{if(!disposed){error=failureText(reason);emit()}};
+  const stopDelivery=()=>{loop?.abort();loop=null;registered=false;lastLease='';lastLeaseAt=0;if(leaseTimer){host.clearInterval(leaseTimer);leaseTimer=null}};
+  async function initialize(){
+    if(!installation||!capability().channel)return;
+    if(!initialized)initialized=installation.initialize(capability().channel,enabled).catch(error=>{initialized=null;throw error});
+    return initialized;
+  }
+  async function report(){
+    if(disposed)return;
+    try{
+      if(client.desktop){await client.notificationView(surface,context());return}
+      if(!registered)return;
+      const {locale:ignored,...value}=context();
+      const space=(client.spaces||[]).find(space=>space.id===value.space);
+      const reading={...value,space:space?.control_id||value.space},signature=JSON.stringify(reading),now=Date.now();
+      if(signature===lastLease&&now-lastLeaseAt<10000)return;
+      lastLease=signature;lastLeaseAt=now;
+      if(await installation.lease(session,{...reading,sequence:++leaseSequence})===false){stopDelivery();emit()}
+
+    }catch(reason){fail(reason)}
+  }
+  async function consume(signal){
+    while(!disposed&&!signal.aborted&&registered){
+      try{
+        const {delivery}=await installation.next(signal,session);if(!delivery)continue;
+        if(signal.aborted||disposed){await installation.receipt(delivery,'unknown');return}
+        if(!enabled||notificationPermission(host)!=='granted'){await installation.receipt(delivery,'failed');return}
+        const event=delivery.event;
+        if(!validNotificationTarget(event)||event.control!==installation.device.control){await installation.receipt(delivery,'failed');continue}
+        let notification;
+        try{const text=notificationText(event,locale());notification=new host.Notification(text.title,{body:text.body,tag:event.id,icon:'/assets/PotCompanion.png'})}
+        catch(reason){const definite=['TypeError','NotAllowedError','SecurityError','NotSupportedError'].includes(reason?.name);await installation.receipt(delivery,definite?'failed':'unknown');fail(reason);continue}
+        notification.onclick=()=>{notification.close();host.focus();Promise.resolve(open(destination(event))).catch(fail)};
+        await installation.receipt(delivery,'accepted');
+      }catch(reason){if(signal.aborted||disposed)return;fail(reason);stopDelivery();return}
+    }
+  }
+  function synchronize(){synchronizing=synchronizing.catch(()=>{}).then(sync);return synchronizing}
+  async function sync(){
+    if(disposed||client.desktop||!installation||!ready||awaitingDirectory||suspended)return;
+    const channel=capability().channel;
+    if(!channel){stopDelivery();return}
+    await initialize();
+    if(disposed||awaitingDirectory)return;
+    if(!enabled){stopDelivery();await installation.disable();return}
+    if(!['granted','default','denied'].includes(permission)){stopDelivery();return}
+    if(channel==='push'&&!installation.subscribed){stopDelivery();await installation.disable();emit();return}
+    if(await installation.register(channel,enabled,permission)===false){stopDelivery();emit();return}
+    if(permission!=='granted'){stopDelivery();return}
+    if(!registered){
+      await installation.baseline(session);registered=true;
+      await report();leaseTimer=host.setInterval(report,10000);
+      if(channel==='local'){
+        loop=new AbortController();const signal=loop.signal;
+        // One receiver per installation avoids occupying an extra HTTP stream
+        // in every tab. This lock owns transport IO; hub receipts still decide
+        // event policy and deduplication.
+        const receive=()=>consume(signal);
+        const work=host.navigator.locks?host.navigator.locks.request('pot-notification-receiver:'+installation.device.id,{signal},receive):receive();
+        Promise.resolve(work).catch(reason=>{if(!signal.aborted)fail(reason)});
+      }
+    }
+  }
+  async function status(){
     const ticket=++statusEpoch;let nextEnabled=enabled,nextPermission,nextError='';
     try{
-      if(client.desktop){const value=await client.notificationStatus();nextEnabled=value.enabled;nextPermission=value.permission;}
-      else {
-        try{nextEnabled=host.localStorage.getItem(preferenceKey)!=='false';}catch{}
-        nextPermission=browserNotificationPermission(host);
-      }
-    }catch(reason){nextPermission='unavailable';nextError=failureText(reason);}
+      if(client.desktop){const value=await client.notificationStatus();nextEnabled=value.enabled;nextPermission=value.permission}
+      else{try{nextEnabled=host.localStorage.getItem(preferenceKey)!=='false'}catch{}nextPermission=notificationPermission(host)}
+    }catch(reason){nextPermission='unavailable';nextError=failureText(reason)}
     if(disposed||ticket!==statusEpoch)return;
-    enabled=nextEnabled;permission=nextPermission;error=nextError;
-    if(!enabled||permission!=='default')onboarding=false;
-    emit();maybeOnboard();
-  };
+    enabled=nextEnabled;permission=nextPermission;error=nextError;if(!enabled||permission!=='default')onboarding=false;
+    emit();maybeOnboard();await synchronize().catch(fail);
+  }
   async function maybeOnboard(){
     if(!ready||disposed||onboardingAttempted||surface!=='main'||host.document.visibilityState!=='visible')return;
-    if(client.desktop){
-      onboardingAttempted=true;
-      try{
-        const result=await client.notificationReady(surface);
-        // A main WebView can finish loading while its native window is hidden.
-        // Revisit only on the next focus/visibility signal, never in a loop.
-        if(result?.deferred){onboardingAttempted=false;return;}
-        await status();
-      }catch(reason){fail(reason);}
-      return;
-    }
-    if(!enabled||authorizing||permission!=='default')return;
-    onboardingAttempted=true;
-    const claimed=await onboardingClaim(host).catch(()=>false);
-    if(claimed&&!disposed&&enabled&&!authorizing&&browserNotificationPermission(host)==='default'){
-      onboarding=true;emit();
-    }
+    if(client.desktop){onboardingAttempted=true;try{const result=await client.notificationReady(surface);if(result?.deferred){onboardingAttempted=false;return}await status()}catch(reason){fail(reason)}return}
+    // Preserve the existing desktop introduction; mobile installation guidance
+    // remains in the same settings entry, and never requests permission itself.
+    if(!enabled||authorizing||permission!=='default'||capability().channel!=='local')return;
+    onboardingAttempted=true;const claimed=await onboardingClaim(host).catch(()=>false);
+    if(claimed&&!disposed&&enabled&&!authorizing&&notificationPermission(host)==='default'){onboarding=true;emit()}
   }
-  const focus=()=>{report();status();};
-  const storage=event=>{if(event.key===preferenceKey)status();};
-  host.addEventListener('focus',focus);host.addEventListener('blur',report);host.document.addEventListener('visibilitychange',focus);host.addEventListener('storage',storage);
-  if(channel)channel.onmessage=({data})=>{
-    if(data?.type==='view-query'&&viewingNotification(context(),data.event))channel.postMessage({type:'viewing',id:data.id});
-    if(data?.type==='viewing')pending.get(data.id)?.();
-  };
-  async function browserViewing(event) {
-    if(viewingNotification(context(),event))return true;
-    if(!channel)return false;
-    return new Promise(resolve=>{
-      const id=host.crypto.randomUUID();let visible=false;
-      pending.set(id,()=>{visible=true;});channel.postMessage({type:'view-query',id,event});
-      host.setTimeout(()=>{pending.delete(id);resolve(visible||viewingNotification(context(),event));},120);
-    });
-  }
-  async function deliver(event,current=()=>!disposed) {
-    if(!current())return;
-    if(client.desktop){await client.notifySystem({...event,...notificationText(event,locale())});return;}
-    if(!enabled||browserNotificationPermission(host)!=='granted')return;
-    const visible=await browserViewing(event);
-    if(!current()||!await claim(event.id,host.indexedDB)||!current())return;
-    if(visible||!enabled||browserNotificationPermission(host)!=='granted')return;
-    const text=notificationText(event,locale());
-    const notification=new host.Notification(text.title,{body:text.body,tag:event.id,icon:'/assets/PotCompanion.png'});
-    notification.onclick=()=>{notification.close();host.focus();Promise.resolve(open(event)).catch(fail);};
-  }
-  const fail=reason=>{if(disposed)return;error=failureText(reason);emit();};
-  const ownerKey=item=>JSON.stringify([item.control_id||item.space_id,item.space_id,item.id]);
-  const bootOf=item=>(client.spaces||[]).find(space=>space.id===item.space_id)?.boot_id||'';
-  function stopOwner(entry){entry.abort.abort();entry.tasks.close();entry.approvals.close();owners.delete(entry.key);}
-  function watch(assistant) {
-    const key=ownerKey(assistant),boot=bootOf(assistant);let entry=owners.get(key);
-    if(entry&&entry.boot!==boot){stopOwner(entry);projection.reset(assistant.space_id,assistant.id,assistant.control_id);entry=null;}
-    if(entry)return entry;
-    entry={key,boot,space:assistant.space_id,abort:new AbortController(),cursor:null};
-    const latest=()=>(client.assistants||[]).find(item=>ownerKey(item)===key);
-    const current=()=>{
-      const item=latest(),space=(client.spaces||[]).find(space=>space.id===entry.space);
-      return !disposed&&owners.get(key)===entry&&item&&!item.offline&&space?.connected!==false&&bootOf(item)===boot;
-    };
-    const scope={owner:assistant.id,space:entry.space,signal:entry.abort.signal};
-    const send=async events=>{for(const event of events){if(!current())return;await deliver(event,current).catch(fail);}};
-    entry.tasks=createRefreshQueue(async()=>{
-      let more;
-      do{
-        const after=entry.cursor,page=await client.request(`/api/v1/tasks/outcomes${after===null?'':`?after=${after}`}`,scope);
-        if(!current())return;
-        if(!Number.isSafeInteger(page.cursor)||page.cursor<0||(after!==null&&page.cursor<after)||page.has_more&&(after===null||page.cursor<=after))throw Error('Invalid notification task cursor');
-        entry.cursor=page.cursor;more=page.has_more;
-        if(after!==null)await send(taskOutcomeNotifications(latest(),page.items||[]));
-      }while(more&&current());
-    },{active:()=>current()&&supportsCapability(latest(),'task.outcomes'),onError:fail});
-    entry.approvals=createRefreshQueue(async()=>{
-      const approvals=await client.request('/api/v1/permissions',scope);
-      if(current())await send(projection.observe(latest(),(approvals.pending||[]).filter(item=>item.request?.owner===assistant.id),boot));
-    },{active:()=>current()&&supportsCapability(latest(),'approvals.manage'),onError:fail});
-    entry.current=current;
-    owners.set(key,entry);return entry;
-  }
-  function openPending(){
-    if(!pendingClick||awaitingDirectory||disposed)return;
-    const event=pendingClick;pendingClick=null;Promise.resolve(open(event)).catch(fail);
-  }
-  const stopClick=surface==='main'?client.onNotificationClick?.(event=>{pendingClick=event;openPending();})||(()=>{}):()=>{};
+  function openPending(){if(!pendingClick||awaitingDirectory||disposed)return;const value=pendingClick;pendingClick=null;Promise.resolve(open(destination(value))).catch(fail)}
+  const click=event=>{if(validNotificationTarget(event)){pendingClick=event;openPending()}};
+  const stopClick=surface==='main'?client.onNotificationClick?.(click)||(()=>{}):()=>{};
   const stopPreference=client.onNotificationPreference?.(()=>status())||(()=>{});
+  const swMessage=event=>{if(event.data?.type==='pot:notification-click')takeClick().catch(fail)};
+  async function takeClick(){
+    if(client.desktop||!host.indexedDB||!installation)return;await initialize();
+    const event=await notificationInstallation(async store=>{const device=await store.get('device'),pending=await store.get('click');store.remove('click');return pending?.device===device?.id&&device?.enabled?pending.event:null},host);
+    if(event)click(event);
+  }
+  const focus=()=>{report();status()};
+  const suspend=()=>{if(client.desktop)return;report();suspended=true;stopDelivery()};
+  const resume=()=>{if(client.desktop)return;suspended=false;status()};
+  const storage=event=>{if(event.key===preferenceKey)status()};
+  const localeChanged=()=>{report();synchronize().catch(fail)};
+  host.addEventListener('pagehide',suspend);host.addEventListener('pageshow',resume);host.addEventListener('offline',suspend);host.addEventListener('online',resume);host.document.addEventListener('freeze',suspend);host.document.addEventListener('resume',resume);
+  host.addEventListener('focus',focus);host.addEventListener('blur',report);host.addEventListener('storage',storage);host.addEventListener('pot:locale',localeChanged);host.document.addEventListener('visibilitychange',focus);
+  host.navigator?.serviceWorker?.addEventListener?.('message',swMessage);
   status();
   return {
-    get epoch(){return generation;},
-    get state(){return {enabled,permission,error,onboarding,authorizing};},
-    subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},
+    get epoch(){return generation},
+    get state(){return {enabled,permission,error,onboarding,authorizing,channel:capability().channel,needsSubscription:capability().channel==='push'&&permission==='granted'&&!installation?.subscribed}},
+    subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener)},
     async setEnabled(value){
-      if(client.desktop)await client.setNotificationsEnabled(value);
-      else host.localStorage.setItem(preferenceKey,String(value));
-      statusEpoch++;enabled=value;if(!enabled)onboarding=false;emit();maybeOnboard();
-      if(permission==='loading')await status();
+      if(client.desktop)await client.setNotificationsEnabled(value);else host.localStorage.setItem(preferenceKey,String(value));
+      statusEpoch++;enabled=value;if(!value)onboarding=false;emit();await synchronize();maybeOnboard();
     },
-    ready(){if(ready)return;ready=true;maybeOnboard();},
-    dismissOnboarding(){onboarding=false;emit();},
+    ready(){if(ready)return;ready=true;maybeOnboard();synchronize().catch(fail);takeClick().catch(fail)},
+    dismissOnboarding(){onboarding=false;emit()},
     authorize(){
-      if(authorization)return authorization;
-      if(!enabled)return Promise.resolve();
-      // Invoke synchronously in the click's user activation, before ANY await.
-      onboarding=false;error='';authorizing=true;
-      let request;
-      try{
-        if(client.desktop)request=client.requestNotificationPermission();
-        else if(browserNotificationPermission(host)==='default')request=host.Notification.requestPermission();
-      }catch(reason){request=Promise.reject(reason);}
-      emit();
-      authorization=Promise.resolve(request).then(()=>status(),async reason=>{await status();fail(reason);throw reason instanceof Error?reason:Error(failureText(reason));}).finally(()=>{authorization=null;authorizing=false;emit();});
-      return authorization;
+      if(authorization)return authorization;if(!enabled)return Promise.resolve();
+      onboarding=false;error='';authorizing=true;let request;
+      // Invoke permission before any await; denial never changes channel.
+      try{if(client.desktop)request=client.requestNotificationPermission();else if(notificationPermission(host)==='default')request=host.Notification.requestPermission()}catch(reason){request=Promise.reject(reason)}
+      emit();authorization=Promise.resolve(request).then(async()=>{
+        if(!client.desktop&&capability().channel==='push'&&notificationPermission(host)==='granted'){await initialize();await installation.subscribe()}
+        await status();
+      },async reason=>{await status();fail(reason);throw reason}).catch(reason=>{fail(reason);throw reason}).finally(()=>{authorization=null;authorizing=false;emit()});return authorization;
     },
-    refresh({reset=false,space='',topics=[]}={}){
-      if(reset){
-        generation++;projection.reset(space);awaitingDirectory=true;
-        for(const entry of owners.values())if(!space||entry.space===space)stopOwner(entry);
-        return Promise.resolve();
-      }
-      const reads=[];
-      for(const entry of owners.values())if((!space||entry.space===space)){
-        if(!topics.length||topics.includes('task-outcomes'))reads.push(entry.tasks.run());
-        if(!topics.length||topics.includes('permissions'))reads.push(entry.approvals.run());
-      }
-      return Promise.all(reads);
-    },
-    directory({epoch=generation}={}){
-      if(epoch!==generation||disposed)return Promise.resolve();
-      awaitingDirectory=false;openPending();
-      const deliveries=[],rows=client.assistants||[],keys=new Set(rows.map(ownerKey));
-      for(const entry of owners.values())if(!keys.has(entry.key))stopOwner(entry);
-      for(const item of rows){
-        const key=ownerKey(item),space=(client.spaces||[]).find(space=>space.id===item.space_id);
-        if(item.offline||space?.connected===false){
-          const entry=owners.get(key);if(entry)stopOwner(entry);
-          projection.reset(item.space_id,item.id,item.control_id);continue;
-        }
-        const existing=owners.get(key),entry=watch(item);
-        for(const event of projection.observe(item,undefined,entry.boot))deliveries.push(deliver(event,entry.current).catch(fail));
-        if(existing!==entry)deliveries.push(entry.tasks.run(),entry.approvals.run());
-      }
-      return Promise.all(deliveries);
-    },
+    refresh({reset=false}={}){if(reset){generation++;awaitingDirectory=true;stopDelivery()}return Promise.resolve()},
+    directory({epoch=generation}={}){if(epoch!==generation||disposed)return Promise.resolve();awaitingDirectory=false;openPending();return synchronize().catch(fail)},
     report,
-    dispose(){disposed=true;for(const entry of owners.values())stopOwner(entry);channel?.close();stopClick();stopPreference();listeners.clear();host.removeEventListener('focus',focus);host.removeEventListener('blur',report);host.document.removeEventListener('visibilitychange',focus);host.removeEventListener('storage',storage);},
+    dispose(){disposed=true;stopDelivery();stopClick();stopPreference();listeners.clear();host.removeEventListener('pagehide',suspend);host.removeEventListener('pageshow',resume);host.removeEventListener('offline',suspend);host.removeEventListener('online',resume);host.document.removeEventListener('freeze',suspend);host.document.removeEventListener('resume',resume);host.removeEventListener('focus',focus);host.removeEventListener('blur',report);host.removeEventListener('storage',storage);host.removeEventListener('pot:locale',localeChanged);host.document.removeEventListener('visibilitychange',focus);host.navigator?.serviceWorker?.removeEventListener?.('message',swMessage)},
   };
 }

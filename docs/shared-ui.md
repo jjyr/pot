@@ -431,119 +431,159 @@ DOM and does not replay completion motion.
 
 ## System notifications
 
-General settings has one **System notifications** preference, enabled by default.
-This expresses delivery intent; it does not grant browser or macOS permission.
-The setting shows the current permission, an explicit authorization action while
-permission is undetermined, and instructions for browser/system settings after a
-denial. After the authenticated Web main interface is ready, an eligible desktop
-browser with undetermined permission sees a non-modal introduction. Only its
-**Allow notifications** click requests browser permission, within that click's
-user activation. **Not now**, closing the browser prompt, errors, and page reloads
-do not repeat the introduction. A permanent origin/profile IndexedDB transaction
-claims the introduction before display across tabs and local node identities; if durable atomic
-storage is unavailable, discovery is skipped and settings remains available.
-This record is independent of delivery intent and OS permission.
+General settings has one **System notifications** switch, enabled by default.
+Delivery intent, API support and OS/browser permission are separate. The switch
+belongs to this installation; it cannot grant permission or change another
+installation. Authorization requires the explicit **Allow notifications** action
+in browsers. Denial, an unanswered prompt and disabled OS banners never count as
+an unsupported API and never trigger a different permission channel.
 
-In the macOS App, the main interface's first successful directory load and paint
-signals readiness to the shared Go service. If Pot notifications are enabled and
-native authorization is undetermined, it requests permission automatically. Tray
-initialization cannot trigger it. Automatic and manual requests share one in-flight
-coordinator; a durable attempted marker prevents automatic retries after errors
-or unknown native status. Settings still supports explicit retry. Already granted,
-denied, or disabled clients never automatically request permission.
-An insecure or unsupported browser reports its actual limitation. Pot does not
-play audio: sound, banners and Do Not Disturb follow browser/macOS settings.
+The local browser constructor is preferred whenever supported, including an
+installed desktop PWA. An available `PushManager` or standalone display does not
+move a local-capable browser to Push. iOS and Android expose notification interfaces
+without supporting the page constructor; these environments use standard Web
+Push when the required Service Worker APIs are present. On iOS 16.4 or later,
+Pot must be opened as a Home Screen application over trusted HTTPS. Ordinary iOS
+browsers show Safari's Share → Add to Home Screen instructions in the same setting.
+Unsupported and insecure environments show their actual limitation.
 
-Browsers use the Notification API in a secure context (HTTPS or localhost).
-Windows and Linux are supported through the Web UI. Mobile browsers do not get
-this introduction or a misleading authorization button: the current constructor
-send path does not implement Android Service Worker delivery or verified iOS Home
-Screen delivery. Settings explains the specific environment limitation.
-Browser delivery checks permission and the local switch before opening the
-notification deduplication database. Unsupported mobile clients do not access
-that store. Storage failures preserve request diagnostics, always reject with an
-error, and remain handled by the notification coordinator rather than rejecting
-the assistant directory refresh.
-The macOS App uses Wails'
-UserNotifications service from a bundled, signed App, with the official
-`UNNotificationSettings.authorizationStatus` for permission presentation. Web and
-App preferences are independent: the browser stores its preference in local
-storage for the current origin/profile/device; App stores it under its private
-root in `system-notifications.json`. Neither preference is an account setting.
-Browser startup makes a best-effort local cancellation of any previous Web Push
-subscription without contacting a server endpoint or delaying system notifications.
-The PWA Service Worker retains asset caching only; its updated cache version
-activates immediately and takes over existing pages, with no push or notification
-click handlers.
+The existing non-modal desktop browser introduction appears only after the main
+interface is ready, with undetermined permission and enabled delivery intent.
+Only its authorization click requests permission. A permanent, atomic IndexedDB
+claim prevents repeat introductions across tabs and node identities; blocked
+storage skips discovery and leaves settings available. The native main window's
+first directory load and paint still signals its shared authorization coordinator;
+tray startup cannot request permission. Native automatic/manual requests share one
+in-flight attempt and the durable attempted marker. Native and Web preferences
+remain independent; native preference/authorization history stays in the private
+`system-notifications.json`, while browser intent stays in origin local storage.
 
-Notifications observe owner-scoped projections on domain invalidations:
+### Shared event service and delivery
 
-- A changed assistant catalogue `reply_id` with an increased `reply_count`
-  identifies a completed assistant reply. The notification body uses that reply's
-  catalogue preview for both local and linked assistants. Whitespace is collapsed
-  and previews are limited to 120 Unicode code points, with an ellipsis when
-  notification formatting truncates them. Empty previews use a localized reply
-  completion message. Token updates do not notify.
-- Task `complete` notifies success and `interrupted` notifies interruption.
-  A `failed` transition first enters assistant recovery; unresolved failures
-  notify through the assistant reply rather than an immediate Task alert.
-  Other phases, including explicit cancellation, do not notify. Task identity
-  and a durable outcome sequence distinguish subsequent terminal transitions.
-  The compact [Task outcome API](task-coordination.md#client-notification-outcomes)
-  reads only changes after a client cursor. `task-outcomes` invalidations wake
-  this reader; token/output updates do not query notification state.
-- New pending permission request IDs notify approval. Tool arguments are never
-  included. Task and approval notifications contain a bounded name and a short
-  localized event description.
+`internal/systemnotifications` owns all business notification rules. Native and
+browser hosts run the same source reader against authenticated Control resources
+and their committed `/changes` stream. This is a resident backend reader, not a
+page SSE observer or a PWA-specific polling loop. `internal/pwapush` only validates
+subscriptions, supplies VAPID and encrypts/sends HTTP requests; it never observes
+replies, Tasks, approvals or reading state.
 
-Each assistant has separate Task-outcome and approval refresh queues. A failed
-read retains that reader's last successful cursor or baseline; it cannot reset
-another assistant, erase a reply baseline, or block approvals behind Task reads.
-Approval responses include an optional `task_title` for the notification name.
+```text
+Control commits → /changes → shared source reader + owner/cursor fences
+                                      |
+                  structured Event + device intent + reading leases
+                                      |
+                     (event ID, device ID) delivery ledger
+                         /                            \
+              local device receiver            Push dispatcher
+                /             \                      |
+      page Notification   native notifier     pwapush: VAPID + RFC8291
+                                                     |
+                                               push service → SW
+                                                     |
+                                      exact Chat/Task click target
+```
 
-Initial reads, the first read after disconnection, and Runtime boot replacements
-establish baselines. An in-flight read from a previous connection cannot establish
-that baseline. Notifications use explicit node, assistant and optional
-Task identity. Clicks activate the browser tab or App main window and open that
-exact Chat/Task; a missing destination reports an error. App retains a click until
-its main WebView and directory are ready.
+- A changed completed `reply_id` with an increased `reply_count` creates a reply
+  event, including for linked assistants. The catalogue preview collapses
+  whitespace and is bounded to 120 Unicode code points. Empty previews use the
+  shared localized completion phrase. Token/output updates never notify.
+- Task outcome sequences identify `complete` and `interrupted` transitions.
+  Failure first enters assistant recovery; only an unresolved assistant reply
+  alerts. Cancellation and intermediate phases do not alert. The compact,
+  owner-scoped [Task outcome API](task-coordination.md#client-notification-outcomes)
+  supplies cursors; output events never cause Task notification polling.
+- New pending approval IDs create approval events with a bounded name and
+  localized description. Tool arguments are never read into notification events.
 
-A visible, focused corresponding Chat suppresses its assistant, Task and approval
-notifications. An exact Task detail suppresses that Task's events. Another Chat,
-a background window or a minimized window permits delivery. Browser checks both
-page visibility and window focus; same-origin tabs ask each other whether the
-target is being viewed. App additionally checks actual Wails window visibility
-and focus, coordinating the main and tray windows.
+Reply, Task and approval cursors/baselines are independent. A failed reader keeps
+its last successful cursor without blocking the other readers. Initial reads,
+source reconnections and Runtime boot replacements establish baselines and expire
+queued history. Enabling a new device does not scan old events. Reads that finish
+after owner deletion, capability revocation, peer replacement or a boot change
+cannot publish events or advance their old cursor. Linked assistant routing IDs
+retain the complete link/assistant identity; retained directory data never grants
+notification authority.
 
-IndexedDB read/write transactions claim browser events once across same-origin
-tabs; App uses its Go store to claim events once across native windows. Claims
-remain for seven days, including suppressed events, so re-enabling or leaving a
-Chat does not replay those events. These scopes do not coordinate App with Web,
-different browser profiles/origins, or different machines. Browser sessions
-and native Runtime identities provide no shared device identity; this
-feature adds no registration or coordination service to infer one.
+Events use stable Control identity as their canonical Space. Browser presentation
+may call that Space `local`; the adapter maps current, confirmed presentation
+identity at the lease/click boundary. It never substitutes a different owner or
+falls back to another Space. A visible focused corresponding Chat suppresses its
+assistant's reply, Task and approval events; an exact Task detail suppresses that
+Task. Background/minimized windows and another Chat allow delivery. The same
+predicate applies to every channel. Browser sessions renew reading leases every
+10 seconds, with a 25-second expiry. Monotonic session sequences reject late reading updates,
+and unchanged views/registrations do not generate per-render HTTP writes. Native leases renew every 5 seconds and also
+verify actual Wails main/tray visibility and focus at delivery time. An expired
+lease stops suppressing; it does not cause a silent Push or background page poll.
 
-Delivery requires a running client and its live connection. A closed, discarded
-or suspended browser page does not receive new notifications through this path;
-Pot no longer provides Web Push offline notifications, subscription APIs, VAPID
-configuration or a server delivery worker. The macOS
-App keeps its WebViews and Runtime resident when its window is hidden; Quit ends
-notification observation. Actual display remains subject to OS/browser policies.
+Each event selects one channel per device. The Control database records
+`suppressed`, `queued`, `sending`, `accepted`, `failed`, `unknown` or `expired`.
+An atomic reservation precedes sending; acceptance is recorded afterward. One
+device cannot consume another's event. A network error or interrupted send has an
+uncertain outcome and is never blindly retried or moved to another channel.
+Explicit temporary service rejections have at most three attempts, with bounded
+backoff up to one minute. Local queued events expire after 25 seconds; Push TTL
+and maximum queue age are five minutes. Claims/events are retained for seven days.
+Acceptance means the service accepted a request, not that the OS displayed a banner.
 
-### Removing legacy Web Push deployments
+Local browser receivers share one Web Lock per installation when supported,
+so additional tabs do not each occupy another notification HTTP connection.
+`pagehide`, offline and freeze abort notification IO and suspend its lease timer;
+`pageshow`, online and resume restore only this notification transport, with a
+fresh delivery baseline. This does not change the Chat subscription or its
+snapshot/reconnection state machine. A live local-capable page is still required
+for local browser delivery. Native observation continues while windows are hidden;
+Quit stops it. Web Push observation/delivery continues while a page is closed or
+suspended, without relying on page timers, SSE or JavaScript execution.
 
-Updated servers never open or read the retired `browser-push.sqlite` subscription
-store, load VAPID keys, poll the old assistant notification feed or send to saved
-subscriptions, including installations that have not reopened Pot. Existing
-subscription files and deployment secrets are inert and are not deleted by this
-source change. The completed-reply records used by the assistant catalogue remain
-local state for sidebar updates and system notification event detection.
+### Push installation and operation
 
-Deploy and restart each browser service to stop its old worker. Source changes do
-not hot-update an already running old deployment or an already loaded old page.
-Online browsers adopt the replacement Service Worker on update; until then an old
-worker may still handle an already queued push. The replacement worker has no
-push handler, and local cancellation needs no new notification permission.
+The browser host's authenticated `/api/v1/notifications/` routes register, update,
+remove and acknowledge installations. They require the current HttpOnly session
+cookie, same-origin checks and current Control/owner scope. Devices are bound to
+that session and access configuration generation, with the cookie's expiry. A
+logout retires local installation writers before revoking that session's devices;
+late responses cannot re-enable them. Token replacement/disable revokes all of
+that browser host's devices, including after restart. Turning the notification
+switch off removes only the current device registration. The browser may retain
+its inert Push subscription for explicit re-enable without another permission
+prompt. Reload reuses an existing subscription with the current VAPID key and never
+unsubscribes it on startup. A subscription bound to an old/different VAPID key
+requires explicit setup and is not adopted into the new service.
+
+VAPID is generated once and stored privately in the browser service's
+`control.sqlite`, separate from the retired `browser-push.sqlite` and legacy
+configuration secrets. Keep the browser service's complete private root across
+restarts/backups; replacing that root replaces its installation and VAPID identity.
+The additive Control migration preserves existing registry, credentials, chats,
+Tasks and receipts. It does not read, import or activate old Push subscription
+files. Notification installation/click IndexedDB state has its own versioned
+migration in `pkg/storage/migrations/ui-notifications/`; it contains no access
+token, subscription secret or tool arguments.
+
+Only supported browser push providers (Apple, FCM, Mozilla and Windows) are
+accepted. Endpoint scheme/host, P-256 point and authentication key lengths are
+validated. The HTTP transport rejects redirects, proxies and non-public DNS
+addresses, including tailnet/private/link-local destinations, and pins resolved
+addresses for the connection. Payloads contain bounded display content and an
+exact structured destination, with no access token or subscription keys. A 404/410
+clears and invalidates that device subscription; a late response cannot invalidate
+a replacement. Re-registering the same invalid subscription requests local
+cleanup and an explicit setup action, rather than silently looping.
+
+The module Service Worker retains the immutable asset cache and excludes API,
+authentication and native bridge traffic. Push promptly calls `showNotification`
+after verifying the current installation ID, Control and enabled channel. Clicks
+focus an existing same-origin Pot root window or open the fixed `/` root; payloads
+cannot choose a URL. A pending exact Chat/Task target survives authentication and
+is consumed only after the current main directory is ready. Logout clears it;
+a missing or stale destination uses the existing localized navigation error.
+
+Tailscale plus trusted HTTPS needs no public inbound Pot listener. The backend
+needs outbound HTTPS to the browser's push service. The phone must be able to
+connect back to Pot through its tailnet when opening a notification. Delivery is
+subject to browser/OS scheduling, Focus and power policies and is not strictly
+instantaneous. Pot does not play audio; sounds and banners follow system settings.
 
 ## Browser crash reporting
 

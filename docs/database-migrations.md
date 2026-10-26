@@ -206,3 +206,19 @@ receiver option, while an explicit empty string selects a supported default. The
 migration preserves original request payloads for exact retry recovery, assistant/native
 thread identities, revisions and task executor configuration. New owner-configured
 scopes use the same registry; deleting an assistant does not delete its scope.
+
+## Unified system notification delivery
+
+`control/0004_system_notifications` adds owner source baselines, structured events,
+installation/session bindings, reading leases, delivery receipts and private
+VAPID material. Existing Control tables and JSON records are unchanged. The native
+host uses its existing Control database; a standalone browser service keeps this
+Control database in its own private service root. Source reconnection establishes
+a fresh baseline rather than replaying persisted history. Interrupted sends become
+uncertain receipts instead of automatic retries. No retired Push store is imported.
+
+The separate rebuildable notification installation database uses
+`ui-notifications/0001_installation.mjs`. It stores device identity/channel/intent,
+a logout epoch and one pending navigation target. It does not share authentication
+storage or disposable business projection retention. Existing browser preference,
+onboarding, token and native authorization records remain intact.

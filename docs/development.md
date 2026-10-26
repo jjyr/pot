@@ -88,6 +88,14 @@ mise run licenses
 mise run build:linux
 ```
 
+`mise run test:pwa` runs the shared notification/source/transport contracts and
+an isolated Chromium Service Worker scenario. The browser runner uses an existing
+Playwright installation (`POT_PLAYWRIGHT_MODULE` may name its module) and optional
+`POT_CHROME` executable. Its temporary origin/profile, fake PushManager subscription
+and synthetic push messages never contact a user device or provider. The real
+Service Worker displays the synthetic notification and exercises click recovery;
+this does not establish physical iOS background/lock-screen behavior.
+
 `test:i18n` checks shared catalog key parity, nonempty translations and matching
 ordered `{parameter}` markers. It does not scan for hardcoded UI text or verify
 runtime language changes; follow the [i18n rules](internationalization.md) for

@@ -21,8 +21,8 @@ export function notificationSetting({notifications,locale,desktop,host=window}) 
     request.textContent=t('notifications.allow');request.disabled=pending||notifications.state.authorizing;
     const key=permission==='denied'?(desktop?'deniedMac':'deniedBrowser'):permission;
     status.textContent=[t(!enabled?'notifications.off':`notifications.${key}`),(error||actionError)?t('notifications.failed'):''].filter(Boolean).join(' ');
-    request.hidden=!enabled||permission!=='default';
-    note.textContent=t('notifications.device');summary.textContent=t('notifications.details');
+    request.hidden=!enabled||permission!=='default'&&!notifications.state.needsSubscription;
+    note.textContent=[t('notifications.device'),notifications.state.channel?t(`notifications.channel.${notifications.state.channel}`):''].filter(Boolean).join(' ');summary.textContent=t('notifications.details');
     details.hidden=!(error||actionError);diagnostic.textContent=error||actionError;
   }
   toggle.input.onchange=async()=>{

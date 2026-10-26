@@ -106,31 +106,25 @@ func TestLinkedNativeNotificationOwnerUsesSameIdentityBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Suppressed delivery still validates and claims the actual UI owner without
+	// Suppressed delivery still validates the actual UI owner without
 	// invoking system APIs or requiring a notification authorization dialog.
 	if err = notifications.SetEnabled(false); err != nil {
 		t.Fatal(err)
 	}
 	s := &Service{spaces: manager, notificationStore: notifications}
 	event := SystemNotification{ID: "linked-reply", Space: "node", Control: "node", Owner: "agent-link:link:codex", Title: "Reply", Body: "Ready"}
-	if err = s.NotifySystem(event); err != nil {
+	if err = s.sendSystemNotification(event); err != nil {
 		t.Fatal("valid linked owner rejected", err)
-	}
-	if err = s.NotifySystem(event); err != nil {
-		t.Fatal("same event did not deduplicate", err)
-	}
-	if claimed, err := notifications.Claim(event.ID); err != nil || claimed {
-		t.Fatal("suppressed linked reply not claimed", claimed, err)
 	}
 	event.ID = "invalid-owner"
 	event.Owner = "agent-link:link:codex:other"
-	if err = s.NotifySystem(event); err == nil {
+	if err = s.sendSystemNotification(event); err == nil {
 		t.Fatal("malformed linked owner accepted")
 	}
 	event.ID = "foreign-node"
 	event.Owner = "agent-link:link:codex"
 	event.Control = "other"
-	if err = s.NotifySystem(event); err == nil {
+	if err = s.sendSystemNotification(event); err == nil {
 		t.Fatal("notification crossed local identity boundary")
 	}
 }

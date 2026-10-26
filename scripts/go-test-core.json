@@ -13,6 +13,10 @@
     "./pkg/storage",
     "./pkg/storage/migrations",
     "./internal/access",
+    "./internal/systemnotifications",
+    "./internal/pwapush",
+    "./internal/webui",
+    "./internal/localui",
     "./internal/secrets",
     "./internal/inbox",
     "./internal/schedule"
