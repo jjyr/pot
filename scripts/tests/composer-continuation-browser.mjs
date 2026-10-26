@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import {mkdir} from 'node:fs/promises';
+import {mkdir,writeFile} from 'node:fs/promises';
+import {pathToFileURL} from 'node:url';
+import {sourceServer,launchBrowser} from './browser-harness.mjs';
 import {attachmentPickerFixture} from './attachment-picker-fixture.mjs';
 
 // Shared production UI, HTTP adapter, SSE and IDB; every identity and file is
@@ -9,7 +11,7 @@ export async function composerContinuationBrowser(browser,{sourceOrigin,baseline
  try{
   for(const phone of [false,true]){
    const viewport=phone?{width:390,height:852}:{width:1280,height:800};
-   const context=await browser.newContext({viewport,isMobile:phone,hasTouch:phone}),page=await context.newPage(),errors=[];
+   const context=await browser.newContext({viewport,isMobile:phone,hasTouch:phone}),page=await context.newPage(),errors=[];let finalEvidence;
    const name='continuation-'+(phone?'phone':'desktop');
    await context.addCookies([{name:'picker-case',value:name,url:fixture.origin}]);
    page.on('pageerror',error=>errors.push(error.message));
@@ -25,7 +27,7 @@ export async function composerContinuationBrowser(browser,{sourceOrigin,baseline
     await control({continuation,messages:[source]});
     await page.goto(fixture.origin+'/?locale=en&assistant_id=alpha');await ready();
     if(baseline)await page.locator('.turn-continuation').waitFor();else await play();
-    if(captureDir){await page.locator('[data-reference-source]').waitFor({state:'visible'});await page.evaluate(()=>document.fonts.ready);await mkdir(captureDir,{recursive:true});await page.screenshot({path:captureDir+'/'+name+'-'+(baseline?'before':'after')+'.png'});}
+    if(captureDir){await page.waitForFunction(()=>!document.querySelector('.draft-storage-status')||document.querySelector('.draft-storage-status').textContent==='Draft saved on this device');await page.locator('[data-reference-source]').waitFor({state:'visible'});await page.evaluate(()=>document.fonts.ready);await mkdir(captureDir,{recursive:true});await page.screenshot({path:captureDir+'/'+name+'-'+(baseline?'before':'after')+'.png'});}
     if(baseline){results.push({viewport,baseline:true});continue;}
     assert.equal(await page.locator('.turn-continuation').count(),0);
     assert.equal(await page.locator('.turn-continuation-error').isVisible(),false);
@@ -93,12 +95,20 @@ export async function composerContinuationBrowser(browser,{sourceOrigin,baseline
     await control({running:true,publish:true});await page.waitForFunction(()=>document.querySelector('.send-button').getAttribute('aria-label')==='Stop');await main.click();
     await page.waitForFunction(async()=> (await(await fetch('/fixture/state')).json()).trace.some(t=>t.kind==='cancel'));
     await input.fill('continue');assert.equal(await main.getAttribute('aria-label'),'Send guidance');await main.click();
-    await page.waitForFunction(async()=> (await(await fetch('/fixture/state')).json()).rows.length===2);
-    const final=await evidence();assert.equal(final.trace.filter(t=>t.kind==='continue').length,5);assert.equal(final.rows.find(row=>row.body.user_message_id==='active-turn').body.text,'continue');assert.equal(final.trace.find(t=>t.path==='/api/v1/turn/steer').body.user_message_id,'active-turn');
+    await page.waitForFunction(async()=> (await(await fetch('/fixture/state')).json()).rows.some(row=>row.body.user_message_id==='active-turn'&&row.body.text==='continue'));
+    await page.waitForFunction(()=>document.querySelector('#pot-composer').value==='');
+    const final=finalEvidence=await evidence();assert.equal(final.trace.filter(t=>t.kind==='continue').length,5);assert.equal(final.rows.find(row=>row.body.user_message_id==='active-turn').body.text,'continue');assert.equal(final.trace.find(t=>t.path==='/api/v1/turn/steer').body.user_message_id,'active-turn');
     assert.equal(final.trace.find(t=>t.kind==='post').path,'/api/v1/messages');assert.equal(final.rows.find(row=>!row.body.user_message_id).body.text,'New message instead of restoration');
     assert.deepEqual(errors,[]);results.push({viewport,ok:true,server:final});
-   }catch(error){throw Error(error.message+'\n'+JSON.stringify({viewport,errors,ui:await page.evaluate(()=>({input:document.querySelector('#pot-composer')?.value,main:document.querySelector('.send-button')?.outerHTML,status:document.querySelector('.connection-status')?.outerHTML})),body:await page.locator('body').innerText(),server:await evidence()}),{cause:error});}finally{await context.close();}
+   }catch(error){throw Error(error.message+'\n'+JSON.stringify({viewport,errors,finalEvidence,ui:await page.evaluate(()=>({input:document.querySelector('#pot-composer')?.value,main:document.querySelector('.send-button')?.outerHTML,status:document.querySelector('.connection-status')?.outerHTML})),body:await page.locator('body').innerText(),server:await evidence()}),{cause:error});}finally{await context.close();}
   }
  }finally{await fixture.close();}
  return results;
+}
+
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
+ const source=await sourceServer({root:process.env.POT_CONTINUATION_SOURCE||process.cwd()}),browser=await launchBrowser();
+ try{const results=await composerContinuationBrowser(browser,{sourceOrigin:source.origin,baseline:process.env.POT_CONTINUATION_BASELINE==='1',captureDir:process.env.POT_CONTINUATION_CAPTURES});console.log(JSON.stringify(results,null,2));if(process.env.POT_CONTINUATION_REPORT)await writeFile(process.env.POT_CONTINUATION_REPORT,JSON.stringify(results,null,2)+'\n');}
+ catch(error){console.error(error.stack);process.exitCode=1;}
+ finally{await browser.close();await source.close();}
 }

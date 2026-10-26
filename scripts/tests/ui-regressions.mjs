@@ -3,6 +3,7 @@ import {performance} from 'node:perf_hooks';
 import {groups,faults,select,fixtures} from './ui-regression-plan.mjs';
 import {sourceServer,launchBrowser,isolatedPage,contract,fixture} from './browser-harness.mjs';
 import {taskContinuity,witnessMessages} from './task-continuity-browser.mjs';
+import {composerContinuationDraftsBrowser} from './composer-continuation-drafts-browser.mjs';
 import {composerContinuationBrowser} from './composer-continuation-browser.mjs';
 import {attachmentPickerBrowser} from './attachment-picker-browser.mjs';
 import {assistantDraftsBrowser} from './assistant-drafts-browser.mjs';
@@ -29,6 +30,7 @@ else {
           try{result.push(await referenceCancellation(await context.newPage(),server.origin));}finally{await context.close();}
         }
       }
+      else if(name==='composer-continuation-drafts')result=await composerContinuationDraftsBrowser(browser,{sourceOrigin:server.origin});
       else if(name==='composer-continuation')result=await composerContinuationBrowser(browser,{sourceOrigin:server.origin});
       else if(name==='attachment-picker')result=await attachmentPickerBrowser(browser,{sourceOrigin:server.origin});
       else if(name==='assistant-drafts')result=await assistantDraftsBrowser(browser,{sourceOrigin:server.origin});
