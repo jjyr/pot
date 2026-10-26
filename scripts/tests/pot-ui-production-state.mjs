@@ -77,6 +77,7 @@ assert.equal(calls.filter(call=>call.url.includes('/denied')).length,1,'failed r
 assert.equal(new APIError(401,{error:'browser authentication required'}).message,'browser authentication required','Browser server diagnostics survive the HTTP adapter');
 const sources=[];
 globalThis.EventSource=class {
+  static CLOSED=2;readyState=0;
   handlers=new Map();
   constructor(url){this.url=url;sources.push(this);}
   addEventListener(type,handler){this.handlers.set(type,handler);}
@@ -84,19 +85,23 @@ globalThis.EventSource=class {
 };
 const changeEvents=[],stopChanges=client.changes((topics,source)=>changeEvents.push({topics,source}),{space:'local'});
 sources.at(-1).handlers.get('changed')({data:JSON.stringify({topics:{usage:1}}),lastEventId:'boot:1'});
-assert.deepEqual(changeEvents,[{topics:['usage'],source:{space:'local',boot:'boot'}}],'Change callbacks retain their originating Space and boot');
-sources.at(-1).onerror();sources.at(-1).onopen();
-assert.deepEqual(changeEvents.slice(-2),[{topics:[],source:{space:'local',reset:true}},{topics:[],source:{space:'local',reset:true}}],'Disconnect and reconnect explicitly reset notification baselines');stopChanges();
+assert.deepEqual(changeEvents,[{topics:[],source:{space:'local',reset:true}},{topics:['usage'],source:{space:'local',boot:'boot'}}],'A committed initial change resets baselines and retains its Space/boot');
+const oldChanges=sources.at(-1);oldChanges.onerror();assert.equal(oldChanges.closed,true,'Adapter cancels native retry before owning reconnection');
+await new Promise(resolve=>setTimeout(resolve,0));const newChanges=sources.at(-1);assert.notEqual(newChanges,oldChanges);
+newChanges.onopen();assert.equal(changeEvents.length,2,'Opening a connection cannot reset business baselines');
+newChanges.handlers.get('changed')({data:JSON.stringify({topics:{usage:1}}),lastEventId:'boot:2'});
+assert.deepEqual(changeEvents.at(-1),{topics:[],source:{space:'local',reset:true}},'The first data of a replacement resets baselines even when topic versions are unchanged');stopChanges();
 const statuses=[];
 client.assistants=[{id:'b',space_id:'local',capabilities:{version:1,operations:['chat.subscribe']}}];
 const stopStream=client.subscribe(()=>{throw Error('Rendering failed');},(...value)=>statuses.push(value));
-const source=sources.at(-1),receive=source.handlers.get('conversation');
+let source=sources.at(-1),receive=source.handlers.get('conversation');
 assert.throws(()=>receive({data:JSON.stringify(toUIFrame(raw))}),/Rendering failed/,'Rendering exceptions reach the interface error handler');
-assert.equal(statuses.length,0,'Rendering failures must not mark the service offline');
+assert.deepEqual(statuses.map(([value])=>value),['connecting'],'Rendering failures must not mark the service offline');
 receive({data:'invalid JSON'});
-assert.equal(statuses.at(-1)[0],'offline');assert.ok(statuses.at(-1)[1] instanceof SyntaxError,'Malformed events retain the parsing diagnostic');
+assert.equal(statuses.at(-1)[0],'offline');assert.ok(statuses.at(-1)[1].cause instanceof SyntaxError,'Malformed events retain the parsing diagnostic behind a localized summary');
+await new Promise(resolve=>setTimeout(resolve,0));source=sources.at(-1);receive=source.handlers.get('conversation');
 receive({data:JSON.stringify(toUIFrame({...raw,cursor:-1}))});
-assert.equal(statuses.at(-1)[1].message,'Invalid conversation cursor','Invalid snapshots retain their diagnostic');
+assert.equal(statuses.at(-1)[1].cause.message,'Invalid conversation cursor','Invalid snapshots retain their diagnostic');
 stopStream();assert.equal(source.closed,true);
 const count=statuses.length;receive({data:'invalid JSON'});source.onerror();
 assert.equal(statuses.length,count,'Retired subscriptions cannot update connection diagnostics');

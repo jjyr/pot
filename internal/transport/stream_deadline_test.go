@@ -3,6 +3,7 @@ package transport
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -29,6 +30,9 @@ func TestStreamDeadlinesBoundWritesOnly(t *testing.T) {
 		}
 		if err != nil {
 			t.Fatal(err)
+		}
+		if heartbeat && !strings.HasPrefix(w.Body.String(), "event: heartbeat\ndata: {}\n\n") {
+			t.Fatal("heartbeat must be observable by EventSource without advancing conversation state", w.Body.String())
 		}
 		if len(w.deadlines) != 2 || w.deadlines[0].IsZero() || !w.deadlines[1].IsZero() {
 			t.Fatal("write deadline must be cleared before waiting for the next frame", w.deadlines)

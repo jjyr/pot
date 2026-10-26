@@ -89,6 +89,39 @@ The desktop local UI adapter consumes the same backend subscriptions and emits
 `pot:changed` through Wails. Responses and changes retain their local scope;
 Agent Link peer operations use their explicit connection identity.
 
+## Browser stream recovery
+
+Conversation and change streams send a named `heartbeat` event with `{}` data
+at 15-second intervals. A heartbeat carries transport liveness only: it does
+not advance a cursor, invalidate a resource or make the composer ready.
+
+The browser adapter owns one EventSource, watchdog and retry schedule per
+captured owner/Space. It closes the previous source before reconnecting, rather
+than competing with native EventSource retries or an additional UI reattach.
+Headers and the first valid conversation reset (or initial change event) have a
+20-second deadline. Heartbeats cannot satisfy or extend that deadline. After
+initial data, 45 seconds without heartbeat or data retires the stream. The first
+failure retries immediately; continuing failures use exponential backoff with
+jitter, capped at 30 seconds. Data or heartbeat after 15 seconds with an accepted
+initial frame resets backoff; repeatedly opening, sending a reset and immediately
+closing cannot create a hot retry loop.
+
+Hidden pages pause watchdog/retry timers. Visible, focus, pageshow and online
+wakeups compare wall-clock deadlines before resuming them, so a suspended PWA
+can replace an expired stream without waiting for a throttled timer. Healthy
+streams survive these wakeups. Offline transitions close the stream; owner
+changes and disposal cancel its timers and terminal-status request. Old source
+callbacks cannot update the new generation.
+
+A terminal EventSource response triggers one bounded, cancellable same-origin
+access-status check. An expired session remains offline with an explicit
+reconnection message instead of a retry loop; a confirmed valid session may
+retry with the same backoff. Unknown terminal failures remain offline for an
+explicit retry. Opening the stream and receiving heartbeats never bypass the
+conversation cache: only a committed current snapshot makes Chat connected.
+Storage failures remain visible and retain drafts; transport reconnects neither
+replay sends nor recreate the composer or its reading position.
+
 ## Main conversation streams
 
 `GET /api/v1/events?assistant_id=...&locale=...` sends UI-only `conversation` frames.

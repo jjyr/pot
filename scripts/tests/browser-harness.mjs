@@ -4,8 +4,8 @@ import {resolve,extname,sep} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {faults,injectFault} from './ui-regression-plan.mjs';
 
-export async function sourceServer({fault}={}) {
-  const root=resolve('.');
+export async function sourceServer({fault,root=resolve('.')}={}) {
+  root=resolve(root);
   const server=createServer(async(req,res)=>{
     try {
       let path=decodeURIComponent(new URL(req.url,'http://localhost').pathname);
@@ -16,7 +16,7 @@ export async function sourceServer({fault}={}) {
       if(!file.startsWith(root+sep))throw Error('Outside fixture source root');
       let data=await readFile(file);
       if(faults[fault]?.path===path)data=injectFault(path,data.toString(),fault);
-      res.writeHead(200,{'Cache-Control':'no-store','Content-Type':({'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.css':'text/css','.json':'application/json','.png':'image/png','.ttf':'font/ttf'})[extname(file)]||'application/octet-stream'});
+      res.writeHead(200,{'Cache-Control':'no-store','Content-Type':({'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.css':'text/css','.json':'application/json','.png':'image/png','.ttf':'font/ttf','.webmanifest':'application/manifest+json'})[extname(file)]||'application/octet-stream'});
       res.end(data);
     }catch(error){res.writeHead(404);res.end(error.message);}
   });
