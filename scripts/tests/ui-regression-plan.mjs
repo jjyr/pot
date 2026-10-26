@@ -5,13 +5,14 @@ export const groups = {
   history: ['task-history', 'task-history-edges'],
   domain: ['domain-repositories.html'],
   management: ['assistant-start-phone','first-connection-codex','first-connection-antigravity','settings-phone','machines'],
-  composer: ['composer-phone','composer-enter','reference-cancel','attachment-picker','composer-continuation'],
+  composer: ['composer-phone','composer-enter','reference-cancel','attachment-picker','composer-continuation','assistant-drafts'],
   connection: ['chat-stream-recovery'],
   approvals: ['linked-approvals','patch-approvals'],
   usage: ['usage-empty','usage-unknown','usage-partial','usage-trend'],
-  storage: ['chat-cache-read-volume.html', 'chat-cache.html', 'projection-store.html', 'chat-cache-ui.html', 'cached-loading.html'],
+  storage: ['chat-cache-read-volume.html', 'chat-cache.html', 'projection-store.html', 'chat-cache-ui.html', 'cached-loading.html','assistant-drafts-storage.html'],
 };
 export const fixtures = {
+  'assistant-drafts-storage.html':'DONE assistant draft storage',
   'chat-initial-layout.html': 'DONE initial Chat layout',
   'domain-repositories.html': 'DONE conversation actions authority contract',
   'chat-cache-read-volume.html': 'PASS bounded chat reads',

@@ -18,8 +18,8 @@ Dispatcher -> machine/default + exact command authorization
 ## Workspaces, files and environment
 
 Main uses `WORKSPACE/assistants/ASSISTANT_ID`. Workers bind their selected project,
-a managed Git worktree, or an OS temporary directory before their first model
-request. Commands, patches, plugins, instruction discovery and protected execution
+a managed Git worktree, or an independent directory under the receiving Runtime
+workspace `tasks/` before their first model request. Commands, patches, plugins, instruction discovery and protected execution
 use this same binding. [Task workspace selection](task-workspaces.md) defines
 selection, base refresh, directory naming and recovery. Selected local resources are prepared before execution and remain fixed in the
 run's resource cache.

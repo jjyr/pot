@@ -16,9 +16,13 @@ import (
 
 func taskResourceService(t *testing.T) *Service {
 	t.Helper()
+	return taskResourceServiceAt(t, t.TempDir(), "")
+}
+func taskResourceServiceAt(t *testing.T, root, workspace string) *Service {
+	t.Helper()
 	manager, _ := execution.New("local", "boot", execution.Limits{MaxActive: 1, MaxQueued: 8})
 	keys, _ := secrets.NewMemoryKey(make([]byte, 32))
-	s, err := Open(Options{Root: t.TempDir(), RuntimeID: "local", BootID: "boot", Manager: manager, Keys: keys})
+	s, err := Open(Options{Root: root, Workspace: workspace, RuntimeID: "local", BootID: "boot", Manager: manager, Keys: keys})
 	if err != nil {
 		t.Fatal(err)
 	}

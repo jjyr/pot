@@ -6,6 +6,7 @@ import {createResourceReads,displayProjection} from '../../web/src/state/resourc
 import {createTaskRepository} from '../../web/src/state/task-repository.mjs';
 import {createChatCache} from '../../web/src/state/chat-cache.mjs';
 import {migrateChatCache} from '../../pkg/storage/migrations/ui-cache/0001_chat_cache.mjs';
+import {UI_CACHE_VERSION} from '../../pkg/storage/migrations/ui-cache/0005_assistant_drafts.mjs';
 const remove=name=>new Promise((resolve,reject)=>{const op=indexedDB.deleteDatabase(name);op.onsuccess=resolve;op.onerror=()=>reject(op.error);});
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
 export async function projectionStoreContract(report=()=>{}){
@@ -62,7 +63,7 @@ export async function projectionStoreContract(report=()=>{}){
   }finally{transport?.resources.clear();globalThis.fetch=originalFetch;await remove(commandName);await remove(commandName+'-tasks');}
   const upgradeName='pot-upgrade-abort-'+crypto.randomUUID(),before=createIndexedStore({name:upgradeName});
   await before.transaction(['cacheStats'],'readwrite',tx=>tx.objectStore('cacheStats').put({key:'preserved',value:42}));
-  const broken=createIndexedStore({name:upgradeName,version:5,migrate:(db,tx)=>{db.createObjectStore('uncommitted');tx.abort();}});let aborted=false;try{await broken.transaction(['cacheStats'],'readonly',()=>{});}catch{aborted=true;}broken.close();
+  const broken=createIndexedStore({name:upgradeName,version:UI_CACHE_VERSION+1,migrate:(db,tx)=>{db.createObjectStore('uncommitted');tx.abort();}});let aborted=false;try{await broken.transaction(['cacheStats'],'readonly',()=>{});}catch{aborted=true;}broken.close();
   const retry=createIndexedStore({name:upgradeName});check(aborted&&(await retry.transaction(['cacheStats'],'readonly',tx=>idbRequest(tx.objectStore('cacheStats').get('preserved')))).value===42,'Versionchange closes old connections and aborted upgrades preserve the previous version for retry');before.close();retry.close();await remove(upgradeName);
   const taskName='pot-task-contract-'+crypto.randomUUID(),client={runtime:{runtime_id:'task-node',boot_id:'boot'},chatCacheName:taskName,request:()=>{throw Error('Unexpected history fetch');}},tasks=createTaskRepository(client),task={id:'task',run_id:'run'},scope={space:'local',owner:'alice'};
   try{

@@ -26,7 +26,7 @@ subprocess.run(
         "-v",
         "./internal/control",
         "-run",
-        "^TestReal(UnixSocketRequiresHostApproval|MainSkillSandboxResources)$",
+        "^TestReal(UnixSocketRequiresHostApproval|MainSkillSandboxResources|TemporaryWorkspacePermissions)$",
     ],
     cwd=ROOT,
     env={**os.environ, "POT_SANDBOX_INTEGRATION": "1", "POT_SANDBOX_SDK": str(sdk)},

@@ -10,14 +10,15 @@ export async function attachmentPickerFixture(sourceOrigin){
  const json=(res,value,status=200)=>{res.writeHead(status,{'content-type':'application/json','cache-control':'no-store'});res.end(JSON.stringify(value));};
  const caps={version:1,scope:'owner',operations:['chat.read','chat.send','chat.subscribe','chat.completions','chat.attachments','chat.references','chat.continue','chat.cancel','task.list','task.read','task.events','task.outcomes']};
  const get=name=>{if(!states.has(name))states.set(name,{trace:[],streams:new Set(),uploads:new Map(),image:true,pdf:true,permission:true,holdInitial:false,holdSend:false,holdUploads:false,held:[],receipt:false,revision:1});return states.get(name);};
- const frame=(s,owner)=>({kind:'reset',base_cursor:0,view:{state:{cursor:s.revision,boot_id:'picker-boot',conversation_id:s.conversation||'main',messages:[],continuation:owner==='alpha'?s.continuation:null,turn:s.running?{user_message_id:'active-turn'}:null,agent:{phase:'ready',attachments:{image:s.image,pdf:s.pdf}}},messages:(s.messages||[]).map((message,i)=>({message,sequence:String(i+1),version:s.revision})),replies:[],history:{has_more:false,has_newer:false}}});
+ const frame=(s,owner)=>({kind:'reset',base_cursor:0,view:{state:{cursor:s.revision,boot_id:'picker-boot',conversation_id:s.conversation||'main',messages:[],continuation:owner==='alpha'?s.continuation:null,turn:s.running?{user_message_id:'active-turn'}:null,agent:{phase:'ready',attachments:{image:s.image,pdf:s.pdf}}},messages:(s.messages||(s.references?[{id:owner+'-source',role:'assistant',text:'Synthetic reference source for '+owner,status:'complete'}]:[])).map((message,i)=>({message,sequence:String(i+1),version:s.revision})),replies:[],history:{has_more:false,has_newer:false}}});
  const send=stream=>stream.res.write('event: conversation\ndata: '+JSON.stringify(frame(stream.state,stream.owner))+'\n\n');
  const server=createServer(async(req,res)=>{try{
   const url=new URL(req.url,'http://fixture'),p=url.pathname,name=/picker-case=([^;]+)/.exec(req.headers.cookie||'')?.[1]||'manual',s=get(name),owner=url.searchParams.get('assistant_id')||'alpha';
   let body;if(req.method==='POST'){let raw='';for await(const chunk of req)raw+=chunk;body=JSON.parse(raw||'{}');}
   if(p==='/fixture/control'){
-   for(const key of ['image','pdf','permission','holdInitial','holdSend','holdUploads','receipt','running','conversation','uploadFailure','continuation','messages','holdContinue','continueError'])if(key in body)s[key]=body[key];
+   for(const key of ['image','pdf','permission','holdInitial','holdSend','holdUploads','receipt','running','conversation','uploadFailure','continuation','messages','holdContinue','continueError','references','rejectSend','acceptSend'])if(key in body)s[key]=body[key];
    if(body.releaseContinue){s.releaseContinue?.();s.releaseContinue=null;}
+   if(body.releaseSends)for(const response of (s.heldSends||[]).splice(0))json(response,{message_id:'accepted',duplicate:false});
    if(body.releaseUploads){for(const release of s.held.splice(0))release();}
    if(body.publish||body.release){s.revision++;for(const stream of s.streams)if(stream.path.endsWith('/events'))send(stream);}
    if(body.directory){s.revision++;for(const stream of s.streams)if(stream.path.endsWith('/changes'))stream.res.write('event: changed\ndata: '+JSON.stringify({assistants:s.revision})+'\n\n');}
@@ -33,9 +34,12 @@ export async function attachmentPickerFixture(sourceOrigin){
    req.on('close',()=>{clearInterval(timer);s.streams.delete(stream);});return;
   }
   if((p==='/api/v1/messages'||p==='/api/v1/turn/steer')&&body){
-   s.trace.push({kind:'post',path:p,owner,body});db.prepare('INSERT OR IGNORE INTO accepted VALUES (?,?,?,?)').run(name,owner,body.request_id,JSON.stringify(body));
-   if(s.holdSend)return;
-   return json(res,{message_id:body.request_id,duplicate:false});
+   s.trace.push({kind:'post',path:p,owner,body});if(s.rejectSend)return json(res,{message:'Synthetic rejection'},409);
+   const duplicate=!!db.prepare('SELECT 1 FROM accepted WHERE scenario=? AND owner=? AND request=?').get(name,owner,body.request_id);
+   if(s.acceptSend!==false)db.prepare('INSERT OR IGNORE INTO accepted VALUES (?,?,?,?)').run(name,owner,body.request_id,JSON.stringify(body));
+   if(s.holdSend){(s.heldSends||=[]).push(res);return;}
+   s.trace.push({kind:'post-response',owner,request_id:body.request_id,duplicate});
+   return json(res,{message_id:body.request_id,duplicate});
   }
   if(p==='/api/v1/messages/receipt'){
    const query=Object.fromEntries(url.searchParams);s.trace.push({kind:'receipt',owner,query});
@@ -53,9 +57,10 @@ export async function attachmentPickerFixture(sourceOrigin){
    if(s.uploadFailure)return json(res,{message:'Synthetic upload failure'},503);
    if(!s.permission)return json(res,{message:'Synthetic permission denied'},403);
    let item=s.uploads.get(body.id);
-   if(body.action==='begin'){item={attachment:{id:body.id,name:body.name,mime_type:body.mime_type,size:body.size},offset:0};s.uploads.set(body.id,item);}
+   if(body.action==='begin'&&!item){item={attachment:{id:body.id,name:body.name,mime_type:body.mime_type,size:body.size},offset:0};s.uploads.set(body.id,item);}
    if(body.action==='chunk')item.offset+=Buffer.from(body.data,'base64').length;
    if(body.action==='finish')item.ready=true;
+   if(body.action==='remove')s.uploads.delete(body.id);
    if(s.holdUploads)await new Promise(resolve=>s.held.push(resolve));
    return json(res,item||{});
   }

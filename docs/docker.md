@@ -136,12 +136,14 @@ permission error.
 | `/home/pot/.pot` | Runtime identity, databases, encrypted provider/service credentials, permissions and task state |
 | `/home/pot/.pot-web` | Browser binding, access token, session signing key and revocations |
 | `/home/pot/.pot/secrets/master.key` | Automatically generated Linux credential master key, created on first secret write |
-| `/home/pot/workspaces` | Default assistant workspaces and managed task worktrees |
+| `/home/pot/workspaces` | Default assistant workspaces, independent Task directories and managed task worktrees |
 
 Back up the **complete volume** with both services stopped. Databases and master
 key must be restored together; never regenerate the key to recover an existing
 database. User-selected project paths outside `/home/pot` need their own mounts
-and backups. OS temporary task workspaces are ephemeral and do not survive
+and backups. New independent Task directories use the configured Runtime workspace
+`tasks/` child and survive replacement when that workspace is on the volume.
+Older Tasks retain their recorded OS temporary paths, which do not survive
 container replacement. Do not mount the installation assets inside a writable
 workspace. See [Secrets](secrets.md) and [Task workspaces](task-workspaces.md).
 

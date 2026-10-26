@@ -13,6 +13,7 @@ export async function clearBusinessCaches({name='pot-chat-cache',indexedDB=globa
   signal?.postMessage('forget');for(const close of [...clients])close();if(signal!==channel)signal?.close();
   for(const database of [name,name+'-tasks']){
     const store=createIndexedStore({name:database,indexedDB});
-    try{await store.transaction(['conversations','messages','views','cacheStats','projections','epochs','taskCheckpoints'],'readwrite',tx=>{for(const name of tx.objectStoreNames)tx.objectStore(name).clear();});}finally{store.close();}
+    const caches=['conversations','messages','views','cacheStats','projections','epochs','taskCheckpoints'];
+    try{await store.transaction(caches,'readwrite',tx=>{for(const name of caches)tx.objectStore(name).clear();});}finally{store.close();}
   }
 }

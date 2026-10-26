@@ -96,7 +96,8 @@ type TaskRequirements struct {
 }
 
 // TaskWorkspace is creation intent; destination Runtime resolves the actual path.
-// An omitted kind selects a direct project when supplied, otherwise OS temporary storage.
+// An omitted kind selects a direct project when supplied, otherwise an independent
+// Runtime-created directory under the receiving Runtime's workspace/tasks root.
 type TaskWorkspace struct {
 	Kind       string `json:"kind,omitempty"`
 	ProjectDir string `json:"project_dir,omitempty"`
