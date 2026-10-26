@@ -21,7 +21,7 @@ const paths = {
   reply: 'm9 10-5 5 5 5M4 15h11a5 5 0 0 0 0-10h-1', menu: 'M4 6h16M4 12h16M4 18h16', back: 'm14 5-7 7 7 7', plus: 'M12 5v14M5 12h14',
   more: 'M5 12h.01M12 12h.01M19 12h.01', send: 'm6 10 6-6 6 6M12 4v16',
   open: 'M14 3h7v7M21 3l-9 9M10 3H3v18h18v-7',
-  stop: 'M6 6h12v12H6z', down: 'm6 9 6 6 6-6', close: 'm6 6 12 12M6 18 18 6',
+  play: 'm8 5 11 7-11 7V5z', stop: 'M6 6h12v12H6z', down: 'm6 9 6 6 6-6', close: 'm6 6 12 12M6 18 18 6',
   cloud:'M6 18h12a4 4 0 0 0 0-8h-1a6 6 0 0 0-11 1 3.5 3.5 0 0 0 0 7',
   clock:'M12 8v5h4M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
   copy: 'M9 9h11v11H9zM15 5V3H3v12h2',
