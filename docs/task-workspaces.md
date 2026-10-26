@@ -15,7 +15,7 @@ Apply these rules in order:
 | Explicit instruction to reuse an existing worktree or modify a directory in place | The specified directory |
 | Feature development in a specified Git repository | A new managed Git worktree |
 | Other work in a specified project | The specified project directory |
-| No specified project | A new directory in the destination OS temporary directory |
+| No specified project | A new independent directory under the destination Runtime workspace `tasks/` |
 
 Feature development defaults to a worktree even when a source repository is
 specified. An explicit in-place instruction overrides this default. Explicit
@@ -77,10 +77,31 @@ copying files.
 
 ## Temporary and direct project directories
 
-For a Task without a project, allocate one unique directory with the destination
-OS temporary-directory API, equivalent to `os.MkdirTemp("", "pot-task-")`.
-Do not hardcode `/tmp`, construct a path on another node, or create
-another mandatory workspace beneath the Runtime data root.
+For a Task without a project, `kind=temporary` allocates a private, unique
+`pot-task-<random-id>` directory under `<effective Runtime workspace>/tasks/` on
+the receiving node. The API name describes an independent Runtime-created
+workspace; it does not imply deletion when a process ends. The existing Runtime
+workspace configuration determines this location, including `--root`,
+`--workspace` and saved configuration. With default configuration it is:
+
+```text
+<destination user home>/.pot/agent-workspace/tasks/pot-task-<random-id>
+```
+
+For example, the macOS default is
+`/Users/<user>/.pot/agent-workspace/tasks/pot-task-<random-id>`. A custom Runtime
+workspace uses its own `tasks/` child. Remote receivers allocate from their local
+configuration; callers do not supply a local allocation path. `TMPDIR` does not
+affect this allocation. Tool-local temporary files and caches keep their existing
+rules.
+
+Runtime accepts configured workspace-root aliases and records canonical paths.
+The `tasks` entry must be a real directory without group or other write access;
+Runtime creates it and each unique Task directory with mode `0700`. Directory
+handles constrain allocation to that workspace, and path/parent identities are
+checked before recording the result. Preparation errors fail explicitly, including
+an unavailable or unwritable root, a non-directory or symlink at `tasks`, or a
+changed allocation path. There is no fallback to OS temporary storage.
 
 For a direct project or an explicitly reused worktree, validate the specified
 directory on the destination. Resolve its canonical existing path and retain the
@@ -142,8 +163,9 @@ original workspace. Automatic failure replacement remains a separate new Task
 with a new workspace. Resuming the same Task does not generate another random
 ID or reinterpret the brief. If the original
 directory is missing, report its loss rather than silently recreating an empty
-workspace and resuming as if files survived. OS temporary storage is not a durable
-artifact store.
+workspace and resuming as if files survived. Existing Tasks keep their recorded
+paths and directory identities, including older OS temporary directories; Runtime
+does not move, recreate or migrate them to the new allocation root.
 
 Continuation verifies the canonical path and the recorded directory identity. A
 managed worktree must still resolve to its original Git administrative and common
@@ -166,18 +188,19 @@ explicitly retained delivered files, rather than assuming `WORKSPACE/tasks/ID`.
 Preserve delivered artifacts independently before reclaiming their temporary
 source directory.
 
-Ending or archiving a Task does not automatically delete a managed worktree or a
-user-specified directory. Temporary workspaces may be reclaimed after the Task's
-processes and sessions have confirmed cleanup and required deliverables have been
-retained. Retained continuation/recovery work keeps its original files. Managed
-worktree cleanup must respect ownership and uncommitted changes.
+Completion, failure, cancellation and archiving retain the original workspace.
+No automatic reclamation, TTL, Task deletion, cold archive or compression/restore
+is implemented. Any future reclamation must confirm process/session cleanup and
+retain required deliverables and continuation files; managed worktree cleanup must
+also respect ownership and uncommitted changes.
 
 ## API and preparation records
 
 `create_task` and `POST /api/v1/tasks` accept `workspace` with `kind`
 (`temporary`, `directory`, `worktree`), `project_dir`, and worktree-only optional
-`remote`, `base`, `branch` and `commit`. Omission selects temporary storage unless
-a `project_dir` is supplied, in which case it selects direct directory use.
+`remote`, `base`, `branch` and `commit`. Omission selects an independent
+Runtime-created workspace unless a `project_dir` is supplied, in which case it
+selects direct directory use.
 The invoking model selects `worktree` for feature development in Git repositories.
 An omitted feature branch becomes `codex/task-TASK_ID`.
 
@@ -196,6 +219,7 @@ transiently through the normal account service and never stored in workspace
 records. Credentials remain local to the executing node. Other Git authentication
 follows that node's account configuration and selected execution boundary.
 
-Temporary workspaces are currently retained for file delivery and recovery; no
-automatic reclamation is implemented. Their OS storage can still be removed
-externally. A missing original workspace fails explicitly.
+Runtime-created workspaces are retained for file delivery and recovery. External
+storage removal can still lose their files, especially for older Tasks in OS
+temporary storage. A missing original workspace fails explicitly. The new path
+rule neither clears old temporary storage nor prevents tools from using it.

@@ -726,7 +726,7 @@ POT_LIVE=1 mise exec -- go test -v ./internal/control \
 ```
 
 The fixture uses a private Control, local bare Git remote and synthetic project
-files. It exercises managed worktree base refresh, direct-project and OS temporary
+files. It exercises managed worktree base refresh, direct-project and Runtime-created persistent
 workspaces, real model-generated patches/commands, instruction discovery and file
 delivery, capped at 18 model requests. Model/account credentials remain in memory
 on that machine. `POT_WORKSPACE_LIVE_RESOURCES` points to installed package assets;

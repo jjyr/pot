@@ -39,7 +39,22 @@ func (s *Service) workspaceDirectory(path string) (string, error) {
 	if !info.IsDir() {
 		return "", errors.New("workspace is not a directory")
 	}
-	root, _ := filepath.Abs(s.options.Root)
+	root, err := filepath.EvalSymlinks(s.options.Root)
+	if err != nil {
+		return "", err
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	workspace, err := filepath.EvalSymlinks(s.options.Workspace)
+	if err != nil {
+		return "", err
+	}
+	workspace, err = filepath.Abs(workspace)
+	if err != nil {
+		return "", err
+	}
 	home, _ := os.UserHomeDir()
 	managedHome := s.options.WorkspaceHome
 	if managedHome == "" {
@@ -49,10 +64,69 @@ func (s *Service) workspaceDirectory(path string) (string, error) {
 	if canonical, e := filepath.EvalSymlinks(managed); e == nil {
 		managed = canonical
 	}
-	if dir == filepath.Dir(dir) || dir == home || pathWithin(root, dir) || (pathWithin(dir, root) && !pathWithin(dir, s.options.Workspace) && !pathWithin(dir, managed)) {
+	if dir == filepath.Dir(dir) || dir == home || pathWithin(root, dir) || (pathWithin(dir, root) && !pathWithin(dir, workspace) && !pathWithin(dir, managed)) {
 		return "", errors.New("workspace overlaps Runtime authority or an unrestricted root")
 	}
 	return dir, nil
+}
+
+// Allocate through directory handles so a replaced tasks parent cannot redirect
+// creation outside the receiving Runtime's configured workspace. Workspace-root
+// aliases are supported; the Runtime-owned tasks entry itself must be a directory.
+func (s *Service) allocateTaskDirectory() (string, error) {
+	workspace, err := filepath.Abs(s.options.Workspace)
+	if err != nil {
+		return "", err
+	}
+	workspace, err = s.workspaceDirectory(workspace)
+	if err != nil {
+		return "", err
+	}
+	root, err := os.OpenRoot(workspace)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	if err = root.Mkdir("tasks", 0700); err != nil && !os.IsExist(err) {
+		return "", err
+	}
+	info, err := root.Lstat("tasks")
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() || info.Mode().Perm()&0022 != 0 {
+		return "", errors.New("Task workspace parent must be a directory without group or other write access")
+	}
+	parent, err := root.OpenRoot("tasks")
+	if err != nil {
+		return "", err
+	}
+	defer parent.Close()
+	opened, err := parent.Stat(".")
+	if err != nil || !os.SameFile(info, opened) {
+		return "", errors.Join(err, errors.New("Task workspace parent identity changed"))
+	}
+	for attempt := 0; attempt < 256; attempt++ {
+		name := "pot-task-" + rand.Text()
+		if err = parent.Mkdir(name, 0700); os.IsExist(err) {
+			continue
+		} else if err != nil {
+			return "", err
+		}
+		path := filepath.Join(workspace, "tasks", name)
+		created, statErr := parent.Lstat(name)
+		canonical, pathErr := filepath.EvalSymlinks(path)
+		current, currentErr := os.Stat(path)
+		currentParent, parentErr := os.Lstat(filepath.Dir(path))
+		if err = errors.Join(statErr, pathErr, currentErr, parentErr); err != nil {
+			return "", err
+		}
+		if canonical != path || !created.IsDir() || !os.SameFile(created, current) || !os.SameFile(info, currentParent) {
+			return "", errors.New("allocated Task workspace path identity changed")
+		}
+		return path, nil
+	}
+	return "", errors.New("Task workspace directory allocation exhausted")
 }
 
 type taskGitPolicyKey struct{}
@@ -227,11 +301,7 @@ func (s *Service) prepareTaskWorkspace(ctx context.Context, l tasks.Launch, poli
 	}()
 	switch w.Kind {
 	case "temporary":
-		w.Path, err = os.MkdirTemp("", "pot-task-")
-		if err != nil {
-			return nil, err
-		}
-		w.Path, err = filepath.EvalSymlinks(w.Path)
+		w.Path, err = s.allocateTaskDirectory()
 		if err != nil {
 			return nil, err
 		}
