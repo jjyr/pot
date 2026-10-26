@@ -1,7 +1,10 @@
 import repl from 'node:repl';
 import { PassThrough } from 'node:stream';
 import { inspect } from 'node:util';
-import { operation, close, browserAvailability } from './browser.mjs';
+import { operation, close, browserAvailability, SUPPORTED_KEYS } from './browser.mjs';
+
+const MAX_SCROLL_DELTA = 2000;
+const SCROLL_CONSTRAINT = `delta_y must be an integer number in [-${MAX_SCROLL_DELTA}, ${MAX_SCROLL_DELTA}] CSS pixels`;
 
 export function createPlugin({ mode, emit }) {
   const vision = mode === 'mixed';
@@ -11,15 +14,16 @@ export function createPlugin({ mode, emit }) {
   const docs = `Computer-use API (one browser tab per REPL):
 let tab = await cua.open("https://example.com");
 let state = await tab.observe(); // {sequence, elements, title, url, ...}
-await tab.fill({element: "8", sequence: state.sequence, text: "3"});
-state = await tab.observe();
-await tab.click({element: "9", sequence: state.sequence});
-await tab.navigate("https://example.com");
-await tab.press({element: "8", sequence: state.sequence, key: "Enter"});
-await tab.scroll({sequence: state.sequence, delta_y: 500});
+state = await tab.fill({element: "8", sequence: state.sequence, text: "3"});
+state = await tab.click({element: "9", sequence: state.sequence});
+state = await tab.navigate("https://example.com");
+state = await tab.press({element: "8", sequence: state.sequence, key: "Enter"});
+state = await tab.scroll({sequence: state.sequence, delta_y: 500});
 await tab.close();
+tab.scroll: ${SCROLL_CONSTRAINT}; positive scrolls down, negative scrolls up.
+tab.press: key must be one of these exact strings: ${SUPPORTED_KEYS.join(', ')}.
 Use cua.getTab(tabId) to retrieve the current tab; cua.getState() observes it.
-Each browser operation automatically emits the fresh observation. Its return value is the parsed observation, so assign it to state. Element actions require the latest sequence. Variables (let/const/var) and top-level await persist across calls. Redeclaring a let/const binding fails; reuse or rename it.
+Each browser operation automatically emits the fresh observation. Its return value is the parsed observation, so assign it to state. click, fill, press and scroll require the latest sequence; element actions also require an observed element ID. Variables (let/const/var) and top-level await persist across calls. Redeclaring a let/const binding fails; reuse or rename it.
 nodeRepl.write(value) emits text; console.log does the same. Unreturned values are not automatically printed. JS errors preserve the REPL and any completed page effects. reset=true with the existing session_id ends the entire REPL; timeout or cancellation invalidates it.
 ${vision ? 'Mixed mode returns a viewport screenshot with observations. tab.click also accepts {x,y,sequence} using the 1280x800 viewport.' : 'Text mode returns AX observations only. Coordinates and image emission are unavailable. Canvas/image-only content requires a vision-capable model.'}
 The REPL controls a separate headless Chromium in this execution machine. Native apps, existing browser profiles, full CDP access, arbitrary page evaluation, popups and multiple tabs are not exposed by this API.`;
@@ -41,7 +45,7 @@ The REPL controls a separate headless Chromium in this execution machine. Native
     if (!args || typeof args !== 'object' || Object.keys(args).some(k => !allowed.includes(k))) throw new Error('Unsupported browser arguments for this model mode');
     if (args.text !== undefined && (typeof args.text !== 'string' || args.text.length > 16384)) throw new Error('Invalid fill text');
     if (action === 'fill' && typeof args.text !== 'string') throw new Error('Fill requires text');
-    if (action === 'scroll' && (!Number.isInteger(args.delta_y) || Math.abs(args.delta_y) > 2000)) throw new Error('Invalid scroll distance');
+    if (action === 'scroll' && (!Number.isInteger(args.delta_y) || Math.abs(args.delta_y) > MAX_SCROLL_DELTA)) throw new Error(`Invalid scroll distance; ${SCROLL_CONSTRAINT}`);
     if (['click', 'fill', 'press'].includes(action) && args.x === undefined && typeof args.element !== 'string') throw new Error('Observed element required');
     if (['click', 'fill', 'press', 'scroll'].includes(action) && args.sequence !== latest?.sequence) throw new Error('Use the latest observation sequence');
     let result;
