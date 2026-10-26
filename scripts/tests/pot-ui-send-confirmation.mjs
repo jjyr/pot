@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createConversationState,beginSubscription,acceptSnapshot,beginSend,settleSend,setDraft,draft,setDraftReferences,draftReferences,ownerKey} from '../../web/src/state/conversation.mjs';
 import {createSendConfirmation} from '../../web/src/state/send-confirmation.mjs';
+import {createProductionClient} from '../../web/src/adapters/production.mjs';
 
 const flush=async()=>{for(let i=0;i<20;i++)await Promise.resolve();};
 class Clock {
@@ -222,4 +223,48 @@ const receiptValue=(request,state='accepted')=>({request_id:request.request_id,c
   assert.equal(reads,1,'An authorization denial pauses automatic checks across recovery signals');assert.equal(f.state.pending.get(r.key),r);assert.equal(f.rejected.length,0,'A receipt access denial does not reject the message');
   f.client.sendReceipt=async request=>receiptValue(request);await f.manager.recover(r);assert.equal(f.accepted.length,1);assert.equal(f.calls.length,1);f.manager.close();
 }
-console.log('Send confirmation: response-first submit with zero normal receipt reads; unknown-only bounded recovery, cancellation, immutable scope and draft/reference fences passed');
+// Exercise the actual production transport and resource command writer. The
+// submit deadline ends at valid HTTP acceptance, even if local storage hangs.
+for(const route of ['message','steer','retry'])for(const newerDraft of [false,true]){
+  const savedFetch=globalThis.fetch,calls=[],commands=[],invalidations=[],failures=[],accepted=[];
+  let resolveCommand,rejectCommand,fail=false;
+  const storage={subscribe:()=>()=>{},close:()=>{},invalidate:async()=>{},
+    command:async(key,meta,value)=>{commands.push({key,meta,value});if(fail)return value;return new Promise((resolve,reject)=>{resolveCommand=()=>resolve(value);rejectCommand=reject;});}};
+  globalThis.fetch=async(url,options={})=>{
+    const path=new URL(url).pathname;calls.push({path,method:options.method||'GET',body:options.body});
+    return Response.json(path==='/api/v1/runtime'?{runtime_id:'runtime'}:{message_id:'accepted',duplicate:false});
+  };
+  let client,manager;
+  try{
+    client=await createProductionClient({base:'http://synthetic.invalid',resourceStorage:storage});client.setScope({space:'space',owner:'a'});
+    client.resources.subscribeInvalidation((topics,scope)=>invalidations.push({topics,scope}));
+    const state=createConversationState(),clock=new Clock();beginSubscription(state);
+    acceptSnapshot(state,snapshot({running:route==='steer',turn_id:route==='steer'?'original':null}),state.epoch);
+    setDraft(state,'submitted');setDraftReferences(state,[{message_id:'old-reference'}]);
+    const receipt=beginSend(state,'fixed-'+route,{allowRunning:true,attachments:[{id:'old-attachment'}],retryUserMessageID:route==='retry'?'failed-input':undefined});
+    manager=createSendConfirmation({state,client,clock,now:()=>clock.now,changed:()=>{},accepted:r=>accepted.push(r),cacheFailed:(...args)=>failures.push(args)});
+    manager.start(receipt);
+    if(newerDraft){setDraft(state,'new draft');setDraftReferences(state,[{message_id:'new-reference'}]);}
+    // Response.json() uses native microtasks in addition to the manager clock.
+    await new Promise(resolve=>setImmediate(resolve));await flush();
+    assert.equal(accepted.length,1,'Valid HTTP success confirms before storage.command resolves');
+    assert.equal(state.pending.size,0);assert.equal(draft(state),newerDraft?'new draft':'');
+    assert.equal(draftReferences(state)[0]?.message_id,newerDraft?'new-reference':undefined);
+    assert.equal(accepted[0].request.attachments[0].id,'old-attachment');
+    await clock.advance(30000);await manager.resume();
+    assert.equal(calls.filter(call=>call.path==='/api/v1/messages/receipt').length,0,'Held local saving beyond the submit timeout must not read receipts');
+    assert.equal(calls.filter(call=>call.method==='POST').length,1);
+    assert.equal(commands.length,1);assert.equal(invalidations.length,0,'No uncommitted local projection is published');
+    if(newerDraft){
+      rejectCommand(Object.assign(Error('synthetic local quota failure'),{storage:true}));await flush();
+      assert.equal(failures.length,1);assert.equal(failures[0][0],receipt);assert.equal(failures[0][1].accepted,true);assert.equal(failures[0][1].uiKey,'storage.commandAccepted');
+      fail=true;await failures[0][2]();await flush();
+      assert.equal(commands.length,2);assert.equal(commands[1].key,commands[0].key,'Local save retry retains the original command ID');
+    }else{resolveCommand();await flush();}
+    assert.equal(invalidations.length,1,'Local commit still invalidates conversation and directory');
+    assert.deepEqual(invalidations[0].topics,['conversation','assistants']);
+    assert.equal(calls.filter(call=>call.method==='POST').length,1,'Local commit retry does not repeat the accepted POST');
+    assert.equal(accepted.length,1);assert.equal(state.pending.size,0);assert.equal(draft(state),newerDraft?'new draft':'');
+  }finally{resolveCommand?.();manager?.close();client?.resources.clear();globalThis.fetch=savedFetch;}
+}
+console.log('Send confirmation: response-first production acceptance independent of local saving; zero normal receipt reads; unknown-only recovery, cancellation, immutable scope and draft/reference fences passed');

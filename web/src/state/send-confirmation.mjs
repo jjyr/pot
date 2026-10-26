@@ -2,7 +2,7 @@ import {settleSend} from './conversation.mjs';
 
 // A successful submit response is sufficient. Only an unknown submit result
 // needs receipt reads, always for its captured scope and immutable request.
-export function createSendConfirmation({state,client,changed,accepted,rejected=()=>{},clock=globalThis,now=()=>Date.now(),online=()=>globalThis.navigator?.onLine!==false,timeout=10000,delays=[750,1500,3000,6000,10000]}) {
+export function createSendConfirmation({state,client,changed,accepted,rejected=()=>{},cacheFailed=()=>{},clock=globalThis,now=()=>Date.now(),online=()=>globalThis.navigator?.onLine!==false,timeout=10000,delays=[750,1500,3000,6000,10000]}) {
   const operations=new Map();let closed=false,suspended=false;
   const current=op=>!closed&&operations.get(op.receipt)===op&&state.pending.get(op.receipt.key)===op.receipt;
   const owns=(op,batch)=>current(op)&&op.active===batch;
@@ -34,7 +34,11 @@ export function createSendConfirmation({state,client,changed,accepted,rejected=(
   }
   async function transmit(op,batch,retry=false){
     try{
-      const result=await bounded(op,batch,options=>client.send(op.receipt.request,options));
+      const result=await bounded(op,batch,async options=>{
+        const value=await client.send(op.receipt.request,options);
+        value?.committed?.catch(reason=>{if(!closed)cacheFailed(op.receipt,reason,value.retryCommit);});
+        return value;
+      });
       if(typeof result?.message_id!=='string'||typeof result?.duplicate!=='boolean')throw Error('Invalid message receipt');
       finish(op,true);
     }catch(reason){

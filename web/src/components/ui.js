@@ -80,6 +80,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let route = 'chat';
   let connection = 'connecting';
   let error = '',chatCacheFailed=false,directoryStorageFailed=false;
+  const sendCacheFailures=new Map();
   let connectionError = '';
   let directoryOpen = !params.has('conversation');
   let directoryCollapsed = false;
@@ -310,6 +311,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const confirmations=createSendConfirmation({state,client,
     accepted:receipt=>attachmentUI?.clearSubmitted(receipt.key,receipt.request.attachments||[]),
     rejected:receipt=>{if(receipt.key===editorOwner)error=t('send.rejected');},
+    cacheFailed:(receipt,reason,retry)=>{sendCacheFailures.set(receipt,retry);updateControls();},
     changed:()=>{if(!disposed){syncEditor();restoreFailedAttachments();updateControls();}},
   });
   function submit() {
@@ -360,17 +362,24 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function connectionStatus() {
     const pending=state.snapshot&&state.pending.get(ownerKey(state.snapshot));
+    const cacheFailures=[...sendCacheFailures].filter(([receipt])=>receipt.key===(state.snapshot&&ownerKey(state.snapshot)));
     const visibleConnection=selectedAssistant?.offline?'offline':connection;
     const projection=el('div','connection-status');
     projection.setAttribute('role','status');
     const label=text=>{const value=el('span','',text);value.title=text;return value;};
-    projection.classList.toggle('has-error', Boolean(error || connectionError) || visibleConnection === 'offline');
-    projection.classList.toggle('is-connected',!pending&&!error&&!connectionError&&visibleConnection==='connected');
+    projection.classList.toggle('has-error', Boolean(error || connectionError || cacheFailures.length) || visibleConnection === 'offline');
+    projection.classList.toggle('is-connected',!pending&&!error&&!connectionError&&!cacheFailures.length&&visibleConnection==='connected');
     if(pending){
       projection.append(label(t(pending.phase==='uncertain'?'send.unknown':'send.confirming')));
       if(pending.recoverable){const retry=el('button','text-button',t('send.checkRetry'));retry.type='button';retry.disabled=visibleConnection!=='connected';retry.onclick=()=>confirmations.recover(pending);projection.append(retry);}
     }
     projection.append(label(error || (connectionError?.uiKey?t(connectionError.uiKey):connectionError) || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
+    if(cacheFailures.length){
+      projection.append(label(t('storage.commandAccepted')));
+      const retry=el('button','text-button',t('retry'));retry.type='button';
+      retry.onclick=async()=>{retry.disabled=true;await Promise.allSettled(cacheFailures.map(async([receipt,save])=>{await save();if(sendCacheFailures.get(receipt)===save)sendCacheFailures.delete(receipt);}));if(!disposed)updateControls();};
+      projection.append(retry);
+    }
     if (directoryStorageFailed||visibleConnection === 'offline'||chatCacheFailed) {
       const retry = el('button', 'text-button', t('retry'));
       retry.type = 'button';

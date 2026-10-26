@@ -415,6 +415,15 @@ No receipt query runs while that POST is pending, including on foreground/online
 signals. A matching persisted SSE message may also confirm the same request
 without waiting for the POST; Agent execution completion is not required.
 
+The production send adapter returns a valid acceptance response before local
+command projection saving completes. Its `committed` promise and `retryCommit`
+function track that separate save; the submit timeout never covers it. Saving
+still uses the original command ID and invalidates conversation/directory reads
+after commit. A local save failure shows the existing accepted-action storage
+notice in the captured owner's Chat. Retry saves that response locally without
+another POST or receipt read; it cannot restore the submitted draft or erase a
+newer one. Other mutation commands retain their commit-before-return behavior.
+
 A timeout, network failure or another inconclusive submit error makes the result
 unknown and enables receipt checks. Each HTTP wait is bounded to ten seconds.
 Five reads then use bounded backoff for the fixed payload and request ID. If they
