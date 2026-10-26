@@ -5,7 +5,7 @@ function register(){
   if(customElements.get('pot-message-file'))return;
   customElements.define('pot-message-file',class extends HTMLElement{
     connectedCallback(){
-      if(this.started)return;this.started=true;this.abort=new AbortController();
+      if(this.started)return;this.started=true;this.abort=new AbortController();this.dataset.state='loading';
       this.link=document.createElement('a');this.link.href='#';this.link.textContent=this.reference.label||this.reference.href;this.link.onclick=event=>{event.preventDefault();this.open();};this.append(this.link);
       this.refresh=()=>{if(this.status)this.status.textContent=translate(document.documentElement.lang,`fileReference.${this.state||'pending'}`);if(this.retry)this.retry.textContent=translate(document.documentElement.lang,'retry');if(this.closeButton)this.closeButton.textContent=translate(document.documentElement.lang,'close');};
       window.addEventListener('pot:locale',this.refresh);this.load();
@@ -26,11 +26,11 @@ function register(){
           this.status?.remove();this.status=null;this.retry?.remove();this.retry=null;
           const claimed=this.options.previewClaims?.get(row.resource.id),canPreview=!claimed?.isConnected||claimed===this;
           if(this.reference.block&&!this.preview&&canPreview){this.options.previewClaims?.set(row.resource.id,this);this.link.hidden=true;this.preview=createResourceView({resource:row.resource,mode:'preview',caption:this.reference.label},{...this.options,noticeKey:'fileReference.savedVersion'});this.append(this.preview);}
-          this.link.setAttribute('aria-label',this.reference.label||row.resource.name);return;
+          this.link.setAttribute('aria-label',this.reference.label||row.resource.name);this.dataset.state='ready';return;
         }
         this.showStatus();
-        if(row&&['pending','resolving'].includes(row.state))this.timer=setTimeout(()=>this.load(),500);else this.retryButton();
-      }catch(error){if(!this.abort.signal.aborted){this.state=error.status?'unavailable':'source_offline';this.showStatus();this.retryButton();}}
+        if(row&&['pending','resolving'].includes(row.state))this.timer=setTimeout(()=>this.load(),500);else{this.dataset.state='error';this.retryButton();}
+      }catch(error){if(!this.abort.signal.aborted){this.dataset.state='error';this.state=error.status?'unavailable':'source_offline';this.showStatus();this.retryButton();}}
     }
     showStatus(){if(!this.status){this.status=document.createElement('span');this.status.className='file-reference-status';this.status.setAttribute('role','status');this.append(this.status);}this.refresh();}
     open(){
@@ -43,4 +43,4 @@ function register(){
     disconnectedCallback(){queueMicrotask(()=>{if(this.isConnected)return;clearTimeout(this.timer);this.abort?.abort();window.removeEventListener('pot:locale',this.refresh);this.dialog?.remove();if(this.row&&this.options.previewClaims?.get(this.row.resource?.id)===this)this.options.previewClaims.delete(this.row.resource.id);this.started=false;this.replaceChildren();this.preview=null;this.status=null;this.retry=null;});}
   });
 }
-export function createMessageFile(reference,message,options){register();const element=document.createElement('pot-message-file');Object.assign(element,{reference,message,options,identity:JSON.stringify([message,reference.href,reference.block,reference.label])});return element;}
+export function createMessageFile(reference,message,options){register();const element=document.createElement('pot-message-file');element.dataset.block=String(!!reference.block);Object.assign(element,{reference,message,options,identity:JSON.stringify([message,reference.href,reference.block,reference.label])});return element;}

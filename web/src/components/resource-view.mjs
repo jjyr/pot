@@ -42,12 +42,12 @@ function register(){
       if(!lease){fail();return;}
       this.dataset.state='loading';
       if(kind==='image'){
-        const image=node('img','resource-image');image.alt=caption||resource.name;image.loading='eager';image.decoding='async';image.hidden=true;image.onload=()=>{if(current()){image.hidden=false;ready();}};image.onerror=fail;setURL(image,lease.url(resource.entry));body.append(image);
+        const image=node('img','resource-image');image.alt=caption||resource.name;image.loading='eager';image.decoding='async';image.hidden=true;image.onload=async()=>{try{await image.decode();if(current()){image.hidden=false;ready();}}catch{fail();}};image.onerror=fail;setURL(image,lease.url(resource.entry));body.append(image);
         image.onclick=()=>expand.click();image.tabIndex=0;image.setAttribute('role','button');image.onkeydown=event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();expand.click();}};
         if(resource.mime_type==='image/gif'){
           const pause=node('button','resource-action');pause.type='button';pause.disabled=true;actions.prepend(pause);let paused=false;
           const toggle=()=>{paused=!paused;if(paused&&image.complete){const canvas=node('canvas');canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;canvas.getContext('2d').drawImage(image,0,0);canvas.className='resource-image resource-gif-still';body.prepend(canvas);image.hidden=true;}else{body.querySelector('canvas')?.remove();image.hidden=false;}pause.textContent=t(paused?'resume':'pause');};
-          pause.textContent=t('pause');pause.onclick=toggle;const prior=image.onload;image.onload=()=>{if(!current())return;prior();pause.disabled=false;if(matchMedia('(prefers-reduced-motion: reduce)').matches&&!paused)toggle();};
+          pause.textContent=t('pause');pause.onclick=toggle;const prior=image.onload;image.onload=async()=>{if(!current())return;await prior();if(!current()||this.dataset.state!=='ready')return;pause.disabled=false;if(matchMedia('(prefers-reduced-motion: reduce)').matches&&!paused)toggle();};
           const oldRefresh=refresh;const updatePause=()=>{oldRefresh();pause.textContent=t(paused?'resume':'pause');};window.addEventListener('pot:locale',updatePause);const stop=this.stopLocale;this.stopLocale=()=>{stop();window.removeEventListener('pot:locale',updatePause);};
         }
       }else if(kind==='audio'||kind==='video'){
