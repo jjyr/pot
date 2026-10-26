@@ -1,9 +1,8 @@
 // Playwright CLI contract against synthetic data and the real shared Chat/Task UI.
-async parentPage => {
- const context=await parentPage.context().browser().newContext({serviceWorkers:'block'}),page=await context.newPage();
+async page => {
  const assert=(value,message)=>{if(!value)throw Error(message);};
  const errors=[],onError=error=>errors.push(error.message);page.on('pageerror',onError);
- const origin=new URL(parentPage.url()).origin,at=Date.now()-6000;
+ const origin=new URL(page.url()).origin,at=Date.now()-6000;
  const call=(id,name,args,result,extra={})=>({id:`message-${id}`,role:'tool',text:'',status:'complete',tool:{id,turn_id:'request-u',name,args,result,phase:'completed',started_at_ms:at,finished_at_ms:at+1000,target:{runtime_id:'test-machine'},workdir:'/workspace/pot',output:[],...extra}});
  const command=(id,cmd,session)=>call(id,'exec_command',{cmd},{stdout:'Starting checks\n',session_id:session,exit_code:null});
  const poll=(id,session,result)=>call(id,'write_stdin',{session_id:session},result,{started_at_ms:at+1000,finished_at_ms:at+2000});
@@ -88,5 +87,5 @@ async parentPage => {
    try{for(const [locale,input,resize]of [['en','Send input','40 rows × 100 columns'],['zh-CN','发送输入','40 行 × 100 列']]){language=locale;view.update(message);const text=[...view.element.querySelectorAll('.tool-section')].map(node=>node.textContent).join('\n');if(!text.includes(input)||!text.includes(resize)||text.includes('hidden-session'))throw Error('Process interactions switch locale and hide IDs');}}finally{view.element.remove();}
   });
   assert(errors.length===0,errors.join('\n'));return {passed:true,errors,checks:'Chat/Task grouping, receipts, input, approvals, live output, quiet failures, expanded diagnostics and mobile layout'};
- }finally{await page.unroute('**/access/status',access);await page.unroute('**/api/v1/**',handler);page.off('pageerror',onError);await context.close();}
+ }finally{await page.unroute('**/access/status',access);await page.unroute('**/api/v1/**',handler);page.off('pageerror',onError);}
 }

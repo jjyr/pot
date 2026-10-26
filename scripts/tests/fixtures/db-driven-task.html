@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Persisted task window fixture</title>
+<link rel="stylesheet" href="/web/src/styles.css"><style>body{padding:20px}#page{width:min(900px,calc(100vw - 40px));height:640px;margin:15px auto;background:var(--canvas);overflow:auto}#results{font-size:12px}#approvals,#chat-approvals{display:none}</style>
+<pre id="results">Loading…</pre><div id="page" class="page-host"></div><div id="approvals"></div><div id="chat-approvals"></div>
+<script type="module">
+const parameters=new URLSearchParams(location.search),before=parameters.has('before'),mixed=parameters.has('mixed'),requests=[],prefix=before?'/output/task-history-before/web/src':'/web/src';
+const {createPages}=await import(prefix+'/components/pages.mjs'),{createResourceReads}=await import(prefix+'/state/resource-cache.mjs');
+const output=document.querySelector('#results'),name='pot-task-view-'+crypto.randomUUID(),events=[];
+for(let i=0;i<1200;i++){events.push({sequence:events.length+1,event:{update:{type:'message_started',id:'row-'+i}}},{sequence:events.length+2,event:{update:{type:'text_delta',text:'Execution update '+String(i+1).padStart(4,'0')+'. Synthetic retained task output.'+(mixed?' Variable-height Task evidence. '.repeat(i%11===0?28:i%4+1):'')}}},{sequence:events.length+3,event:{update:{type:'message_finished'}}});}
+const scope={owner:'assistant',space:'local'},info={id:'task',assistant_id:'assistant',title:'Long-running fixture',address:{node_id:'fixture-task',kind:'task',agent_id:'history-review'},phase:'running'},record={run_id:'run',info,request:{text:'Review the same synthetic task history.'},capabilities:{version:1,operations:['task.read','task.events','task.input','task.control']}};
+const client={production:true,chatCacheName:name,runtime:{runtime_id:'fixture-task',boot_id:'boot'},spaces:[{id:'local',control_id:'fixture-task',connected:true}],assistants:[{id:'assistant',name:'Fixture',space_id:'local',capabilities:{version:1,operations:['chat.read']}}],scope:()=>scope,request:async(path,options)=>{const url=new URL(path,location.href);if(url.pathname==='/api/v1/runtime')return {runtime_id:'fixture-task',host:{hostname:'Isolated fixture'}};if(url.pathname.endsWith('/events')){const after=Number(url.searchParams.get('after')||0),rows=events.slice(after,after+100);requests.push(after);return {events:rows,cursor:rows.at(-1)?.sequence||after,has_more:after+rows.length<events.length};}if(url.pathname.endsWith('/messages'))return {items:[]};if(url.pathname==='/api/v1/tasks/task')return structuredClone(record);return {items:[],pending:[]};},downloadFile:()=>{}};
+client.resources=createResourceReads(client);client.read=(...args)=>client.resources.read(...args);
+const pages=createPages({client,host:document.querySelector('#page'),approvalHost:document.querySelector('#approvals'),chatApprovalHost:document.querySelector('#chat-approvals'),chatVisible:()=>false,locale:()=> 'en',notify:text=>output.textContent=text,changed:()=>{},titleChanged:()=>{},openChat:()=>{}});
+window.addEventListener('pagehide',()=>{pages.dispose();client.resources.clear();indexedDB.deleteDatabase(name);indexedDB.deleteDatabase(name+'-tasks');});
+window.taskFixture={pages,client,events,record,scope,requests};
+await pages.openTask({...info,_space_id:'local'});
+for(let i=0;i<600&&!document.querySelector('.task-transcript')?.textContent.includes('Execution update 1200.');i++)await new Promise(resolve=>setTimeout(resolve,20));
+output.textContent='Ready: 1200 messages; '+(before?'baseline source':'committed DB window');
+</script>

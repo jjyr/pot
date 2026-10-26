@@ -1,6 +1,5 @@
 // Exercise the production page component with controlled, delayed API replies.
 async page=>{
- const context=await page.context().browser().newContext({serviceWorkers:'block'});page=await context.newPage();
  const state=STATE,assert=(value,message)=>{if(!value)throw Error(message);},errors=[];
  const onError=error=>errors.push(error.message);page.on('pageerror',onError);
  await page.route('**/task-refresh-fixture',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><link rel="stylesheet" href="/styles.css"><body><main style="height:680px;width:900px;max-width:100%;margin:40px auto;overflow:auto"></main></body></html>'}));
@@ -30,14 +29,23 @@ async page=>{
    f.pages.refresh(['usage']);f.pages.refresh(['permissions']);f.pages.refresh(['schedules']);
   });
   assert(await page.evaluate(()=>taskFixture.calls.length===1),'Unrelated changes do not reload task lists');
+  await page.clock.install();
+  await page.evaluate(()=>{const input=taskFixture.input;input.dispatchEvent(new CompositionEvent('compositionstart'));input.value='中';input.dispatchEvent(new InputEvent('input',{isComposing:true}));});
+  await page.clock.runFor(220);
+  assert(await page.evaluate(()=>taskFixture.calls.length===1),'Task search does not query IME preedit');
+  await page.evaluate(()=>{const input=taskFixture.input;input.value='';input.dispatchEvent(new CompositionEvent('compositionend'));});
+  await page.clock.runFor(220);
+  await page.evaluate(()=>{taskFixture.input.value='未提交的搜索';taskFixture.input.setSelectionRange(2,4);});
+
   await page.evaluate(()=>{const f=taskFixture;f.refresh=f.pages.refresh(['tasks']);for(let i=0;i<20;i++)f.pages.refresh(['tasks']);});
-  assert(await page.evaluate(()=>{const f=taskFixture;return f.calls.length===2&&f.pending.length===1&&!f.pending[0].options.signal.aborted&&f.input.isConnected&&f.rows.isConnected&&f.rows.children.length>0;}),'A burst retains the visible list and one active request');
+  assert(await page.evaluate(()=>{const f=taskFixture;return f.calls.length===2&&f.pending.length===1&&!f.pending[0].options.signal?.aborted&&f.input.isConnected&&f.rows.isConnected&&f.rows.children.length>0;}),'A burst retains the visible list and one active request');
   if(state.screenshot)await page.screenshot({path:state.screenshot});
-  await page.evaluate(async()=>{const f=taskFixture;f.items[0].phase='waiting';f.items[0].pending=2;f.reply();await f.refresh;});
+  await page.evaluate(async()=>{const f=taskFixture;f.items[0].phase='waiting';f.items[0].pending=2;f.reply();});
   await page.waitForFunction(()=>taskFixture.calls.length===3);
-  await page.evaluate(()=>taskFixture.reply());
+  await page.evaluate(async()=>{taskFixture.reply();await taskFixture.refresh;});
   await page.waitForFunction(()=>document.querySelector('.task-phase').textContent==='等待配额');
-  assert(await page.evaluate(()=>{const f=taskFixture;return f.calls.length===3&&f.rows.querySelector('.task-row')===f.row&&f.rows.scrollTop===f.scroll&&document.activeElement===f.input&&f.input.value==='未提交的搜索'&&f.input.selectionStart===2&&f.input.selectionEnd===4&&f.row.textContent.includes('2 条待处理指令');}),'One follow-up updates metadata while preserving nodes, draft, selection and scroll');
+  const followup=await page.evaluate(()=>{const f=taskFixture;return {calls:f.calls.length,pending:f.pending.length,sameRow:f.rows.querySelector('.task-row')===f.row,scroll:f.rows.scrollTop,savedScroll:f.scroll,focused:document.activeElement===f.input,draft:f.input.value,selection:[f.input.selectionStart,f.input.selectionEnd],updated:f.row.textContent.includes('2 条待处理指令')};});
+  assert(followup.calls===3&&followup.pending===0&&followup.sameRow&&followup.scroll===followup.savedScroll&&followup.focused&&followup.draft==='未提交的搜索'&&followup.selection[0]===2&&followup.selection[1]===4&&followup.updated,'One follow-up updates metadata while preserving nodes, draft, selection and scroll: '+JSON.stringify(followup));
   // Cached offline rows are retained and recover without repeated warnings.
   for(let attempt=0;attempt<2;attempt++){
    await page.evaluate(async()=>{const f=taskFixture;f.refresh=f.pages.refresh(['tasks']);for(const call of f.pending.splice(0))call.reject(Error('Offline fixture'));await f.refresh;});
@@ -59,7 +67,7 @@ async page=>{
   assert(await page.locator('.task-row').count()===0&&await page.locator('.page-empty').count()===1,'Removed tasks reconcile to the empty state');
   // Older requests must not overwrite a new filter, even if cancellation is ignored.
   await page.evaluate(()=>{const f=taskFixture;f.pages.refresh(['tasks']);f.retired=f.pending.splice(0);f.input.value='新查询';f.input.dispatchEvent(new Event('change'));});
-  assert(await page.evaluate(()=>taskFixture.retired[0].options.signal.aborted&&taskFixture.pending[0].path.includes('q=%E6%96%B0%E6%9F%A5%E8%AF%A2')),'Filter navigation aborts the previous generation');
+  assert(await page.evaluate(()=>!taskFixture.retired[0].options.signal?.aborted&&taskFixture.pending[0].path.includes('q=%E6%96%B0%E6%9F%A5%E8%AF%A2')),'Filter navigation releases its consumer while shared IO continues');
   await page.evaluate(()=>{taskFixture.items=[{id:'current',assistant_id:'a',title:'当前筛选任务',phase:'running',updated_at_ms:200}];taskFixture.reply();});
   await page.getByRole('button',{name:'当前筛选任务',exact:true}).waitFor();
   await page.evaluate(()=>{for(const call of taskFixture.retired)call.resolve({items:[{id:'stale',title:'过期任务'}]});});
@@ -69,7 +77,8 @@ async page=>{
   assert(await page.locator('.task-row').count()===2,'Row identity includes assistant identity');
   await page.getByRole('button',{name:'助手 b',exact:true}).click();
   await page.evaluate(()=>{taskFixture.pages.refresh(['tasks']);});
-  assert(await page.evaluate(()=>taskFixture.pending.length===1&&taskFixture.pending[0].options.owner==='b'&&!taskFixture.pending[0].options.signal.aborted),'Changes during detail loading do not navigate back to the list');
+  await page.waitForFunction(()=>taskFixture.pending.length===1);
+  assert(await page.evaluate(()=>taskFixture.pending.length===1&&taskFixture.pending[0].options.owner==='b'&&!taskFixture.pending[0].options.signal?.aborted),'Changes during detail loading do not navigate back to the list');
   await page.evaluate(()=>{taskFixture.detailRecord={capabilities:taskFixture.capabilities,info:{phase:'running'},request:{text:'目标'}};taskFixture.pending.shift().resolve(taskFixture.detailRecord);});
   await page.getByLabel('任务追加',{exact:true}).waitFor();
   await page.getByLabel('任务追加',{exact:true}).fill('保留任务指导');
@@ -79,5 +88,5 @@ async page=>{
   assert(await page.evaluate(()=>taskFixture.guidance===document.querySelector('textarea')&&taskFixture.guidance.value==='保留任务指导'),'Transcript updates retain the guidance draft');
   assert(errors.length===0,errors.join('\n'));
   return {passed:true,coalesced_refresh:true,stable_dom:true,retained_search:true,offline_recovery:true,stale_responses_ignored:true,owner_identity:true,detail_navigation:true,errors};
- }finally{await page.evaluate(()=>window.taskFixture?.pages.dispose());page.off('pageerror',onError);await context.close();}
+ }finally{await page.evaluate(()=>window.taskFixture?.pages.dispose());page.off('pageerror',onError);}
 }

@@ -1,5 +1,13 @@
+import {createMemoryProjectionStore} from '../../web/src/state/projection-store.mjs';
 import assert from 'node:assert/strict';
-import {createResourceCache,createResourceReads} from '../../web/src/state/resource-cache.mjs';
+import {createResourceCache,createResourceReads,displayProjection} from '../../web/src/state/resource-cache.mjs';
+import {utf8Bytes} from '../../web/src/state/projection-bytes.mjs';
+for(const text of ['中'.repeat(900000),'😀'.repeat(400000)]){
+  const record=displayProjection('/api/v1/tasks/t',{error:text,result:{text,outcome:{error:text}}});
+  assert(record.cache_truncated);for(const field of [record.error,record.result.text,record.result.outcome.error]){assert(utf8Bytes(field)<=1024*1024);assert(!field.includes('\ufffd'));}
+  const guidance=displayProjection('/api/v1/tasks/t/messages',Array.from({length:20},(_,id)=>({id,text})));
+  assert(guidance.cache_truncated);assert(utf8Bytes(JSON.stringify(guidance.items))<=16*1024*1024);assert(guidance.items.every(row=>utf8Bytes(row.text)<=1024*1024&&row.text.isWellFormed()));
+}
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
 const tick=async()=>{for(let i=0;i<10;i++)await Promise.resolve();};
 let time=0,reads=0;const notices=[],cache=createResourceCache({now:()=>time,onChange:(key,error)=>notices.push({key,error})});
@@ -60,14 +68,14 @@ for(const topic of ['tasks','runner']){
 // newly selected Space, and never place request credentials into a read cache.
 const {createProductionClient}=await import('../../web/src/adapters/production.mjs');
 const originalFetch=globalThis.fetch,transportCalls=[];let save=deferred(),version=1;
-globalThis.fetch=async(path,options={})=>{transportCalls.push({path,method:options.method});const url=new URL(path,'http://fixture');if(options.method==='POST'&&url.pathname==='/api/v1/assistants/bootstrap')return new Response(JSON.stringify({assistant:null}));if(options.method==='POST'){await save.promise;version++;return new Response(JSON.stringify({saved:true}));}return new Response(JSON.stringify(url.pathname==='/api/v1/runtime'?{runtime_id:'transport',boot_id:'boot'}:{version}));};
+globalThis.fetch=async(path,options={})=>{transportCalls.push({path,method:options.method});const url=new URL(path,'http://fixture');if(options.method==='POST'&&url.pathname==='/api/v1/assistants/bootstrap')return new Response(JSON.stringify({assistant:null}));if(options.method==='POST'){await save.promise;version++;return new Response(JSON.stringify({saved:true}));}return new Response(JSON.stringify(url.pathname==='/api/v1/runtime'?{runtime_id:'transport',boot_id:'boot'}:url.pathname==='/api/v1/providers'?{profiles:[{id:'one',name:'Fixture',revision:version}]}:{version}));};
 try{
-  const transport=await createProductionClient();transport.spaces=[{id:'a',control_id:'a'},{id:'b',control_id:'b'}];
+  const transport=await createProductionClient({resourceStorage:createMemoryProjectionStore()});transport.spaces=[{id:'a',control_id:'a'},{id:'b',control_id:'b'}];
   transport.setScope({space:'a',owner:'alpha'});await transport.read('/api/v1/providers');await transport.read('/api/v1/agent/routing');
   transport.setScope({space:'b',owner:'beta'});await transport.read('/api/v1/providers');transport.setScope({space:'a',owner:'alpha'});
   const writing=transport.request('/api/v1/providers',{method:'POST',body:{api_key:'fixture-private-key'}});transport.setScope({space:'b',owner:'beta'});save.resolve();await writing;
   const beforeReads=transportCalls.length;await transport.read('/api/v1/providers');assert.equal(transportCalls.length,beforeReads,'A save finishing after navigation cannot invalidate the new Space');
-  transport.setScope({space:'a',owner:'alpha'});assert.equal((await transport.read('/api/v1/providers')).version,1,'Save invalidation preserves visible content while refreshing');await tick();assert.equal((await transport.read('/api/v1/providers')).version,2);
+  transport.setScope({space:'a',owner:'alpha'});assert.equal((await transport.read('/api/v1/providers')).profiles[0].revision,1,'Save invalidation preserves visible content while refreshing');await tick();assert.equal((await transport.read('/api/v1/providers')).profiles[0].revision,2);
   await transport.read('/api/v1/agent/routing');await tick();assert.equal(transportCalls.filter(call=>call.path.includes('/agent/routing')).length,2,'Saving providers invalidates associated routing data');
   // With no Provider, first-use bootstrap is a read-only no-op. Invalidating
   // directory reads here would make their background refresh bootstrap again.
@@ -85,7 +93,7 @@ console.log('Shared transport save invalidation and captured-scope fencing passe
 let pluginEnabled=true;const pluginCalls=[];
 globalThis.fetch=async(path,options={})=>{const url=new URL(path,'http://fixture');pluginCalls.push({path:url.pathname,space:url.searchParams.get('space_id'),method:options.method||'GET'});if(url.pathname==='/api/v1/runtime')return new Response(JSON.stringify({runtime_id:'plugins',boot_id:'boot'}));if(options.method==='POST'){pluginEnabled=false;return new Response(JSON.stringify({saved:true}));}return new Response(JSON.stringify({provider_types:[{id:'plugin/type',available:pluginEnabled}],connections:[{profile_id:'one',available:pluginEnabled}]}));};
 try{
- const transport=await createProductionClient();transport.spaces=[{id:'a',control_id:'a'},{id:'b',control_id:'b'}];transport.setScope({space:'a',owner:''});
+ const transport=await createProductionClient({resourceStorage:createMemoryProjectionStore()});transport.spaces=[{id:'a',control_id:'a'},{id:'b',control_id:'b'}];transport.setScope({space:'a',owner:''});
  assert.equal((await transport.read('/api/v1/providers')).provider_types[0].available,true);
  transport.setScope({space:'b'});await transport.read('/api/v1/providers');transport.setScope({space:'a'});
  await transport.request('/api/v1/extensions',{method:'POST',body:{action:'toggle',kind:'plugins',id:'plugin',enabled:false,revision:1}});

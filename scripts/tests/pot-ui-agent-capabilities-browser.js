@@ -1,6 +1,5 @@
 // Shared product UI with explicit operation descriptions. No model calls.
 async page => {
- const context=await page.context().browser().newContext({serviceWorkers:'block'});page=await context.newPage();
  const assert=(condition,message)=>{if(!condition)throw Error(message);};
  const calls=[],errors=[],onError=error=>errors.push(error.message);page.on('pageerror',onError);
  const assistantCaps={version:1,scope:'owner',operations:['chat.read','chat.send','chat.subscribe','task.read','task.list','task.outcomes']};
@@ -47,5 +46,5 @@ async page => {
   assert(!calls.slice(mark).some(call=>call.path.endsWith('/events')||call.path.endsWith('/messages')),'Unsupported task transcript and input endpoints are not queried');
   assert(errors.length===0,errors.join('\n'));return {passed:true,local_privilege_removed:true,remote_task_controls:true,dynamic_capabilities:true};
  }catch(error){throw Error(error.message+'; DOM: '+(await page.locator('body').innerText()).slice(0,2000)+'; errors: '+errors.join('; ')+'; reads: '+calls.map(call=>call.path).join(','));
- }finally{await page.unroute('**/api/v1/**',handler);await page.unroute('**/access/status',access);page.off('pageerror',onError);await context.close();}
+ }finally{await page.unroute('**/api/v1/**',handler);await page.unroute('**/access/status',access);page.off('pageerror',onError);}
 }

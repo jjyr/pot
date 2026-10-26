@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {Virtualizer,_resetIOSDetectionForTests} from '../../web/src/vendor/tanstack-virtual-core.mjs';
-import {createReadingCursor} from '../../web/src/components/reading-cursor.mjs';
+import {createConversationController} from '../../web/src/components/conversation-controller.mjs';
 
 // Exercise real TanStack gesture/compensation state with a deterministic clock.
 // No browser physics are simulated: offsets represent browser input.
@@ -10,16 +10,16 @@ const originalCSS=globalThis.CSS;
 globalThis.Element=class extends EventTarget{};
 function fixture(os){
  Object.defineProperty(globalThis,'navigator',{configurable:true,value:{userAgent:os,platform:os,maxTouchPoints:5}});_resetIOSDetectionForTests();
- let time=0,next=0,offsetChanged;const timers=new Map(),frames=new Map(),writes=[];
- const win={performance:{now:()=>time},setTimeout(fn,delay){const id=++next;timers.set(id,{fn,at:time+delay});return id;},clearTimeout:id=>timers.delete(id),requestAnimationFrame(fn){const id=++next;frames.set(id,fn);return id;},cancelAnimationFrame:id=>frames.delete(id)};
+ let time=0,next=0,offsetChanged,controller;const timers=new Map(),frames=new Map(),writes=[];
+ const win=Object.assign(new EventTarget(),{performance:{now:()=>time},setTimeout(fn,delay){const id=++next;timers.set(id,{fn,at:time+delay});return id;},clearTimeout:id=>timers.delete(id),requestAnimationFrame(fn){const id=++next;frames.set(id,fn);return id;},cancelAnimationFrame:id=>frames.delete(id)});
  const styles=new Map(),history=new Element();Object.assign(history,{scrollTop:1000,scrollHeight:10000,clientHeight:600,clientWidth:390,ownerDocument:{defaultView:win},getBoundingClientRect:()=>({top:0}),querySelectorAll:()=>[],style:{getPropertyValue:key=>styles.get(key)?.value||'',getPropertyPriority:key=>styles.get(key)?.priority||'',setProperty:(key,value,priority='')=>styles.set(key,{value,priority})}});
  const virtualizer=new Virtualizer({count:100,getScrollElement:()=>history,estimateSize:()=>100,initialOffset:1000,
   observeElementRect(_v,cb){cb({width:390,height:600});return()=>{};},observeElementOffset(_v,cb){offsetChanged=cb;return()=>{};},
-  scrollToFn(offset,{adjustments=0}={}){const top=offset+adjustments;if(top!==history.scrollTop){writes.push(top);history.scrollTop=top;}},onChange:()=>{}});
+  scrollToFn(offset,{adjustments=0}={}){const top=offset+adjustments;if(top!==history.scrollTop){writes.push(top);history.scrollTop=top;controller?.wrote(top);}},onChange:()=>{}});
  virtualizer._willUpdate();virtualizer.getMeasurements();
- return {history,virtualizer,writes,timers,
+ return {history,virtualizer,writes,timers,attach:value=>{controller=value;},
   event(name){const event=new Event(name);Object.defineProperty(event,'touches',{value:name==='touchstart'?[{clientY:200}]:[]});history.dispatchEvent(event);},
-  scroll(top){history.scrollTop=top;offsetChanged(top,true);},
+  scroll(top){history.scrollTop=top;controller?.nativeScroll();offsetChanged(top,true);},
   tick(ms){time+=ms;for(const [id,timer]of [...timers])if(timer.at<=time){timers.delete(id);timer.fn();}},
   frame(){const ready=[...frames.values()];frames.clear();for(const fn of ready)fn();},
   close:()=>virtualizer.cleanup(),
@@ -52,41 +52,58 @@ try{
  assert.equal(stop.history.style.getPropertyValue('overflow-y'),'','new input restores native scrolling immediately');
  assert.equal(stop.virtualizer.scrollState,null);assert.equal(stop.virtualizer.isTouchScrolling,true);
  assert.deepEqual(stop.writes,[],'a cancelled destination cannot replay over the new touch');stop.close();
- // The cursor consumes its bound virtualizer's state rather than timing motion.
- const f=fixture('iPhone'),v=f.virtualizer,commands=[];
- const reading=createReadingCursor(f.history);
- reading.bindScroll({get scrolling(){return v.isTouchScrolling;},cancel:()=>v.cancelScroll(),project:command=>commands.push(command)});
- reading.restore({mode:'reading',position:{top:1000,anchors:[]}});reading.apply();commands.length=0;
- f.event('touchstart');f.scroll(950);reading.observeScroll();reading.apply();reading.layout(()=>{});
- f.event('touchend');f.event('touchstart');reading.reflow();
- assert.deepEqual(commands,[],'continuous touch and layout updates do not restore an old cursor');
- reading.latest();reading.apply();assert.equal(commands.length,1);assert.equal(commands[0].explicit,true,'an explicit Latest command immediately takes priority');
- commands.length=0;f.event('touchend');f.event('scrollend');reading.pause();reading.apply();reading.apply();
- assert.deepEqual(commands,[],'ordinary renders never turn a saved historical anchor into a new scroll command');
- reading.latest();f.scroll(0);reading.observeScroll();
- assert.equal(reading.following,true,'native offsets from hidden/remounted history cannot replace pending Latest restoration');
- reading.apply();f.history.scrollTop=700;reading.observeScroll();
- assert.equal(reading.following,true,'native layout movement after Latest was applied cannot become historical reading without reader input');
- reading.restore({mode:'reading',position:{top:700,anchors:[]}});reading.apply();
- f.history.scrollTop=600;reading.observeScroll();
- assert.equal(reading.snapshot().position.top,700,'native layout movement cannot replace a restored reading position');
- f.history.dispatchEvent(new Event('pointerdown'));f.history.scrollTop=500;reading.observeScroll();
- assert.equal(reading.snapshot().position.top,500,'reader input authorizes subsequent native movement');
- reading.latest();reading.apply();f.history.scrollTop=400;reading.observeScroll();
- assert.equal(reading.following,true,'Latest retires the preceding reader input before delayed native events');
- reading.dispose();f.close();
- // Width reflow can deliver multiple measurement batches. Retain the requested
- // message offset through those batches, then release it on the next gesture.
- const resized=fixture('iPhone');let rowTop=1000;
- const row={dataset:{scrollAnchor:'message:m',messageId:'m'},getBoundingClientRect:()=>({top:rowTop-resized.history.scrollTop,bottom:rowTop-resized.history.scrollTop+200,height:200})};
- resized.history.querySelectorAll=()=>[row];
- const cursor=createReadingCursor(resized.history),positions=[];
- cursor.bindScroll({scrolling:false,cancel:()=>{},project({top}){positions.push(top);resized.history.scrollTop=top;cursor.acceptScroll();}});
- cursor.restore({mode:'reading',position:{top:1000,anchors:[{key:'message:m',offset:0}]}});cursor.apply();positions.length=0;
- cursor.resize();rowTop+=30;cursor.apply();cursor.commit();rowTop+=20;cursor.apply();
- assert.deepEqual(positions,[1030,1050],'measurement batches keep the original resized reading anchor');
- resized.history.dispatchEvent(new Event('pointerdown'));positions.length=0;rowTop+=10;cursor.apply();
- assert.deepEqual(positions,[],'new input releases width restoration immediately');cursor.dispose();resized.close();
+ // The product controller is tested against the real engine. DOM facts can
+ // arrive before or after its measurement cache, independently of user input.
+ for(const os of ['iPhone','Android']){
+  for(const order of ['dom-first','measure-first']){
+   const f=fixture(os),v=f.virtualizer;let actualTop=1000,requested=0;
+   const row={dataset:{scrollAnchor:'message:m',messageId:'m',sequence:'11'},getBoundingClientRect:()=>({top:actualTop-f.history.scrollTop-v._holdOffset,bottom:actualTop-f.history.scrollTop-v._holdOffset+200,height:200})};
+   f.history.querySelectorAll=()=>[row];
+   const notifications=[];
+   const c=createConversationController({scroller:f.history,virtualizer:v,requestLayout:()=>requested++,scrolled:delta=>notifications.push({delta,published:c.api.snapshot().position?.anchor?.offset,actual:row.getBoundingClientRect().top})});f.attach(c);
+   const states=[],off=c.api.subscribeReading(state=>states.push(state));
+   const commit=()=>{c.beforeLayout();v.getMeasurements();c.reconcile();c.publish();};
+   c.api.restore({mode:'reading',position:{top:1000,anchors:[{key:'message:m',offset:0}],anchor:{id:'m',offset:0,sequence:'11'}}});commit();f.writes.length=0;
+   const trace=[];
+   if(order==='measure-first')v.resizeItem(0,160);
+   actualTop+=60;commit();trace.push({reason:'height +60',top:f.history.scrollTop,offset:row.getBoundingClientRect().top});
+   if(order==='dom-first')v.resizeItem(0,160);
+   for(let i=0;i<5;i++)commit();
+   assert.deepEqual(f.writes,[1060],`${os}/${order}: a late measurement and repeated layouts cannot compensate the same delta twice`);
+   assert.equal(trace[0].offset,0);
+   actualTop+=30;commit();v.resizeItem(1,130);commit();
+   actualTop+=20;v.resizeItem(2,120);commit();
+   assert.deepEqual(f.writes,[1060,1090,1110],'independent height changes each receive their own correction');
+   // Wheel and keyboard movement is adopted before the next geometry commit.
+   for(const kind of ['wheel','keydown']){
+    const beforeInput=row.getBoundingClientRect().top;actualTop+=25;
+    const event=new Event(kind);Object.assign(event,kind==='wheel'?{deltaY:-36,deltaX:0}:{key:'ArrowUp'});
+    f.history.closest=()=>null;f.history.dispatchEvent(event);
+    if(kind==='keydown')c.idle(); // The preceding wheel's idle can arrive first.
+    f.scroll(f.history.scrollTop-36);
+    v.resizeItem(3,v.getMeasurements()[3].size+25);commit();
+    assert.equal(row.getBoundingClientRect().top,beforeInput+36,`${kind}: pending DOM growth is geometry; only the native input delta changes the anchor`);
+    if(kind==='keydown'){f.scroll(f.history.scrollTop-4);commit();assert.equal(row.getBoundingClientRect().top,beforeInput+40,'the next native key-tail frame remains input after an older idle notification');}
+    const writes=f.writes.length;commit();commit();assert.equal(f.writes.length,writes);
+   }
+   // Touch corrections use the same model and are held by the engine, rather
+   // than a second cursor/timer. Drawing the held offset preserves the anchor.
+   f.event('touchstart');const move=new Event('touchmove');Object.defineProperty(move,'touches',{value:[{clientY:220}]});f.history.dispatchEvent(move);f.scroll(f.history.scrollTop-20);
+   const touchOffset=row.getBoundingClientRect().top,native=f.history.scrollTop,writes=f.writes.length;
+   actualTop+=40;v.resizeItem(4,140);commit();commit();
+   assert.equal(f.history.scrollTop,native);assert.equal(f.writes.length,writes);assert.equal(v._holdOffset,40);assert.equal(row.getBoundingClientRect().top,touchOffset);
+   v.setOptions({...v.options,onChange:()=>{if(!v.isTouchScrolling)commit();}});
+   f.event('touchend');f.event('scrollend');commit();
+   assert.equal(f.history.scrollTop,native+40);assert.equal(v._holdOffset,0);assert.equal(row.getBoundingClientRect().top,touchOffset);
+   assert.equal(f.writes.length,writes+1,'the held correction flushes once after native touch ownership ends');
+   // Layout proximity to the bottom is not user intent to follow.
+   f.history.scrollHeight=f.history.scrollTop+f.history.clientHeight;commit();assert.equal(c.api.following,false);
+   c.api.locate({id:'m'});const interrupt=new Event('wheel');Object.assign(interrupt,{deltaY:-36,deltaX:0});f.history.dispatchEvent(interrupt);f.scroll(f.history.scrollTop-36);commit();assert.equal(c.api.destination,null,'input interrupts explicit navigation');
+   const published=states.at(-1);assert.equal(published.position.anchor.offset,row.getBoundingClientRect().top,'published state reflects the compensated geometry');
+   assert.ok(notifications.length>0&&notifications.every(item=>item.published===item.actual),'history boundary callbacks observe the newly committed reading point');
+   assert.ok(requested>0);off();c.close();f.close();
+  }
+ }
 }finally{
  if(originalNavigator)Object.defineProperty(globalThis,'navigator',originalNavigator);else delete globalThis.navigator;
  globalThis.Element=originalElement;_resetIOSDetectionForTests();

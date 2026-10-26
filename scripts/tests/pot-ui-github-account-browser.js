@@ -1,7 +1,5 @@
 // Real account disclosure and plugin-owned subscription contract; synthetic IO.
 async page=>{
- const context=await page.context().browser().newContext({serviceWorkers:'block'});page=await context.newPage();
- try{
   await page.route('**/github-account-fixture',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"><body></body></html>'}));
   await page.goto(STATE.origin+'/github-account-fixture');
   const result=await page.evaluate(async()=>{
@@ -77,5 +75,4 @@ async page=>{
   if(await page.locator('.integration-toggle').getAttribute('aria-expanded')!=='true')throw Error('Keyboard disclosure failed');
   if(!await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth))throw Error('Mobile content overflows');
   console.log(result);return {passed:true};
- }finally{await context.close();}
 }

@@ -1,10 +1,9 @@
 // Shared production Markdown and reply components, exercised through Playwright
 // CLI against the disposable preview or authenticated HTTP integration fixture.
-async parentPage=>{
+async page=>{
   // Service-worker responses bypass Playwright routing. Isolate the module-load
   // tests while retaining the integration fixture's authenticated cookies.
-  const context=await parentPage.context().browser().newContext({serviceWorkers:'block',storageState:await parentPage.context().storageState()});
-  const page=await context.newPage();
+  const context=page.context();
   const assert=(value,message)=>{if(!value)throw Error(message);},errors=[],remote=[];
   const onError=error=>errors.push(error.message);
   const onRequest=request=>{if(new URL(request.url()).hostname.endsWith('.test'))remote.push(request.url());};
@@ -15,7 +14,7 @@ async parentPage=>{
   const vendorRoute=async route=>{loads++;started();await pending;await route.continue();};
   await page.route('**/vendor/pele.mjs',vendorRoute);
   try{
-    await page.goto(new URL('/?locale=zh-CN&theme=light&conversation=preview-conversation',parentPage.url()).href);
+    await page.goto(new URL('/?locale=zh-CN&theme=light&conversation=preview-conversation',page.url()).href);
     await page.evaluate(async()=>{
       const {renderMarkdown}=await import('/components/markdown.mjs');
       const {createReplyBubble}=await import('/components/reply.mjs');
@@ -165,6 +164,6 @@ async parentPage=>{
   }finally{
     release();await page.unroute('**/vendor/pele.mjs',vendorRoute);
     page.off('pageerror',onError);page.off('request',onRequest);
-    await context.close();
+
   }
 }

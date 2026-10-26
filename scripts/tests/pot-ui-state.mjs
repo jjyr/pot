@@ -5,7 +5,7 @@ import {createEnterGuard, bindComposer} from '../../web/src/components/composer.
 import {isMobileBrowser} from '../../web/src/components/input-platform.mjs';
 import {messages,translate} from '../../web/src/locales/messages.mjs';
 import {projectChatReplies,replyFailureKind} from '../../web/src/state/chat-replies.mjs';
-import {taskElapsed,taskClockEnd} from '../../web/src/components/task-time.mjs';
+import {taskElapsed,taskClockEnd,bindTaskClock} from '../../web/src/components/task-time.mjs';
 import {bindResumeRecovery} from '../../web/src/state/resume.mjs';
 import {bindViewport} from '../../web/src/components/viewport.mjs';
 import {assistantActivity} from '../../web/src/components/assistant-activity.mjs';
@@ -77,6 +77,24 @@ for(const phase of ['complete','failed','cancelled','interrupted']){
 assert.equal(taskElapsed(taskStart,taskStart+138000,'zh-CN',true),'2分18秒');
 assert.equal(taskElapsed(0,taskStart,'en',true),'');
 assert.equal(taskClockEnd({phase:'waiting',finished_at_ms:123},456),456);
+
+// The former browser clock sweep is a deterministic presentation contract:
+// tick existing nodes, freeze terminal receipts, stop when hidden/disposed.
+const clockDocument=new EventTarget(),clockTimers=new Map(),originalClock={document:globalThis.document,setTimeout:globalThis.setTimeout,clearTimeout:globalThis.clearTimeout,now:Date.now};
+let clockNow=taskStart+754000,clockLocale='en',clockID=0;
+const clockRow=(finished=false)=>({dataset:{startedAt:String(taskStart),...(finished?{finishedAt:String(taskStart+138000)}:{})},hasAttribute:key=>finished&&key==='data-finished-at',textContent:''});
+const liveClock=clockRow(),finishedClock=clockRow(true);
+try{
+  globalThis.document=clockDocument;globalThis.setTimeout=callback=>{const id=++clockID;clockTimers.set(id,callback);return id;};globalThis.clearTimeout=id=>clockTimers.delete(id);Date.now=()=>clockNow;
+  const clock=bindTaskClock({querySelectorAll:()=>[liveClock,finishedClock]},{locale:()=>clockLocale,active:()=>true});
+  clock.refresh();assert.equal(liveClock.textContent,'Elapsed 12m 34s');assert.equal(finishedClock.textContent,'Elapsed 2m 18s');assert.equal(clockTimers.size,1);
+  clockNow+=1000;[...clockTimers.values()][0]();assert.equal(liveClock.textContent,'Elapsed 12m 35s');assert.equal(finishedClock.textContent,'Elapsed 2m 18s');
+  clockLocale='zh-CN';clock.refresh();assert.equal(liveClock.textContent,'已用 12分35秒');
+  clockDocument.hidden=true;clockDocument.dispatchEvent(new Event('visibilitychange'));assert.equal(clockTimers.size,0);
+  clockDocument.hidden=false;clockDocument.dispatchEvent(new Event('visibilitychange'));assert.equal(clockTimers.size,1);clock.dispose();assert.equal(clockTimers.size,0);
+  clockDocument.dispatchEvent(new Event('visibilitychange'));assert.equal(clockTimers.size,0);
+}finally{globalThis.document=originalClock.document;globalThis.setTimeout=originalClock.setTimeout;globalThis.clearTimeout=originalClock.clearTimeout;Date.now=originalClock.now;}
+
 
 for(const [locale,catalog] of Object.entries(messages)){
   assert.deepEqual(Object.keys(catalog).sort(),Object.keys(messages.en).sort(),`Shared translation keys: ${locale}`);

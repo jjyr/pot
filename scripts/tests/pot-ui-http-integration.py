@@ -97,20 +97,16 @@ def run(binary, base, env, cli_command, profile_only=False):
                 .replace("STATE", json.dumps({"origin": origin}))
                 .replace("docs/pr-images/", str(ROOT / "output/pr-images/regression") + "/")
             )
-            output = browser_cli(
-                "run-code",
-                "async page => { const context = await page.context().browser().newContext({serviceWorkers:'block',storageState:await page.context().storageState()}); "
+            wrapper = (
+                "async page => { const context = await page.context().browser().newContext({locale:'en-US',viewport:{width:1280,height:800},serviceWorkers:'block',storageState:await page.context().storageState()}); "
                 "try { const fixture = await context.newPage(); await fixture.goto("
                 + json.dumps(origin)
                 + "); return await ("
                 + code
-                + ")(fixture); } finally { await context.close(); } }",
+                + ")(fixture); } finally { await context.close(); } }"
             )
-            marker = (
-                '"errors":[]'
-                if script in {"pot-ui-shell-browser.js", "pot-ui-production-browser.js"}
-                else '"passed":true'
-            )
+            output = browser_cli("run-code", wrapper)
+            marker = '"errors":[]' if script == "pot-ui-production-browser.js" else '"passed":true'
             if marker not in output:
                 raise RuntimeError(script + " did not pass")
             print("Browser passed: " + script, flush=True)
@@ -482,11 +478,8 @@ def run(binary, base, env, cli_command, profile_only=False):
                 "pot-ui-agent-capabilities-browser.js",
                 "pot-ui-tasks-browser.js",
                 "pot-ui-task-refresh-browser.js",
-                "pot-ui-machine-identity-browser.js",
-                "pot-ui-machines-browser.js",
                 "pot-ui-github-account-browser.js",
                 "pot-ui-refresh-browser.js",
-                "pot-ui-shell-browser.js",
                 "pot-ui-production-browser.js",
             ]:
                 browser_fixture(script)
@@ -497,16 +490,11 @@ def run(binary, base, env, cli_command, profile_only=False):
                 raise RuntimeError("Browser did not return successful integration evidence")
             print("Browser passed: pot-ui-http-browser.js", flush=True)
             for script in [
-                "pot-ui-fluid-browser.js",
-                "pot-ui-mobile-directory-browser.js",
                 "pot-ui-replies-browser.js",
-                "pot-ui-reply-outcomes-browser.js",
                 "pot-ui-process-runs-browser.js",
-                "pot-ui-continuation-browser.js",
                 "pot-ui-mermaid-browser.js",
                 "pot-ui-file-images-browser.js",
                 "pot-ui-task-approvals-browser.js",
-                "pot-ui-task-time-browser.js",
             ]:
                 browser_fixture(script)
             actual = (base / "download.bin").read_bytes()

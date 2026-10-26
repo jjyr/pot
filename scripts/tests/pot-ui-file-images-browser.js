@@ -1,6 +1,5 @@
 // Shared production client, Markdown, reply and tool components on an isolated origin.
-async parentPage=>{
-  const context=await parentPage.context().browser().newContext({serviceWorkers:'block',storageState:await parentPage.context().storageState()}),page=await context.newPage();
+async page=>{
   const assert=(value,message)=>{if(!value)throw Error(message);},errors=[],reads=[];
   page.on('pageerror',error=>errors.push(error.message));
   const task='21cfe7c9-34cc-41a8-9156-39a8341ad3dc';let png,hold=false,resume,started,fail=false;
@@ -14,7 +13,7 @@ async parentPage=>{
   });
   try{
     await page.route('**/file-images-fixture?*',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"><body></body></html>'}));
-    await page.setViewportSize({width:1000,height:760});await page.goto(new URL('/file-images-fixture?locale=zh-CN&theme=light',parentPage.url()).href);
+    await page.setViewportSize({width:1000,height:760});await page.goto(new URL('/file-images-fixture?locale=zh-CN&theme=light',page.url()).href);
     png=await page.evaluate(async task=>{
       const canvas=document.createElement('canvas');canvas.width=480;canvas.height=320;
       const c=canvas.getContext('2d');c.fillStyle='#deecf5';c.fillRect(0,0,480,320);c.fillStyle='#f3c35d';c.beginPath();c.arc(375,75,32,0,Math.PI*2);c.fill();
@@ -80,5 +79,5 @@ async parentPage=>{
     await page.evaluate(()=>{imageFixture.taskView.dispose();imageFixture.host.replaceChildren();});
     assert(errors.length===0,errors.join('\n'));
     return {passed:true,inline:true,download:true,dialog:true,owner_scope:true,streaming:true,mobile:true,locale:true,failure:true,task:true,tool:true,errors};
-  }finally{resume?.();await context.close();}
+  }finally{resume?.();}
 }

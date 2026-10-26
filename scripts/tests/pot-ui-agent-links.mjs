@@ -1,3 +1,4 @@
+import {createMemoryProjectionStore} from '../../web/src/state/projection-store.mjs';
 import assert from 'node:assert/strict';
 import {projectLinkedAssistants,linkedAssistantID,supportsCapability,agentFailureKey} from '../../web/src/state/agent-links.mjs';
 import {createProductionClient} from '../../web/src/adapters/production.mjs';
@@ -17,7 +18,7 @@ globalThis.fetch=async(url,options)=>{
  const value=url==='/api/v1/runtime'?{runtime_id:'local-node',boot_id:'boot'}:options.method==='POST'?{message_id:'accepted-message',duplicate:false}:frame;
  return new Response(JSON.stringify(value));
 };
-const client=await createProductionClient();client.assistants=projected;client.setScope({space:'local',owner:projected[0].id});
+const client=await createProductionClient({resourceStorage:createMemoryProjectionStore()});client.assistants=projected;client.setScope({space:'local',owner:projected[0].id});
 client.uiLocale=()=> 'zh-CN';
 assert.equal((await client.snapshot()).owner_id,JSON.stringify(['local',projected[0].id]));
 let route=new URL(calls.at(-1).url,'http://fixture');
