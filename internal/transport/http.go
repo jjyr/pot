@@ -149,7 +149,7 @@ func streamSnapshots(w http.ResponseWriter, r *http.Request, app *Application) {
 func writeHeartbeat(controller *http.ResponseController, w http.ResponseWriter) error {
 	_ = controller.SetWriteDeadline(time.Now().Add(15 * time.Second))
 	defer controller.SetWriteDeadline(time.Time{})
-	if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+	if _, err := fmt.Fprint(w, "event: heartbeat\ndata: {}\n\n"); err != nil {
 		return err
 	}
 	return controller.Flush()

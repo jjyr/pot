@@ -370,7 +370,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       projection.append(label(t(pending.phase==='uncertain'?'send.unknown':'send.confirming')));
       if(pending.recoverable){const retry=el('button','text-button',t('send.checkRetry'));retry.type='button';retry.disabled=visibleConnection!=='connected';retry.onclick=()=>confirmations.recover(pending);projection.append(retry);}
     }
-    projection.append(label(error || connectionError || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
+    projection.append(label(error || (connectionError?.uiKey?t(connectionError.uiKey):connectionError) || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
     if (directoryStorageFailed||visibleConnection === 'offline'||chatCacheFailed) {
       const retry = el('button', 'text-button', t('retry'));
       retry.type = 'button';
@@ -868,6 +868,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     state.uiAnchor=messageWindow.anchor?.sequence||null;
   }
   function pendingSend(){return state.snapshot&&state.pending.has(ownerKey(state.snapshot));}
+  function readyFromSnapshot(){connection='connected';connectionError='';disconnected=false;if(chatCacheFailed){chatCacheFailed=false;error='';}}
   async function applySnapshot(snapshot, receivedEpoch = epoch, receivedMessages=snapshot.messages,{live=true}={}) {
     if (disposed || receivedEpoch !== state.epoch) return;
     if(state.snapshot&&validSnapshot(snapshot)&&state.snapshot.boot_id!==snapshot.boot_id){
@@ -893,10 +894,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(live&&validSnapshot(snapshot)){awaitingSnapshot=false;}
     const pendingReceipt=state.pending.get(ownerKey(snapshot));
     let accepted;try{accepted=acceptSnapshot(state,snapshot,receivedEpoch,{committed:true,receivedMessages});}catch(reason){if(reason.message==='conversation_gap'){loadSnapshot(true);return;}throw reason;}
-    if (!accepted){if(state.snapshot&&validSnapshot(snapshot)&&state.snapshot.cursor===snapshot.cursor){if(live)connection='connected';updateControls();}return;}
+    if (!accepted){if(state.snapshot&&validSnapshot(snapshot)&&state.snapshot.cursor===snapshot.cursor){if(live)readyFromSnapshot();updateControls();}return;}
     if(pendingReceipt && !state.pending.has(pendingReceipt.key))confirmations.confirmed(pendingReceipt);
-    if(live){connection = 'connected';connectionError = '';}
-    if(chatCacheFailed){chatCacheFailed=false;error='';}
+    if(live)readyFromSnapshot();
     snapshot=state.snapshot;
     if(editorOwner !== ownerKey(snapshot)&&!chatPosition)restoreSavedPosition(activeView?.position);
     syncEditor();
@@ -928,9 +928,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     awaitingSnapshot=!!client.production;connection='connecting';updateControls();
     unsubscribe = chatSession.watch({snapshot:(snapshot,received,options)=>applySnapshot(snapshot,receivedEpoch,received,options),failed:reason=>{if(disposed||receivedEpoch!==epoch)return;if(['conversation_gap','history_gap'].includes(reason.message))loadSnapshot(true);else if(reason.uiKey==='identityChanged'){connection='offline';error=t('identityChanged');updateControls();}else cacheFailure(reason);},removed:()=>loadDirectory(),connection:(value, reason) => {
       if (disposed || receivedEpoch !== state.epoch) return;
-      if (value === 'offline') {disconnected = true;connectionError = reason?.message || t('streamDisconnected');}
+      if (value === 'offline') {disconnected = true;connectionError = reason?.uiKey?reason:reason?.message || t('streamDisconnected');}
       if (value === 'connected') connectionError = '';
-      if (value === 'connected' && disconnected) { disconnected = false; loadSnapshot(true); }
+      if(value==='connecting'&&client.production)awaitingSnapshot=true;
+      if (value === 'connected' && disconnected && client.desktop) { disconnected = false; loadSnapshot(true); }
       else { connection = value==='connected'&&awaitingSnapshot?'connecting':value; updateControls(); }
     }});
     if(!client.production)return loadSnapshot();
@@ -1104,8 +1105,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   if(client.production){attachChanges();loadDirectory();updates?.refresh(client.scope());}else attach();
   const stopResume=bindResumeRecovery(async()=>{
     if(disposed)return;
-    const snapshot=selectedAssistant||!client.production?loadSnapshot(true):Promise.resolve();
-    if(client.production){attachChanges();pages.refresh();pages.permissions();refreshBackgroundTasks();}
+    const snapshot=(client.desktop||!client.production)&&(selectedAssistant||!client.production)?loadSnapshot(true):Promise.resolve();
+    if(client.production){if(client.desktop)attachChanges();pages.refresh();pages.permissions();refreshBackgroundTasks();}
     await Promise.all([snapshot,loadDirectory()]);
   });
   const persistChat=()=>{if(document.visibilityState==='hidden')rememberChatPosition();};

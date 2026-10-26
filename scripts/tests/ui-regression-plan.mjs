@@ -6,6 +6,7 @@ export const groups = {
   domain: ['domain-repositories.html'],
   management: ['assistant-start-phone','first-connection-codex','first-connection-antigravity','settings-phone','machines'],
   composer: ['composer-phone','composer-enter'],
+  connection: ['chat-stream-recovery'],
   approvals: ['linked-approvals','patch-approvals'],
   usage: ['usage-empty','usage-unknown','usage-partial','usage-trend'],
   storage: ['chat-cache-read-volume.html', 'chat-cache.html', 'projection-store.html', 'chat-cache-ui.html', 'cached-loading.html'],
