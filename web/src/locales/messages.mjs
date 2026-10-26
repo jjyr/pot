@@ -2,6 +2,15 @@ import serverMessages from './server.json' with {type:'json'};
 
 export const messages = {
   en: {
+    "startup.connectTitle":"Connect to Pot",
+    "startup.token":"Access token",
+    "startup.connect":"Connect",
+    "startup.accessFailed":"Could not verify browser access. Check your token and connection, then retry.",
+    "startup.local":"Showing saved conversations. Verifying access and reconnecting…",
+    "startup.loading":"Connecting to Pot. First use requires a connection.",
+    "startup.unavailable":"Could not connect or open saved conversations. Check your connection and retry.",
+    "startup.forbidden":"Access is not permitted. Check your permissions, then retry.",
+
     "assistantStart.otherRuntime":"Connected runtime",
     "assistantStart.runtimeLabel":"{brand} · {name} · {description} · {status}",
     "assistantStart.manageConnection":"Manage {name}",
@@ -1138,6 +1147,15 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    "startup.connectTitle":"连接到 Pot",
+    "startup.token":"访问令牌",
+    "startup.connect":"连接",
+    "startup.accessFailed":"无法验证浏览器访问权限。请检查令牌和网络后重试。",
+    "startup.local":"正在显示已保存的对话，后台验证访问权限并重新连接…",
+    "startup.loading":"正在连接 Pot。首次使用需要联网。",
+    "startup.unavailable":"无法连接或打开已保存的对话。请检查网络后重试。",
+    "startup.forbidden":"没有访问权限。请检查权限后重试。",
+
     "assistantStart.otherRuntime":"已连接的运行环境",
     "assistantStart.runtimeLabel":"{brand} · {name} · {description} · {status}",
     "assistantStart.manageConnection":"管理 {name}",

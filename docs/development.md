@@ -232,6 +232,11 @@ the shared DOM against synthetic messages and a deterministic loopback provider;
 attachment bytes are synthetic local blobs. Stop it with `POST /fixture/stop` at
 that private origin. This opt-in fixture adds no product data or native notifications.
 
+`mise run test:pwa-cold-start` covers local startup and reconnect authority with
+isolated production HTTP/SSE, IndexedDB and Service Worker fixtures. Its reconnect
+checks hold directory or session responses, revoke capabilities and release
+retired connection/Control responses; no command is submitted.
+
 For chat stream lifecycle checks, `node scripts/tests/ui-regressions.mjs --group
 connection` runs the production browser adapter and shared UI with real
 EventSource, IndexedDB and a controlling Service Worker against synthetic HTTP

@@ -140,7 +140,7 @@ export function createResourceReads(client,{storage=client.production?createProj
       }
     };
     const before=cache.status(key),authoritative=options.authoritative||mentions;
-    const value=await cache.read(key,committedLoad,{ttl,signal:options.signal,authoritative,notify:options.notify});
+    const value=client.onlineReady===false&&before.has&&!authoritative?cache.peek(key):await cache.read(key,committedLoad,{ttl,signal:options.signal,authoritative,notify:options.notify});
     const status=before.has&&!authoritative?before:cache.status(key);
     if(value&&typeof value==='object')queryStates.set(value,{lastConfirmed:status.lastConfirmed,freshness:status.source==='retained'?'retained':Date.now()-status.at<ttl&&!status.error?'fresh':'stale'});
     return value;
@@ -203,6 +203,9 @@ export function createResourceReads(client,{storage=client.production?createProj
       // item from an obsolete projection. This is distinct from read completion.
       return Promise.allSettled([...invalidations].map(listener=>listener(topics,bootChanged?{...source,reset:true}:source)));
     },
+    // Connection authority is transient. Retained projections remain readable,
+    // but a new connection must not join a previous connection's display IO.
+    resetConnection(){hydrated.clear();cache.reset();},
     clear(){closed=true;stopStorage?.();storage?.close();cache.reset();boots.clear();hydrated.clear();},
   };
   return result;

@@ -157,6 +157,10 @@ python -m venv .local/skill-tests
 description = "Verify GitHub background polling and durable assistant delivery"
 run = ["node --test plugins/github/*.test.mjs", "go test -race ./internal/assistant ./internal/control -run 'TestPlugin|TestGitHubPlugin' -count=1"]
 
+[tasks."test:pwa-cold-start"]
+description = "Verify local-first browser startup using isolated HTTP/SSE, IndexedDB and a real Service Worker"
+run = ["node scripts/tests/pot-ui-cold-start-browser.mjs", "node scripts/tests/pot-ui-reconnect-authority-browser.mjs"]
+
 [tasks."test:pwa"]
 description = "Verify isolated system notification, Web Push and browser lifecycle contracts"
 run = ["go test ./internal/systemnotifications ./internal/browsernotifications ./internal/pwapush ./internal/webui ./pkg/storage ./web", "node scripts/tests/pot-ui-notifications.mjs", "node scripts/tests/pot-ui-service-worker.mjs", "node scripts/tests/pot-pwa-browser.mjs"]

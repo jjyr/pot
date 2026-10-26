@@ -116,5 +116,7 @@ synchronization. The Link inspector reuses this form for creation and execution
 settings; names, avatars and deletion retain their existing profile/delete paths.
 
 Browser language and appearance use `pot-ui-locale` and `pot-ui-theme` per origin.
-The `pot-ui-v3` service worker cache replaces obsolete `pot-ui-*` asset caches.
+The browser service worker retains a complete, integrity-checked version of the
+embedded UI. See [Shared UI](shared-ui.md#browser-cold-start) for startup and
+version switching.
 Preferences use only the current keys; old development preferences are not imported.

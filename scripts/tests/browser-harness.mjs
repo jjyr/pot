@@ -2,10 +2,12 @@ import {readFile} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {resolve,extname,sep} from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {shellAssets} from './pwa-shell.mjs';
 import {faults,injectFault} from './ui-regression-plan.mjs';
 
 export async function sourceServer({fault,root=resolve('.')}={}) {
   root=resolve(root);
+  let shell;
   const server=createServer(async(req,res)=>{
     try {
       let path=decodeURIComponent(new URL(req.url,'http://localhost').pathname);
@@ -14,7 +16,7 @@ export async function sourceServer({fault,root=resolve('.')}={}) {
       if(!path.startsWith('/web/')&&!path.startsWith('/scripts/')&&!path.startsWith('/pkg/'))path='/web/src'+path;
       const file=resolve(root,'.'+path);
       if(!file.startsWith(root+sep))throw Error('Outside fixture source root');
-      let data=await readFile(file);
+      let data=path==='/web/src/service-worker.js'?(await(shell ||= shellAssets(root))).files.get('/service-worker.js'):await readFile(file);
       if(faults[fault]?.path===path)data=injectFault(path,data.toString(),fault);
       res.writeHead(200,{'Cache-Control':'no-store','Content-Type':({'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.css':'text/css','.json':'application/json','.png':'image/png','.ttf':'font/ttf','.webmanifest':'application/manifest+json'})[extname(file)]||'application/octet-stream'});
       res.end(data);

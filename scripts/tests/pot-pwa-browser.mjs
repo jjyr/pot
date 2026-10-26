@@ -1,6 +1,7 @@
 // Isolated browser/SW contract. Never uses a real PushManager subscription or any
 // product root, account, model or push provider. Supply an existing Playwright.
 import assert from 'node:assert/strict';
+import {shellAssets} from './pwa-shell.mjs';
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {resolve,extname} from 'node:path';
@@ -21,6 +22,7 @@ const setting=notificationSetting({notifications:manager,locale:()=>locale,deskt
 window.changeLocale=()=>{locale='zh-CN';dispatchEvent(new Event('pot:locale'))};
 window.addEventListener('pagehide',()=>{setting.dispose();manager.dispose()},{once:true});
 </script>`;
+const shellFiles=await shellAssets(root,(path,body)=>path==='/index.html'?Buffer.from(shell):body);
 const server=createServer(async(req,res)=>{
  try{
   const url=new URL(req.url,'http://fixture');
@@ -36,7 +38,7 @@ const server=createServer(async(req,res)=>{
   if(url.pathname==='/'){res.setHeader('Content-Type','text/html');res.end(shell);return}
   const path=url.pathname.startsWith('/pkg/storage/migrations/')?resolve(root,'.'+url.pathname):resolve(root,'web/src','.'+url.pathname);
   if(!path.startsWith(root+'/')){res.writeHead(404).end();return}
-  const data=await readFile(path);res.setHeader('Content-Type',({'.js':'text/javascript','.mjs':'text/javascript','.json':'application/json','.css':'text/css','.png':'image/png','.html':'text/html','.ttf':'font/ttf'})[extname(path)]||'application/octet-stream');res.end(data);
+  const data=shellFiles.files.get(url.pathname)||await readFile(path);res.setHeader('Content-Type',({'.js':'text/javascript','.mjs':'text/javascript','.json':'application/json','.css':'text/css','.png':'image/png','.html':'text/html','.ttf':'font/ttf'})[extname(path)]||'application/octet-stream');res.end(data);
  }catch{res.writeHead(404).end()}
 });await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const origin=`http://127.0.0.1:${server.address().port}`;
