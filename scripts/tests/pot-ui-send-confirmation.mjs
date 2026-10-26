@@ -268,3 +268,16 @@ for(const route of ['message','steer','retry'])for(const newerDraft of [false,tr
   }finally{resolveCommand?.();manager?.close();client?.resources.clear();globalThis.fetch=savedFetch;}
 }
 console.log('Send confirmation: response-first production acceptance independent of local saving; zero normal receipt reads; unknown-only recovery, cancellation, immutable scope and draft/reference fences passed');
+
+{
+  const f=fixture();setDraft(f.state,'Restored unsent editor');const receipt=beginSend(f.state,'persisted-request',{allowRunning:true});
+  f.scope={space:'other',owner:'b'};f.manager.restore(receipt,{space:'space',owner:'a'});await flush();await f.clock.advance(40);
+  assert.equal(f.calls.length,0,'Reload confirmation never submits automatically');assert(f.queries.length>0);assert(f.queries.every(query=>query.options.owner==='a'&&query.options.space==='space'));
+  await f.manager.recover(receipt);assert.equal(f.calls.length,0,'Explicit recovery of a restored unknown request remains read-only');assert.equal(f.state.pending.get(receipt.key),receipt);
+  f.queryState='accepted';await f.manager.recover(receipt);assert.equal(f.state.pending.size,0);assert.equal(f.accepted.length,1);f.manager.close();
+}
+{
+  const f=fixture();setDraft(f.state,'Captured before storage wait');const receipt=beginSend(f.state,'saved-before-post',{allowRunning:true}),captured={space:'space',owner:'a'};
+  f.scope={space:'other',owner:'b'};f.manager.start(receipt,captured);await flush();assert.equal(f.calls[0].options.owner,'a');assert.equal(f.calls[0].options.space,'space','Navigation while saving cannot retarget the deferred POST');f.manager.close();
+}
+console.log('Persistent send recovery: read-only reload and preflight scope contracts passed');

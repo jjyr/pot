@@ -78,7 +78,10 @@ export function createAssistantDrafts({client,state,attachments,changed,restored
     async retry(key){for(const [target,value]of deletions){try{await storage.remove(target);deletions.delete(target);}catch(error){value.error=error;notify();throw error;}}const entry=bindings.get(key);if(!entry){notify();return;}if(!entry.loaded)await load(entry);await drain(entry);},
     async forget(scope){
       const key=assistantDraftKey(client,scope),entry=entries.get(key);
-      if(entry){entry.retired=true;clock.clearTimeout(entry.timer);bindings.delete(entry.stateKey);entries.delete(key);}
+      if(entry){
+        entry.retired=true;clock.clearTimeout(entry.timer);bindings.delete(entry.stateKey);entries.delete(key);attachments.discard(entry.stateKey);
+        for(const map of [state.drafts,state.draftVersions,state.referenceDrafts,state.referenceVersions,state.pending,state.retries,state.sends])map.delete(entry.stateKey);
+      }
       // Store serialization puts deletion after all already-issued writes.
       const deletion={};deletions.set(key,deletion);
       try{await storage.remove(key);deletions.delete(key);}catch(error){deletion.error=error;notify();throw error;}

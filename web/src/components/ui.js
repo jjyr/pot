@@ -237,6 +237,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const referenceDraftHost=el('div','composer-references');form.prepend(referenceDraftHost);
   const referenceStatus=el('div','reference-announcement');referenceStatus.setAttribute('role','status');composerArea.append(referenceStatus);
   const draftStatus=el('div','draft-storage-status');draftStatus.setAttribute('role','status');composerArea.append(draftStatus);
+  let draftStatusSignature='';
   let referenceDraftSignature='',referenceNotice='';
   let historyLoading=false,historyFailure='',historyGeneration=0,historyFlight=null,historyRecovery=null,historyAbort=new AbortController();
   let historyScrollTime=0,historySpeed=0,historyLatency=200;
@@ -275,7 +276,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
 
   const stopMessageSelection=bindMessageSelection(history,{capture:refs=>{
-    if(!can('chat.references')||route!=='chat'||!state.snapshot||editorOwner!==ownerKey(state.snapshot)||state.pending.has(editorOwner))return;
+    if(!can('chat.references')||route!=='chat'||!state.snapshot||editorOwner!==ownerKey(state.snapshot))return;
     const next=[...draftReferences(state)];for(const ref of refs)if(!next.some(old=>old.message_id===ref.message_id&&old.quote===ref.quote))next.push(ref);
     if(referenceProblem(next)){referenceNotice='references.limit';updateControls();return;}
     setDraftReferences(state,next);referenceNotice='references.added';updateControls();
@@ -350,7 +351,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       catch{if(state.pending.get(receipt.key)===receipt){state.pending.delete(receipt.key);state.sends.delete(receipt.key);assistantDrafts.change(receipt.key);}updateControls();return;}
       if(disposed||state.pending.get(receipt.key)!==receipt)return;
     }
-    receipt.phase='sending';confirmations.start(receipt,receipt.scope);
+    receipt.phase='sending';updateControls();confirmations.start(receipt,receipt.scope);
   }
   async function cancel() {
     if (!can('chat.cancel')||cancelPending || !state.snapshot?.running) return;
@@ -370,12 +371,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(directoryStorageFailed)error=t('storage.failed');
     const snapshot = state.snapshot;
     const saved=assistantDrafts?.status(editorOwner);
-    draftStatus.hidden=!saved;
-    draftStatus.classList.toggle('inline-error',!!saved?.error);
-    const draftLabel=saved?.cleanup?'drafts.cleanupFailed':saved?.error?'drafts.failed':saved?.loading?'drafts.loading':saved?.dirty?'drafts.saving':'drafts.saved';
-    draftStatus.replaceChildren(el('span','',saved?t(draftLabel):''));
-    if(saved?.error){const retry=el('button','text-button',t('retry'));retry.type='button';retry.onclick=()=>assistantDrafts.retry(editorOwner).catch(()=>{});draftStatus.append(retry);}
-    if(saved?.error){const details=el('details'),summary=el('summary','',t('web.error.details'));details.append(summary,el('span','',saved.error.message||String(saved.error)));draftStatus.append(details);}
+    const draftSignature=JSON.stringify([!!saved,saved?.cleanup,saved?.error?.message,saved?.loading,saved?.dirty,locale]);
+    if(draftSignature!==draftStatusSignature){
+      draftStatusSignature=draftSignature;draftStatus.hidden=!saved;draftStatus.classList.toggle('inline-error',!!saved?.error);
+      const draftLabel=saved?.cleanup?'drafts.cleanupFailed':saved?.error?'drafts.failed':saved?.loading?'drafts.loading':saved?.dirty?'drafts.saving':'drafts.saved';
+      draftStatus.replaceChildren(el('span','',saved?t(draftLabel):''));
+      if(saved?.error){const retry=el('button','text-button',t('retry'));retry.type='button';retry.onclick=()=>assistantDrafts.retry(editorOwner).catch(()=>{});draftStatus.append(retry);const details=el('details'),summary=el('summary','',t('web.error.details'));details.append(summary,el('span','',saved.error.message||String(saved.error)));draftStatus.append(details);}
+    }
     const pending = snapshot && state.pending.get(ownerKey(snapshot));
     const running = snapshot?.running;
     continuation?.update(snapshot,{connected:connection==='connected'&&can('chat.continue')&&!selectedAssistant?.offline&&!pending});
