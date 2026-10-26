@@ -6,6 +6,9 @@
 /* Shared semantic values and geometry preserve the established Pot design.
    System appearance follows the OS live, without recreating the text editor. */
 @font-face { font-family: 'Pot Web Sans'; src: url('./assets/IBMPlexSans-Regular.ttf') format('truetype'); font-style: normal; font-weight: 400; font-display: swap; }
+.chat-font-fallback { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.initial-layout-slot { box-sizing: border-box; height: var(--initial-layout-height); min-height: var(--initial-layout-height); max-height: var(--initial-layout-height); overflow: auto; contain: size; }
+.initial-layout-slot.is-expanded { height: auto; min-height: 0; max-height: none; contain: none; }
 :root {
   color-scheme: light;
   --canvas: #f8f6f1; --surface: #fffefa; --navigation: #f0ede6;

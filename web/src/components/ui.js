@@ -6,6 +6,7 @@ import {projectLinkedAssistants,supportsCapability} from '../state/agent-links.m
 import {agentSource} from './connection-visuals.mjs';
 import {createUpdates} from './updates.mjs';
 import {createCommunicationWindow} from './communication-window.mjs';
+import {createInitialChatLayout} from './initial-chat-layout.mjs';
 import {notificationOnboarding} from './notification-onboarding.mjs';
 import {createSendConfirmation} from '../state/send-confirmation.mjs';
 import {bindMessageSelection,renderMessageReferences,referenceProblem} from './message-references.mjs';
@@ -91,7 +92,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let unsubscribe = () => {}, stopChanges = () => {};
   let directoryEpoch = 0, directorySignature = '';
   let activeView=null,viewWrite=Promise.resolve(),viewTimer,chatSession=null,selectionGeneration=0;
-  let chatPreparing=false,revealFrame=0;
+  let chatPreparing=false,initialIntent=null;
   let chatShown=false,pendingTaskToggle=null;
   let chatPosition=null,chatNavigation=0;
   let awaitingSnapshot=false;
@@ -491,25 +492,23 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function cacheFailure(reason){
     if(disposed)return;
     chatCacheFailed=true;error=t('chatCache.failed');console.error('Chat cache:',reason);updateControls();
-    if(!state.snapshot){chatPreparing=false;history.style.visibility='';history.removeAttribute('aria-busy');}
+    if(!state.snapshot){initialLayout.cancel();chatPreparing=false;initialIntent=null;history.style.visibility='';history.removeAttribute('aria-busy');}
   }
+  const initialLayout=createInitialChatLayout({history,
+    ready:()=>!disposed&&chatPreparing&&!!state.snapshot&&!historyLoading&&chatShown,
+    layout:()=>{editor.resize();renderMessagesNow(true);},
+    position:()=>{if(initialIntent)applyChatPosition(initialIntent);},
+    fontFallback:()=>root.classList.add('chat-font-fallback'),
+    reveal:()=>{chatPreparing=false;initialIntent=null;history.style.visibility='';history.removeAttribute('aria-busy');scheduleViewSave();},
+  });
   function prepareChat(){
-    cancelAnimationFrame(revealFrame);revealFrame=0;chatPreparing=true;
+    initialLayout.cancel();chatPreparing=true;
+    initialIntent=chatPosition?.intent||{kind:'restore',position:messageWindow.snapshot()};
     history.style.visibility='hidden';history.setAttribute('aria-busy','true');
+    root.classList.remove('chat-font-fallback');
   }
   function revealChat(){
-    if(!chatPreparing||revealFrame||!state.snapshot||historyLoading||!chatShown)return;
-    const receivedEpoch=epoch;
-    revealFrame=requestAnimationFrame(()=>{
-      if(disposed||receivedEpoch!==epoch){revealFrame=0;return;}
-      editor.resize();renderMessagesNow(true);
-      revealFrame=requestAnimationFrame(()=>{
-        if(disposed||receivedEpoch!==epoch){revealFrame=0;return;}
-        renderMessagesNow(true);revealFrame=0;
-        if(historyLoading)return;
-        chatPreparing=false;history.style.visibility='';history.removeAttribute('aria-busy');scheduleViewSave();
-      });
-    });
+    if(chatPreparing&&!initialLayout.pending&&state.snapshot&&!historyLoading&&chatShown)initialLayout.start();
   }
   const closeAssistantProfile = () => assistantProfile.hidePopover();
   window.addEventListener('resize', closeAssistantProfile);
@@ -529,8 +528,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function renderShell() {
     root.classList.toggle('is-background',document.visibilityState==='hidden');
     const showingChat=route==='chat'&&!(media.matches&&directoryOpen);
-    if(chatShown&&!showingChat){rememberChatPosition();cancelChatPosition();messageWindow.suspend();}
-    if(!chatShown&&showingChat&&selectedAssistant&&!chatPreparing&&!chatPosition)positionChat({kind:'restore',position:activeView?.position});
+    if(chatShown&&!showingChat){rememberChatPosition();cancelChatPosition();initialLayout.cancel();messageWindow.suspend();}
+    if(!chatShown&&showingChat&&selectedAssistant&&!chatPreparing){prepareChat();if(!chatPosition)positionChat({kind:'restore',position:activeView?.position});}
     chatShown=showingChat;
     queueMicrotask(()=>{if(!disposed)notifications?.report();});
     const rail=shellRoots.rail.cloneNode(false),titlebar=shellRoots.titlebar.cloneNode(false),menu=shellRoots.menu.cloneNode(false);
@@ -682,13 +681,17 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function nearBottom() { return history.scrollHeight - history.clientHeight - history.scrollTop < 80; }
   let renderFrame=0,fullRender=false,chatProjection;
   function currentChatPosition(ticket){return !disposed&&ticket.generation===chatNavigation&&ticket.epoch===epoch;}
-  function cancelChatPosition(){chatNavigation++;chatPosition=null;}
-  function positionChat(intent){
-    const ticket={kind:intent.kind,epoch,generation:++chatNavigation};
-    chatPosition=ticket;
+  function cancelChatPosition(){chatNavigation++;chatPosition=null;initialIntent=null;}
+  function applyChatPosition(intent){
     if(intent.kind==='restore')messageWindow.restore(intent.position);
     else if(intent.kind==='latest')messageWindow.scrollToLatest();
     else messageWindow.locate({id:intent.id,expand:intent.expand});
+  }
+  function positionChat(intent){
+    const ticket={kind:intent.kind,intent,epoch,generation:++chatNavigation};
+    chatPosition=ticket;
+    if(chatPreparing)initialIntent=intent;
+    applyChatPosition(intent);
     renderMessages();return ticket;
   }
   function pauseFollowing(){cancelChatPosition();messageWindow.pause();}
@@ -895,6 +898,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const pendingReceipt=state.pending.get(ownerKey(snapshot));
     let accepted;try{accepted=acceptSnapshot(state,snapshot,receivedEpoch,{committed:true,receivedMessages});}catch(reason){if(reason.message==='conversation_gap'){loadSnapshot(true);return;}throw reason;}
     if (!accepted){if(state.snapshot&&validSnapshot(snapshot)&&state.snapshot.cursor===snapshot.cursor){if(live)readyFromSnapshot();updateControls();}return;}
+    if(initialSnapshot&&!chatPreparing)prepareChat();
     if(pendingReceipt && !state.pending.has(pendingReceipt.key))confirmations.confirmed(pendingReceipt);
     if(live)readyFromSnapshot();
     snapshot=state.snapshot;
@@ -974,6 +978,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function creationSpace(){return selectedAssistant?spaces.find(space=>space.id===selectedAssistant.space_id):spaces.find(space=>space.kind==='local')||spaces[0];}
   function clearSelectedAssistant() {
+    initialLayout.cancel();
     const space=selectedAssistant?.space_id||client.scope().space;
     selectionGeneration++;unsubscribe();historyAbort.abort();historyAbort=new AbortController();chatSession?.close().catch(()=>{});chatSession=null;epoch=beginSubscription(state);activeView=null;selectedAssistant=null;editorOwner=null;pendingSelection=null;
     client.setScope({space,owner:''});pages.clearApprovals();completions?.reset();
@@ -1113,7 +1118,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   window.addEventListener('pagehide',rememberChatPosition);document.addEventListener('visibilitychange',persistChat);
   return () => {
     if(disposed)return;
-    rememberChatPosition();clearTimeout(viewTimer);cancelAnimationFrame(revealFrame);historyAbort.abort();
+    rememberChatPosition();clearTimeout(viewTimer);initialLayout.cancel();historyAbort.abort();
     window.removeEventListener('pagehide',rememberChatPosition);document.removeEventListener('visibilitychange',persistChat);
     chatSession?.close().catch(()=>{});
     disposed = true;updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);viewportObserver.disconnect();stopReading();messageWindow.close();stopResources?.();releaseDomains();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();backgroundTaskView.close();directoryEpoch++; unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();

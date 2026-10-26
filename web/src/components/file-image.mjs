@@ -26,7 +26,7 @@ function registerImage() {
         close.type=saveButton.type='button';close.textContent='×';close.onclick=()=>dialog.close();saveButton.onclick=save;title.textContent=this.label;full.alt=this.label;full.src=image.src;
         header.append(title,saveButton,close);dialog.append(header,full);this.dialog=dialog;refresh();document.body.append(dialog);dialog.addEventListener('close',()=>{dialog.remove();if(this.dialog===dialog)this.dialog=null;},{once:true});dialog.showModal();
       };
-      image.onload=()=>{if(!this.isConnected||generation!==this.generation)return;this.dataset.state='ready';this.removeAttribute('aria-busy');status.hidden=true;image.hidden=false;preview.disabled=false;};image.onerror=failed;
+      image.onload=async()=>{try{await image.decode();if(!this.isConnected||generation!==this.generation)return;this.dataset.state='ready';this.removeAttribute('aria-busy');status.hidden=true;image.hidden=false;preview.disabled=false;}catch{failed();}};image.onerror=failed;
       this.lease=this.acquireFileImage(this.file);
       this.lease.url.then(url=>{if(this.isConnected&&generation===this.generation)image.src=url;}).catch(failed);
     }
