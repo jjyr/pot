@@ -51,7 +51,8 @@
     "./internal/transport": [
       "TestSocketProductCreateEventsAuthAndRestart",
       "TestSendReceiptHTTPIdentityAndAuthorization",
-      "TestExternalMessageFileCompletionToHTTPPreviewAndDownload"
+      "TestExternalMessageFileCompletionToHTTPPreviewAndDownload",
+      "TestCommittedApprovalStreamAndOwnerRevocation"
     ],
     "./internal/agenthost": [
       "TestCodexTaskAndPeerApprovalFromPot",
