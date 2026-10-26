@@ -80,7 +80,15 @@ state = await tab.fill({element: "8", sequence: state.sequence, text: "3"});
 state = await tab.click({element: "9", sequence: state.sequence});
 ```
 
-The API provides `cua.open`, `cua.getTab`, `cua.getState`, and tab methods `navigate`, `observe`, `fill`, `click`, `press`, `scroll`, `close`. Each operation emits and returns a fresh observation. Actions require the current sequence and observed element ID. Await operations sequentially; concurrent actions are rejected. `nodeRepl.write` and `console.log` emit text.
+The API provides `cua.open`, `cua.getTab`, `cua.getState`, and tab methods `navigate`, `observe`, `fill`, `click`, `press`, `scroll`, `close`. Each operation emits and returns a fresh observation. `click`, `fill`, `press` and `scroll` require the current sequence; element actions also require an observed element ID. Await operations sequentially; concurrent actions are rejected. `nodeRepl.write` and `console.log` emit text.
+
+`tab.scroll({sequence, delta_y})` requires a numeric integer from -2000 to 2000
+inclusive, in CSS pixels; positive values scroll down and negative values scroll
+up. `tab.press({element, sequence, key})` accepts the exact strings `Enter`, `Tab`,
+`Escape`, `Backspace`, `ArrowDown` and `ArrowUp`. The first-call API documentation
+and argument errors state these constraints. Scroll requires the latest observation
+sequence; press also requires an observed element ID. Errors retain the warning
+that prior effects may have occurred; inspect the page before repeating an action.
 
 Closing the tab preserves JS state. End the REPL with `reset:true` and its existing `session_id`; reset without an ID is rejected. Each REPL supports one tab. Popups, frame targeting, uploads/downloads and unrestricted CDP/page evaluation are not exposed.
 
