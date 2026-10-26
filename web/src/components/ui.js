@@ -278,9 +278,17 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }});
   function updateReferenceDraft(){
     referenceStatus.textContent=referenceNotice?t(referenceNotice):'';referenceStatus.className=referenceNotice==='references.limit'?'reference-limit':'reference-announcement';
-    const refs=draftReferences(state,editorOwner),next=JSON.stringify([editorOwner,refs,locale,!!state.pending.has(editorOwner)]);
+    const refs=draftReferences(state,editorOwner),next=JSON.stringify([editorOwner,refs,locale]);
     if(next===referenceDraftSignature)return;referenceDraftSignature=next;referenceDraftHost.hidden=!refs.length;
-    referenceDraftHost.replaceChildren(renderMessageReferences(refs,{messages:state.snapshot?.messages||[],locale:()=>locale,onJump:jumpToMessage,disabled:state.pending.has(editorOwner),onRemove:index=>{setDraftReferences(state,refs.filter((_,i)=>i!==index),editorOwner);referenceNotice='references.removed';updateControls();}}));
+    referenceDraftHost.replaceChildren(renderMessageReferences(refs,{messages:state.snapshot?.messages||[],locale:()=>locale,onJump:jumpToMessage,onRemove:index=>{
+      setDraftReferences(state,refs.filter((_,i)=>i!==index),editorOwner);
+      // The submitted request owns a copy of its references. Cancelling the
+      // editable draft must also release the original prose selection, which
+      // otherwise stays highlighted and can be captured again on keyup.
+      const selection=window.getSelection();
+      if(selection?.rangeCount&&history.contains(selection.getRangeAt(0).commonAncestorContainer))selection.removeAllRanges();
+      referenceNotice='references.removed';updateControls();
+    }}));
   }
   function retryAttachmentInput(){
     const failed=failedMessageInput(state.snapshot);
