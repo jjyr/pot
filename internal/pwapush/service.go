@@ -122,7 +122,21 @@ func payload(d browsernotifications.Device, e systemnotifications.Event) ([]byte
 func (s *Service) deliver(ctx context.Context, d browsernotifications.Device, out browsernotifications.Delivery) {
 	var body string
 	var sub Subscription
-	err := s.store.DB.QueryRowContext(ctx, "SELECT body FROM notification_push_subscriptions WHERE device=? AND invalidated=0", d.ID).Scan(&body)
+	// Read the subscription and current reservation authority in one SQLite
+	// snapshot. An old reservation must never borrow a replacement's endpoint.
+	// The query finishes before HTTP; no writer or authority lock spans Send.
+	err := s.store.DB.QueryRowContext(ctx, `SELECT p.body FROM notification_push_subscriptions p
+ JOIN notification_devices d ON d.id=p.device JOIN notification_deliveries q ON q.device=d.id
+ WHERE d.id=? AND d.binding=? AND d.revision=? AND d.control_id=? AND d.enabled=1
+ AND d.permission='granted' AND d.channel='push' AND d.expires_ms>? AND p.invalidated=0
+ AND q.event=? AND q.revision=d.revision AND q.channel='push' AND q.state='sending' AND q.attempts=?`,
+		d.ID, d.Binding, d.Revision, out.Event.Control, time.Now().UnixMilli(), out.Event.ID, out.Attempt).Scan(&body)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Only retire this exact unsent reservation, even if the device has since
+		// changed. Finish intentionally requires current authority for HTTP results.
+		_, _ = s.store.DB.ExecContext(ctx, "UPDATE notification_deliveries SET state='expired',updated_ms=? WHERE event=? AND device=? AND revision=? AND attempts=? AND state='sending'", time.Now().UnixMilli(), out.Event.ID, d.ID, d.Revision, out.Attempt)
+		return
+	}
 	state := "failed"
 	result := Result{}
 	if !s.events.Current(out.Event) {

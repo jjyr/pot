@@ -597,6 +597,12 @@ clears and invalidates that device subscription; a late response cannot invalida
 a replacement. Re-registering the same invalid subscription requests local
 cleanup and an explicit setup action, rather than silently looping.
 
+Before HTTP, Push reads the subscription and its reserved device revision,
+session binding, channel, permission and enabled state in one database snapshot.
+A reservation retired by replacement or revocation expires without using a newer
+subscription. No writer or authority lock spans HTTP; an already captured send's
+uncertain result remains non-retryable and cannot invalidate a replacement.
+
 The module Service Worker retains the immutable asset cache and excludes API,
 authentication and native bridge traffic. Push promptly calls `showNotification`
 after verifying the current installation ID, Control and enabled channel. Clicks

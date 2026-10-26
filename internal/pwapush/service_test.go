@@ -47,19 +47,7 @@ func TestPushServiceRetriesUncertaintyReplacementAndRestart(t *testing.T) {
 	if err = service.Register(ctx, d, sub); err != nil {
 		t.Fatal(err)
 	}
-	enqueue := func(id string) {
-		t.Helper()
-		e := systemnotifications.Event{ID: id, Control: "node", Space: "node", Owner: "alpha", Kind: "reply", Name: "Alpha", BodyKey: "notifications.replyComplete"}
-		body, _ := json.Marshal(e)
-		result, err := store.DB.Exec("INSERT INTO notification_events(id,body,created_ms) VALUES(?,?,?)", id, string(body), time.Now().UnixMilli())
-		if err != nil {
-			t.Fatal(err)
-		}
-		seq, _ := result.LastInsertId()
-		if err = store.Enqueue(ctx, systemnotifications.Record{Sequence: seq, Event: e, Created: time.Now()}); err != nil {
-			t.Fatal(err)
-		}
-	}
+	enqueue := func(id string) { enqueuePush(t, store, id) }
 	reserve := func() (browsernotifications.Device, browsernotifications.Delivery) {
 		t.Helper()
 		target, out, err := store.Reserve(ctx, "", "", "push", 5*time.Minute, false)
@@ -155,5 +143,92 @@ func TestPushPayloadBoundsAndNavigationWhitelist(t *testing.T) {
 	json.Unmarshal(message["event"], &target)
 	if len(target) != 7 || target["owner"] != owner || target["preview"] != nil || target["boot"] != nil || target["body_key"] != nil {
 		t.Fatal("push did not use the navigation whitelist")
+	}
+}
+
+func TestReservedPushUsesCurrentInstallation(t *testing.T) {
+	for _, change := range []string{"none", "subscription", "revoke", "disable", "permission", "channel", "binding"} {
+		t.Run(change, func(t *testing.T) {
+			ctx := context.Background()
+			store, err := browsernotifications.Open(filepath.Join(t.TempDir(), "control.sqlite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			sub, _ := subscription(t)
+			calls := 0
+			service, err := NewService(store, currentEvents{}, "https://pot.tailnet.test", testDelivery(func(_ context.Context, got Subscription, _ []byte) Result {
+				calls++
+				if got.Endpoint != sub.Endpoint {
+					t.Errorf("old reservation used replacement subscription: %s", got.Endpoint)
+				}
+				return Result{Status: 201}
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := browsernotifications.Device{ID: strings.Repeat("d", 24), Control: "node", Binding: "session", Channel: "push", Enabled: true, Permission: "granted", Expires: time.Now().Add(time.Hour).UnixMilli()}
+			if err = service.Register(ctx, d, sub); err != nil {
+				t.Fatal(err)
+			}
+			enqueuePush(t, store, "before-change")
+			target, out, err := store.Reserve(ctx, "", "", "push", 5*time.Minute, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch change {
+			case "revoke":
+				err = store.Revoke(ctx, d.Binding)
+			case "channel":
+				d.Channel = "local"
+				err = store.Register(ctx, d)
+			case "binding":
+				err = store.Remove(ctx, d.ID, d.Binding)
+				if err == nil {
+					d.Binding = "new-session"
+					err = service.Register(ctx, d, sub)
+				}
+			case "subscription", "disable", "permission":
+				replacement := sub
+				if change == "subscription" {
+					replacement.Endpoint += "/new-installation"
+				} else if change == "disable" {
+					d.Enabled = false
+				} else {
+					d.Permission = "denied"
+				}
+				err = service.Register(ctx, d, replacement)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			service.deliver(ctx, target, out)
+			want := 0
+			if change == "none" {
+				want = 1
+			}
+			if calls != want {
+				t.Fatalf("transport calls: got %d, want %d", calls, want)
+			}
+			var sending int
+			if err = store.DB.QueryRow("SELECT count(*) FROM notification_deliveries WHERE state='sending'").Scan(&sending); err != nil || sending != 0 {
+				t.Fatal("unsent reservation retained uncertainty", sending, err)
+			}
+		})
+	}
+}
+
+// Shared committed-event fixture for transport contracts, independent of source rules.
+func enqueuePush(t *testing.T, store *browsernotifications.Store, id string) {
+	t.Helper()
+	e := systemnotifications.Event{ID: id, Control: "node", Space: "node", Owner: "alpha", Kind: "reply", Name: "Alpha", BodyKey: "notifications.replyComplete"}
+	body, _ := json.Marshal(e)
+	result, err := store.DB.Exec("INSERT INTO notification_events(id,body,created_ms) VALUES(?,?,?)", id, string(body), time.Now().UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq, _ := result.LastInsertId()
+	if err = store.Enqueue(context.Background(), systemnotifications.Record{Sequence: seq, Event: e, Created: time.Now()}); err != nil {
+		t.Fatal(err)
 	}
 }
