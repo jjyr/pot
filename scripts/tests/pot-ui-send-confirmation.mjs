@@ -23,6 +23,41 @@ function fixture(){
   const start=(text='same text',attachments=[])=>{setDraft(state,text);const r=beginSend(state,'id-'+calls.length,{allowRunning:true,attachments});manager.start(r);return r;};
   return {state,clock,calls,queries,accepted,rejected,manager,client,start,set queryState(v){queryState=v;},set queryError(v){queryError=v;},set scope(v){scope=v;},set sendError(v){sendError=v;},set online(v){online=v;}};
 }
+// A known submit result owns the normal path. Recovery signals and the old
+// first-query deadline must not cause receipt reads while its POST is pending.
+for(const delay of [0,9]){
+  const f=fixture();f.queryState='accepted';f.start('normal submit',[{id:'submitted'}]);
+  await f.clock.advance(delay);await f.manager.resume();await f.manager.resume();
+  assert.equal(f.queries.length,0,'A pending POST does not need a parallel acceptance query');
+  assert.equal(f.state.pending.size,1,'Only the response or matching SSE can confirm a normal submit');
+  f.calls[0].resolve({message_id:'accepted',duplicate:false});await flush();
+  assert.equal(f.state.pending.size,0);assert.equal(draft(f.state),'');assert.equal(f.queries.length,0);assert.equal(f.accepted.length,1);assert.equal(f.clock.timers.size,0);f.manager.close();
+}
+{
+  const f=fixture();f.start();await f.clock.advance(3);f.manager.suspend();
+  assert(!f.calls[0].options.signal.aborted,'Backgrounding preserves the normal POST wait');
+  await f.clock.advance(5);await f.manager.resume();await f.manager.recover([...f.state.pending.values()][0]);
+  assert.equal(f.queries.length,0,'Neither foreground nor explicit check may query a submit with no unknown result');
+  f.calls[0].resolve({message_id:'accepted',duplicate:false});await flush();assert.equal(draft(f.state),'');assert.equal(f.queries.length,0);f.manager.close();
+}
+{
+  const f=fixture();f.start();await f.clock.advance(9);f.calls[0].reject({status:409});await flush();await f.clock.advance(40);await f.manager.resume();
+  assert.equal(f.rejected.length,1);assert.equal(f.queries.length,0,'A definite rejection is not an unknown submission');assert.equal(draft(f.state),'same text');f.manager.close();
+}
+{
+  const f=fixture();f.sendError={accepted:true,uiKey:'storage.commandAccepted'};f.start();await flush();await f.clock.advance(40);
+  assert.equal(f.accepted.length,1);assert.equal(draft(f.state),'');assert.equal(f.queries.length,0,'Known acceptance reported by the adapter needs no readback');f.manager.close();
+}
+{
+  const f=fixture();f.start();await f.clock.advance(3);assert.equal(f.queries.length,0);
+  f.calls[0].reject(Error('Connection interrupted'));await flush();await f.clock.advance(1);
+  assert.equal(f.queries.length,1,'Network failure enables receipt reads only after the POST outcome becomes unknown');assert.equal(f.calls.length,1);f.manager.close();
+}
+{
+  const f=fixture();f.start();await f.clock.advance(3);f.online=false;await f.manager.resume();assert(f.calls[0].options.signal.aborted);
+  f.online=true;f.queryState='accepted';await f.manager.resume();
+  f.calls[0].reject({status:400});await flush();assert.equal(f.queries.length,1);assert.equal(f.calls.length,1);assert.equal(f.accepted.length,1);assert.equal(f.rejected.length,0,'Late submit failure cannot undo confirmed acceptance');f.manager.close();
+}
 {
   const f=fixture(),r=f.start();
   assert(acceptSnapshot(f.state,snapshot({cursor:'2',messages:[user(r.request,{accepted_request_id:'another'})]}),f.state.epoch));
@@ -39,8 +74,8 @@ function fixture(){
 }
 {
   const f=fixture(),r=f.start('',[{id:'upload',name:'old.pdf',mime_type:'application/pdf',size:12}]);
-  f.queryState='accepted';await f.clock.advance(1);
-  assert.equal(f.state.pending.size,0,'receipt query unlocks without any transcript message in the window');
+  f.queryState='accepted';await f.clock.advance(11);
+  assert.equal(f.state.pending.size,0,'After submit timeout, receipt query unlocks without a transcript message');
   assert.equal(f.accepted.length,1);assert.equal(f.calls.length,1,'confirmation never repeats uploads or sends');
   f.manager.close();
 }
@@ -87,7 +122,7 @@ function fixture(){
 }
 {
   const f=fixture();f.sendError={status:400};f.start();await flush();
-  assert.equal(f.state.pending.size,0);assert.equal(f.rejected.length,1);assert.equal(draft(f.state),'same text');f.manager.close();
+  assert.equal(f.state.pending.size,0);assert.equal(f.rejected.length,1);assert.equal(draft(f.state),'same text');assert.equal(f.queries.length,0);f.manager.close();
 }
 {
   const f=fixture(),r=f.start();await f.clock.advance(40);f.sendError={status:400};await f.manager.recover(r);
@@ -97,7 +132,7 @@ function fixture(){
   const f=fixture(),r=f.start();
   const epoch=beginSubscription(f.state);acceptSnapshot(f.state,snapshot({boot_id:'next-boot'}),epoch);
   assert.equal(beginSend(f.state,'new-id',{allowRunning:true}),null,'boot change retains the unknown original attempt');
-  f.queryState='accepted';await f.clock.advance(1);assert.equal(f.state.pending.size,0);f.manager.close();
+  f.queryState='accepted';await f.clock.advance(11);assert.equal(f.state.pending.size,0);f.manager.close();
 }
 {
   const f=fixture();
@@ -140,13 +175,12 @@ const receiptValue=(request,state='accepted')=>({request_id:request.request_id,c
   await f.clock.advance(100000);assert.equal(f.queries.length,6,'Unknown results never restart periodic polling');assert.equal(f.clock.timers.size,0);f.manager.close();
 }
 {
-  const f=fixture(),r=f.start();let resolve;const reads=[];
+  const f=fixture(),r=f.start();f.queryError=true;await f.clock.advance(40);let resolve;const reads=[];
   f.client.sendReceipt=(request,options)=>new Promise(yes=>{reads.push({request,options});resolve=yes;});
-  await f.clock.advance(1);const manual=f.manager.recover(r),again=f.manager.recover(r);await f.manager.resume();await flush();
-  assert.equal(reads.length,1,'Polling and explicit recovery share the active query');assert.equal(f.calls.length,1);
-  resolve(receiptValue(r.request,'unconfirmed'));await flush();assert.equal(f.calls.length,2,'An explicit recovery may resend after unconfirmed');assert.equal(f.calls[1].request,r.request);
-  f.calls[1].resolve({message_id:'accepted',duplicate:true});await Promise.all([manual,again]);await f.clock.advance(100000);
-  assert.equal(reads.length,1);assert.equal(f.accepted.length,1);f.manager.close();
+  const auto=f.manager.resume();await flush();const manual=f.manager.recover(r),again=f.manager.recover(r);
+  assert.equal(reads.length,1,'Unknown-result recovery signals share the active check');assert.equal(f.calls.length,1);
+  resolve(receiptValue(r.request));await Promise.all([auto,manual,again]);await f.clock.advance(100000);
+  assert.equal(reads.length,1);assert.equal(f.accepted.length,1);assert.equal(f.calls.length,1);f.manager.close();
 }
 {
   const f=fixture();setDraftReferences(f.state,[{message_id:'submitted'}]);const r=f.start();f.queryError=true;await f.clock.advance(40);
@@ -188,4 +222,4 @@ const receiptValue=(request,state='accepted')=>({request_id:request.request_id,c
   assert.equal(reads,1,'An authorization denial pauses automatic checks across recovery signals');assert.equal(f.state.pending.get(r.key),r);assert.equal(f.rejected.length,0,'A receipt access denial does not reject the message');
   f.client.sendReceipt=async request=>receiptValue(request);await f.manager.recover(r);assert.equal(f.accepted.length,1);assert.equal(f.calls.length,1);f.manager.close();
 }
-console.log('Send confirmation: bounded read-only resume, shared queries, cancellation ownership, draft/reference fences, auth pause and explicit immutable retries passed');
+console.log('Send confirmation: response-first submit with zero normal receipt reads; unknown-only bounded recovery, cancellation, immutable scope and draft/reference fences passed');

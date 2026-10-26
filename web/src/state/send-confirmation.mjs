@@ -1,134 +1,108 @@
 import {settleSend} from './conversation.mjs';
 
-// A request timeout ends only the client's wait. Acceptance is reconciled using
-// its captured scope and immutable request, never the current editor or turn.
+// A successful submit response is sufficient. Only an unknown submit result
+// needs receipt reads, always for its captured scope and immutable request.
 export function createSendConfirmation({state,client,changed,accepted,rejected=()=>{},clock=globalThis,now=()=>Date.now(),online=()=>globalThis.navigator?.onLine!==false,timeout=10000,delays=[750,1500,3000,6000,10000]}) {
-  const operations=new Map();
-  let closed=false,suspended=false;
-  const current=op=>!closed && operations.get(op.receipt)===op && state.pending.get(op.receipt.key)===op.receipt;
-  const owns=(op,generation)=>current(op)&&op.generation===generation&&!suspended;
+  const operations=new Map();let closed=false,suspended=false;
+  const current=op=>!closed&&operations.get(op.receipt)===op&&state.pending.get(op.receipt.key)===op.receipt;
+  const owns=(op,batch)=>current(op)&&op.active===batch;
   function cancel(op){
-    // Revoke every asynchronous owner before aborting. An abort listener may
-    // settle synchronously, and its finally must not clear a newer query.
-    op.generation++;op.polling=op.check=op.recovery=null;
     clock.clearTimeout(op.timer);op.timer=undefined;
-    for(const end of op.waits)end();op.waits.clear();
+    const batch=op.active;op.active=null;batch?.cancel?.();
   }
   function stop(op){cancel(op);operations.delete(op.receipt);}
   function finish(op,ok,reason){
     if(!current(op))return;
-    if(settleSend(state,op.receipt,ok,reason)){
-      if(ok)accepted(op.receipt);
-      else rejected(op.receipt);
-    }
+    if(settleSend(state,op.receipt,ok,reason)){if(ok)accepted(op.receipt);else rejected(op.receipt);}
     stop(op);changed();
   }
-  async function bounded(op,call,generation=op.generation){
-    const controller=new AbortController();let timer,cancel;
-    try {
-      if(!owns(op,generation))throw Error('Client wait ended');
-      const value=await Promise.race([call({...op.scope,signal:controller.signal}),new Promise((_,reject)=>{
-        cancel=()=>{controller.abort();reject(Error('Client wait ended'));};
-        op.waits.add(cancel);timer=clock.setTimeout(cancel,timeout);
-      })]);
-      if(controller.signal.aborted||!owns(op,generation))throw Error('Client wait ended');
+  async function bounded(op,batch,call){
+    const controller=new AbortController();let timer;
+    const ended=new Promise((_,reject)=>{
+      batch.cancel=()=>{controller.abort();reject(Error('Client wait ended'));};
+      timer=clock.setTimeout(batch.cancel,timeout);
+    });
+    try{
+      if(!owns(op,batch))throw Error('Client wait ended');
+      const value=await Promise.race([call({...op.scope,signal:controller.signal}),ended]);
+      if(controller.signal.aborted||!owns(op,batch))throw Error('Client wait ended');
       return value;
-    } catch(reason){
-      if(controller.signal.aborted||!owns(op,generation))throw Error('Client wait ended',{cause:reason});
+    }catch(reason){
+      if(controller.signal.aborted||!owns(op,batch))throw Error('Client wait ended',{cause:reason});
       throw reason;
-    } finally {clock.clearTimeout(timer);op.waits.delete(cancel);}
+    }finally{clock.clearTimeout(timer);batch.cancel=null;}
   }
-  async function transmit(op,recovery=false){
-    const generation=op.generation;
-    try {
-      const result=await bounded(op,options=>client.send(op.receipt.request,options));
+  async function transmit(op,batch,retry=false){
+    try{
+      const result=await bounded(op,batch,options=>client.send(op.receipt.request,options));
       if(typeof result?.message_id!=='string'||typeof result?.duplicate!=='boolean')throw Error('Invalid message receipt');
       finish(op,true);
-    } catch(reason){
-      if(!owns(op,generation))return;
-      // An explicit rejection of the original call is definitive. Once a wait
-      // was lost, a later rejection alone cannot disprove earlier acceptance.
-      if(!recovery && reason?.status>=400 && reason.status<500 && reason.status!==408)finish(op,false,reason);
-      else {op.receipt.phase='uncertain';changed();}
+    }catch(reason){
+      if(!owns(op,batch))return;
+      // The adapter can report known server acceptance alongside a local cache
+      // error. It must not turn that known outcome into another receipt query.
+      if(reason?.accepted===true)finish(op,true);
+      else if(!retry&&reason?.status>=400&&reason.status<500&&reason.status!==408)finish(op,false,reason);
+      else op.unknown=true;
     }
   }
-  function query(op){
-    if(op.check)return op.check.promise;
-    const check=op.check={generation:op.generation};
-    const active=()=>owns(op,check.generation)&&op.check===check;
-    check.promise=Promise.resolve().then(async()=>{
-      if(!active())return;
-      const value=await bounded(op,options=>client.sendReceipt(op.receipt.request,options),check.generation);
-      if(!active())return;
-      const request=op.receipt.request;
-      if(client.production && (value?.runtime_id!==op.control || value.owner_id!==op.scope.owner))throw Error('Invalid acceptance owner');
-      if(value?.request_id!==request.request_id || value.conversation_id!==request.conversation_id ||
-        (value.user_message_id||'')!==(request.user_message_id||'') ||
-        (value.retry_user_message_id||'')!==(request.retry_user_message_id||''))throw Error('Invalid acceptance identity');
-      if(value.state==='accepted' && typeof value.message_id==='string'){finish(op,true);return true;}
-      if(value.state==='rejected'){finish(op,false,{status:409});return true;}
-      if(value.state!=='unconfirmed')throw Error('Invalid acceptance state');
-      op.blocked=false;return false;
-    }).catch(reason=>{
-      if(active()&&[401,403].includes(reason?.status))op.blocked=true;
-      throw reason;
-    }).finally(()=>{if(op.check===check)op.check=null;});
-    return check.promise;
+  async function query(op,batch){
+    const value=await bounded(op,batch,options=>client.sendReceipt(op.receipt.request,options)),request=op.receipt.request;
+    if(client.production&&(value?.runtime_id!==op.control||value.owner_id!==op.scope.owner))throw Error('Invalid acceptance owner');
+    if(value?.request_id!==request.request_id||value.conversation_id!==request.conversation_id||
+      (value.user_message_id||'')!==(request.user_message_id||'')||
+      (value.retry_user_message_id||'')!==(request.retry_user_message_id||''))throw Error('Invalid acceptance identity');
+    if(value.state==='accepted'&&typeof value.message_id==='string'){finish(op,true);return true;}
+    if(value.state==='rejected'){finish(op,false,{status:409});return true;}
+    if(value.state!=='unconfirmed')throw Error('Invalid acceptance state');
+    op.blocked=false;return false;
   }
-  function schedule(op){
-    if(!current(op)||suspended||!client.sendReceipt)return;
-    if(op.index===delays.length||op.blocked){op.polling=null;op.receipt.phase='uncertain';op.receipt.recoverable=true;changed();return;}
-    const polling=op.polling;
-    op.timer=clock.setTimeout(async()=>{
-      op.timer=undefined;
-      if(!current(op)){stop(op);return;}
-      if(!polling||op.polling!==polling)return;
-      try {await query(op);}catch{/* An unavailable read proves neither outcome. */}
-      if(current(op)&&op.polling===polling)schedule(op);
-    },delays[op.index++]);
+  function unknown(op,automatic=false){
+    if(!current(op))return;
+    op.unknown=true;op.receipt.phase='uncertain';
+    const poll=automatic&&!suspended&&online()&&!op.blocked&&client.sendReceipt&&op.index<delays.length;
+    op.receipt.recoverable=!poll;changed();
+    if(poll)op.timer=clock.setTimeout(()=>{op.timer=undefined;check(op,false,true);},delays[op.index++]);
   }
-  function recover(op,explicit){
-    if(!current(op)||suspended||!online()||!client.sendReceipt)return;
-    if(op.recovery)return op.recovery.promise;
-    op.polling=null;clock.clearTimeout(op.timer);op.timer=undefined;
-    const recovery=op.recovery={generation:op.generation};
-    const active=()=>owns(op,recovery.generation)&&op.recovery===recovery;
+  function check(op,explicit=false,automatic=false){
+    if(!current(op)||!op.unknown||suspended||!online()||!client.sendReceipt)return;
+    if(op.active)return op.active.promise;
+    clock.clearTimeout(op.timer);op.timer=undefined;
+    const batch=op.active={kind:'check'};
     op.receipt.recoverable=false;op.receipt.phase='confirming';changed();
-    recovery.promise=Promise.resolve().then(async()=>{
-      if(!active())return;
-      // Automatic recovery only reads. A user-requested retry retains the
-      // original immutable payload and may transmit after an unconfirmed read.
-      try{if(!await query(op)&&active()&&explicit)await transmit(op,true);}
-      catch{/* Keep the fixed attempt when acceptance cannot be established. */}
-      finally{if(active()){op.recovery=null;op.receipt.phase='uncertain';op.receipt.recoverable=true;changed();}}
-    });
-    return recovery.promise;
+    batch.promise=Promise.resolve().then(async()=>{
+      if(!owns(op,batch))return;
+      try{if(!await query(op,batch)&&owns(op,batch)&&explicit)await transmit(op,batch,true);}
+      catch(reason){if(owns(op,batch)&&[401,403].includes(reason?.status))op.blocked=true;}
+    }).finally(()=>{if(owns(op,batch)){op.active=null;unknown(op,automatic);}});
+    return batch.promise;
   }
-  function suspend(){
-    if(closed||suspended)return;suspended=true;
-    for(const op of operations.values())if(current(op)){op.resumeAt=0;op.receipt.phase='uncertain';op.receipt.recoverable=true;cancel(op);}
-    changed();
+  function suspend({offline=false}={}){
+    if(closed)return;suspended=true;
+    for(const op of operations.values())if(current(op)){
+      // Backgrounding alone does not discard a pending POST response. A real
+      // offline transition cancels it and makes its acceptance result unknown.
+      if(op.active?.kind==='submit'&&!offline)continue;
+      cancel(op);op.resumeAt=0;unknown(op);
+    }
   }
   return {
     start(receipt){
-      const scope={...client.scope?.()};
-      const control=(client.spaces||[]).find(space=>space.id===scope.space)?.control_id||client.runtime?.runtime_id;
-      const op={receipt,scope,control,waits:new Set(),index:0,generation:0,polling:{},resumeAt:0};operations.set(receipt,op);
-      if(suspended||!online()){receipt.phase='uncertain';receipt.recoverable=true;changed();return;}
-      transmit(op);schedule(op);
+      const scope={...client.scope?.()},control=(client.spaces||[]).find(space=>space.id===scope.space)?.control_id||client.runtime?.runtime_id;
+      const op={receipt,scope,control,index:0,resumeAt:0,unknown:false};operations.set(receipt,op);
+      if(suspended||!online()){unknown(op);return;}
+      const batch=op.active={kind:'submit'};
+      batch.promise=transmit(op,batch).finally(()=>{if(owns(op,batch)){op.active=null;unknown(op,true);}});
     },
-    // Snapshot reconciliation already settled state; cancel only this attempt's
-    // client waits and clean its submitted attachments exactly once.
+    // A matching persisted SSE frame may confirm before the POST response.
     confirmed(receipt){const op=operations.get(receipt);if(op){stop(op);accepted(receipt);}},
-    recover(receipt){const op=operations.get(receipt);if(op)return recover(op,true);},
+    recover(receipt){const op=operations.get(receipt);if(op)return check(op,true);},
     resume(){
       if(closed)return Promise.resolve();
-      if(!online()){suspend();return Promise.resolve();}
+      if(!online()){suspend({offline:true});return Promise.resolve();}
       suspended=false;const checks=[];
-      for(const op of operations.values())if(current(op)&&op.receipt.recoverable&&!op.blocked&&!op.recovery&&now()>=op.resumeAt){
-        // One read per recovery burst, with a short cooldown for repeated focus
-        // events. No timer rearms this budget or restarts the initial polling.
-        op.resumeAt=now()+1000;checks.push(recover(op,false));
+      for(const op of operations.values())if(current(op)&&op.unknown&&op.receipt.recoverable&&!op.blocked&&!op.active&&now()>=op.resumeAt){
+        op.resumeAt=now()+1000;checks.push(check(op));
       }
       return Promise.all(checks);
     },

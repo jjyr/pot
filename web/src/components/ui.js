@@ -1114,7 +1114,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const resumeSends=()=>{if(document.visibilityState!=='hidden')confirmations.resume();};
   const pageHidden=()=>{rememberChatPosition();confirmations.suspend();};
   const persistChat=()=>{if(document.visibilityState==='hidden')pageHidden();else resumeSends();};
-  const offline=()=>confirmations.suspend();
+  const offline=()=>confirmations.suspend({offline:true});
   for(const name of ['focus','pageshow','online'])window.addEventListener(name,resumeSends);
   window.addEventListener('pagehide',pageHidden);window.addEventListener('offline',offline);document.addEventListener('visibilitychange',persistChat);
   return () => {

@@ -409,19 +409,22 @@ The response repeats that identity plus `runtime_id`, `owner_id` and `state`:
 means an absent steer targets a turn that no longer accepts guidance. Reads do
 not start or interrupt Agent work.
 
-The client ends each HTTP wait after ten seconds and keeps the fixed payload and
-request ID while acceptance is unknown. Five receipt reads use bounded backoff;
-a matching persisted message or query unlocks the next send even if the HTTP
-receipt is still held. Once those reads are exhausted, foreground and online
-recovery signals trigger one more bounded, read-only receipt check in the captured
-scope. Event bursts coalesce; each attempt shares one in-flight query across
-polling, automatic checks and explicit recovery. Repeated signals have a one-second
-cooldown and never restart background polling. An unconfirmed result, timeout or
-unavailable read retains the unknown attempt; 401/403 pauses automatic checks.
-Hidden/pagehide and offline transitions cancel waits and synchronously revoke
-query ownership, so late results cannot affect a newer check. A later visible,
-foreground or online signal can resume the original attempt. Disposal cancels
-all waits. Automatic recovery never transmits a message.
+The normal submit path waits only for its business response: success confirms
+immediately, and an explicit rejection retains the draft and reports the error.
+No receipt query runs while that POST is pending, including on foreground/online
+signals. A matching persisted SSE message may also confirm the same request
+without waiting for the POST; Agent execution completion is not required.
+
+A timeout, network failure or another inconclusive submit error makes the result
+unknown and enables receipt checks. Each HTTP wait is bounded to ten seconds.
+Five reads then use bounded backoff for the fixed payload and request ID. If they
+are exhausted, foreground/online signals trigger one further read-only check.
+Each unknown attempt has one active check; bursts coalesce with a one-second
+cooldown and never restart periodic polling. Unconfirmed results or unavailable
+reads retain the unknown attempt; 401/403 pauses automatic checks. Backgrounding
+pauses receipt checks but lets a pending POST return its definitive response.
+Offline/disposal cancels waits and revokes ownership before abort, so late results
+cannot affect a newer check. Automatic recovery never transmits a message.
 
 If unresolved, a localized Check and retry action queries
 first and, only after an unconfirmed result, retries the same ID/payload in the
