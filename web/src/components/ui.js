@@ -1109,12 +1109,19 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(client.production){if(client.desktop)attachChanges();pages.refresh();pages.permissions();refreshBackgroundTasks();}
     await Promise.all([snapshot,loadDirectory()]);
   });
-  const persistChat=()=>{if(document.visibilityState==='hidden')rememberChatPosition();};
-  window.addEventListener('pagehide',rememberChatPosition);document.addEventListener('visibilitychange',persistChat);
+  // Receipt checks own their coalescing and cancellation. Directory refreshes
+  // may still be pending when offline/online arrives in the same event burst.
+  const resumeSends=()=>{if(document.visibilityState!=='hidden')confirmations.resume();};
+  const pageHidden=()=>{rememberChatPosition();confirmations.suspend();};
+  const persistChat=()=>{if(document.visibilityState==='hidden')pageHidden();else resumeSends();};
+  const offline=()=>confirmations.suspend();
+  for(const name of ['focus','pageshow','online'])window.addEventListener(name,resumeSends);
+  window.addEventListener('pagehide',pageHidden);window.addEventListener('offline',offline);document.addEventListener('visibilitychange',persistChat);
   return () => {
     if(disposed)return;
     rememberChatPosition();clearTimeout(viewTimer);cancelAnimationFrame(revealFrame);historyAbort.abort();
-    window.removeEventListener('pagehide',rememberChatPosition);document.removeEventListener('visibilitychange',persistChat);
+    window.removeEventListener('pagehide',pageHidden);window.removeEventListener('offline',offline);document.removeEventListener('visibilitychange',persistChat);
+    for(const name of ['focus','pageshow','online'])window.removeEventListener(name,resumeSends);
     chatSession?.close().catch(()=>{});
     disposed = true;updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);viewportObserver.disconnect();stopReading();messageWindow.close();stopResources?.();releaseDomains();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();backgroundTaskView.close();directoryEpoch++; unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     stopMessageSelection();completions?.dispose();attachmentUI?.destroy();client.releaseAttachments?.();

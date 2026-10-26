@@ -412,7 +412,18 @@ not start or interrupt Agent work.
 The client ends each HTTP wait after ten seconds and keeps the fixed payload and
 request ID while acceptance is unknown. Five receipt reads use bounded backoff;
 a matching persisted message or query unlocks the next send even if the HTTP
-receipt is still held. If unresolved, a localized Check and retry action queries
+receipt is still held. Once those reads are exhausted, foreground and online
+recovery signals trigger one more bounded, read-only receipt check in the captured
+scope. Event bursts coalesce; each attempt shares one in-flight query across
+polling, automatic checks and explicit recovery. Repeated signals have a one-second
+cooldown and never restart background polling. An unconfirmed result, timeout or
+unavailable read retains the unknown attempt; 401/403 pauses automatic checks.
+Hidden/pagehide and offline transitions cancel waits and synchronously revoke
+query ownership, so late results cannot affect a newer check. A later visible,
+foreground or online signal can resume the original attempt. Disposal cancels
+all waits. Automatic recovery never transmits a message.
+
+If unresolved, a localized Check and retry action queries
 first and, only after an unconfirmed result, retries the same ID/payload in the
 captured scope. Unavailable reads retain the unknown attempt. Subscription/boot
 renewals and navigation retain it in the mounted client; newer drafts, references
