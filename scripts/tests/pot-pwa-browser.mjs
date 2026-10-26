@@ -6,7 +6,7 @@ import {readFile} from 'node:fs/promises';
 import {resolve,extname} from 'node:path';
 const {chromium}=await import(process.env.POT_PLAYWRIGHT_MODULE||'playwright');
 const root=resolve(import.meta.dirname,'../..');
-const calls=[],devices=new Map(),pending=[],queue=[],pendingSessions=[];let holdSession=false,expireSubscription=false;
+const calls=[],devices=new Map(),pending=[],queue=[],pendingSessions=[];let holdSession=false,expireSubscription=false,failNext=false,holdDevice=false;const heldDevices=[];
 const event={id:'["node","alpha","reply","new"]',space:'node',control:'node',owner:'alpha',task:'task-one',kind:'reply',name:'Alpha',preview:'Synthetic reply complete'};
 const shell=`<!doctype html><link rel="stylesheet" href="/styles.css"><main style="padding:48px;max-width:720px"><h1>System notifications</h1><div id="setting"></div></main><script type="module">
 import {createSystemNotifications} from '/adapters/notifications.mjs';
@@ -28,9 +28,9 @@ const server=createServer(async(req,res)=>{
    const chunks=[];for await(const chunk of req)chunks.push(chunk);const data=chunks.length?JSON.parse(Buffer.concat(chunks)):null;calls.push({path:url.pathname,data});res.setHeader('Content-Type','application/json');
    if(url.pathname.endsWith('/session')){if(holdSession){pendingSessions.push(res);return}res.end(JSON.stringify({binding:'synthetic-session',control:'node'}));return}
    if(url.pathname.endsWith('/key')){res.end(JSON.stringify({public_key:'B'+ 'A'.repeat(86)}));return}
-   if(url.pathname.endsWith('/device')){if(data.channel==='push'&&expireSubscription){expireSubscription=false;res.writeHead(410).end('{"error":"synthetic expired subscription"}');return}devices.set(data.device,data)}
+   if(url.pathname.endsWith('/device')){if(holdDevice&&data.permission==='granted'){devices.set(data.device,data);heldDevices.push(()=>res.end('{"accepted":true}'));return}if(data.channel==='push'&&expireSubscription){expireSubscription=false;res.writeHead(410).end('{"error":"synthetic expired subscription"}');return}devices.set(data.device,data)}
    if(url.pathname.endsWith('/remove'))devices.delete(data.device);
-   if(url.pathname.endsWith('/next')){if(queue.length){res.end(JSON.stringify({delivery:queue.shift()}));return}pending.push(res);res.on('close',()=>{const i=pending.indexOf(res);if(i>=0)pending.splice(i,1)});return}
+   if(url.pathname.endsWith('/next')){if(failNext){failNext=false;res.writeHead(503).end('{}');return}if(queue.length){res.end(JSON.stringify({delivery:queue.shift()}));return}pending.push(res);res.on('close',()=>{const i=pending.indexOf(res);if(i>=0)pending.splice(i,1)});return}
    res.end('{"accepted":true}');return;
   }
   if(url.pathname==='/'){res.setHeader('Content-Type','text/html');res.end(shell);return}
@@ -136,5 +136,74 @@ try{
    await page.getByRole('checkbox',{name:'系统通知'}).uncheck();assert.equal(await page.evaluate(()=>manager.state.enabled),false);
   }
   assert.deepEqual(errors,[]);await context.close();console.log(`PASS ${mode}: channel, gesture, subscription lifecycle, delivery and device fencing`);
+ }
+
+ // Real fetch/IndexedDB/SW lifecycle interleavings, with no real subscriptions.
+ for(const scenario of ['recover','dispose','freeze','off','reset','denied','cancel-retry','deny-retry','push-freeze','push-dispose','push-off']){
+  calls.length=0;devices.clear();queue.length=0;failNext=scenario==='recover'||scenario==='cancel-retry'||scenario==='deny-retry';
+  const context=await browser.newContext({viewport:{width:1280,height:800}});
+  await context.addInitScript(scenario=>{
+   window.pushReads=window.pushSubscriptions=window.pushUnsubscriptions=0;window.localNotifications=[];
+   const intervals=new Set(),set=window.setInterval.bind(window),clear=window.clearInterval.bind(window);window.intervals=intervals;
+   window.setInterval=(...args)=>{const id=set(...args);intervals.add(id);return id};window.clearInterval=id=>{intervals.delete(id);clear(id)};
+   Object.defineProperty(navigator,'userAgent',{value:scenario.startsWith('push-')?'iPhone':'Desktop Chrome'});Object.defineProperty(navigator,'standalone',{value:true});
+   class FakeNotification{static get permission(){return localStorage.getItem('fakePermission')||'default'}static requestPermission(){localStorage.setItem('fakePermission','granted');return Promise.resolve('granted')}constructor(title,options){localNotifications.push({title,options})}close(){}}
+   Object.defineProperty(window,'Notification',{value:FakeNotification});
+  },scenario);
+  const page=await context.newPage();page.setDefaultTimeout(7000);await page.goto(origin);
+  await page.getByRole('button',{name:'Allow notifications',exact:true}).waitFor();
+  // Let the initial default-permission sync settle before holding the grant.
+  const initial=scenario.startsWith('push-')?'/remove':'/device';
+  for(let i=0;i<200&&!calls.some(call=>call.path.endsWith(initial));i++)await page.waitForTimeout(10);
+  assert(calls.some(call=>call.path.endsWith(initial)));
+  await page.waitForTimeout(30);
+  holdDevice=!['recover','cancel-retry','deny-retry'].includes(scenario);
+  await page.getByRole('button',{name:'Allow notifications',exact:true}).click();
+  if(['recover','cancel-retry','deny-retry'].includes(scenario)){
+   await page.waitForFunction(()=>manager.state.error.includes('503'));
+   if(scenario!=='recover'){
+    await page.evaluate(async scenario=>{if(scenario==='cancel-retry')await manager.setEnabled(false);else{localStorage.setItem('fakePermission','denied');dispatchEvent(new Event('focus'))}},scenario);await page.waitForTimeout(700);
+    assert.equal(calls.filter(call=>call.path.endsWith('/next')).length,1,'disabled receiver retried');
+    assert.equal(await page.evaluate(()=>intervals.size),0);
+   }else{
+    // Current queued work must survive transport retry; no second baseline.
+    const sibling=await context.newPage();await sibling.goto(origin);await sibling.waitForTimeout(100);
+    assert.equal(calls.filter(call=>call.path.endsWith('/baseline')).length,1,'standby tab rebuilt the live receiver baseline during backoff');
+    queue.push({event:{...event,id:'current-after-503'},attempt:1});
+    await page.waitForFunction(()=>localNotifications.length===1);
+    assert.equal(calls.filter(call=>call.path.endsWith('/baseline')).length,1);
+    assert.equal(await page.evaluate(()=>intervals.size),1);
+    assert.equal(await page.evaluate(()=>manager.state.error),'');
+    for(let i=0;i<100&&pending.length!==1;i++)await page.waitForTimeout(10);
+    assert.equal(pending.length,1,'transport retry lost the installation receiver lock');
+    queue.push({event:{...event,id:'current-during-handoff'},attempt:1});await page.evaluate(()=>manager.dispose());
+    await sibling.waitForFunction(()=>localNotifications.length===1);
+    assert.equal(calls.filter(call=>call.path.endsWith('/baseline')).length,1,'standby takeover expired current queued work');await sibling.close();
+   }
+  }else{
+   for(let i=0;i<200&&!heldDevices.length;i++)await page.waitForTimeout(10);assert(heldDevices.length);
+   const before=calls.filter(call=>['/baseline','/view','/next'].some(suffix=>call.path.endsWith(suffix))).length;
+   await page.evaluate(scenario=>{
+    if(scenario==='dispose'||scenario==='push-dispose')manager.dispose();
+    if(scenario==='freeze'||scenario==='push-freeze')document.dispatchEvent(new Event('freeze'));
+    if(scenario==='off'||scenario==='push-off'){window.off=manager.setEnabled(false);}
+    if(scenario==='reset')manager.refresh({reset:true});
+    if(scenario==='denied'){localStorage.setItem('fakePermission','denied');dispatchEvent(new Event('focus'));}
+   },scenario);
+   if(scenario==='off'||scenario==='push-off')await page.waitForFunction(async()=>{
+    const {notificationInstallation}=await import('/adapters/notification-installation.mjs');return (await notificationInstallation(store=>store.get('device')))?.enabled===false;
+   });
+   holdDevice=false;heldDevices.splice(0).forEach(done=>done());await page.waitForTimeout(250);
+   if(scenario==='off'||scenario==='push-off'){await page.evaluate(()=>window.off);assert(!Array.from(devices.values()).some(device=>device.enabled),'disabled installation retained server registration')}
+   assert.equal(calls.filter(call=>['/baseline','/view','/next'].some(suffix=>call.path.endsWith(suffix))).length,before,'stale registration started notification IO: '+scenario);
+   assert.equal(await page.evaluate(()=>intervals.size),0,'stale registration started a lease timer: '+scenario);
+   if(scenario==='off'||scenario==='push-off')assert.equal(await page.evaluate(async()=>{const {notificationInstallation}=await import('/adapters/notification-installation.mjs');return (await notificationInstallation(store=>store.get('device'))).enabled}),false);
+   if(scenario.startsWith('push-')&&scenario!=='push-off'){assert(Array.from(devices.values()).some(device=>device.channel==='push'&&device.enabled),'page retirement removed background Push');assert.equal(await page.evaluate(async()=>{const {notificationInstallation}=await import('/adapters/notification-installation.mjs');return (await notificationInstallation(store=>store.get('device'))).enabled}),true)}
+   if(scenario==='freeze'||scenario==='push-freeze'){
+    await page.evaluate(()=>document.dispatchEvent(new Event('resume')));await page.waitForFunction(()=>intervals.size===1);
+   }
+  }
+  if(!scenario.startsWith('push-'))assert.equal(await page.evaluate(()=>pushReads+pushSubscriptions),0,'local recovery touched Push');
+  await context.close();pending.splice(0).forEach(res=>res.end('{"delivery":null}'));console.log('PASS receiver lifecycle: '+scenario);
  }
 }finally{await browser.close();for(const res of pending)res.destroy();await new Promise(resolve=>server.close(resolve))}

@@ -407,6 +407,9 @@ func (h *Hub) Observe(ctx context.Context, source localui.Caller) {
 		}()
 		var previous map[string]uint64
 		_ = source.Stream(connection, "/api/v1/changes", func(event localui.Event) error {
+			if event.Type != "changed" && event.Type != "changes" && event.Type != "message" {
+				return nil
+			}
 			var versions map[string]uint64
 			if err := json.Unmarshal(event.Data, &versions); err != nil {
 				return err

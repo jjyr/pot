@@ -134,6 +134,15 @@ func (s *Server) cookie(c Config, expires int64, nonce string) string {
 	return text + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 func (s *Server) authenticated(r *http.Request, c Config) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.authenticatedLocked(r, c)
+}
+
+// authenticatedLocked checks the current authority while the caller holds mu.
+// Notification registration holds this same lock through its database commit,
+// in the same server -> hub order used by logout and ReplaceAccess.
+func (s *Server) authenticatedLocked(r *http.Request, c Config) bool {
 	if c.Disabled {
 		return false
 	}
@@ -152,9 +161,7 @@ func (s *Server) authenticated(r *http.Request, c Config) bool {
 	if !hmac.Equal([]byte(cookie.Value), []byte(s.cookie(c, expires, parts[2]))) {
 		return false
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.config.Generation == c.Generation && s.config.Revoked[sessionOwner(r)] == 0
+	return !s.config.Disabled && s.config.Generation == c.Generation && s.config.Revoked[sessionOwner(r)] == 0
 }
 func (s *Server) sameOrigin(r *http.Request) bool {
 	return r.Host == s.origin.Host && (r.Header.Get("Origin") == "" || r.Header.Get("Origin") == s.origin.String()) && r.Header.Get("Sec-Fetch-Site") != "cross-site"

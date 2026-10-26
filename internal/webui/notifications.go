@@ -151,7 +151,16 @@ func (s *Server) notificationRoute(w http.ResponseWriter, r *http.Request, c Con
 		cookie, _ := r.Cookie("pot_session")
 		parts := strings.Split(cookie.Value, ".")
 		expires, _ := strconv.ParseInt(parts[1], 10, 64)
+		// Body reads and validation above cannot hold the authority lock. Once
+		// they finish, revalidate and commit in one sequence with revocation.
+		s.mu.Lock()
+		if !s.authenticatedLocked(r, c) {
+			s.mu.Unlock()
+			failure(w, 401, "browser authentication required")
+			return
+		}
 		err = hub.Register(r.Context(), systemnotifications.Device{ID: input.Device, Binding: binding, Control: input.Control, Channel: input.Channel, Enabled: input.Enabled, Permission: input.Permission, Locale: input.Locale, Subscription: subscription, Expires: expires * 1000})
+		s.mu.Unlock()
 	case "/api/v1/notifications/view":
 		if input.View.Owner != "" && !hub.ValidateScope(input.Control, input.View.Space, []string{input.View.Owner}) {
 			failure(w, 409, "notification view scope changed")

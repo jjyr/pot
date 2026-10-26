@@ -528,6 +528,10 @@ Acceptance means the service accepted a request, not that the OS displayed a ban
 
 Local browser receivers share one Web Lock per installation when supported,
 so additional tabs do not each occupy another notification HTTP connection.
+Transient receiver failures keep that lock and reading lease while retrying one
+request at a time, with cancellable backoff from 250 milliseconds to 15 seconds.
+This transport retry does not rebuild the source baseline or replay a displayed
+event. Authentication rejection, denied permission and disabled intent stop it.
 `pagehide`, offline and freeze abort notification IO and suspend its lease timer;
 `pageshow`, online and resume restore only this notification transport, with a
 fresh delivery baseline. This does not change the Chat subscription or its
@@ -535,6 +539,10 @@ snapshot/reconnection state machine. A live local-capable page is still required
 for local browser delivery. Native observation continues while windows are hidden;
 Quit stops it. Web Push observation/delivery continues while a page is closed or
 suspended, without relying on page timers, SSE or JavaScript execution.
+Every asynchronous setup continuation checks the current lifecycle and intent
+before changing installation state or starting more IO. Suspending or disposing a
+page does not remove an enabled Push installation; its backend delivery continues.
+Named stream heartbeats carry liveness only and never replace business versions.
 
 ### Push installation and operation
 
@@ -542,6 +550,10 @@ The browser host's authenticated `/api/v1/notifications/` routes register, updat
 remove and acknowledge installations. They require the current HttpOnly session
 cookie, same-origin checks and current Control/owner scope. Devices are bound to
 that session and access configuration generation, with the cookie's expiry. A
+registration reads and validates its body before taking the server authority
+lock, then rechecks current authentication and commits while holding that same
+lock used by logout and access replacement. Revocation cannot be followed by a
+late registration from a request authorized before its body was read. A
 logout retires local installation writers before revoking that session's devices;
 late responses cannot re-enable them. Token replacement/disable revokes all of
 that browser host's devices, including after restart. Turning the notification

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -142,7 +144,7 @@ func TestResidentSourceQueuesDoNotBlockApprovalsOrOtherOwners(t *testing.T) {
 				return stream.Err()
 			case topics := <-updates:
 				data, _ := json.Marshal(topics)
-				if err := receive(localui.Event{Data: data}); err != nil {
+				if err := receive(localui.Event{Type: "changed", Data: data}); err != nil {
 					return err
 				}
 			}
@@ -208,5 +210,87 @@ func TestResidentSourceQueuesDoNotBlockApprovalsOrOtherOwners(t *testing.T) {
 	h.db.QueryRow("SELECT count(*) FROM notification_events WHERE json_extract(body,'$.owner')='alpha' AND json_extract(body,'$.kind')='task-complete'").Scan(&alphaTasks)
 	if alphaTasks != 0 {
 		t.Fatal("late deleted-owner outcome notified")
+	}
+}
+
+// The named heartbeat emitted by the transport is liveness, not a version map.
+func TestResidentSourceIgnoresHeartbeatWithoutLosingBusinessVersions(t *testing.T) {
+	h := testHub(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	events := make(chan localui.Event, 8)
+	reads := make(chan struct{}, 8)
+	var count atomic.Uint64
+	count.Store(1)
+	source := localui.Functions{Request: func(_ context.Context, _ string, path string, _ json.RawMessage) (json.RawMessage, error) {
+		var value any
+		switch path {
+		case "/api/v1/runtime":
+			value = map[string]string{"runtime_id": "node", "boot_id": "boot"}
+		case "/api/v1/assistants":
+			reads <- struct{}{}
+			n := count.Load()
+			value = []any{map[string]any{"id": "alpha", "name": "Alpha", "reply_id": fmt.Sprint(n), "reply_count": n}}
+		case "/api/v1/agent-links":
+			value = map[string]any{"items": []any{}}
+		default:
+			return nil, fmt.Errorf("unexpected path %s", path)
+		}
+		return json.Marshal(value)
+	}, Events: func(ctx context.Context, _ string, receive func(localui.Event) error) error {
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case event := <-events:
+				if err := receive(event); err != nil {
+					return err
+				}
+			}
+		}
+	}}
+	done := make(chan struct{})
+	go func() { defer close(done); h.Observe(ctx, source) }()
+	defer func() { cancel(); <-done }()
+	events <- localui.Event{Type: "changed", Data: []byte(`{"assistants":1}`)}
+	select {
+	case <-reads:
+	case <-time.After(time.Second):
+		t.Fatal("missing initial business baseline")
+	}
+	// Wait for the initial committed baseline, not just its resource read.
+	for deadline := time.Now().Add(time.Second); ; {
+		var n int
+		if h.db.QueryRow("SELECT count(*) FROM notification_sources").Scan(&n) == nil && n == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("baseline not committed")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	events <- localui.Event{Type: "heartbeat", Data: []byte(`{}`)}
+	events <- localui.Event{Type: "unrelated", Data: []byte(`{"assistants":20}`)}
+	events <- localui.Event{Type: "changed", Data: []byte(`{"assistants":1}`)}
+	select {
+	case <-reads:
+		t.Fatal("heartbeat/unrelated frame invalidated business versions")
+	case <-time.After(150 * time.Millisecond):
+	}
+	count.Store(2)
+	events <- localui.Event{Type: "changed", Data: []byte(`{"assistants":2}`)}
+	select {
+	case <-reads:
+	case <-time.After(time.Second):
+		t.Fatal("business event after heartbeat was lost")
+	}
+	for deadline := time.Now().Add(time.Second); ; {
+		var n int
+		if h.db.QueryRow("SELECT count(*) FROM notification_events").Scan(&n) == nil && n == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("new reply after heartbeat not published")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
