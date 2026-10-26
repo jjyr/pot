@@ -65,6 +65,15 @@ func NewLocalHTTPClient(client *http.Client, credential, expectedID string) *HTT
 	}
 	return &HTTPClient{origin: "http://runtime", token: credential, expectedID: expectedID, client: local}
 }
+
+// NewHTTPClient keeps credentials in the host and supports the same private
+// Control resource/stream contract used by the native UI.
+func NewHTTPClient(origin string, client *http.Client, credential, expectedID string) *HTTPClient {
+	c := NewLocalHTTPClient(client, credential, expectedID)
+	c.origin = strings.TrimSuffix(origin, "/")
+	return c
+}
+
 func operatorPath(path string) (string, error) {
 	u, err := url.ParseRequestURI(path)
 	if err != nil || u.IsAbs() || u.Host != "" || !strings.HasPrefix(u.Path, "/api/v1/") || strings.Contains(u.Path, "\\") || strings.Contains(u.Path, "//") {

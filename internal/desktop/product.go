@@ -44,6 +44,8 @@ type Service struct {
 	notifier                  *notifications.NotificationService
 	notificationAuthorization *systemnotifications.Authorization
 	notificationViews         map[string]NotificationView
+	notificationLocale        string
+
 	pendingNotification       map[string]interface{}
 	attentionWake             chan struct{}
 	reduceMotion, motionKnown bool
@@ -139,6 +141,7 @@ func runProduct(parent context.Context, root string) (result error) {
 	}
 	notifier := notifications.New()
 	service := &Service{notificationStore: notificationStore, notifier: notifier, notificationViews: map[string]NotificationView{}, ctx: ctx, api: api, subscriptions: map[string]context.CancelFunc{}, reads: reads, attentionWake: make(chan struct{}, 1)}
+
 	service.smoke = smoke
 	service.notificationAuthorization = &systemnotifications.Authorization{
 		Store: notificationStore, Status: notificationAuthorization,
@@ -202,6 +205,11 @@ func runProduct(parent context.Context, root string) (result error) {
 	tray := app.Window.NewWithOptions(application.WebviewWindowOptions{Name: "pot-tray", Title: "Pot", Width: 380, Height: 560, URL: "/?platform=desktop&surface=tray", Frameless: true, AlwaysOnTop: true, Hidden: true, DisableResize: true, HideOnEscape: true, HideOnFocusLost: true})
 	tray.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) { tray.Hide(); e.Cancel() })
 	service.main, service.tray = main, tray
+	stopNotifications, err := service.startNotificationEvents(ctx, runtime.Root.Path, localui.NewLocalHTTPClient(localClient, socket.Endpoint.Token, api.RuntimeID))
+	if err != nil {
+		return err
+	}
+	defer stopNotifications()
 	// A Dock reopen belongs to the main window; Wails' default handler reveals
 	// every hidden window, including the compact tray and isolated viewer.
 	app.Event.RegisterApplicationEventHook(events.Mac.ApplicationShouldHandleReopen, func(e *application.ApplicationEvent) {

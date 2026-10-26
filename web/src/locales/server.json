@@ -1,10 +1,18 @@
 {
   "en": {
     "assistant.welcome": "Hi, I'm {name}.\n\nYou can change my name and avatar in my settings, or tell me how you'd like me to talk and work so I fit your style.\n\nWhat would you like to work on together?",
-    "assistant.codexWelcome": "Hi, I'm {name}, running in Codex.\n\nYou can change my name and avatar in my settings, or tell me how you'd like me to talk and work so I fit your style.\n\nWhat would you like to work on together?"
+    "assistant.codexWelcome": "Hi, I'm {name}, running in Codex.\n\nYou can change my name and avatar in my settings, or tell me how you'd like me to talk and work so I fit your style.\n\nWhat would you like to work on together?",
+    "notifications.replyComplete": "Assistant reply complete",
+    "notifications.taskComplete": "Background task complete",
+    "notifications.taskFailed": "Background task failed or interrupted",
+    "notifications.approvalRequired": "Approval required. Review in Pot."
   },
   "zh-CN": {
     "assistant.welcome": "你好，我是 {name}。\n\n你可以在我的设置里换个名字、换张头像，也可以写下希望我怎么说话、怎么做事，让我更合你的习惯。\n\n有什么想先一起做的？",
-    "assistant.codexWelcome": "你好，我是 {name}，运行在 Codex 中。\n\n你可以在我的设置里换个名字、换张头像，也可以告诉我希望我怎么说话、怎么做事，让我更合你的习惯。\n\n有什么想先一起做的？"
+    "assistant.codexWelcome": "你好，我是 {name}，运行在 Codex 中。\n\n你可以在我的设置里换个名字、换张头像，也可以告诉我希望我怎么说话、怎么做事，让我更合你的习惯。\n\n有什么想先一起做的？",
+    "notifications.replyComplete": "助手回复已完成",
+    "notifications.taskComplete": "后台任务已完成",
+    "notifications.taskFailed": "后台任务失败或中断",
+    "notifications.approvalRequired": "需要你的审批，请在 Pot 中查看"
   }
 }

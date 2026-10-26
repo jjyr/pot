@@ -1,0 +1,11 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>System notifications fixture</title><link rel="stylesheet" href="/web/src/styles.css"><body><main class="settings-page" style="max-width:740px;margin:64px auto;padding:24px"><h1>Settings</h1><div id="setting"></div></main><script type="module">
+const params=new URLSearchParams(location.search);const source=params.has('before')?'/before':'/web/src';
+const {createSystemNotifications}=await import(source+'/adapters/notifications.mjs');
+const {notificationSetting}=await import(source+'/components/notification-setting.mjs');let permission=params.get('permission')||'default';
+class FakeNotification{static get permission(){return permission}static requestPermission(){return Promise.resolve(permission='granted')}constructor(){}}
+const fakeHost=Object.create(window);for(const [key,value] of Object.entries({Notification:FakeNotification,navigator:{userAgent:'iPhone',language:'en',platform:'iPhone',serviceWorker:undefined},isSecureContext:true,document,localStorage,indexedDB,crypto,addEventListener:window.addEventListener.bind(window),removeEventListener:window.removeEventListener.bind(window),setTimeout,clearTimeout,setInterval,clearInterval,matchMedia:()=>({matches:false})}))Object.defineProperty(fakeHost,key,{value});
+const client={production:false,desktop:false,runtime:{runtime_id:'fixture'},assistants:[],spaces:[]};
+const notifications=createSystemNotifications({client,surface:'main',view:()=>({}),open:()=>{},locale:()=>params.get('locale')||'en',host:fakeHost});
+const setting=notificationSetting({notifications,locale:()=>params.get('locale')||'en',desktop:false,host:window});document.querySelector('#setting').append(setting.element);
+window.addEventListener('pagehide',()=>{setting.dispose();notifications.dispose()},{once:true});
+</script></body></html>

@@ -159,7 +159,6 @@ export async function createProductionClient({desktop = false, base = '', resour
     requestNotificationPermission:desktop?()=>invoke('RequestSystemNotificationPermission'):undefined,
     setNotificationsEnabled:desktop?value=>invoke('SetSystemNotificationsEnabled',value):undefined,
     notificationView:desktop?(surface,view)=>invoke('SetNotificationView',surface,view):undefined,
-    notifySystem:desktop?event=>invoke('NotifySystem',event):undefined,
     onNotificationClick:desktop?handler=>{
       let active=true;
       const take=()=>invoke('TakeSystemNotification').then(value=>{if(active&&value)handler(value);}).catch(()=>{});

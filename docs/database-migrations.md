@@ -206,3 +206,26 @@ receiver option, while an explicit empty string selects a supported default. The
 migration preserves original request payloads for exact retry recovery, assistant/native
 thread identities, revisions and task executor configuration. New owner-configured
 scopes use the same registry; deleting an assistant does not delete its scope.
+
+## Unified system notification delivery
+
+`control/0004_system_notifications` adds structured notification events,
+browser installations, reading leases and per-installation receipts. Push
+subscription JSON/fingerprints and private VAPID material have separate tables
+owned by the Push service. An activation event sequence prevents delayed consumers
+from replaying history to newly enabled installations. Native preferences/claims
+keep their existing private JSON format; native delivery does not use the browser
+registration/receipt protocol. This migration is new after the released Control
+0003 history; it does not import an earlier experimental Push schema.
+
+Existing Control business tables and JSON records are unchanged. The native host
+uses its Control database; a standalone browser service keeps a Control database
+in its private service root. Lifecycle stream reconnection establishes a fresh
+access lifetime without storing business-source baselines or reading history. Browser interrupted sends become uncertain receipts, never an
+automatic resend. No retired Push store is imported.
+
+The separate rebuildable notification installation database uses
+`ui-notifications/0001_installation.mjs`. It stores device identity/channel/intent,
+a logout epoch and one pending navigation target. It does not share authentication
+storage or disposable business projection retention. Existing browser preference,
+onboarding, token and native authorization records remain intact.

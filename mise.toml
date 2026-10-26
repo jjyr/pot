@@ -157,6 +157,10 @@ python -m venv .local/skill-tests
 description = "Verify GitHub background polling and durable assistant delivery"
 run = ["node --test plugins/github/*.test.mjs", "go test -race ./internal/assistant ./internal/control -run 'TestPlugin|TestGitHubPlugin' -count=1"]
 
+[tasks."test:pwa"]
+description = "Verify isolated system notification, Web Push and browser lifecycle contracts"
+run = ["go test ./internal/systemnotifications ./internal/browsernotifications ./internal/pwapush ./internal/webui ./pkg/storage ./web", "node scripts/tests/pot-ui-notifications.mjs", "node scripts/tests/pot-ui-service-worker.mjs", "node scripts/tests/pot-pwa-browser.mjs"]
+
 [tasks."test:i18n"]
 description = "Verify shared product translation completeness"
 run = "python scripts/tests/localization.py"

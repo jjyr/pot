@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const current = 'pot-ui-v3', retired = 'retired-product-ui';
+const current = 'pot-ui-v4', retired = 'retired-product-ui';
 const entries = new Map([
   [retired, new Map([['/index.html', 'retired UI'], ['/app.js', 'retired JS']])],
   [current, new Map([['/index.html', 'current UI'], ['/app.js', 'current JS']])],
@@ -37,12 +37,15 @@ const caches = {
   },
 };
 let network;
+const installation=new Map();const displayed=[];const focused=[];const opened=[];
 const context = vm.createContext({
+ notificationInstallation:async work=>work({get:async key=>installation.get(key),put:(value,key)=>installation.set(key,value),remove:key=>installation.delete(key)}),
+ validNotificationTarget:event=>event&&typeof event.id==='string'&&['space','control','owner'].every(key=>event[key])&&['reply','task-complete','task-failed','approval'].includes(event.kind),
   URL, Promise, caches,
   fetch: async () => { if (!network) throw Error('offline fixture'); return new Response(network.body, {status: network.status}); },
-  self: {location: {origin: 'https://pot.test'}, addEventListener: (name, handler) => listeners.set(name, handler)},
+  self: {registration:{showNotification:async(title,options)=>displayed.push({title,options})},clients:{matchAll:async()=>[],openWindow:async url=>opened.push(url)},location: {origin: 'https://pot.test'}, addEventListener: (name, handler) => listeners.set(name, handler)},
 });
-vm.runInContext(fs.readFileSync(new URL('../../web/src/service-worker.js', import.meta.url), 'utf8'), context);
+vm.runInContext(fs.readFileSync(new URL('../../web/src/service-worker.js', import.meta.url), 'utf8').replace(/^import[^\n]*\n/,''), context);
 async function request(path, mode = 'cors', method = 'GET') {
   let response;
   listeners.get('fetch')({request: {method, url: new URL(path, 'https://pot.test').href, mode}, respondWith(value) {response = value;}});
@@ -75,3 +78,18 @@ await Promise.resolve();
 assert.equal(writes.length, 1, 'only successful responses may be cached');
 assert.equal(entries.get(retired).get('/app.js'), 'retired JS', 'other cache data is untouched');
 console.log('Current-cache offline boundaries, misses, excluded traffic and successful network writes passed');
+
+const target={id:'reply',space:'node',control:'node',owner:'alpha',task:'task-one',kind:'reply'};
+const payload={version:1,event:target,device:'device',title:'Pot · Alpha',body:'Synthetic reply'};
+installation.set('device',{schema_version:1,id:'device',control:'node',enabled:true,channel:'push'});
+async function dispatch(name,event){let pending;listeners.get(name)({...event,waitUntil:value=>pending=value});await pending}
+await dispatch('push',{data:{json:()=>({...payload,device:'other'})}});assert.equal(displayed.length,0);
+await dispatch('push',{data:{json:()=>payload}});assert.equal(displayed.length,1);assert.equal(displayed[0].options.tag,'reply');
+const notification={data:{device:'device',event:{...target,url:'https://attacker.test/'}},close(){}};
+await dispatch('notificationclick',{notification});assert.deepEqual(opened,['/'],'worker opens only its own fixed root');
+assert.equal(installation.get('click').event.task,'task-one');
+context.self.clients.matchAll=async()=>[{url:'https://pot.test/',focus:async()=>focused.push('focus'),postMessage:message=>focused.push(message.type)}];
+await dispatch('notificationclick',{notification});assert.deepEqual(focused,['focus','pot:notification-click']);
+installation.get('device').enabled=false;await dispatch('push',{data:{json:()=>payload}});assert.equal(displayed.length,1);
+await dispatch('notificationclick',{notification});assert.equal(focused.length,2,'disabled installation cannot restore a target');
+console.log('Push display, device fencing, fixed click destination and pending exact Task target passed');

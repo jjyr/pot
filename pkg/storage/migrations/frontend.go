@@ -5,7 +5,7 @@ import (
 	"io/fs"
 )
 
-//go:embed ui-cache/*.mjs
+//go:embed ui-cache/*.mjs ui-notifications/*.mjs
 var frontendSchemas embed.FS
 
 // FrontendSchemas exposes only the versioned IndexedDB migrations to web hosts.

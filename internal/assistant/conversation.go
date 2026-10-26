@@ -36,9 +36,10 @@ type RunOptions struct {
 	Settle             func(context.Context) error
 }
 type ConversationOptions struct {
-	ProjectUI   func(context.Context, []protocol.UIMessage) error
-	IdlePolicy  func(context.Context, core.Thread) (IdleCompactionPolicy, error)
-	CompactGate func(context.Context, func() error) error
+	ReplyCommitted func(protocol.Message)
+	ProjectUI      func(context.Context, []protocol.UIMessage) error
+	IdlePolicy     func(context.Context, core.Thread) (IdleCompactionPolicy, error)
+	CompactGate    func(context.Context, func() error) error
 
 	Context                                  context.Context
 	Owner, ConversationID, RuntimeID, BootID string
@@ -157,6 +158,7 @@ func OpenConversation(path string, options ConversationOptions) (*Conversation, 
 	if err != nil {
 		return nil, err
 	}
+	store.ReplyCommitted = options.ReplyCommitted
 	if err := store.InitializeInstructions(options.InitialRules); err != nil {
 		store.Close()
 		return nil, err

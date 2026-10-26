@@ -27,6 +27,7 @@ type Definition struct {
 	Avatar    string `json:"avatar,omitempty"`
 }
 type Registry struct {
+	Changed   func()
 	db        *sql.DB
 	directory string
 }
@@ -307,6 +308,9 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 	if err := storage.ExportAssistantFiles(r.db, r.directory); err != nil {
 		return definition, err
 	}
+	if r.Changed != nil {
+		r.Changed()
+	}
 	return r.definition(ctx, definition.ID)
 }
 func (r *Registry) Welcome(ctx context.Context, id string) (string, error) {
@@ -362,6 +366,9 @@ func (r *Registry) UpdateProfile(ctx context.Context, id string, patch ProfileUp
 			return d, err
 		}
 	}
+	if r.Changed != nil {
+		r.Changed()
+	}
 	return r.definition(ctx, id)
 }
 
@@ -412,7 +419,7 @@ func (r *Registry) Delete(ctx context.Context, id string, revision uint64) error
 	}
 	unlock := storage.LockAssistantFiles(r.Directory(id))
 	defer unlock()
-	return storage.Transaction(ctx, r.db, func(tx *sql.Tx) error {
+	err := storage.Transaction(ctx, r.db, func(tx *sql.Tx) error {
 		var deleted bool
 		if err := tx.QueryRowContext(ctx, "SELECT deleted FROM assistant_definitions WHERE id=?", id).Scan(&deleted); err != nil {
 			return err
@@ -430,6 +437,10 @@ func (r *Registry) Delete(ctx context.Context, id string, revision uint64) error
 		_, err = tx.ExecContext(ctx, "UPDATE assistant_definitions SET deleted=1 WHERE id=?", id)
 		return err
 	})
+	if err == nil && r.Changed != nil {
+		r.Changed()
+	}
+	return err
 }
 func (r *Registry) DefaultAvatar(ctx context.Context, id string) (string, error) {
 	deleted, err := r.Deleted(ctx, id)

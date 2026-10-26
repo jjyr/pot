@@ -89,7 +89,12 @@ func (s *Service) agentLinkIdentity(ctx context.Context, id string) (agentlink.I
 
 func (s *Service) openAgentLinks() error {
 	hostIdentity, hostKey := s.Machines.TransportIdentity()
-	service, err := agentlink.New(agentlink.Options{HostIdentity: hostIdentity, HostKey: hostKey, DB: s.integrationDB, Backend: potLinkBackend{s}, Secrets: s.integrationSecrets, Identity: s.agentLinkIdentity, Mailbox: controlLinkMailbox{s}, Changed: func() { s.Changes.Notify("agent-links"); s.Changes.Notify("assistant-mail"); s.wakeTasks() }})
+	service, err := agentlink.New(agentlink.Options{HostIdentity: hostIdentity, HostKey: hostKey, DB: s.integrationDB, Backend: potLinkBackend{s}, Secrets: s.integrationSecrets, Identity: s.agentLinkIdentity, Mailbox: controlLinkMailbox{s}, ApprovalReceived: s.receiveApprovalEvent, Changed: func() {
+		s.Lifecycle.Publish(protocol.LifecycleEvent{Kind: "authority_changed"})
+		s.Changes.Notify("agent-links")
+		s.Changes.Notify("assistant-mail")
+		s.wakeTasks()
+	}})
 	if err != nil {
 		return err
 	}
