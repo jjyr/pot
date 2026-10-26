@@ -5,7 +5,7 @@ export const groups = {
   history: ['task-history', 'task-history-edges'],
   domain: ['domain-repositories.html'],
   management: ['assistant-start-phone','first-connection-codex','first-connection-antigravity','settings-phone','machines'],
-  composer: ['composer-phone','composer-enter'],
+  composer: ['composer-phone','composer-enter','reference-cancel'],
   connection: ['chat-stream-recovery'],
   approvals: ['linked-approvals','patch-approvals'],
   usage: ['usage-empty','usage-unknown','usage-partial','usage-trend'],
