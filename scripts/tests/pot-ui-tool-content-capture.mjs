@@ -24,7 +24,7 @@ try{
   await checkPage.close();
   if(integrationOrigin){
     const parent=await browser.newPage();await parent.goto(integrationOrigin);
-    try{for(const script of ['pot-ui-process-runs-browser.js','pot-ui-tools-browser.js']){
+    try{for(const script of ['pot-ui-process-runs-browser.js']){
       const source=await readFile(new URL(script,import.meta.url),'utf8');const run=new Function(`return (${source}\n)` )();
       console.log(`${script}: ${JSON.stringify(await run(parent))}`);
     }}finally{await parent.close();}

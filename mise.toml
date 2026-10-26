@@ -122,7 +122,7 @@ run = "python scripts/go-notices --output .local/licenses/go-dependencies.txt ./
 [tasks."test:ui"]
 description = "Verify shared DOM composer and production owner-scoped state contracts"
 depends = ["test:ui-fluid", "test:assistant-creation"]
-run = ["node scripts/tests/pot-ui-service-worker.mjs", "node scripts/tests/pot-ui-preferences.mjs", "node --test pkg/mcp/node_runtime.test.mjs", "node scripts/tests/pot-ui-updates.mjs", "node scripts/tests/pot-ui-extensions.mjs", "node scripts/tests/pot-ui-history.mjs", "node scripts/tests/pot-ui-scroll-input.mjs", "node scripts/tests/pot-ui-chat-sync.mjs", "node scripts/tests/pot-ui-resource-cache.mjs", "node scripts/tests/pot-ui-domains.mjs", "node scripts/tests/pot-ui-query-resource-refresh.mjs", "node scripts/tests/pot-ui-display-resources.mjs", "node scripts/tests/pot-ui-topology.mjs", "node scripts/tests/pot-ui-agent-links.mjs", "node scripts/tests/pot-ui-state.mjs", "node scripts/tests/pot-ui-schedule-probe.mjs", "node scripts/tests/pot-ui-send-confirmation.mjs", "node scripts/tests/pot-ui-production-state.mjs", "node scripts/tests/pot-ui-provider-plugins.mjs", "node scripts/tests/pot-ui-usage.mjs", "node scripts/tests/script-runs.mjs", "node scripts/tests/pot-ui-notifications.mjs", "node scripts/tests/pot-ui-github-subscriptions.mjs", "node --test plugins/github/*.test.mjs", "node scripts/tests/pot-ui-attachments.mjs", "node scripts/tests/pot-ui-file-images.mjs", "node scripts/tests/pot-ui-message-files.mjs", "node scripts/tests/pot-ui-references.mjs", "node scripts/tests/pot-ui-message-identities.mjs", "node scripts/tests/pot-ui-communication.mjs", "node scripts/tests/pot-ui-composer-selectors.mjs", "node scripts/tests/web-errors.js"]
+run = ["node --test scripts/tests/ui-regression-plan.test.mjs", "node scripts/tests/pot-ui-service-worker.mjs", "node scripts/tests/pot-ui-preferences.mjs", "node --test pkg/mcp/node_runtime.test.mjs", "node scripts/tests/pot-ui-updates.mjs", "node scripts/tests/pot-ui-extensions.mjs", "node scripts/tests/pot-ui-history.mjs", "node scripts/tests/pot-ui-scroll-input.mjs", "node scripts/tests/pot-ui-chat-sync.mjs", "node scripts/tests/pot-ui-resource-cache.mjs", "node scripts/tests/pot-ui-domains.mjs", "node scripts/tests/pot-ui-query-resource-refresh.mjs", "node scripts/tests/pot-ui-display-resources.mjs", "node scripts/tests/pot-ui-topology.mjs", "node scripts/tests/pot-ui-agent-links.mjs", "node scripts/tests/pot-ui-state.mjs", "node scripts/tests/pot-ui-schedule-probe.mjs", "node scripts/tests/pot-ui-send-confirmation.mjs", "node scripts/tests/pot-ui-production-state.mjs", "node scripts/tests/pot-ui-provider-plugins.mjs", "node scripts/tests/pot-ui-usage.mjs", "node scripts/tests/script-runs.mjs", "node scripts/tests/pot-ui-notifications.mjs", "node scripts/tests/pot-ui-github-subscriptions.mjs", "node --test plugins/github/*.test.mjs", "node scripts/tests/pot-ui-attachments.mjs", "node scripts/tests/pot-ui-file-images.mjs", "node scripts/tests/pot-ui-message-files.mjs", "node scripts/tests/pot-ui-references.mjs", "node scripts/tests/pot-ui-message-identities.mjs", "node scripts/tests/pot-ui-communication.mjs", "node scripts/tests/pot-ui-composer-selectors.mjs", "node scripts/tests/web-errors.js"]
 
 
 [tasks."test:executor"]
@@ -234,7 +234,7 @@ xcrun swiftc -module-cache-path .local/icons/modules resources/app/PotIcon.swift
 
 [tasks."test:ui-http-integration"]
 description = "Opt-in real local browser/HTTP/SSE integration (cached Playwright CLI and browser required)"
-run = ["python scripts/tests/pot-ui-http-integration.py", "python scripts/tests/pot-ui-assistant-start-browser.py", "python scripts/tests/pot-ui-assistant-settings-browser.py", "python scripts/tests/pot-ui-linked-approvals-browser.py", "python scripts/tests/pot-ui-composer-selectors-browser.py", "python scripts/tests/pot-ui-usage-browser.py"]
+run = "python scripts/tests/ui-http-suite.py"
 
 [tasks."test:public-api"]
 description = "Verify reusable Go libraries from an independent external module"
@@ -255,3 +255,27 @@ run = ["go test -race ./internal/agenthost ./cmd/pot-codex-agent ./pkg/pluginhos
 [tasks."test:antigravity-agent"]
 description = "Verify native Antigravity sessions, scoped management and plugin installation"
 run = ["go test -race ./internal/agenthost ./pkg/agentlink ./pkg/storage", "python integrations/antigravity/install_test.py"]
+
+[tasks."test:ui-scroll"]
+description = "Trusted wheel continuity, mixed/nested heights and reading anchors (isolated Chromium)"
+run = "node scripts/tests/ui-regressions.mjs --group scroll"
+
+[tasks."test:ui-nav"]
+description = "Trusted touch Back intermediate frames and keyed conversation navigation"
+run = "node scripts/tests/ui-regressions.mjs --group nav"
+
+[tasks."test:ui-history"]
+description = "Automatic Task history, bounded reads, retry and cancellation"
+run = "node scripts/tests/ui-regressions.mjs --group history"
+
+[tasks."test:ui-domain"]
+description = "Domain progress, scope, shared commands and committed IndexedDB publication"
+run = ["node scripts/tests/pot-ui-domains.mjs", "node scripts/tests/ui-regressions.mjs --group domain"]
+
+[tasks."test:ui-storage"]
+description = "Real IndexedDB integrity, read volume, namespace and transaction contracts"
+run = "node scripts/tests/ui-regressions.mjs --group storage"
+
+[tasks."test:ui-regressions"]
+description = "All deterministic browser regression groups; HTTP/SSE qualification is separate"
+run = "node scripts/tests/ui-regressions.mjs"

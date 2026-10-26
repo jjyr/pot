@@ -119,6 +119,11 @@ async page => {
   await expand(chatCard('task-two'));await chatCard('task-two').getByRole('button',{name:'本任务允许',exact:true}).click();
   await page.locator('.chat-approvals').waitFor({state:'hidden'});await change();
   await row().locator('.assistant-approval-status').waitFor({state:'detached'});
+  // Retain the former tool sweep's distinct permanent-grant boundary here.
+  pending.push(approval('persistent-approval','task-two','grant-call'));await change();await chatCard('task-two').waitFor();await expand(chatCard('task-two'));
+  assert(await chatCard('task-two').getByText('cat /Projects/shared/release.txt',{exact:true}).first().isVisible(),'Permanent grant still reviews the exact requested command');
+  await chatCard('task-two').getByRole('button',{name:'始终允许此命令',exact:true}).click();await chatCard('task-two').waitFor({state:'detached'});
+  assert(posts.some(post=>post.body.id==='persistent-approval'&&post.body.action==='allow_always'&&post.owner==='alpha'&&post.space==='local'),'Permanent command decision retains the original approval, owner and Space');
   assert(posts.every(post=>post.path==='/api/v1/permissions'),'Reminders never send chat messages or model requests');
   assert(errors.length===0,'No browser exceptions: '+errors.join('; '));
   return {passed:true,checks:'Shared expandable Chat/Task cards, latest-message slot, transient notices, global assistant badges, retry, owner fencing, reload and navigation',posts:posts.length};

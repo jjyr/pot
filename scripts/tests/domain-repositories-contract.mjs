@@ -1,3 +1,4 @@
+import {tasksDomainContract} from './tasks-domain-contract.mjs';
 import {createProductionClient} from '../../web/src/adapters/production.mjs';
 import {createProjectionStore} from '../../web/src/state/projection-store.mjs';
 import {domainsFor} from '../../web/src/state/domains/index.mjs';
@@ -67,5 +68,6 @@ export async function domainRepositoriesContract(report=()=>{}){
     const stopA=taskDomains.tasks.watchTranscript(task,scope,snapshot=>a.push(snapshot)),stopB=taskDomains.tasks.watchTranscript(task,scope,snapshot=>b.push(snapshot));stopA();const disposedCount=a.length;
     await wait(()=>b.at(-1)?.data?.cursor===7200);check(a.length===disposedCount&&b.at(-1).data.messages.at(-1).text==='message 2399','Transcript watch first reads IndexedDB and shares background confirmation after one view disposes');stopB();releaseTasks();
   }finally{repository.close();await remove(taskName+'-tasks');}
+  await tasksDomainContract(report);
   report('DONE domain repositories contract');
 }

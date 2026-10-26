@@ -1,7 +1,7 @@
 // Exercise the real flow adapter with delayed/repeated ResizeObserver delivery.
 // Trace native writes in the fixture, without a product debug API.
-async page=>{
-  const origin=new URL(page.url()).origin,assert=(ok,label)=>{if(!ok)throw Error(label);},errors=[];
+async (page,{origin=new URL(page.url()).origin}={})=>{
+  const assert=(ok,label)=>{if(!ok)throw Error(label);},errors=[];
   page.on('pageerror',error=>errors.push(error.message));
   await page.addInitScript(()=>{
     const Native=ResizeObserver,held=[];
