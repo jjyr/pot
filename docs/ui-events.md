@@ -241,8 +241,10 @@ at most 640 messages and a 16 MiB estimated body budget. IndexedDB retains up to
 are evicted first. Cached history intervals are used before backend reads, and
 unknown or evicted intervals are fetched again. Reset gaps invalidate cached
 interval provenance. Versions fence late pages, transactions serialize writers,
-and retired boot identities cannot restore an earlier projection. This is a
+and retired boot identities cannot restore an earlier projection. The transcript projection is a
 rebuildable UI cache, never the authoritative conversation store or a send queue.
+[Assistant drafts](assistant-drafts.md) share the database through separate stores
+that are excluded from projection retention and cache clearing.
 
 Window and persistent body budgets count UTF-8 encoded message JSON plus a
 256-byte allowance per row. Task text, combined tool output text, serialized
@@ -439,8 +441,9 @@ If unresolved, a localized Check and retry action queries
 first and, only after an unconfirmed result, retries the same ID/payload in the
 captured scope. Unavailable reads retain the unknown attempt. Subscription/boot
 renewals and navigation retain it in the mounted client; newer drafts, references
-and attachments survive late or duplicate confirmation. This is in-memory
-recovery, not persistence across closing/reloading the app.
+and attachments survive late or duplicate confirmation.
+[Assistant drafts](assistant-drafts.md) persist that immutable request fence across
+closing/reloading the app and restore it through read-only confirmation.
 Assistant messages bind to their input through `reply_to`; terminal failures retain
 their original diagnostic in the message's `error` field, including preparation
 failures before the first model event. Chat projects a single reply bubble from

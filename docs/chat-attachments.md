@@ -94,15 +94,15 @@ Model input is separately bounded to 64 MiB of attachment originals in retained
 context and a 96 MiB encoded request. PDF context estimation charges decoded
 bytes with an image floor; actual provider token usage remains authoritative.
 
-Drafts and in-progress File objects follow the existing in-memory composer
-lifetime, scoped by Control/Space, assistant and conversation. Navigation keeps
-them; restarting the client restores sent history, not unsent editor contents.
+Drafts persist locally per Control/Space and assistant, bound to their current
+conversation. Text, references and original attachment Blobs survive navigation
+and client restart; see [Assistant drafts](assistant-drafts.md).
 Local file selection and removal do not depend on agent activity, a pending send
 receipt or the stream connection. The chooser captures its Space, owner and
 conversation before opening. Changing conversations or leaving chat cancels that
 selection with an explanation; late chooser results are ignored. Closing the
-chooser also retires its intent. Selecting files creates visible in-memory cards
-before upload eligibility is checked. Missing connection or upload permission
+chooser also retires its intent. Selecting files creates visible cards and promptly queues original Blobs for
+local persistence. Upload eligibility is checked independently. Missing connection or upload permission
 retains the files with a waiting explanation. Restoring eligibility starts one
 upload attempt per waiting file; unsupported model types remain visible and block
 Send until removed or supported again. Upload failures expose an explicit retry;
@@ -111,9 +111,8 @@ rendering progress does not erase selection-limit warnings.
 Uploads expose progress, cancellation/removal and retry with the same ID and
 confirmed offset. Removing a pending send's submitted original only changes the
 local draft; Control retains that immutable send snapshot. Its later confirmation
-clears only submitted IDs, preserving files selected afterwards. Browser File
-objects cannot survive closing or reloading the whole page; no unsent Blob data
-is persisted. A lost send receipt reconciles the same request identity.
+clears only submitted IDs, preserving files selected afterwards. Reload reconstructs File objects and previews from the saved originals,
+then validates ready uploads with their original IDs. A lost send receipt reconciles the same request identity.
 A confirmed provider rejection restores the latest attachment draft when it does
 not overwrite newer typing. Retrying unchanged input uses
 `POST /api/v1/turn/retry` to resume the original failed message and checkpoint;

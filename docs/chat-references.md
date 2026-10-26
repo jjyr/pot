@@ -11,9 +11,9 @@ scrolls to the original message. Removal remains available while a send awaits
 confirmation: it changes the draft for the next input, while the submitted input
 keeps its captured references.
 
-References are in-memory drafts scoped by Control, assistant and conversation,
-alongside the text and attachment drafts. Navigation retains them; client restart
-does not restore unsent drafts. Sent references persist above the user's message
+References persist in the [local assistant draft](assistant-drafts.md), scoped by
+Control, Space and assistant and bound to their conversation. Navigation and
+client restart restore them alongside text and local attachment originals. Sent references persist above the user's message
 text and retain their original message IDs. A lost receipt, explicit retry, queued
 user batch or active-turn guidance retains the same accepted references. Later
 draft changes survive late acknowledgements. A reference alone does not send a

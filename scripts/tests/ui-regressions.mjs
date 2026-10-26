@@ -4,6 +4,7 @@ import {groups,faults,select,fixtures} from './ui-regression-plan.mjs';
 import {sourceServer,launchBrowser,isolatedPage,contract,fixture} from './browser-harness.mjs';
 import {taskContinuity,witnessMessages} from './task-continuity-browser.mjs';
 import {attachmentPickerBrowser} from './attachment-picker-browser.mjs';
+import {assistantDraftsBrowser} from './assistant-drafts-browser.mjs';
 import {chatStreamRecovery} from './chat-stream-recovery-browser.mjs';
 import {taskHistoryBrowser,taskHistoryEdges} from './task-history-browser.mjs';
 import {referenceCancellation} from './reference-cancel-browser.mjs';
@@ -28,6 +29,7 @@ else {
         }
       }
       else if(name==='attachment-picker')result=await attachmentPickerBrowser(browser,{sourceOrigin:server.origin});
+      else if(name==='assistant-drafts')result=await assistantDraftsBrowser(browser,{sourceOrigin:server.origin});
       else if(name==='chat-stream-recovery')result=await chatStreamRecovery(browser,{sourceOrigin:server.origin});
       else if(name==='directory')result=await contract('pot-ui-mobile-directory-browser.js',null,{browser,origin:server.origin});
       else if(name==='composer-enter')result=await contract('pot-ui-mobile-enter-browser.js',null,{browser,origin:server.origin,base:server.origin+'/web/src'});

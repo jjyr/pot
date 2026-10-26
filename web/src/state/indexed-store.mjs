@@ -1,18 +1,18 @@
-import {UI_CACHE_VERSION,migrateTaskCheckpoints} from '../../../pkg/storage/migrations/ui-cache/0004_task_checkpoints.mjs';
+import {UI_CACHE_VERSION,migrateAssistantDrafts} from '../../../pkg/storage/migrations/ui-cache/0005_assistant_drafts.mjs';
 
 export const idbRequest=value=>new Promise((resolve,reject)=>{value.onsuccess=()=>resolve(value.result);value.onerror=()=>reject(value.error);});
 // Resolves work only at transaction completion. Never expose a put's success as
 // a committed projection. Each caller declares exactly the stores it touches.
-export function createIndexedStore({indexedDB=globalThis.indexedDB,name='pot-chat-cache',version=UI_CACHE_VERSION,migrate=migrateTaskCheckpoints}={}){
+export function createIndexedStore({indexedDB=globalThis.indexedDB,name='pot-chat-cache',version=UI_CACHE_VERSION,migrate=migrateAssistantDrafts}={}){
   let opening,closed=false;
   function open(){
     if(closed)return Promise.reject(Error('chat_cache_closed'));
     if(!opening)opening=new Promise((resolve,reject)=>{
       if(!indexedDB){reject(Error('chat_cache_unavailable'));return;}
-      const request=indexedDB.open(name,version);let abandoned=false;
-      request.onupgradeneeded=event=>{if(abandoned||closed){request.transaction.abort();return;}migrate(request.result,request.transaction,event.oldVersion);};
+      const request=indexedDB.open(name,version);let abandoned=false,upgradeError;
+      request.onupgradeneeded=event=>{if(abandoned||closed){request.transaction.abort();return;}try{migrate(request.result,request.transaction,event.oldVersion);}catch(error){upgradeError=error;request.transaction.abort();}};
       request.onsuccess=()=>{const db=request.result;if(abandoned||closed){db.close();return;}db.onversionchange=()=>{db.close();opening=null;};resolve(db);};
-      request.onerror=()=>reject(request.error);
+      request.onerror=()=>reject(upgradeError||request.error);
       request.onblocked=()=>{abandoned=true;reject(Error('chat_cache_blocked'));};
     }).catch(error=>{opening=null;throw error;});
     return opening;

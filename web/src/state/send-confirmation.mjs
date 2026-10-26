@@ -2,7 +2,7 @@ import {settleSend} from './conversation.mjs';
 
 // A successful submit response is sufficient. Only an unknown submit result
 // needs receipt reads, always for its captured scope and immutable request.
-export function createSendConfirmation({state,client,changed,accepted,rejected=()=>{},cacheFailed=()=>{},clock=globalThis,now=()=>Date.now(),online=()=>globalThis.navigator?.onLine!==false,timeout=10000,delays=[750,1500,3000,6000,10000]}) {
+export function createSendConfirmation({state,client,changed,accepted,rejected=()=>{},cacheFailed=()=>{},canRetry=()=>true,clock=globalThis,now=()=>Date.now(),online=()=>globalThis.navigator?.onLine!==false,timeout=10000,delays=[750,1500,3000,6000,10000]}) {
   const operations=new Map();let closed=false,suspended=false;
   const current=op=>!closed&&operations.get(op.receipt)===op&&state.pending.get(op.receipt.key)===op.receipt;
   const owns=(op,batch)=>current(op)&&op.active===batch;
@@ -76,7 +76,7 @@ export function createSendConfirmation({state,client,changed,accepted,rejected=(
     op.receipt.recoverable=false;op.receipt.phase='confirming';changed();
     batch.promise=Promise.resolve().then(async()=>{
       if(!owns(op,batch))return;
-      try{if(!await query(op,batch)&&owns(op,batch)&&explicit)await transmit(op,batch,true);}
+      try{if(!await query(op,batch)&&owns(op,batch)&&explicit&&canRetry(op.receipt))await transmit(op,batch,true);}
       catch(reason){if(owns(op,batch)&&[401,403].includes(reason?.status))op.blocked=true;}
     }).finally(()=>{if(owns(op,batch)){op.active=null;unknown(op,automatic);}});
     return batch.promise;
@@ -91,12 +91,21 @@ export function createSendConfirmation({state,client,changed,accepted,rejected=(
     }
   }
   return {
-    start(receipt){
-      const scope={...client.scope?.()},control=(client.spaces||[]).find(space=>space.id===scope.space)?.control_id||client.runtime?.runtime_id;
+    start(receipt,capturedScope=client.scope?.()){
+      const scope={...capturedScope},control=(client.spaces||[]).find(space=>space.id===scope.space)?.control_id||client.runtime?.runtime_id;
       const op={receipt,scope,control,index:0,resumeAt:0,unknown:false};operations.set(receipt,op);
       if(suspended||!online()){unknown(op);return;}
       const batch=op.active={kind:'submit'};
       batch.promise=transmit(op,batch).finally(()=>{if(owns(op,batch)){op.active=null;unknown(op,true);}});
+    },
+    // Reloaded drafts reconcile only the immutable request saved before POST.
+    // Automatic checks stay read-only. Only an explicit Check and retry action
+    // may resubmit the immutable request after an unconfirmed receipt.
+    restore(receipt,capturedScope){
+      const scope={...capturedScope},control=(client.spaces||[]).find(space=>space.id===scope.space)?.control_id||client.runtime?.runtime_id;
+      const op={receipt,scope,control,index:0,resumeAt:0,unknown:true};operations.set(receipt,op);
+      if(suspended||!online()){unknown(op);return;}
+      check(op,false,true);
     },
     // A matching persisted SSE frame may confirm before the POST response.
     confirmed(receipt){const op=operations.get(receipt);if(op){stop(op);accepted(receipt);}},
