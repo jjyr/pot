@@ -26,7 +26,7 @@ var errFileChanged = errors.New("file reference changed")
 // messageFileCompletion freezes the host execution identity before model/tool
 // execution. A later directory replacement cannot become a newly allowed root.
 func (s *Service) messageFileCompletion(owner, task, run, root string) func(string, string) {
-	source := resources.Source{Node: s.options.RuntimeID, Owner: owner, Task: task, Run: run, Root: root}
+	source := resources.Source{Rules: resources.LocalFileRules, Node: s.options.RuntimeID, Owner: owner, Task: task, Run: run, Root: root}
 	if info, err := os.Lstat(root); err == nil && info.IsDir() {
 		source.RootID, _ = taskDirectoryIdentity(info)
 	}
@@ -62,7 +62,7 @@ func (s *Service) bindMessageFileSource(source resources.Source, message, text s
 		if err != nil || r == nil {
 			return denied
 		}
-		bound := resources.Source{Owner: owner, Task: u.Host}
+		bound := resources.Source{Rules: source.Rules, Owner: owner, Task: u.Host}
 		if r.Launch == nil {
 			return bound
 		}
@@ -134,6 +134,12 @@ func (s *Service) snapshotMessageFile(ctx context.Context, ref resources.Message
 	if err := s.Resources.ValidateOwner(ctx, src.Owner); err != nil {
 		return nil, errFileForbidden
 	}
+	if src.Rules == resources.LocalFileRules {
+		return s.snapshotLocalMessageFile(ctx, ref)
+	}
+	if src.Rules != 0 && src.Rules != 1 {
+		return nil, errFileForbidden
+	}
 	root := src.Root
 	rootID := src.RootID
 	taskRoot := src.Task
@@ -169,11 +175,7 @@ func (s *Service) snapshotMessageFile(ctx context.Context, ref resources.Message
 			path = "AGENTS.md"
 			config = true
 			rootID = src.ConfigID
-			info, err := os.Lstat(root)
-			if err != nil {
-				return nil, err
-			}
-			if src.ConfigID == "" || !info.IsDir() {
+			if src.ConfigID == "" {
 				return nil, errFileForbidden
 			}
 		} else {
@@ -199,6 +201,15 @@ func (s *Service) snapshotMessageFile(ctx context.Context, ref resources.Message
 		return nil, err
 	} else if previous != nil {
 		return previous, nil
+	}
+	if config {
+		info, err := os.Lstat(root)
+		if err != nil {
+			return nil, err
+		}
+		if !info.IsDir() {
+			return nil, errFileForbidden
+		}
 	}
 	if taskRoot != "" {
 		r, err := s.Tasks.Get(ctx, src.Owner, taskRoot)
@@ -273,6 +284,26 @@ func (s *Service) snapshotMessageFile(ctx context.Context, ref resources.Message
 		stamps[path] = after
 		return data, nil
 	}
+	verify := func() error {
+		for path, stamp := range stamps {
+			info, err := handle.Stat(path)
+			if err != nil {
+				return err
+			}
+			current, err := taskFileRevision(info)
+			if err != nil {
+				return err
+			}
+			if stamp != current {
+				return errFileChanged
+			}
+		}
+		return nil
+	}
+	return s.registerMessageSnapshot(ctx, ref, request, hash, path, read, verify)
+}
+
+func (s *Service) registerMessageSnapshot(ctx context.Context, ref resources.MessageFile, request, hash, path string, read func(string, int) ([]byte, error), verify func() error) (*resources.Resource, error) {
 	data, err := read(path, resources.FileLimit)
 	if err != nil {
 		return nil, err
@@ -288,26 +319,16 @@ func (s *Service) snapshotMessageFile(ctx context.Context, ref resources.Message
 			return nil, err
 		}
 	}
-	for path, stamp := range stamps {
-		info, err := handle.Stat(path)
-		if err != nil {
-			return nil, err
-		}
-		current, err := taskFileRevision(info)
-		if err != nil {
-			return nil, err
-		}
-		if stamp != current {
-			return nil, errFileChanged
-		}
+	if err := verify(); err != nil {
+		return nil, err
 	}
-	saved, err := s.Resources.Register(ctx, src.Owner, request, hash, filepath.Base(path), path, paths, contents)
+	saved, err := s.Resources.Register(ctx, ref.Source.Owner, request, hash, filepath.Base(path), path, paths, contents)
 	if err != nil {
 		return nil, err
 	}
 	return &saved, nil
 }
-func readBoundRoot(ctx context.Context, root *os.Root, path string, limit int, config bool, expected string) ([]byte, error) {
+func readBoundRoot(ctx context.Context, root *os.Root, path string, limit int, config bool, expected string, guards ...func(os.FileInfo) error) ([]byte, error) {
 	if limit < 0 {
 		return nil, errFileTooLarge
 	}
@@ -338,6 +359,11 @@ func readBoundRoot(ctx context.Context, root *os.Root, path string, limit int, c
 	}
 	if !before.Mode().IsRegular() {
 		return nil, errFileForbidden
+	}
+	for _, guard := range guards {
+		if err := guard(before); err != nil {
+			return nil, err
+		}
 	}
 	if before.Size() > int64(limit) {
 		return nil, errFileTooLarge

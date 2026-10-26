@@ -10,9 +10,13 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 )
 
+const LocalFileRules = 2
+
 // Source is minted only by the execution host, never from Markdown or HTTP.
-// Root is the captured execution directory; Config permits only own AGENTS.md.
+// Root is the captured execution directory, not the v2 absolute-path boundary.
+// Missing Rules retains the original confined policy and receipt hashes.
 type Source struct {
+	Rules    int    `json:"rules,omitempty"`
 	RootID   string `json:"root_id"`
 	ConfigID string `json:"config_id,omitempty"`
 	Node     string `json:"node"`

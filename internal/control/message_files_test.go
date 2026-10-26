@@ -13,11 +13,15 @@ import (
 	"github.com/jjyr/pot/internal/resources"
 )
 
-func awaitFiles(t *testing.T, s *Service, owner, message string) []resources.MessageFile {
+func awaitFiles(t *testing.T, s *Service, owner, message string, tasks ...string) []resources.MessageFile {
 	t.Helper()
+	task := ""
+	if len(tasks) > 0 {
+		task = tasks[0]
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		rows, err := s.MessageFiles(context.Background(), owner, "", message)
+		rows, err := s.MessageFiles(context.Background(), owner, task, message)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -96,7 +100,7 @@ func TestMessageFilesRejectPathsAndRetry(t *testing.T) {
 	text := "[绝对](" + outside + ")\n\n[逃逸](../private)\n\n[符号](escape)\n\n[缺少](missing.txt)\n\n[自身](" + ownConfig + ")\n\n[其他配置](" + filepath.Join(s.Registry.Directory(a.ID), "profile.json") + ")"
 	s.bindMessageFiles(a.ID, "", "", "reply", text, root)
 	rows := awaitFiles(t, s, a.ID, "reply")
-	for i, want := range []string{"forbidden", "forbidden", "forbidden", "not_found", "ready", "forbidden"} {
+	for i, want := range []string{"ready", "not_found", "ready", "not_found", "ready", "ready"} {
 		if rows[i].State != want {
 			t.Fatalf("%d got %s want %s", i, rows[i].State, want)
 		}
@@ -177,7 +181,7 @@ func TestMessageFilesDirectoryReplacementAndRegularFileLimits(t *testing.T) {
 	}
 }
 
-func TestOwnConfigurationMappingRejectsDirectoryAliases(t *testing.T) {
+func TestConfigurationAliasUsesCapturedRules(t *testing.T) {
 	s, _ := configurationService(t)
 	ctx := context.Background()
 	a, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "config-alias", Name: "Configuration"})
@@ -196,8 +200,16 @@ func TestOwnConfigurationMappingRejectsDirectoryAliases(t *testing.T) {
 	}
 	s.bindMessageFiles(a.ID, "", "", "config-link", "[rules]("+filepath.Join(directory, "AGENTS.md")+")", root)
 	rows := awaitFiles(t, s, a.ID, "config-link")
-	if rows[0].State != "forbidden" || rows[0].Resource != nil {
-		t.Fatal("configuration alias escaped owner scope", rows)
+	if rows[0].State != "ready" {
+		t.Fatal("ordinary configuration alias was not shareable", rows)
+	}
+	legacy := rows[0].Source
+	legacy.Rules = 0
+	if err := s.Resources.BindMessage(ctx, a.ID, "main", "legacy-config", "[rules]("+filepath.Join(directory, "AGENTS.md")+")", legacy); err != nil {
+		t.Fatal(err)
+	}
+	if got := awaitFiles(t, s, a.ID, "legacy-config")[0]; got.State != "forbidden" || got.Resource != nil {
+		t.Fatal("legacy configuration alias gained access", got)
 	}
 }
 

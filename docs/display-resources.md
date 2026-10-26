@@ -58,22 +58,64 @@ supply replacement paths or manufacture a source binding.
 ```text
 execution completion -> explicit Markdown nodes -> provenance + pending references
                                                          |
-                                              background confined reads
+                                             background versioned reads
                                                          |
                                                 immutable resource Store
                                                          |
 message/ref ID -> owner/Space checked status -> existing ResourceView + Download
 ```
 
-Relative paths resolve under the captured execution directory. Absolute paths must
-map into that same root. The only extra mapping is the originating main assistant's
-exact configuration `AGENTS.md`; sibling configuration files are excluded and
-symlinks are refused for this mapping. Task reads retain the existing verified
-workspace handle and directory identity checks. A main message can reference an
-owned Task with `pot-file://TaskID/relative`; its original Task/run/node binding is
-captured at completion. Workers can reference only their own Task. File reads use
-regular-file checks, bounded reads and before/after revisions; HTML dependency
-sets are rechecked before registration. Replaced directory identities fail closed.
+New sources capture file-sharing rules version 2. Main assistants and local Tasks
+can deliver ordinary OS-readable files by absolute path, including source,
+documentation and reports outside their execution workspace or in another
+assistant's directory. No copy, per-file registration or prior tool read is
+required. Relative paths resolve against the captured execution directory. That
+directory remains a provenance and resolution anchor, not an absolute-path scope.
+Sharing uses the host's file reader independently of Trusted/Protected command
+policy; command sandbox, grants, Runtime prohibitions and owner refusals retain
+their existing meaning. File links grant no command execution authority.
+
+Node, owner, original Task/run and workspace directory identities remain bound
+and verified. A main message can reference an owned Task with
+`pot-file://TaskID/relative`; its original Task/run/node binding is captured at
+completion. Workers can reference only their own Task. These identity-bearing
+references remain confined to the verified Task root, including symlink targets;
+ordinary absolute paths do not claim Task identity or resource API ownership.
+Remote sources are never substituted with same-named local files.
+
+Version 2 excludes only these exact product authentication file identities:
+
+- This Runtime root's `runtime.json` (local API bearer token).
+- This Runtime root's `machines.sqlite`, `machines.sqlite-wal`,
+  `machines.sqlite-shm` and `machines.sqlite-journal` (node signing private key).
+- The active `secrets.FileKey` path, or for `SystemKey` the configured
+  `POT_SECRET_KEY_FILE`; without that override, the non-macOS default
+  `~/.pot/secrets/master.key`. macOS SystemKey uses Keychain, not a file.
+
+Checks use canonical targets and opened file identity, so symlink and hard-link
+aliases do not bypass these exceptions. Classification uses metadata, never
+credential bytes. There are no directory, hidden-file, extension or general
+configuration bans. This is not universal secret detection: arbitrary credentials,
+copies, other Runtime roots and opaque embedding `KeySource` locations are not
+discovered or content-scanned. Hosts using an opaque key source must manage its
+file exposure separately.
+
+Reads require ordinary files, retain the 64 MiB limit and compare descriptor
+revisions before and after reading. Path targets and HTML dependency sets are
+rechecked before registration. Replaced execution directory identities fail
+closed. HTML assets remain under the execution root for entries inside it; for
+external entries, assets are limited to the canonical entry's directory. A
+dependency symlink cannot escape that base or include an excluded credential.
+
+Sources without a rules field retain version 1: absolute paths stay inside the
+captured root except the originating main assistant's exact configuration
+`AGENTS.md` mapping. The ledger-only `control/0004_message_file_rules` migration
+records the new optional JSON field without rewriting old source JSON, receipt
+identities, statuses or resources. Recovery and retries use each stored source's
+rules; a new completion callback cannot replace an already-bound source. Unknown
+versions fail closed. No upgrade scans historical conversations or retries old
+forbidden references under new authority. Immutable receipts retain their saved
+bytes even after the original path changes or disappears.
 
 Remote original-execution reads are currently unavailable in Control. A bound
 remote source reports `source_offline`; it is never substituted with a local path.
