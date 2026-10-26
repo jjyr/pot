@@ -568,10 +568,17 @@ install API. It checks successful upgrade, executable-launch failure and
 startup-exit rollback, new
 PID/boot, preserved root/identity/arguments/environment/working directory, and
 bundle signatures. It neither publishes releases nor opens existing product
-roots. Signed-feed discovery and download verification remain covered by the
-updater Go tests. The native macOS packaging job runs this simulation as well.
+roots. Test builds use a temporary Go overlay to route only the updater's fixed
+fixture feed/package URLs to a loopback HTTP server, with no public-network
+fallback. Each host must pass the real check API and report verified discovery
+and automatic installation eligibility before the prepared scenarios run.
+Production builds have no fixture transport or new URL/configuration override.
+Download verification remains covered by the updater Go tests. The native macOS
+packaging job runs this simulation as well.
 For existing test builds, run `mise exec -- python
-scripts/tests/macos-update-smoke.py /absolute/Old.app /absolute/New.app`.
+scripts/tests/macos-update-smoke.py /absolute/Old.app /absolute/New.app --feed /absolute/update.json`.
+These existing Apps must independently discover and verify that same target;
+prepared files alone cannot authorize installation.
 
 Branch pushes and PR events do not start the release/build workflow.
 That workflow always calls the full `Tests` gate for its resolved source SHA. Headless

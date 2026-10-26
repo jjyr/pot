@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Simulate a prepared upgrade with two real macOS Apps and disposable roots.
 
-This tests the native installation lifecycle, not public release discovery. Both
-Apps must contain a pinned update key and the same storage/schema discriminator.
-Signature, manifest and download trust are covered by the selfupdate Go tests.
+This tests verified discovery and the native installation lifecycle with a signed
+fixture feed. --build overlays only the test Apps' update HTTP transport onto a
+loopback server; product trust and installation gates remain unchanged. Existing
+Apps must independently discover the same pinned-key target before installation.
 """
 
 import argparse
@@ -23,6 +24,8 @@ import subprocess
 import sys
 import tempfile
 import time
+
+from native_update_discovery import fixture_discovery
 
 
 class UnixHTTP(http.client.HTTPConnection):
@@ -123,6 +126,18 @@ def exercise(old, new, scenario, feed):
                 assert tuple(map(int, target["version"].split("."))) > tuple(
                     map(int, original["version"].split("."))
                 )
+                for selected in (endpoint, second_endpoint):
+                    discovered = call(
+                        selected["socket"],
+                        "POST",
+                        "/api/v1/updates",
+                        {"action": "check", "request_id": "native-check-" + scenario},
+                        selected["token"],
+                    )
+                    assert discovered["version"] == target["version"], discovered
+                    assert discovered["discovery"] == "verified", discovered
+                    assert discovered["supported"] and discovered["auto_install"], discovered
+                    assert not discovered.get("reason"), discovered
                 stage = updates / ("stage-" + target["version"]) / "Pot.app"
                 stage.parent.mkdir()
                 shutil.copytree(new, stage, symlinks=True)
@@ -133,10 +148,10 @@ def exercise(old, new, scenario, feed):
                     # App cannot exec. The installer must restore/relaunch old.
                     (stage / "Contents/MacOS/pot-app").chmod(0o644)
                 elif scenario == "startup-failure":
-                    # A late package fault that lets exec succeed, but makes
-                    # the new executable reject its own installation at boot.
-                    broken = dict(target, storage_format="fixture-invalid-format")
-                    write(stage / "Contents/Resources/update.json", broken)
+                    # Keep authenticated target metadata intact so preflight
+                    # passes. An old executable can exec, then OpenHost rejects
+                    # its version mismatch before the new host becomes ready.
+                    shutil.copy2(old / "Contents/MacOS/pot-app", stage / "Contents/MacOS/pot-app")
                     subprocess.run(["codesign", "--force", "--sign", "-", stage], check=True)
                 shutil.copyfile(feed, updates / "verified-feed.json")
                 (updates / "verified-feed.json").chmod(0o600)
@@ -274,7 +289,10 @@ def main():
         if args.old_app or args.new_app:
             parser.error("--build does not take existing App paths")
         repo = Path(__file__).resolve().parents[2]
-        with tempfile.TemporaryDirectory(prefix="pot-update-builds-") as temporary:
+        with (
+            tempfile.TemporaryDirectory(prefix="pot-update-builds-") as temporary,
+            fixture_discovery(repo, Path(temporary)) as fixture_flags,
+        ):
             directory = Path(temporary)
             public = subprocess.check_output(
                 ["go", "run", "./scripts/sign-release", "keygen", directory / "key.pem"],
@@ -292,6 +310,7 @@ def main():
                         "POT_APP_RELEASE": "1",
                         "POT_APP_VERSION": version,
                         "POT_UPDATE_PUBLIC_KEY": public,
+                        "GOFLAGS": fixture_flags,
                     },
                 )
                 app = directory / (version + ".app")
