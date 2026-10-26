@@ -65,7 +65,7 @@ try{
   const options={messageFiles:()=>binding,previewClaims:new Map(),acquireResource:()=>({read:()=>bytes,release(){}})};
   const file=createMessageFile({href:'notes.txt',label:'notes.txt',block:true},'delayed',options),link=createMessageFile({href:'inline.txt',label:'inline.txt',block:false},'delayed',options);
   block.append(file);inline.append('Inline file: ',link);body.append(block,inline);row.append(body);h.append(earlier,row,tail);document.body.append(h);
-  const metrics=()=>({row:row.getBoundingClientRect().height,scroll:h.scrollTop,height:h.scrollHeight,tail:tail.getBoundingClientRect().y,file:file.getBoundingClientRect().height,linkHeight:link.getBoundingClientRect().height,linkWidth:link.getBoundingClientRect().width});
+  const metrics=()=>({row:row.getBoundingClientRect().height,bodyWidth:body.getBoundingClientRect().width,scroll:h.scrollTop,height:h.scrollHeight,tail:tail.getBoundingClientRect().y,file:file.getBoundingClientRect().height,fileWidth:file.getBoundingClientRect().width,linkHeight:link.getBoundingClientRect().height,linkWidth:link.getBoundingClientRect().width});
   let firstLayout,sampling=true;const samples=[];
   const sample=()=>{if(!sampling)return;if(firstLayout)samples.push(metrics());requestAnimationFrame(sample);};requestAnimationFrame(sample);
   const gate=createInitialChatLayout({history:h,layout:()=>{},position:()=>{h.scrollTop=h.scrollHeight;},ready:()=>true,fontFallback:()=>{},timeout:30,reveal:()=>{h.style.visibility='';firstLayout=metrics();}});gate.start();await wait(()=>firstLayout);
