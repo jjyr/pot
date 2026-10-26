@@ -203,6 +203,9 @@ export function createResourceReads(client,{storage=client.production?createProj
       // item from an obsolete projection. This is distinct from read completion.
       return Promise.allSettled([...invalidations].map(listener=>listener(topics,bootChanged?{...source,reset:true}:source)));
     },
+    // Connection authority is transient. Retained projections remain readable,
+    // but a new connection must not join a previous connection's display IO.
+    resetConnection(){hydrated.clear();cache.reset();},
     clear(){closed=true;stopStorage?.();storage?.close();cache.reset();boots.clear();hydrated.clear();},
   };
   return result;

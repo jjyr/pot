@@ -39,7 +39,7 @@ function bindIdentity(value){
   };
 }
 const online=()=>{if(!client||client.onlineReady===false)verify();};
-function suspend(){if(client?.production){client.onlineReady=false;client.startupConfirmed();status('startup.local');}}
+function suspend(){if(client?.production){client.suspendStartup();client.startupConfirmed();status('startup.local');}}
 async function verify(force=false,resetScope=false){
   if(stopped||verifying&&force!==true)return;currentAbort?.abort();suspend();verifying=true;clearTimeout(retryTimer);
   const ticket=++verification,abort=new AbortController(),timer=setTimeout(()=>abort.abort(),10000);currentAbort=abort;

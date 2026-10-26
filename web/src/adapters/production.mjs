@@ -62,7 +62,8 @@ export async function createProductionClient({desktop = false, base = '', resour
   const service = 'github.com/jjyr/pot/internal/desktop.Service';
   const invoke = (method, ...args) => runtimeAPI.Call.ByName(`${service}.${method}`, ...args);
   const context = {owner: '', space: ''};
-  let client;
+  let client,connectionAbort=new AbortController();const confirmedSessions=new Map();
+  const sessionKey=scope=>JSON.stringify([scope.space||'',scope.owner||'']);
   const acceptedCommands=new Map();
   async function commitCommand(path,method,body,value,capturedScope,signature){
     const topics=mutationTopics(path,body,value);
@@ -106,13 +107,18 @@ export async function createProductionClient({desktop = false, base = '', resour
   function guardReconnect(onStatus=()=>{}){
     let attempts=0;
     return (status,reason)=>{
-      if(status==='connecting'&&attempts++>0&&client.startup&&client.onlineReady){client.onlineReady=false;client.revalidateStartup?.();}
+      if(status==='connecting'&&attempts++>0&&client.startup&&client.onlineReady){client.revalidateStartup?.();}
       onStatus(status,reason);
     };
   }
   async function request(path, options = {}) {
     let {method = 'GET', body, signal} = options;
     if(client?.onlineReady===false)throw localized(Object.assign(new APIError(503,{code:'startup_unconfirmed'}),{uiKey:'startup.local'}));
+    if(method!=='GET'&&client?.operationScopeReady?.(options)===false)throw localized(Object.assign(new APIError(503,{code:'authority_unconfirmed'}),{uiKey:'startup.local'}));
+    if(client?.startup&&options.session&&!client.sessionReady(options))throw localized(Object.assign(new APIError(503,{code:'session_unconfirmed'}),{uiKey:'startup.local'}));
+    if(client?.startup&&options.requiredCapabilities?.length&&!options.requiredCapabilities.some(operation=>client.supports(operation,options)))throw localized(Object.assign(new APIError(403,{code:'agent_link_capability_unsupported'}),{uiKey:'agentLinks.capabilityUnavailable'}));
+    const generation=client?.connectionGeneration;
+    if(method==='GET')signal=signal?AbortSignal.any([signal,connectionAbort.signal]):connectionAbort.signal;
     const capturedScope={...context,...options};
     // Every assistant uses the same product routes. Agent Link resolves its
     // destination and authorization on the host; presentation IDs never choose
@@ -135,6 +141,7 @@ export async function createProductionClient({desktop = false, base = '', resour
       headers: body === undefined ? {} : {'Content-Type': 'application/json'},
       body: body === undefined ? undefined : JSON.stringify(body)});
     const value = response.status === 204 ? null : await response.json().catch(() => null);
+    if(method==='GET'&&generation!==client?.connectionGeneration)throw new DOMException('Connection retired','AbortError');
     if (!response.ok) throw localized(new APIError(response.status, value));
     if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);
     return value;
@@ -147,6 +154,26 @@ export async function createProductionClient({desktop = false, base = '', resour
   const onlineWaiters=new Set();
   const whenOnline=handler=>{onlineWaiters.add(handler);return()=>onlineWaiters.delete(handler);};
   client = {production: true, desktop, runtime, startup:startupIdentity,onlineReady:!startupIdentity,
+    connectionGeneration:0,directoryGeneration:startupIdentity?-1:0,directorySpaces:new Set(),
+    get operationsReady(){return client.onlineReady&&client.directoryGeneration===client.connectionGeneration;},
+    operationScopeReady(options={}){
+      if(!client.operationsReady)return false;
+      if(!client.startup)return true;
+      const scope={...context,...options};
+      if(scope.space&&!client.directorySpaces.has(scope.space))return false;
+      if(!scope.owner)return true;
+      const item=client.assistants?.find(item=>item.id===scope.owner&&item.space_id===scope.space);
+      return !!item&&!item.retained&&!item.offline;
+    },
+    sessionReady(options={}){return !client.startup||confirmedSessions.get(sessionKey({...context,...options}))===client.connectionGeneration;},
+    confirmSession(scope,generation){if(client.onlineReady&&generation===client.connectionGeneration)confirmedSessions.set(sessionKey(scope),generation);},
+    suspendStartup(){
+      // A retained-only client has no live reads or authority to retire. Keep
+      // its in-progress local directory assembly available to the first screen.
+      if(!client.onlineReady)return;
+      client.onlineReady=false;client.connectionGeneration++;client.directoryGeneration=-1;client.directorySpaces.clear();confirmedSessions.clear();
+      connectionAbort.abort();connectionAbort=new AbortController();client.resources.resetConnection();
+    },
     confirmStartup(value){if((value.runtime_id||value.id)!==runtime.runtime_id)throw Error('Startup identity changed');Object.assign(runtime,value);client.onlineReady=true;for(const handler of [...onlineWaiters])handler();onlineWaiters.clear();}, transport:request,request:(path,options={})=>(options.method||'GET')==='GET'?client.resources.read(path,options):request(path,options),readBaselines,
     messageFiles(message,options={}){return request(`/api/v1/message-files/${encodeURIComponent(message)}?${new URLSearchParams({task_id:options.task||''})}`,options);},
     retryMessageFile(message,ref,options={}){return request(`/api/v1/message-files/${encodeURIComponent(message)}/${encodeURIComponent(ref)}?${new URLSearchParams({task_id:options.task||''})}`,{...options,method:'POST'});},
@@ -159,14 +186,14 @@ export async function createProductionClient({desktop = false, base = '', resour
     },
     acquireFileImage:createFileImages(request,()=>context),
     scope: () => ({...context}), setScope: value => Object.assign(context, value),
-    supports:(operation,options={})=>{const scope={...context,...options};return supportsCapability(client.assistants?.find(item=>item.id===scope.owner&&item.space_id===scope.space),operation);},
+    supports:(operation,options={})=>{const scope={...context,...options};return client.operationScopeReady(scope)&&supportsCapability(client.assistants?.find(item=>item.id===scope.owner&&item.space_id===scope.space),operation);},
     snapshot: async options => {
       const scope = {...context,...options};
       const value = await request('/api/v1/snapshot?'+new URLSearchParams({locale:client.uiLocale?.()||'en'}), scope);
       return normalizeSnapshot(value, runtime, scope.owner, scope.space);
     },
     history: async (query, options = {}) => {const page=await request(`/api/v1/history?${new URLSearchParams(query)}`,options);return {...page,messages:page.messages.map(({message,...meta})=>({...message,...meta}))};},
-    send: ({boot_id,user_message_id,retry_user_message_id,...body},options={}) => retry_user_message_id ? request('/api/v1/turn/retry',{...options,submission:true,method:'POST',body:{request_id:body.request_id,user_message_id:retry_user_message_id}}) : request(user_message_id?'/api/v1/turn/steer':'/api/v1/messages', {...options,submission:true,method: 'POST', body:user_message_id?{request_id:body.request_id,user_message_id,text:body.text,attachments:body.attachments,references:body.references}:body}),
+    send: ({boot_id,user_message_id,retry_user_message_id,...body},options={}) => retry_user_message_id ? request('/api/v1/turn/retry',{...options,session:true,requiredCapabilities:['chat.send'],submission:true,method:'POST',body:{request_id:body.request_id,user_message_id:retry_user_message_id}}) : request(user_message_id?'/api/v1/turn/steer':'/api/v1/messages', {...options,session:true,requiredCapabilities:['chat.send'],submission:true,method: 'POST', body:user_message_id?{request_id:body.request_id,user_message_id,text:body.text,attachments:body.attachments,references:body.references}:body}),
     sendReceipt: (requestValue,options={}) => {
       const {request_id,conversation_id,user_message_id,retry_user_message_id}=requestValue;
       const query=new URLSearchParams({request_id,conversation_id});
@@ -174,9 +201,9 @@ export async function createProductionClient({desktop = false, base = '', resour
       if(retry_user_message_id)query.set('retry_user_message_id',retry_user_message_id);
       return request(`/api/v1/messages/receipt?${query}`,options);
     },
-    controlTurn:(body,scope)=>request('/api/v1/turn/control',{...scope,method:'POST',body}),
-    continueTurn:(body,scope)=>request('/api/v1/turn/continue',{...scope,method:'POST',body}),
-    cancel: ({boot_id, turn_id, request_id}) => request('/api/v1/turn/cancel', {method: 'POST', body: {request_id, user_message_id: turn_id}}),
+    controlTurn:(body,scope)=>request('/api/v1/turn/control',{...scope,session:true,requiredCapabilities:['chat.control'],method:'POST',body}),
+    continueTurn:(body,scope)=>request('/api/v1/turn/continue',{...scope,session:true,requiredCapabilities:['chat.continue'],method:'POST',body}),
+    cancel: ({boot_id, turn_id, request_id}) => request('/api/v1/turn/cancel', {session:true,requiredCapabilities:['chat.cancel'],method: 'POST', body: {request_id, user_message_id: turn_id}}),
     notificationStatus:desktop?()=>invoke('SystemNotificationStatus'):undefined,
     notificationReady:desktop?surface=>invoke('NotificationMainReady',surface):undefined,
     requestNotificationPermission:desktop?()=>invoke('RequestSystemNotificationPermission'):undefined,

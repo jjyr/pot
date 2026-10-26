@@ -173,7 +173,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   if(onboarding)root.append(onboarding.element);
   let notificationReady=false;
   function mainReady(){
-    if(notificationReady||client.onlineReady===false)return;notificationReady=true;
+    if(notificationReady||client.operationsReady===false)return;notificationReady=true;
     // The successful initial directory read has mounted the main interface.
     // Wait for a paint; rendering, reconnects and tray setup do not authorize.
     requestAnimationFrame(()=>requestAnimationFrame(()=>{if(!disposed)notifications?.ready();}));
@@ -231,7 +231,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   });
   const stopViewport = bindViewport(document.documentElement, {onWidthChange: () => editor.resize()});
   const restoredAttachmentFailures=new Set(),attachmentAttempts=new Map();
-  const can=(operation,item=selectedAssistant)=>!client.production||client.onlineReady!==false&&!directoryStorageFailed&&supportsCapability(item,operation);
+  const can=(operation,item=selectedAssistant)=>!client.production||client.operationsReady!==false&&client.operationScopeReady?.({space:item?.space_id,owner:item?.id})!==false&&!directoryStorageFailed&&supportsCapability(client.assistants?.find(current=>current.id===item?.id&&current.space_id===item?.space_id&&current.control_id===item?.control_id),operation);
   const attachmentUI=client.production?createAttachmentComposer({client,form,input,getKey:()=>editorOwner,getCaps:()=>state.snapshot?.agent?.attachments,canSelect:()=>route==='chat'&&!!editorOwner&&!!assistantDrafts?.ready(editorOwner),canUpload:()=>can('chat.attachments')&&route==='chat'&&!!state.snapshot&&editorOwner===ownerKey(state.snapshot)&&connection==='connected'&&!selectedAssistant?.offline,changed:()=>updateControls(),draftChanged:key=>assistantDrafts?.change(key,true),locale:()=>locale}):null;
   if(attachmentUI){form.classList.add('has-attachments');attachmentUI.toolbar.append(send);}
   const referenceDraftHost=el('div','composer-references');form.prepend(referenceDraftHost);
@@ -392,7 +392,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const running = snapshot?.running;
     const draftReady=!assistantDrafts||assistantDrafts.ready(editorOwner);
     continuation?.update(snapshot,{connected:draftReady&&connection==='connected'&&can('chat.continue')&&!selectedAssistant?.offline&&!pending&&!!snapshot&&editorOwner===ownerKey(snapshot)});
-    const recovery=continuation?.state(),restoring=recovery?.pending,resuming=client.onlineReady!==false&&draftReady&&recovery?.available&&!hasComposerInput();
+    const recovery=continuation?.state(),restoring=recovery?.pending,resuming=client.operationsReady!==false&&draftReady&&recovery?.available&&!hasComposerInput();
     const stopping=running&&(!client.production||(!draft(state).trim()&&!attachmentUI?.items().length));
     const label = restoring||resuming ? recovery.label : stopping ? (cancelPending ? t('stopping') : t('stop')) : running?t('send.guidance'):t('send');
     send.replaceChildren(icon(restoring ? 'refresh' : resuming ? 'play' : stopping ? 'stop' : 'send'));
@@ -439,7 +439,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function saveNavigation(next,replace=false){const value={potRoute:next,potScope:client.scope?.()||{},potDirectory:directoryOpen};window.history[replace?'replaceState':'pushState'](value,'',location.href);}
   async function navigate(next,{replace=false,record=true}={}) {
-    if(client.onlineReady===false&&next!=='chat')return;
+    if(client.operationsReady===false&&next!=='chat')return;
     if (pages && !await pages.leave()) return;
     route = next;
     menuOpen = false;
@@ -457,8 +457,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (inMenu) item.append(el('span', '', t(name === 'chat' ? 'assistants' : name)));
       item.classList.toggle('is-selected', route === name);
       if (route === name) item.setAttribute('aria-current', 'page');
-      item.disabled=client.onlineReady===false&&name!=='chat';
-      item.onclick = () => {if(client.onlineReady===false&&name!=='chat')return;navigate(name);};
+      item.disabled=client.operationsReady===false&&name!=='chat';
+      item.onclick = () => {if(client.operationsReady===false&&name!=='chat')return;navigate(name);};
       fragment.append(item);
     }
     return fragment;
@@ -586,7 +586,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     root.querySelector('.assistant-profile-trigger')?.setAttribute('aria-expanded', String(event.newState === 'open'));
   });
   function renderShell() {
-    root.classList.toggle('is-local-startup',client.onlineReady===false);
+    root.classList.toggle('is-local-startup',client.operationsReady===false);
+    unavailable.inert=client.operationScopeReady?.()===false||pages?.authorityReady===false;approvals.inert=client.operationScopeReady?.()===false;
     root.classList.toggle('is-background',document.visibilityState==='hidden');
     const showingChat=route==='chat'&&!(media.matches&&directoryOpen);
     if(chatShown&&!showingChat){rememberChatPosition();cancelChatPosition();initialLayout.cancel();messageWindow.suspend();}
@@ -681,7 +682,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     unavailable.hidden = route === 'chat';
     if (!client.production) unavailable.textContent = t('unavailable');
     // Search is window state and survives narrow conversation navigation/resizes.
-    const nextDirectorySignature = JSON.stringify([locale,narrow,surface,selectedAssistant?.space_id,selectedAssistant?.id,spaces,assistants,state.snapshot?.assistants,replies.records()]);
+    const nextDirectorySignature = JSON.stringify([locale,narrow,surface,client.operationsReady,selectedAssistant?.space_id,selectedAssistant?.id,spaces,assistants,state.snapshot?.assistants,replies.records()]);
     if (nextDirectorySignature !== directorySignature || !directory.childElementCount) {
     directorySignature=nextDirectorySignature;
     const searchValue = directory.querySelector('input')?.value || '';
@@ -695,7 +696,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       collapse.onclick = toggleDirectory; heading.append(collapse);
     }
     const add = button('plus', t(client.production ? 'assistantStart.title' : 'preview'));
-    add.disabled = !client.production||client.onlineReady===false||!creationSpace()||creationSpace()?.connected===false;
+    add.disabled = !client.production||client.operationsReady===false||!creationSpace()||creationSpace()?.connected===false;
     add.onclick = () => {directoryOpen=false;navigate('add-assistant');};
     heading.append(add);
     const search = el('input', 'assistant-search');

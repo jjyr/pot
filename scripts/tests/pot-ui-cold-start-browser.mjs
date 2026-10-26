@@ -9,7 +9,8 @@ import {execFileSync} from 'node:child_process';
 import {shellAssets} from './pwa-shell.mjs';
 const root=resolve(process.env.POT_COLD_SOURCE||resolve(import.meta.dirname,'../..'));
 const output=resolve(process.env.POT_COLD_OUTPUT||'.pot-artifacts/cold-start');await mkdir(output,{recursive:true});
-let release='one',hold='',control='synthetic-control',spaceControl='',auth=200,authenticated=true,failAsset='';
+let release='one',hold='',control='synthetic-control',spaceControl='',auth=200,authenticated=true,failAsset='',revoked=false,offlineSpace=false;
+const held=[];
 const calls=[],streams=new Set();
 const original=await shellAssets(root),updated=await shellAssets(root,(path,body)=>path==='/styles.css'?Buffer.concat([body,Buffer.from('\n/* synthetic next release */\n')]):body);
 if(!process.argv.includes('--serve')){
@@ -21,7 +22,7 @@ if(!process.argv.includes('--serve')){
   original.files.set('/service-worker.js',embedded);
  }finally{await rm(temporary,{recursive:true,force:true});}
 }
-const capabilities={version:1,operations:['chat.read','chat.send','chat.continue','chat.events','chat.history','assistant.profile.read','assistant.profile.write','assistant.management','task.read','task.list','task.events']};
+const capabilities={version:1,operations:['chat.read','chat.send','chat.continue','chat.events','chat.history','assistant.profile','assistant.profile.read','assistant.profile.write','assistant.management','task.read','task.list','task.events']};
 const definitions=['alpha','beta'].map(id=>({id,name:id==='alpha'?'Synthetic Alpha':'Synthetic Beta',revision:1,phase:'ready',capabilities}));
 const frame=owner=>({kind:'reset',base_cursor:0,view:{state:{api_version:3,cursor:1,boot_id:'synthetic-boot',conversation_id:'conversation-'+owner,turn:null,...(owner==='beta'?{continuation:{user_message_id:'beta-original',attempt_id:'synthetic-attempt',summary:false}}:{}),agent:{phase:'ready',model:'synthetic-model'}},replies:[],messages:Array.from({length:90},(_,index)=>({sequence:String(index+1),version:1,message:{id:owner+'-'+index,role:index%2?'assistant':'user',status:'complete',text:`${owner.toUpperCase()} cached message ${index+1}. Synthetic reading position sample.\n`+'Local conversation content. '.repeat(5)}})),history:{before:'1',after:'90',has_more:false,has_newer:false}}});
 function closeStreams(){for(const res of streams)res.end();streams.clear();}
@@ -30,6 +31,9 @@ const server=createServer(async(req,res)=>{try{
  if(path==='/__phone'){res.setHeader('Content-Type','text/html');res.end('<!doctype html><title>Pot phone viewport fixture</title><iframe title="Pot phone 390px" style="width:390px;height:740px;border:1px solid #ccc" src="http://127.0.0.1:'+String(Number(server.address().port)-1)+'/?locale=en"></iframe>');return;}
  if(path==='/__fixture'){
   if(url.searchParams.has('hold'))hold=url.searchParams.get('hold');
+  if(url.searchParams.has('revoked'))revoked=url.searchParams.get('revoked')==='true';
+  if(url.searchParams.has('offlineSpace'))offlineSpace=url.searchParams.get('offlineSpace')==='true';
+  if(url.searchParams.has('releaseHeld')){const group=url.searchParams.get('releaseHeld');for(const entry of held.splice(0)){if(!group||entry.group===group)entry.release();else held.push(entry);}}
   if(url.searchParams.has('auth'))auth=Number(url.searchParams.get('auth'));
   if(url.searchParams.has('authenticated'))authenticated=url.searchParams.get('authenticated')==='true';
   if(url.searchParams.has('control')){control=url.searchParams.get('control');spaceControl='';}
@@ -38,7 +42,7 @@ const server=createServer(async(req,res)=>{try{
   if(url.searchParams.has('release'))release=url.searchParams.get('release');
   if(url.searchParams.has('failAsset'))failAsset=url.searchParams.get('failAsset');
   if(url.searchParams.has('disconnect'))closeStreams();
-  res.setHeader('Content-Type','application/json');res.end(JSON.stringify({hold,auth,control,release,calls}));return;
+  res.setHeader('Content-Type','application/json');res.end(JSON.stringify({hold,auth,control,release,pending:held.map(entry=>entry.group),calls}));return;
  }
  const call={at:Date.now(),method:req.method,path:req.url,release};calls.push(call);res.on('finish',()=>{call.status=res.statusCode;call.finishedAt=Date.now()});
  if(path==='/access/status'||path.startsWith('/api/')){
@@ -48,15 +52,19 @@ const server=createServer(async(req,res)=>{try{
   const owner=url.searchParams.get('assistant_id')||'alpha';let value={};
   if(path==='/api/v1/runtime')value={runtime_id:control,boot_id:'synthetic-boot',host:{hostname:'Synthetic Host'}};
   if(path==='/api/v1/spaces')value={active_space_id:'local',items:[{id:'local',control_id:spaceControl||control,name:'Synthetic Space',kind:'local',connected:true}]};
-  if(path==='/api/v1/assistants')value=definitions;
+  if(offlineSpace&&path==='/api/v1/spaces')value.items.push({id:'unavailable',control_id:'unavailable-control',name:'Synthetic unavailable Space',kind:'remote',connected:false});
+  if(path==='/api/v1/assistants'&&url.searchParams.get('space_id')==='unavailable'){res.writeHead(503);res.end(JSON.stringify({code:'synthetic_offline'}));return;}
+  if(path==='/api/v1/assistants')value=definitions.map(item=>({...item,capabilities:revoked?{version:1,operations:['chat.read','chat.events','chat.history']}:capabilities}));
   if(path==='/api/v1/agent-links')value={items:[]};
   if(path==='/api/v1/snapshot')value=frame(owner);
+  if(path==='/api/v1/assistants/profile')value={id:owner,name:owner==='alpha'?'Synthetic Alpha':'Synthetic Beta',revision:1,avatar:''};
   if(path==='/api/v1/permissions')value={pending:[],policy:{machines:{},rules:[],task_grants:[]}};
   if(path==='/api/v1/tasks/catalog'||path==='/api/v1/tasks/query')value={items:[],total:0,counts:{},next_offset:null};
   if(path==='/api/v1/assistants/bootstrap')value={assistant:null};
+  if(hold.startsWith('spaces:')&&path==='/api/v1/spaces'||hold.startsWith('assistants:')&&path==='/api/v1/assistants'){const body=JSON.stringify(value);held.push({group:hold.split(':')[1],release:()=>res.end(body)});return;}
   if(path==='/api/v1/events'||path==='/api/v1/changes'){
    res.setHeader('Content-Type','text/event-stream');res.setHeader('Cache-Control','no-store');res.flushHeaders();streams.add(res);res.on('close',()=>streams.delete(res));res.write(': synthetic stream\n\n');
-   if(path.endsWith('/events'))res.write('event: conversation\ndata: '+JSON.stringify(frame(owner))+'\n\n');return;
+   if(path.endsWith('/events')){const body='event: conversation\ndata: '+JSON.stringify(frame(owner))+'\n\n';if(hold.startsWith('session:'))held.push({group:hold.split(':')[1],release:()=>res.write(body)});else res.write(body);}return;
   }
   res.end(JSON.stringify(value));return;
  }

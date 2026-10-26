@@ -45,9 +45,10 @@ export function createChatDomain(client){
       },
       watch(next){
         current();stop();sync?.close();observer=next;
+        const connectionGeneration=client.connectionGeneration;
         const version=generation,active=()=>!closed&&!retired&&!ended&&version===generation;
         const failed=reason=>{if(active())observer.failed?.(reason);};
-        if(cache)sync=createChatSync({cache:{writeFrames:(...args)=>commit(()=>cache.writeFrames(...args))},key,context:()=>!ended?commitContext():{surface},committed:(value,received)=>active()?deliver(value,received):undefined,failed});
+        if(cache)sync=createChatSync({cache:{writeFrames:(...args)=>commit(()=>cache.writeFrames(...args))},key,context:()=>!ended?commitContext():{surface},committed:(value,received)=>{if(!active())return;client.confirmSession?.(scope,connectionGeneration);return deliver(value,received);},failed});
         receive=value=>{
           if(!active())return;
           if(!validSnapshot(value)){failed(Error('Invalid conversation snapshot'));return;}

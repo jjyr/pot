@@ -159,7 +159,7 @@ run = ["node --test plugins/github/*.test.mjs", "go test -race ./internal/assist
 
 [tasks."test:pwa-cold-start"]
 description = "Verify local-first browser startup using isolated HTTP/SSE, IndexedDB and a real Service Worker"
-run = "node scripts/tests/pot-ui-cold-start-browser.mjs"
+run = ["node scripts/tests/pot-ui-cold-start-browser.mjs", "node scripts/tests/pot-ui-reconnect-authority-browser.mjs"]
 
 [tasks."test:pwa"]
 description = "Verify isolated system notification, Web Push and browser lifecycle contracts"

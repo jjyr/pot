@@ -706,6 +706,22 @@ refreshes the directory and conversation without replacing the editor or its
 reading anchor. Interrupted sends keep their existing immutable confirmation
 fences; recovery never automatically submits or retries a message.
 
+Each browser connection has a transient generation. Suspension revokes operation
+authority and aborts the previous generation's reads. Access and runtime checks
+restore transport reads only; an authoritative directory refresh in that
+generation restores operation capability checks for its confirmed Spaces and
+assistants. Failed scopes and retained linked assistants remain unavailable
+without blocking confirmed local work. Retained names and cached
+capabilities cannot satisfy this barrier. Chat additionally waits for its current
+subscription's committed live snapshot; the adapter keeps that confirmation
+per assistant and connection generation, including across asynchronous draft
+preparation. Online navigation and existing management
+forms remain unavailable while the directory barrier is pending, and the adapter
+also rejects mutations. An already open assistant editor checks its current
+capability again before saving and remains unavailable if that capability was
+revoked. Late reads from a retired connection cannot publish a
+directory or unlock a later connection. This state is never persisted.
+
 A changed Control retires the old UI and writers before opening the new namespace.
 Drafts remain under their original Control/Space/assistant/conversation. An access
 token supplied in the URL does not open the previous cached identity. Explicit
