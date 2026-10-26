@@ -232,6 +232,20 @@ the shared DOM against synthetic messages and a deterministic loopback provider;
 attachment bytes are synthetic local blobs. Stop it with `POST /fixture/stop` at
 that private origin. This opt-in fixture adds no product data or native notifications.
 
+For chat stream lifecycle checks, `node scripts/tests/ui-regressions.mjs --group
+connection` runs the production browser adapter and shared UI with real
+EventSource, IndexedDB and a controlling Service Worker against synthetic HTTP
+faults. It uses the product watchdog durations and separate browser contexts.
+Use the existing `POT_PLAYWRIGHT_MODULE` and `POT_CHROMIUM_EXECUTABLE` overrides.
+For a real isolated Control and authenticated browser gateway, set
+`POT_STREAM_FIXTURE_URL_FILE` to a private temporary filename and run
+`go test ./internal/transport -run '^TestChatStreamBrowserFixture$' -count=1 -v
+-timeout=12m`. POST `/fixture/login` at the written loopback origin establishes
+its synthetic cookie; `/fixture/meta` returns the fixture assistant ID. The
+normal UI at `/` uses synthetic SQLite history and no model calls. Stop with
+POST `/fixture/stop`. These desktop browser checks do not qualify physical iOS
+PWA suspension or a real tailnet path.
+
 `mise run test:ui-http-integration` exercises real local HTTP/SSE and downloads
 with a deterministic loopback model fixture; it needs cached Playwright CLI and
 an installed browser.
@@ -562,10 +576,17 @@ install API. It checks successful upgrade, executable-launch failure and
 startup-exit rollback, new
 PID/boot, preserved root/identity/arguments/environment/working directory, and
 bundle signatures. It neither publishes releases nor opens existing product
-roots. Signed-feed discovery and download verification remain covered by the
-updater Go tests. The native macOS packaging job runs this simulation as well.
+roots. Test builds use a temporary Go overlay to route only the updater's fixed
+fixture feed/package URLs to a loopback HTTP server, with no public-network
+fallback. Each host must pass the real check API and report verified discovery
+and automatic installation eligibility before the prepared scenarios run.
+Production builds have no fixture transport or new URL/configuration override.
+Download verification remains covered by the updater Go tests. The native macOS
+packaging job runs this simulation as well.
 For existing test builds, run `mise exec -- python
-scripts/tests/macos-update-smoke.py /absolute/Old.app /absolute/New.app`.
+scripts/tests/macos-update-smoke.py /absolute/Old.app /absolute/New.app --feed /absolute/update.json`.
+These existing Apps must independently discover and verify that same target;
+prepared files alone cannot authorize installation.
 
 Branch pushes and PR events do not start the release/build workflow.
 That workflow always calls the full `Tests` gate for its resolved source SHA. Headless

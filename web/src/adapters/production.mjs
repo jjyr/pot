@@ -2,6 +2,8 @@ import {translate} from '../locales/messages.mjs';
 import {supportsCapability,agentFailureKey} from '../state/agent-links.mjs';
 import {createResourceReads} from '../state/resource-cache.mjs';
 import {createTopicVersions} from '../state/changes.mjs';
+import {createEventStream} from '../state/event-stream.mjs';
+import {validSnapshot} from '../state/conversation.mjs';
 import {createFileImages} from '../state/file-images.mjs';
 import {createDisplayResources} from '../state/display-resources.mjs';
 // Shared product transport. Every operation captures its Space/owner before IO.
@@ -75,6 +77,17 @@ export async function createProductionClient({desktop = false, base = '', resour
     catch(error){error.accepted=true;error.uiKey='storage.commandAccepted';throw localized(error);}
   }
   const localized=error=>error.uiKey?Object.assign(new Error(translate(client?.uiLocale?.()||'en',error.uiKey),{cause:error}),error,{name:error.name,diagnostic:error.diagnostic||error.message}):error;
+  async function terminalStreamFailure(signal){
+    const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),5000);
+    const cancel=()=>abort.abort();signal.addEventListener('abort',cancel,{once:true});if(signal.aborted)cancel();
+    try{
+      const response=await fetch(`${base}/access/status`,{credentials:'same-origin',signal:abort.signal});
+      if(response.status===401)return {uiKey:'connection.authenticationRequired',code:'stream_authentication'};
+      if(response.ok){const value=await response.json();if(value.authenticated===false)return {uiKey:'connection.authenticationRequired',code:'stream_authentication'};if(value.authenticated===true)return {retry:true};}
+    }catch{/* A terminal transport failure is distinct from unconfirmed authentication. */}
+    finally{clearTimeout(timer);signal.removeEventListener('abort',cancel);}
+    return {uiKey:'connection.streamUnavailable',code:'stream_closed'};
+  }
   async function request(path, options = {}) {
     let {method = 'GET', body, signal} = options;
     const capturedScope={...context,...options};
@@ -218,16 +231,12 @@ export async function createProductionClient({desktop = false, base = '', resour
         }).catch(reason => { if (active) onStatus('offline', reason); });
         return () => { active = false; stop(); stopStatus(); if (token) invoke('Unsubscribe', token).catch(() => {}); };
       }
-      const source = new EventSource(`${base}${scopedPath('/api/v1/events?'+new URLSearchParams({locale:client.uiLocale?.()||'en'}), scope)}`);
-      source.addEventListener('conversation', event => {
-        let value;
-        try { value = JSON.parse(event.data); }
-        catch (reason) { if (active) onStatus('offline', reason); return; }
-        deliver(value);
-      });
-      source.onopen = () => { if (active) onStatus('connected'); };
-      source.onerror = () => { if (active) onStatus('offline'); };
-      return () => { active = false; source.close(); };
+      return createEventStream({url:`${base}${scopedPath('/api/v1/events?'+new URLSearchParams({locale:client.uiLocale?.()||'en'}),scope)}`,
+        events:{conversation:(event,initial)=>{
+          const snapshot=normalizeSnapshot(JSON.parse(event.data),runtime,scope.owner,scope.space);
+          if(!validSnapshot(snapshot)||initial&&snapshot.kind!=='reset')throw Error('Invalid initial conversation frame');
+          return ()=>onSnapshot(snapshot);
+        }},onStatus,terminal:terminalStreamFailure});
     },
     changes(onChange,{space=context.space}={}) {
       const scope = {...context,space},versions=createTopicVersions();
@@ -237,12 +246,13 @@ export async function createProductionClient({desktop = false, base = '', resour
         if(event.data.reset){onChange([],{space:event.data.space_id,reset:true});return;}
         notify(event.data.topics,event.data.space_id,event.data.boot_id||'');
       });
-      const source = new EventSource(`${base}${scopedPath('/api/v1/changes', scope)}`);
-      const deliver = event => { try { const value = JSON.parse(event.data); const id=event.lastEventId||'',separator=id.lastIndexOf(':');notify(value.topics || value,scope.space,separator<0?'':id.slice(0,separator)); } catch { /* next version event reconciles */ } };
-      source.onopen=()=>onChange([],{space:scope.space,reset:true});
-      source.onerror=()=>onChange([],{space:scope.space,reset:true});
-      source.addEventListener('changed', deliver); source.addEventListener('changes', deliver); source.onmessage = deliver;
-      return () => source.close();
+      const deliver=(event,initial)=>{
+        const value=JSON.parse(event.data),id=event.lastEventId||'',separator=id.lastIndexOf(':');
+        return ()=>{if(initial)onChange([],{space:scope.space,reset:true});
+          notify(value.topics||value,scope.space,separator<0?'':id.slice(0,separator));};
+      };
+      return createEventStream({url:`${base}${scopedPath('/api/v1/changes',scope)}`,
+        events:{changed:deliver,changes:deliver,message:deliver},terminal:terminalStreamFailure});
     },
   };
   client.resources=createResourceReads(client,{storage:resourceStorage});

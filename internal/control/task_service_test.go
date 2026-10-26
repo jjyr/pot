@@ -3,6 +3,8 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/jjyr/pot/internal/resources"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/testutil"
@@ -147,6 +149,47 @@ func TestLocalTaskUsesSharedCapacityOwnerModelAndSummary(t *testing.T) {
 	owned := awaitFiles(t, s, "main", "owned-file")
 	if owned[0].State != "ready" || owned[0].Source.Run != ref.Source.Run {
 		t.Fatal(owned)
+	}
+	// Ordinary absolute links share local files without claiming another Task's
+	// identity. pot-file links still require that Task's original run and root.
+	outside := filepath.Join(t.TempDir(), "source.go")
+	writeTaskFixture(t, outside, "package synthetic\n// outside the Task workspace\n")
+	if err := os.Symlink(outside, filepath.Join(taskRoot, "outside-alias")); err != nil {
+		t.Fatal(err)
+	}
+	s.bindMessageFiles("main", accepted.Info.ID, ref.Source.Run, "absolute-files", "[source]("+outside+":2)\n\n[alias](outside-alias)\n\n[confined](pot-file://"+accepted.Info.ID+"/outside-alias)", taskRoot)
+	for i, item := range awaitFiles(t, s, "main", "absolute-files", accepted.Info.ID) {
+		want := "ready"
+		if i == 2 {
+			want = "forbidden"
+		}
+		if item.State != want {
+			t.Fatal("Task absolute-file policy", item)
+		}
+	}
+	// Historical sources use the same category-separated receipts. A successful
+	// ordinary symlink snapshot cannot authorize a pot-file escape on recovery.
+	for i, rules := range []any{nil, 1, 2} {
+		raw := historicalSource(t, ref.Source, rules)
+		message := fmt.Sprintf("historical-task-%d", i)
+		ordinary := storedMessageFile(t, s, message, "outside-alias", raw, "pending", nil)
+		if got := awaitFiles(t, s, "main", message)[0]; got.State != "ready" {
+			t.Fatal("historical Task ordinary link failed", got)
+		}
+		// Use the same message/revision to target exactly the receipt inputs;
+		// link category must be the remaining distinction.
+		ordinary.Href = "pot-file://" + accepted.Info.ID + "/outside-alias"
+		if _, err := s.snapshotMessageFile(ctx, ordinary); !errors.Is(err, errFileForbidden) {
+			t.Fatal("Task link reused ordinary symlink receipt", err)
+		}
+	}
+	invalid := ref.Source
+	invalid.Run = "nonexistent-run"
+	if err := s.Resources.BindMessage(ctx, "main", "task:"+accepted.Info.ID, "wrong-run", "[source]("+outside+")", invalid); err != nil {
+		t.Fatal(err)
+	}
+	if got := awaitFiles(t, s, "main", "wrong-run", accepted.Info.ID)[0]; got.State != "source_offline" {
+		t.Fatal("absolute path bypassed run binding", got)
 	}
 	s.bindMessageFiles("main", accepted.Info.ID, ref.Source.Run, "foreign-file", "[file](pot-file://another-task/artifact.txt)", taskRoot)
 	for {

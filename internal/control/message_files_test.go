@@ -13,11 +13,15 @@ import (
 	"github.com/jjyr/pot/internal/resources"
 )
 
-func awaitFiles(t *testing.T, s *Service, owner, message string) []resources.MessageFile {
+func awaitFiles(t *testing.T, s *Service, owner, message string, tasks ...string) []resources.MessageFile {
 	t.Helper()
+	task := ""
+	if len(tasks) > 0 {
+		task = tasks[0]
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		rows, err := s.MessageFiles(context.Background(), owner, "", message)
+		rows, err := s.MessageFiles(context.Background(), owner, task, message)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -96,7 +100,7 @@ func TestMessageFilesRejectPathsAndRetry(t *testing.T) {
 	text := "[绝对](" + outside + ")\n\n[逃逸](../private)\n\n[符号](escape)\n\n[缺少](missing.txt)\n\n[自身](" + ownConfig + ")\n\n[其他配置](" + filepath.Join(s.Registry.Directory(a.ID), "profile.json") + ")"
 	s.bindMessageFiles(a.ID, "", "", "reply", text, root)
 	rows := awaitFiles(t, s, a.ID, "reply")
-	for i, want := range []string{"forbidden", "forbidden", "forbidden", "not_found", "ready", "forbidden"} {
+	for i, want := range []string{"ready", "not_found", "ready", "not_found", "ready", "ready"} {
 		if rows[i].State != want {
 			t.Fatalf("%d got %s want %s", i, rows[i].State, want)
 		}
@@ -177,7 +181,7 @@ func TestMessageFilesDirectoryReplacementAndRegularFileLimits(t *testing.T) {
 	}
 }
 
-func TestOwnConfigurationMappingRejectsDirectoryAliases(t *testing.T) {
+func TestConfigurationAliasUsesOrdinaryFilePolicy(t *testing.T) {
 	s, _ := configurationService(t)
 	ctx := context.Background()
 	a, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "config-alias", Name: "Configuration"})
@@ -196,9 +200,14 @@ func TestOwnConfigurationMappingRejectsDirectoryAliases(t *testing.T) {
 	}
 	s.bindMessageFiles(a.ID, "", "", "config-link", "[rules]("+filepath.Join(directory, "AGENTS.md")+")", root)
 	rows := awaitFiles(t, s, a.ID, "config-link")
-	if rows[0].State != "forbidden" || rows[0].Resource != nil {
-		t.Fatal("configuration alias escaped owner scope", rows)
+	if rows[0].State != "ready" {
+		t.Fatal("ordinary configuration alias was not shareable", rows)
 	}
+	old := storedMessageFile(t, s, "historical-config-alias", filepath.Join(directory, "AGENTS.md"), historicalSource(t, rows[0].Source, 1), "pending", nil)
+	if got := awaitFiles(t, s, a.ID, old.Message)[0]; got.State != "ready" {
+		t.Fatal("historical configuration alias used the former policy", got)
+	}
+
 }
 
 // Direct completed-message fixtures use the same host binding callback.
@@ -250,7 +259,7 @@ func TestMessageFileReadRejectsReplacementBetweenStatAndOpen(t *testing.T) {
 	if err := os.Rename(replacement, path); err != nil {
 		t.Fatal(err)
 	}
-	if data, err := readBoundRoot(context.Background(), root, "source.txt", 1024, false, revision); err != errFileChanged || len(data) != 0 {
+	if data, err := readBoundRoot(context.Background(), root, "source.txt", 1024, revision); err != errFileChanged || len(data) != 0 {
 		t.Fatal("opened an uncaptured file revision", string(data), err)
 	}
 }
