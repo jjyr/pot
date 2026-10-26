@@ -1,3 +1,4 @@
+import {UI_CACHE_VERSION} from '../../pkg/storage/migrations/ui-cache/0006_startup_identity.mjs';
 import {createIndexedStore,idbRequest} from '../../web/src/state/indexed-store.mjs';
 import {createDraftStore,assistantDraftKey} from '../../web/src/state/draft-store.mjs';
 import {createAssistantDrafts} from '../../web/src/state/assistant-drafts.mjs';
@@ -21,7 +22,7 @@ export async function assistantDraftStorage(report=()=>{}){
   let upgraded=createIndexedStore({name});
   check(await upgraded.transaction(['messages','views','composerDrafts','composerFiles'],'readonly',async tx=>(await idbRequest(tx.objectStore('messages').get(['old-chat','message']))).message.text==='Keep old chat'&&(await idbRequest(tx.objectStore('views').get(['old-chat','browser']))).position.id==='message'&&(await idbRequest(tx.objectStore('composerDrafts').count()))===0),'v'+version+' upgrade preserves messages and reading positions and creates empty draft stores');
   upgraded.close();const drafts=createDraftStore({name});await drafts.write('assistant',{conversation_id:'main',text:'Retain me'},[{id:'image',blob:new Blob(['original'],{type:'image/png'})}]);drafts.close();
-  const failed=createIndexedStore({name,version:6,migrate(db){db.createObjectStore('must-roll-back');throw Error('Synthetic migration failure');}});let rejected=false;
+  const failed=createIndexedStore({name,version:UI_CACHE_VERSION+1,migrate(db){db.createObjectStore('must-roll-back');throw Error('Synthetic migration failure');}});let rejected=false;
   try{await failed.transaction(['composerDrafts'],'readonly',()=>{});}catch(error){rejected=error.message==='Synthetic migration failure';}failed.close();
   const reopened=createDraftStore({name});check(rejected&&(await reopened.read('assistant')).files[0].blob.size===8,'Failed migration rolls back and permits reopening without losing drafts');reopened.close();
   await clearBusinessCaches({name});const retained=createDraftStore({name});check((await retained.read('assistant')).record.text==='Retain me','Business cache cleanup preserves unsent drafts and originals');retained.close();await remove(name);await remove(name+'-tasks');

@@ -392,7 +392,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const running = snapshot?.running;
     const draftReady=!assistantDrafts||assistantDrafts.ready(editorOwner);
     continuation?.update(snapshot,{connected:draftReady&&connection==='connected'&&can('chat.continue')&&!selectedAssistant?.offline&&!pending&&!!snapshot&&editorOwner===ownerKey(snapshot)});
-    const recovery=continuation?.state(),restoring=recovery?.pending,resuming=draftReady&&recovery?.available&&!hasComposerInput();
+    const recovery=continuation?.state(),restoring=recovery?.pending,resuming=client.onlineReady!==false&&draftReady&&recovery?.available&&!hasComposerInput();
     const stopping=running&&(!client.production||(!draft(state).trim()&&!attachmentUI?.items().length));
     const label = restoring||resuming ? recovery.label : stopping ? (cancelPending ? t('stopping') : t('stop')) : running?t('send.guidance'):t('send');
     send.replaceChildren(icon(restoring ? 'refresh' : resuming ? 'play' : stopping ? 'stop' : 'send'));
@@ -463,18 +463,18 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     return fragment;
   }
-  let preferenceControls,preferenceContext;
+  let preferenceControls,preferenceContext,connectionGeneration=0;
   function renderPreferences() {
     if(client.production){
-      const captured={...client.scope()},receivedEpoch=epoch,selection=selectionGeneration,boot=client.runtime.boot_id;
+      const captured={...client.scope()},receivedEpoch=epoch,selection=selectionGeneration,linkGeneration=connectionGeneration,boot=client.runtime.boot_id;
       const assistant=selectedAssistant,identity=assistant&&JSON.stringify([assistant.space_id,assistant.id,controlOf(assistant)]);
-      const context=JSON.stringify([captured,receivedEpoch,selection,boot,identity,state.snapshot&&[ownerKey(state.snapshot),state.snapshot.boot_id,state.snapshot.running,state.snapshot.turn_id,!!state.snapshot.turn?.paused]]);
+      const context=JSON.stringify([captured,receivedEpoch,selection,linkGeneration,boot,identity,state.snapshot&&[ownerKey(state.snapshot),state.snapshot.boot_id,state.snapshot.running,state.snapshot.turn_id,!!state.snapshot.turn?.paused]]);
       // Retained directory data revokes execution authority, not the identity of
       // an open menu. Keep its existing actions focusable during revalidation;
       // fresh capability removal and storage/offline failures still remove them.
       // Reconciliation may remove a button or replace its handler. A retained
       // node/callback must still validate authority and its original destination.
-      const current=()=>!disposed&&receivedEpoch===epoch&&selection===selectionGeneration&&boot===client.runtime.boot_id&&JSON.stringify(captured)===JSON.stringify(client.scope())&&captured.owner===selectedAssistant?.id&&captured.space===selectedAssistant?.space_id&&identity===JSON.stringify([selectedAssistant?.space_id,selectedAssistant?.id,controlOf(selectedAssistant)])&&!selectedAssistant?.offline;
+      const current=()=>!disposed&&receivedEpoch===epoch&&selection===selectionGeneration&&linkGeneration===connectionGeneration&&boot===client.runtime.boot_id&&JSON.stringify(captured)===JSON.stringify(client.scope())&&captured.owner===selectedAssistant?.id&&captured.space===selectedAssistant?.space_id&&identity===JSON.stringify([selectedAssistant?.space_id,selectedAssistant?.id,controlOf(selectedAssistant)])&&!selectedAssistant?.offline;
       const retaining=preferences.open&&assistant?.retained&&!directoryStorageFailed&&context===preferenceContext&&current();
       const visible=(key,allowed)=>allowed||retaining&&!!preferences.querySelector('[data-view-key="'+key+'"]');
       preferences.classList.add('product-actions');const projection=preferences.cloneNode(false),close=button('close',t('close'));close.dataset.viewKey='close';close.onclick=()=>preferences.close();projection.append(close);
@@ -997,6 +997,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     awaitingSnapshot=!!client.production;connection='connecting';updateControls();
     unsubscribe = chatSession.watch({snapshot:(snapshot,received,options)=>applySnapshot(snapshot,receivedEpoch,received,options),failed:reason=>{if(disposed||receivedEpoch!==epoch)return;if(['conversation_gap','history_gap'].includes(reason.message))loadSnapshot(true);else if(reason.uiKey==='identityChanged'){connection='offline';error=t('identityChanged');updateControls();}else cacheFailure(reason);},removed:()=>loadDirectory(),connection:(value, reason) => {
       if (disposed || receivedEpoch !== state.epoch) return;
+      if(value!==connection)connectionGeneration++;
       if (value === 'offline') {disconnected = true;connectionError = reason?.uiKey?reason:reason?.message || t('streamDisconnected');}
       if (value === 'connected') connectionError = '';
       if(value==='connecting'&&client.production)awaitingSnapshot=true;
@@ -1175,7 +1176,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     },{space:''});
   }
   if(client.production){attachChanges();loadDirectory();updates?.refresh(client.scope());}else attach();
-  const startupConfirmed=()=>{if(disposed)return;if(client.onlineReady!==false){domains.directory.refresh().catch(()=>{});if(selectedAssistant)loadSnapshot(true);}renderShell();updateControls();};
+  const startupConfirmed=()=>{if(disposed)return;if(client.onlineReady!==false){attachChanges();domains.directory.refresh().catch(()=>{});if(selectedAssistant)loadSnapshot(true);}renderShell();updateControls();};
   const stopStartup=client.onStartupConfirmed?.(startupConfirmed);
   const stopResume=bindResumeRecovery(async()=>{
     if(disposed)return;

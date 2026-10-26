@@ -9,6 +9,7 @@ import {translate} from './locales/messages.mjs';
 const root = document.querySelector('#app');
 const params = new URLSearchParams(location.search);
 const desktop = params.get('platform') === 'desktop';
+const changingAccess=new URLSearchParams(location.hash.slice(1)).has('access_token');
 const locale=()=>params.get('locale')||storedPreference('pot-ui-locale',navigator.language.startsWith('zh')?'zh-CN':'en');
 const t=key=>translate(locale(),key);
 document.documentElement.dataset.platform = desktop ? 'desktop' : 'browser';
@@ -28,6 +29,7 @@ function mount(value){
 function bindIdentity(value){
   const listeners=new Set();
   value.onStartupConfirmed=handler=>{listeners.add(handler);return()=>listeners.delete(handler);};
+  value.revalidateStartup=({resetScope=false}={})=>verify(true,resetScope);
   value.startupConfirmed=()=>{for(const listener of listeners)listener();};
   value.rememberStartup=async(scope,surface)=>{
     // A retained identity may update its local selection, never its confirmed
@@ -37,10 +39,13 @@ function bindIdentity(value){
   };
 }
 function suspend(){if(client?.production){client.onlineReady=false;client.startupConfirmed();status('startup.local');}}
-async function verify(force=false){
+async function verify(force=false,resetScope=false){
   if(stopped||verifying&&force!==true)return;currentAbort?.abort();suspend();verifying=true;clearTimeout(retryTimer);
   const ticket=++verification,abort=new AbortController(),timer=setTimeout(()=>abort.abort(),10000);currentAbort=abort;
   try{
+    if(!client&&!changingAccess){
+      try{identity=await store.read();if(identity){const value=await createProductionClient({startupIdentity:identity});bindIdentity(value);mount(value);status('startup.local');}}catch(error){console.error('Pot startup storage:',error);}
+    }
     const access=await ensureBrowserAccess(root,{signal:abort.signal,onSetup:()=>{if(ticket!==verification||stopped)return;dispose();client?.resources?.clear();client=null;identity=null;store?.clear().catch(()=>{});notice.remove();}});
     const response=await fetch('/api/v1/runtime',{credentials:'same-origin',signal:abort.signal});
     const runtime=await response.json().catch(()=>null);
@@ -51,7 +56,7 @@ async function verify(force=false){
     }
     if(!(runtime?.runtime_id||runtime?.id))throw Error('Runtime identity unavailable');
     const id=runtime.runtime_id||runtime.id;
-    if(client&&client.runtime.runtime_id===id){
+    if(client&&client.runtime.runtime_id===id&&!resetScope){
       client.access=access;client.confirmStartup(runtime);client.startupConfirmed();
     }else{
       // A changed Control retires every old writer before opening its namespace.
@@ -77,7 +82,7 @@ try{
   }else{
     installPWA().catch(error=>console.error('Pot shell installation:',error));
     store=createStartupIdentity();status('startup.loading');
-    try{identity=params.has('access_token')||new URLSearchParams(location.hash.slice(1)).has('access_token')?null:await store.read();}catch(error){console.error('Pot startup storage:',error);}
+    try{identity=changingAccess?null:await store.read();}catch(error){console.error('Pot startup storage:',error);}
     if(identity){const value=await createProductionClient({startupIdentity:identity});bindIdentity(value);mount(value);status('startup.local');}
     else status('startup.loading');
     verify();

@@ -1,3 +1,4 @@
+import {translate} from '../../locales/messages.mjs';
 import {projectLinkedAssistants} from '../agent-links.mjs';
 import {machinePresentation} from '../machine-identity.mjs';
 const retained=item=>({...item,executing:false,pending_approvals:0,capabilities:{version:1,operations:['chat.read']},retained:true});
@@ -5,13 +6,17 @@ export function createDirectoryDomain(client,{resources,queries,commands}){
   let previous=[];
   const local=(value,space,offline)=>{let items=value;if(typeof items==='string')items=JSON.parse(items);const fresh=!resources.state(value)||resources.state(value).freshness==='fresh';return (items?.items||items||[]).map(item=>({...(!fresh?retained(item):item),control_id:space.control_id||space.id,space_id:space.id,space_name:space.name,space_kind:space.kind,offline}));};
   const directory=queries.define('directory',async force=>{
-    const catalog=await resources.read('/api/v1/spaces',{owner:'',space:'',authoritative:force}),spaces=catalog.items||[];client.spaces=spaces;
+    const catalog=await resources.read('/api/v1/spaces',{owner:'',space:'',authoritative:force}),spaces=catalog.items||[];
+    if(client.startup&&client.onlineReady!==false&&spaces.some(space=>{const before=client.spaces?.find(item=>item.id===space.id);return before?.control_id&&before.control_id!==space.control_id;})){
+      client.onlineReady=false;client.revalidateStartup?.({resetScope:true});throw Object.assign(Error(translate(client.uiLocale?.()||'en','identityChanged')),{uiKey:'identityChanged'});
+    }
+    client.spaces=spaces;
     if(!spaces.length)throw Error('No serving Space');
     let partial=false;
     const results=await Promise.all(spaces.map(async space=>{try{
       const [items]=await Promise.all([resources.read('/api/v1/assistants',{space:space.id,owner:'',authoritative:force}),machinePresentation(client).load({space:space.id})]);
-      const own=local(items,space,space.connected===false);
-      try{const links=await resources.read('/api/v1/agent-links',{space:space.id,owner:'',authoritative:force}),fresh=!resources.state(links)||resources.state(links).freshness==='fresh';const linked=projectLinkedAssistants(links,space).map(item=>fresh?item:retained(item));
+      const own=local(items,space,space.connected===false||client.onlineReady===false);
+      try{const links=await resources.read('/api/v1/agent-links',{space:space.id,owner:'',authoritative:force}),fresh=!resources.state(links)||resources.state(links).freshness==='fresh';const linked=projectLinkedAssistants(links,space).map(item=>client.onlineReady===false?{...retained(item),offline:true}:fresh?item:retained(item));
         for(const item of previous.filter(item=>item.origin&&item.space_id===space.id&&!linked.some(current=>current.id===item.id))){if(links.items?.some(link=>link.id===item.origin.link_id&&link.status!=='connected'))linked.push({...item,offline:true});}return [...own,...linked];
       }catch(error){if(error.storage||error.name==='AbortError')throw error;partial=true;return [...own,...previous.filter(item=>item.origin&&item.space_id===space.id).map(item=>({...retained(item),offline:true}))];}
     }catch(error){if(error.storage||error.name==='AbortError')throw error;partial=true;const cached=previous.filter(item=>item.space_id===space.id);return (cached.length?cached:local(space.assistants||[],space,true)).map(item=>({...retained(item),offline:true}));}}));

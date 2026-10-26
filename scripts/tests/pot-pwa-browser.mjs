@@ -7,7 +7,6 @@ import {readFile} from 'node:fs/promises';
 import {resolve,extname} from 'node:path';
 const {chromium}=await import(process.env.POT_PLAYWRIGHT_MODULE||'playwright');
 const root=resolve(import.meta.dirname,'../..');
-const shellFiles=await shellAssets(root);
 const calls=[],devices=new Map(),pending=[],queue=[],pendingSessions=[];let holdSession=false,expireSubscription=false,failNext=false,holdDevice=false;const heldDevices=[];
 const event={id:'["node","alpha","reply","new"]',space:'node',control:'node',owner:'alpha',task:'task-one',kind:'reply',name:'Alpha',preview:'Synthetic reply complete'};
 const shell=`<!doctype html><link rel="stylesheet" href="/styles.css"><main style="padding:48px;max-width:720px"><h1>System notifications</h1><div id="setting"></div></main><script type="module">
@@ -23,6 +22,7 @@ const setting=notificationSetting({notifications:manager,locale:()=>locale,deskt
 window.changeLocale=()=>{locale='zh-CN';dispatchEvent(new Event('pot:locale'))};
 window.addEventListener('pagehide',()=>{setting.dispose();manager.dispose()},{once:true});
 </script>`;
+const shellFiles=await shellAssets(root,(path,body)=>path==='/index.html'?Buffer.from(shell):body);
 const server=createServer(async(req,res)=>{
  try{
   const url=new URL(req.url,'http://fixture');
@@ -38,7 +38,7 @@ const server=createServer(async(req,res)=>{
   if(url.pathname==='/'){res.setHeader('Content-Type','text/html');res.end(shell);return}
   const path=url.pathname.startsWith('/pkg/storage/migrations/')?resolve(root,'.'+url.pathname):resolve(root,'web/src','.'+url.pathname);
   if(!path.startsWith(root+'/')){res.writeHead(404).end();return}
-  const data=url.pathname==='/service-worker.js'?shellFiles.files.get(url.pathname):await readFile(path);res.setHeader('Content-Type',({'.js':'text/javascript','.mjs':'text/javascript','.json':'application/json','.css':'text/css','.png':'image/png','.html':'text/html','.ttf':'font/ttf'})[extname(path)]||'application/octet-stream');res.end(data);
+  const data=shellFiles.files.get(url.pathname)||await readFile(path);res.setHeader('Content-Type',({'.js':'text/javascript','.mjs':'text/javascript','.json':'application/json','.css':'text/css','.png':'image/png','.html':'text/html','.ttf':'font/ttf'})[extname(path)]||'application/octet-stream');res.end(data);
  }catch{res.writeHead(404).end()}
 });await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const origin=`http://127.0.0.1:${server.address().port}`;

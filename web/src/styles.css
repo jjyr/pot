@@ -1022,3 +1022,9 @@ button.communication-task-endpoint:focus-visible{outline:2px solid var(--primary
 .draft-storage-status[hidden] { display:none; }
 
 .startup-status { position: fixed; z-index: 1000; top: max(8px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); max-width: calc(100vw - 24px); padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel, Canvas); color: var(--text, CanvasText); font-size: 13px; box-shadow: 0 2px 12px #0002; }
+
+.startup-status { width: max-content; max-width: calc(100vw - 24px); box-sizing: border-box; display: flex; align-items: center; gap: .5rem; }
+.startup-status button { flex: none; }
+.startup-status { pointer-events: none; }
+.startup-status button { pointer-events: auto; }
+@media (max-width: 640px) { .startup-status { top: calc(env(safe-area-inset-top) + 56px); } }

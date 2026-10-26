@@ -72,7 +72,7 @@ export async function chatStreamRecovery(browser,{sourceOrigin,cases}={}){
   const sample=()=>page.evaluate(()=>({states:window.__streams.map(s=>({path:new URL(s.url).pathname,state:s.readyState})),draft:document.querySelector('#pot-composer').value,status:document.querySelector('.connection-status').textContent,addTitle:document.querySelector('.attachment-plus').title,sw:!!navigator.serviceWorker.controller}));
   const started=Date.now();
   try{
-   await page.goto(origin+'/?locale=en&assistant_id=alpha&conversation=main');await ready();await page.evaluate(()=>navigator.serviceWorker.ready);await page.waitForFunction(()=>!!navigator.serviceWorker.controller);
+   await page.goto(origin+'/?locale=en&assistant_id=alpha&conversation=main');await ready();await page.evaluate(()=>navigator.serviceWorker.ready);await page.reload();await ready();await page.waitForFunction(()=>!!navigator.serviceWorker.controller);
    state.statusChecks=state.statusAborted=0;
    await page.locator('#pot-composer').fill('retained synthetic draft');await run({page,context,state,control,ready,sample});assert.deepEqual(errors,[]);
    results.push({name,ok:true,ms:Date.now()-started,subscriptions:state.subscriptions,changeSubscriptions:state.changeSubscriptions,statusChecks:state.statusChecks,statusAborted:state.statusAborted,sample:await sample()});

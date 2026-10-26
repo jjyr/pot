@@ -20,8 +20,8 @@ export async function attachmentPickerBrowser(browser,{sourceOrigin,baseline=fal
   const visibility=value=>page.evaluate(value=>{window.visibility=value;Object.defineProperty(document,'visibilityState',{get:()=>window.visibility,configurable:true});document.dispatchEvent(new Event('visibilitychange'));if(value==='hidden'){window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}));window.dispatchEvent(new Event('freeze'));}else{window.dispatchEvent(new Event('resume'));window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}));window.dispatchEvent(new Event('focus'));}},value);
   const marks=[];
   try{
-   await page.goto(fixture.origin+'/?locale=en&assistant_id=alpha&conversation=main');await ready();await page.evaluate(()=>navigator.serviceWorker.ready);await page.waitForFunction(()=>!!navigator.serviceWorker.controller);
-   await run({page,control,evidence,sample,ready,choose,uploaded,switchOwner,visibility,marks});assert.deepEqual(errors,[]);
+   await page.goto(fixture.origin+'/?locale=en&assistant_id=alpha&conversation=main');await ready();await page.evaluate(()=>navigator.serviceWorker.ready);await page.reload();await ready();await page.waitForFunction(()=>!!navigator.serviceWorker.controller);
+   await run({connectionsBefore:(await evidence()).trace.filter(t=>t.kind==='sse-open'&&t.path==='/api/v1/events').length,page,control,evidence,sample,ready,choose,uploaded,switchOwner,visibility,marks});assert.deepEqual(errors,[]);
    results.push({name,ok:true,marks,final:await sample(),server:await evidence()});
   }catch(error){results.push({name,ok:false,error:error.stack,errors,marks,final:await sample().catch(()=>null),body:await page.locator('body').innerText(),server:await evidence()});}
   finally{await context.close();}
@@ -36,12 +36,12 @@ export async function attachmentPickerBrowser(browser,{sourceOrigin,baseline=fal
    await control({holdInitial:false,release:true});await ready();if(!baseline)await uploaded();
    marks.push({phase:'recovered',ui:await sample()});const uploads=(await evidence()).trace.filter(t=>t.kind==='upload');assert.equal(uploads.length,baseline?0:3);assert(uploads.every(t=>t.owner==='alpha'&&t.space==='local'));
   },{clock:true});
-  await scenario('permission-picker-return',async({page,control,evidence,sample,choose,uploaded,marks})=>{
+  await scenario('permission-picker-return',async({page,control,evidence,sample,choose,uploaded,marks,connectionsBefore})=>{
    const chooser=await choose();await control({permission:false,directory:true});
    await page.locator('#pot-composer').fill('Permission probe');await page.waitForFunction(()=>document.querySelector('.send-button').disabled);
    await chooser.setFiles(file);marks.push({phase:'permission-unavailable',ui:await sample()});assert.equal(await page.locator('.attachment-card').count(),baseline?0:1);assert.equal((await evidence()).trace.filter(t=>t.kind==='upload').length,0);
    await control({permission:true,directory:true});if(!baseline)await uploaded();else await page.waitForFunction(()=>!document.querySelector('.attachment-plus').disabled);
-   marks.push({phase:'permission-restored',ui:await sample()});assert.equal((await evidence()).trace.filter(t=>t.kind==='upload').length,baseline?0:3);assert.equal((await evidence()).trace.filter(t=>t.kind==='sse-open'&&t.path==='/api/v1/events').length,1);
+   marks.push({phase:'permission-restored',ui:await sample()});assert.equal((await evidence()).trace.filter(t=>t.kind==='upload').length,baseline?0:3);assert.equal((await evidence()).trace.filter(t=>t.kind==='sse-open'&&t.path==='/api/v1/events').length,connectionsBefore);
   });
   await scenario('owner-picker-return',async({page,evidence,choose,uploaded,switchOwner,sample,marks})=>{
    const chooser=await choose();await switchOwner('beta');await chooser.setFiles(file);

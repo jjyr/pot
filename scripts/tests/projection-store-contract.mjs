@@ -67,7 +67,7 @@ export async function projectionStoreContract(report=()=>{}){
   await v5.transaction(['composerDrafts','composerFiles','views'],'readwrite',tx=>{
     tx.objectStore('composerDrafts').put({key:'fixture',text:'preserved draft',pending:{request_id:'fixed-request'}});
     tx.objectStore('composerFiles').put({key:'fixture-file',id:'original',blob:new Blob(['original'])});
-    tx.objectStore('views').put({key:'fixture-view',position:{following:false,anchor:{id:'reading'}}});
+    tx.objectStore('views').put({key:'fixture-view',surface:'main',position:{following:false,anchor:{id:'reading'}}});
   });v5.close();
   const brokenStartup=createIndexedStore({name:startupName,migrate:(db,tx,old)=>{migrateStartupIdentity(db,tx,old);tx.abort();}});let upgradeAborted=false;
   try{await brokenStartup.transaction(['startup'],'readonly',()=>{});}catch{upgradeAborted=true;}brokenStartup.close();

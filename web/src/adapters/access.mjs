@@ -28,8 +28,9 @@ async function exchange(token,signal) {
   const response=await fetch('/access/token',{method:'POST',credentials:'same-origin',signal,headers:{Authorization:`Bearer ${token}`}});
   if(!response.ok)throw Object.assign(Error('Browser access exchange failed'),{status:response.status});
 }
+let pendingAccessFragment=null;
 export async function ensureBrowserAccess(root,{signal,onSetup=()=>{}}={}) {
-  const fragment=takeAccessFragment();
+  const fragment=takeAccessFragment()??pendingAccessFragment;if(fragment!==null)pendingAccessFragment=fragment;
   const response=await fetch('/access/status',{credentials:'same-origin',signal});
   if(response.status===404)return null; // Isolated fixture is checked by bootstrap.
   if(!response.ok)throw Object.assign(Error(`Browser access: HTTP ${response.status}`),{status:response.status});
@@ -38,8 +39,8 @@ export async function ensureBrowserAccess(root,{signal,onSetup=()=>{}}={}) {
   if(!saved)try{saved=await tokenStore('get');}catch{/* A restricted browser can use a session-only token. */}
   signal?.throwIfAborted();
   if(fragment||!status.authenticated&&saved) {
-    try {await exchange(saved,signal);try{await tokenStore('put',saved);}catch{}return {...status,authenticated:true};}
-    catch(reason) {if(![401,403].includes(reason.status))throw reason;try{await tokenStore('remove');}catch{}if(status.authenticated&&!fragment)return status;}
+    try {await exchange(saved,signal);signal?.throwIfAborted();pendingAccessFragment=null;try{await tokenStore('put',saved);}catch{}return {...status,authenticated:true};}
+    catch(reason) {if(![401,403].includes(reason.status))throw reason;pendingAccessFragment=null;try{await tokenStore('remove');}catch{}if(status.authenticated&&!fragment)return status;}
   }
   if(status.authenticated&&!fragment)return status;
   onSetup();
@@ -48,7 +49,7 @@ export async function ensureBrowserAccess(root,{signal,onSetup=()=>{}}={}) {
   return new Promise(resolve=>{
     const form=document.createElement('form'),heading=document.createElement('h1'),label=document.createElement('label'),input=document.createElement('input'),submit=document.createElement('button'),error=document.createElement('p');
     root.className='access-setup';heading.textContent=t('startup.connectTitle');label.textContent=t('startup.token');input.type='password';input.autocomplete='off';input.required=true;input.setAttribute('aria-label',label.textContent);input.className='field-input';label.append(input);submit.className='control primary';submit.textContent=t('startup.connect');error.className='inline-error';error.setAttribute('role','alert');form.append(heading,label,error,submit);root.replaceChildren(form);
-    form.onsubmit=async event=>{event.preventDefault();submit.disabled=true;error.textContent='';try{await exchange(input.value.trim());try{await tokenStore('put',input.value.trim());}catch{}input.value='';root.replaceChildren();stopViewport();resolve({...status,authenticated:true});}catch(reason){error.textContent=t('startup.accessFailed');console.error('Pot access:',reason);}finally{submit.disabled=false;}};
+    form.onsubmit=async event=>{event.preventDefault();submit.disabled=true;error.textContent='';try{await exchange(input.value.trim());pendingAccessFragment=null;try{await tokenStore('put',input.value.trim());}catch{}input.value='';root.replaceChildren();stopViewport();resolve({...status,authenticated:true});}catch(reason){error.textContent=t('startup.accessFailed');console.error('Pot access:',reason);}finally{submit.disabled=false;}};
   });
 }
 export async function forgetBrowserAccess() {try{await disableNotificationInstallation();}catch{/* Server session revocation remains authoritative when local storage is blocked. */}try{await tokenStore('remove');}catch{}try{await fetch('/access/logout',{method:'POST',credentials:'same-origin'});}finally{try{await clearBusinessCaches();localStorage.removeItem('pot-ui-read-v1');}finally{location.reload();}}}

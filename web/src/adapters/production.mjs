@@ -101,6 +101,15 @@ export async function createProductionClient({desktop = false, base = '', resour
     // failures without depending on a consumer Retry button or foreground remount.
     return {retry:true};
   }
+  // A transport retry must re-confirm the startup identity before publishing
+  // frames or enabling requests in the old namespace.
+  function guardReconnect(onStatus=()=>{}){
+    let attempts=0;
+    return (status,reason)=>{
+      if(status==='connecting'&&attempts++>0&&client.startup&&client.onlineReady){client.onlineReady=false;client.revalidateStartup?.();}
+      onStatus(status,reason);
+    };
+  }
   async function request(path, options = {}) {
     let {method = 'GET', body, signal} = options;
     if(client?.onlineReady===false)throw localized(Object.assign(new APIError(503,{code:'startup_unconfirmed'}),{uiKey:'startup.local'}));
@@ -255,7 +264,7 @@ export async function createProductionClient({desktop = false, base = '', resour
           const snapshot=normalizeSnapshot(JSON.parse(event.data),runtime,scope.owner,scope.space);
           if(!validSnapshot(snapshot)||initial&&snapshot.kind!=='reset')throw Error('Invalid initial conversation frame');
           return ()=>onSnapshot(snapshot);
-        }},onStatus,terminal:terminalStreamFailure});
+        }},onStatus:guardReconnect(onStatus),terminal:terminalStreamFailure});
     },
     changes(onChange,{space=context.space}={}) {
       const scope = {...context,space};
@@ -268,12 +277,13 @@ export async function createProductionClient({desktop = false, base = '', resour
         notify(event.data.topics,event.data.space_id,event.data.boot_id||'');
       });
       const deliver=(event,initial)=>{
+        if(!client.onlineReady)return false;
         const value=JSON.parse(event.data),id=event.lastEventId||'',separator=id.lastIndexOf(':');
         return ()=>{if(initial)onChange([],{space:scope.space,reset:true});
           notify(value.topics||value,scope.space,separator<0?'':id.slice(0,separator));};
       };
       return createEventStream({url:`${base}${scopedPath('/api/v1/changes',scope)}`,
-        events:{changed:deliver,changes:deliver,message:deliver},terminal:terminalStreamFailure});
+        events:{changed:deliver,changes:deliver,message:deliver},onStatus:guardReconnect(),terminal:terminalStreamFailure});
     },
   };
   client.resources=createResourceReads(client,{storage:resourceStorage});
