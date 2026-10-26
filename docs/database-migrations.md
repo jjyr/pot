@@ -209,13 +209,20 @@ scopes use the same registry; deleting an assistant does not delete its scope.
 
 ## Unified system notification delivery
 
-`control/0004_system_notifications` adds owner source baselines, structured events,
-installation/session bindings, reading leases, delivery receipts and private
-VAPID material. Existing Control tables and JSON records are unchanged. The native
-host uses its existing Control database; a standalone browser service keeps this
-Control database in its own private service root. Source reconnection establishes
-a fresh baseline rather than replaying persisted history. Interrupted sends become
-uncertain receipts instead of automatic retries. No retired Push store is imported.
+`control/0004_system_notifications` adds source baselines, structured events,
+browser installations, reading leases and per-installation receipts. Push
+subscription JSON/fingerprints and private VAPID material have separate tables
+owned by the Push service. An activation event sequence prevents delayed consumers
+from replaying history to newly enabled installations. Native preferences/claims
+keep their existing private JSON format; native delivery does not use the browser
+registration/receipt protocol. This migration is new after the released Control
+0003 history; it does not import an earlier experimental Push schema.
+
+Existing Control business tables and JSON records are unchanged. The native host
+uses its Control database; a standalone browser service keeps a Control database
+in its private service root. Source reconnection establishes a fresh authority
+cycle/baseline. Browser interrupted sends become uncertain receipts, never an
+automatic resend. No retired Push store is imported.
 
 The separate rebuildable notification installation database uses
 `ui-notifications/0001_installation.mjs`. It stores device identity/channel/intent,

@@ -14,6 +14,7 @@
     "./pkg/storage/migrations",
     "./internal/access",
     "./internal/systemnotifications",
+    "./internal/browsernotifications",
     "./internal/pwapush",
     "./internal/webui",
     "./internal/localui",

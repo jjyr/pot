@@ -159,7 +159,7 @@ run = ["node --test plugins/github/*.test.mjs", "go test -race ./internal/assist
 
 [tasks."test:pwa"]
 description = "Verify isolated system notification, Web Push and browser lifecycle contracts"
-run = ["go test ./internal/systemnotifications ./internal/pwapush ./internal/webui ./pkg/storage ./web", "node scripts/tests/pot-ui-notifications.mjs", "node scripts/tests/pot-ui-service-worker.mjs", "node scripts/tests/pot-pwa-browser.mjs"]
+run = ["go test ./internal/systemnotifications ./internal/browsernotifications ./internal/pwapush ./internal/webui ./pkg/storage ./web", "node scripts/tests/pot-ui-notifications.mjs", "node scripts/tests/pot-ui-service-worker.mjs", "node scripts/tests/pot-pwa-browser.mjs"]
 
 [tasks."test:i18n"]
 description = "Verify shared product translation completeness"

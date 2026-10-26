@@ -1,6 +1,6 @@
-// Package pwapush implements only standards-based subscription validation and
-// encrypted transport. Event policy, foreground leases and retries belong to
-// systemnotifications; this package never observes business resources.
+// Package pwapush owns Web Push subscriptions, encrypted transport, provider
+// retries and invalidation. It consumes selected browser receipts and never
+// observes business resources or decides which business events should notify.
 package pwapush
 
 import (

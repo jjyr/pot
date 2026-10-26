@@ -97,7 +97,7 @@ func New(o Options) (*Server, error) {
 	}
 	server := &Server{config: o.Config, origin: origin, upstream: o.Upstream, assets: http.FileServer(http.FS(o.Assets)), streams: map[uint64]browserStream{}, persist: o.Persist, failures: map[string]attempt{}}
 	if o.Root != "" {
-		server.notifications, err = startNotifications(o.Root, o.Upstream, o.Origin, o.Config)
+		server.notifications, err = startNotifications(o.Root, o.Upstream, o.Origin, o.Config, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -116,7 +116,7 @@ func (s *Server) ReplaceAccess(c Config) error {
 		return errors.New("access generation must advance")
 	}
 	if s.notifications != nil {
-		if err := s.notifications.hub.RevokeAll(context.Background()); err != nil {
+		if err := s.notifications.revoke(context.Background(), ""); err != nil {
 			return err
 		}
 	}
@@ -232,7 +232,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if auth && s.notifications != nil {
-			if err := s.notifications.hub.Revoke(r.Context(), notificationBinding(r, c.Generation)); err != nil {
+			if err := s.notifications.revoke(r.Context(), notificationBinding(r, c.Generation)); err != nil {
 				failure(w, 500, "notification revocation could not be saved")
 				return
 			}
@@ -263,7 +263,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if s.notifications != nil {
-				if err := s.notifications.hub.Revoke(r.Context(), notificationBinding(r, c.Generation)); err != nil {
+				if err := s.notifications.revoke(r.Context(), notificationBinding(r, c.Generation)); err != nil {
 					s.mu.Unlock()
 					failure(w, 500, "notification revocation could not be saved")
 					return

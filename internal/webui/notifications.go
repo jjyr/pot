@@ -1,10 +1,13 @@
 package webui
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jjyr/pot/internal/browsernotifications"
+	"github.com/jjyr/pot/internal/localui"
+	"github.com/jjyr/pot/internal/pwapush"
+	"github.com/jjyr/pot/internal/systemnotifications"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -12,68 +15,71 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/jjyr/pot/internal/localui"
-	"github.com/jjyr/pot/internal/pwapush"
-	"github.com/jjyr/pot/internal/systemnotifications"
 )
 
 type notificationService struct {
-	hub    *systemnotifications.Hub
-	push   *pwapush.Sender
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	events  *systemnotifications.Hub
+	devices *browsernotifications.Store
+	local   *browsernotifications.Local
+	push    *pwapush.Service
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 }
 
-func startNotifications(root string, upstream Upstream, origin string, config Config) (*notificationService, error) {
-	hub, err := systemnotifications.OpenHub(filepath.Join(root, "control.sqlite"))
+func startNotifications(root string, upstream Upstream, origin string, config Config, transport pwapush.Transport) (*notificationService, error) {
+	path := filepath.Join(root, "control.sqlite")
+	events, err := systemnotifications.OpenHub(path)
 	if err != nil {
 		return nil, err
 	}
-	if err = hub.Reconcile(context.Background(), func(binding string) bool {
+	devices, err := browsernotifications.Open(path)
+	if err != nil {
+		events.Close()
+		return nil, err
+	}
+	cleanup := func() { devices.Close(); events.Close() }
+	if err = devices.Reconcile(context.Background(), func(binding string) bool {
 		generation, session, ok := strings.Cut(binding, ":")
 		return ok && !config.Disabled && generation == strconv.FormatUint(config.Generation, 10) && config.Revoked[session] == 0
 	}); err != nil {
-		hub.Close()
+		cleanup()
 		return nil, err
 	}
-	secret, err := hub.Secret("vapid-p256-v1", pwapush.GenerateKey)
+	push, err := pwapush.NewService(devices, events, origin, transport)
 	if err != nil {
-		hub.Close()
+		cleanup()
 		return nil, err
 	}
-	push, err := pwapush.New(secret, origin)
+	if err = push.ClearRevoked(context.Background()); err != nil {
+		cleanup()
+		return nil, err
+	}
+	browserSub, err := events.Subscribe()
 	if err != nil {
-		hub.Close()
+		cleanup()
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	n := &notificationService{hub: hub, push: push, cancel: cancel}
-	hub.Push = func(ctx context.Context, d systemnotifications.Device, event systemnotifications.Event) systemnotifications.Result {
-		var sub pwapush.Subscription
-		if json.Unmarshal([]byte(d.Subscription), &sub) != nil {
-			return systemnotifications.Result{State: "failed", Invalid: true}
-		}
-		payload, err := pushPayload(d, event)
-		if err != nil {
-			return systemnotifications.Result{State: "failed"}
-		}
-		sent := push.Send(ctx, sub, payload)
-		state := "failed"
-		if sent.Unknown {
-			state = "unknown"
-		} else if sent.Status >= 200 && sent.Status < 300 {
-			state = "accepted"
-		}
-		return systemnotifications.Result{State: state, RetryAfter: sent.RetryAfter, Invalid: sent.Invalid}
-	}
+	n := &notificationService{events: events, devices: devices, local: &browsernotifications.Local{Store: devices, Events: events}, push: push, cancel: cancel}
 	caller := localui.NewHTTPClient(upstream.URL, upstream.Client, upstream.Credential, upstream.ControlID)
-	n.wg.Add(2)
-	go func() { defer n.wg.Done(); hub.Observe(ctx, caller) }()
-	go func() { defer n.wg.Done(); hub.Dispatch(ctx) }()
+	n.wg.Add(3)
+	go func() { defer n.wg.Done(); events.Observe(ctx, caller) }()
+	go func() { defer n.wg.Done(); devices.Run(ctx, browserSub) }()
+	go func() { defer n.wg.Done(); push.Run(ctx) }()
 	return n, nil
 }
-func (n *notificationService) close() { n.cancel(); n.wg.Wait(); _ = n.hub.Close() }
+func (n *notificationService) close() {
+	n.cancel()
+	n.wg.Wait()
+	_ = n.devices.Close()
+	_ = n.events.Close()
+}
+func (n *notificationService) revoke(ctx context.Context, binding string) error {
+	if err := n.devices.Revoke(ctx, binding); err != nil {
+		return err
+	}
+	return n.push.ClearRevoked(ctx)
+}
 func notificationBinding(r *http.Request, generation uint64) string {
 	return strconv.FormatUint(generation, 10) + ":" + sessionOwner(r)
 }
@@ -82,17 +88,19 @@ func (s *Server) notificationRoute(w http.ResponseWriter, r *http.Request, c Con
 		failure(w, 503, "notification service unavailable")
 		return
 	}
-	hub := s.notifications.hub
+	events := s.notifications.events
+	registry := s.notifications.devices
+	local := s.notifications.local
 	if r.Method == "GET" && r.URL.Path == "/api/v1/notifications/session" {
-		if hub.Control() == "" {
+		if events.Control() == "" {
 			failure(w, 503, "notification source unavailable")
 			return
 		}
-		reply(w, 200, map[string]string{"binding": notificationBinding(r, c.Generation), "control": hub.Control()})
+		reply(w, 200, map[string]string{"binding": notificationBinding(r, c.Generation), "control": events.Control()})
 		return
 	}
 	if r.Method == "GET" && r.URL.Path == "/api/v1/notifications/key" {
-		reply(w, 200, map[string]string{"public_key": s.notifications.push.PublicKey})
+		reply(w, 200, map[string]string{"public_key": s.notifications.push.PublicKey()})
 		return
 	}
 	if r.Method != "POST" {
@@ -128,22 +136,16 @@ func (s *Server) notificationRoute(w http.ResponseWriter, r *http.Request, c Con
 	var err error
 	switch r.URL.Path {
 	case "/api/v1/notifications/device":
-		if !hub.ValidateScope(input.Control, input.Space, nil) {
+		if !events.ValidateScope(input.Control, input.Space, nil) {
 			failure(w, 409, "notification scope changed")
 			return
 		}
-		subscription := ""
+
 		if input.Channel == "push" {
-			if input.Subscription == nil || pwapush.Validate(*input.Subscription) != nil {
+			if input.Subscription == nil {
 				failure(w, 400, "invalid push subscription")
 				return
 			}
-			if input.Subscription.ExpirationTime != nil && *input.Subscription.ExpirationTime <= time.Now().UnixMilli() {
-				failure(w, 400, "expired push subscription")
-				return
-			}
-			raw, _ := json.Marshal(input.Subscription)
-			subscription = string(raw)
 		} else if input.Subscription != nil {
 			failure(w, 400, "local notification device cannot register Push")
 			return
@@ -159,14 +161,22 @@ func (s *Server) notificationRoute(w http.ResponseWriter, r *http.Request, c Con
 			failure(w, 401, "browser authentication required")
 			return
 		}
-		err = hub.Register(r.Context(), systemnotifications.Device{ID: input.Device, Binding: binding, Control: input.Control, Channel: input.Channel, Enabled: input.Enabled, Permission: input.Permission, Locale: input.Locale, Subscription: subscription, Expires: expires * 1000})
+		device := browsernotifications.Device{ID: input.Device, Binding: binding, Control: input.Control, Channel: input.Channel, Enabled: input.Enabled, Permission: input.Permission, Locale: input.Locale, Expires: expires * 1000}
+		if input.Channel == "push" {
+			err = s.notifications.push.Register(r.Context(), device, *input.Subscription)
+		} else {
+			err = registry.Register(r.Context(), device)
+		}
 		s.mu.Unlock()
 	case "/api/v1/notifications/view":
-		if input.View.Owner != "" && !hub.ValidateScope(input.Control, input.View.Space, []string{input.View.Owner}) {
+		if input.View.Owner != "" && !events.ValidateScope(input.Control, input.View.Space, []string{input.View.Owner}) {
 			failure(w, 409, "notification view scope changed")
 			return
 		}
-		err = hub.Lease(r.Context(), input.Device, binding, input.Session, input.View)
+		err = s.notifications.push.Check(r.Context(), input.Device, binding)
+		if err == nil {
+			err = registry.Lease(r.Context(), input.Device, binding, input.Session, input.View)
+		}
 	case "/api/v1/notifications/next":
 		stream, finish, streamErr := s.stream(r, c.Generation)
 		if streamErr != nil {
@@ -174,7 +184,7 @@ func (s *Server) notificationRoute(w http.ResponseWriter, r *http.Request, c Con
 			break
 		}
 		defer finish()
-		delivery, e := hub.Next(stream, input.Device, binding, input.Session)
+		delivery, e := local.Next(stream, input.Device, binding, input.Session)
 		if e != nil {
 			err = e
 			break
@@ -183,27 +193,25 @@ func (s *Server) notificationRoute(w http.ResponseWriter, r *http.Request, c Con
 		if encodeErr := json.NewEncoder(w).Encode(map[string]any{"delivery": delivery}); encodeErr != nil && delivery != nil {
 			receiptContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			_ = hub.Complete(receiptContext, input.Device, binding, delivery.Event.ID, delivery.Attempt, systemnotifications.Result{State: "unknown"})
+			_ = local.Complete(receiptContext, input.Device, binding, delivery.Event.ID, delivery.Attempt, "unknown")
 		}
 		return
 	case "/api/v1/notifications/receipt":
-		// A definite constructor failure can be retried on this channel. No result
-		// ever registers or falls back to Push.
-		retry := time.Duration(0)
-		if input.State == "failed" {
-			retry = 5 * time.Second
-		}
-		err = hub.Complete(r.Context(), input.Device, binding, input.Event, input.Attempt, systemnotifications.Result{State: input.State, RetryAfter: retry})
+		err = local.Complete(r.Context(), input.Device, binding, input.Event, input.Attempt, input.State)
 	case "/api/v1/notifications/baseline":
-		err = hub.Baseline(r.Context(), input.Device, binding, input.Session)
+		err = local.Baseline(r.Context(), input.Device, binding, input.Session)
 	case "/api/v1/notifications/remove":
-		err = hub.Remove(r.Context(), input.Device, binding)
+		err = registry.Remove(r.Context(), input.Device, binding)
 	default:
 		failure(w, 404, "notification route unavailable")
 		return
 	}
 	if err != nil {
-		if errors.Is(err, systemnotifications.ErrSubscriptionExpired) {
+		if errors.Is(err, pwapush.ErrInvalidSubscription) {
+			failure(w, 400, "invalid push subscription")
+			return
+		}
+		if errors.Is(err, pwapush.ErrSubscriptionExpired) {
 			failure(w, 410, "notification subscription expired")
 			return
 		}
@@ -214,13 +222,4 @@ func (s *Server) notificationRoute(w http.ResponseWriter, r *http.Request, c Con
 		return
 	}
 	reply(w, 200, map[string]bool{"accepted": true})
-}
-
-func pushPayload(device systemnotifications.Device, event systemnotifications.Event) ([]byte, error) {
-	title, body := event.Text(device.Locale)
-	var encoded bytes.Buffer
-	encoder := json.NewEncoder(&encoded)
-	encoder.SetEscapeHTML(false)
-	err := encoder.Encode(map[string]any{"version": 1, "event": event.Target(), "device": device.ID, "title": title, "body": body})
-	return encoded.Bytes(), err
 }

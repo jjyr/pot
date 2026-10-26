@@ -2,6 +2,7 @@ package systemnotifications
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,12 +39,12 @@ type sourceState struct {
 	Approvals   map[string]bool
 }
 type sourceDirectory struct {
-	Control, Boot string
-	Owners        []Owner
+	Control, Boot, Session string
+	Owners                 []Owner
 }
 
 func sourceBoot(directory sourceDirectory, owner Owner) string {
-	return directory.Control + "/" + directory.Boot + "/" + owner.Remote
+	return directory.Control + "/" + directory.Boot + "/" + owner.Remote + "/" + directory.Session
 }
 func readJSON(ctx context.Context, source localui.Caller, path string, out any) error {
 	data, err := source.Call(ctx, "GET", path, nil)
@@ -197,6 +198,7 @@ type sourceOwner struct {
 	tasks, approvals         chan struct{}
 }
 type sourceManager struct {
+	cycle     string
 	h         *Hub
 	source    localui.Caller
 	ctx       context.Context
@@ -238,8 +240,11 @@ func (m *sourceManager) refreshDirectory() error {
 	if err != nil {
 		return err
 	}
+	directory.Session = m.cycle
 	current := map[string]Owner{}
-	for _, owner := range directory.Owners {
+	for i := range directory.Owners {
+		directory.Owners[i].Boot = sourceBoot(directory, directory.Owners[i])
+		owner := directory.Owners[i]
 		current[owner.ID] = owner
 	}
 	m.mu.Lock()
@@ -312,8 +317,39 @@ func (m *sourceManager) refreshDirectory() error {
 	}
 	return nil
 }
+
+// A failed resource invalidation remains work even if no new topic arrives.
+// Each independent reader owns one cancellable timer and its successful cursor.
+type sourceBackoff struct {
+	timer *time.Timer
+	ready <-chan time.Time
+	delay time.Duration
+}
+
+func (b *sourceBackoff) stop() {
+	if b.timer != nil {
+		b.timer.Stop()
+	}
+	b.ready = nil
+}
+func (b *sourceBackoff) finished(err error) {
+	b.stop()
+	if err == nil {
+		b.delay = 0
+		return
+	}
+	if b.delay == 0 {
+		b.delay = 250 * time.Millisecond
+	} else {
+		b.delay = min(b.delay*2, 15*time.Second)
+	}
+	b.timer = time.NewTimer(b.delay)
+	b.ready = b.timer.C
+}
 func (m *sourceManager) taskLoop(entry *sourceOwner) {
 	defer m.wg.Done()
+	retry := sourceBackoff{}
+	defer retry.stop()
 	var cursor *uint64
 	var epoch uint64
 	for {
@@ -321,6 +357,7 @@ func (m *sourceManager) taskLoop(entry *sourceOwner) {
 		case <-entry.ctx.Done():
 			return
 		case <-entry.tasks:
+		case <-retry.ready:
 		}
 		entry.mu.Lock()
 		owner, version := entry.owner, entry.taskEpoch
@@ -341,6 +378,7 @@ func (m *sourceManager) taskLoop(entry *sourceOwner) {
 			}
 			return m.h.commitSource(entry.ctx, owner.ID, sourceState{Boot: entry.boot, Cursor: next}, events, "task")
 		})
+		retry.finished(err)
 		if errors.Is(err, ErrSourceChanged) {
 			wakeSource(m.directory)
 		}
@@ -348,6 +386,8 @@ func (m *sourceManager) taskLoop(entry *sourceOwner) {
 }
 func (m *sourceManager) approvalLoop(entry *sourceOwner) {
 	defer m.wg.Done()
+	retry := sourceBackoff{}
+	defer retry.stop()
 	var previous map[string]bool
 	var epoch uint64
 	for {
@@ -355,6 +395,7 @@ func (m *sourceManager) approvalLoop(entry *sourceOwner) {
 		case <-entry.ctx.Done():
 			return
 		case <-entry.approvals:
+		case <-retry.ready:
 		}
 		entry.mu.Lock()
 		owner, version := entry.owner, entry.approvalEpoch
@@ -375,6 +416,7 @@ func (m *sourceManager) approvalLoop(entry *sourceOwner) {
 			}
 			return m.h.commitSource(entry.ctx, owner.ID, sourceState{Boot: entry.boot, Approvals: next}, events, "approval")
 		})
+		retry.finished(err)
 		if errors.Is(err, ErrSourceChanged) {
 			wakeSource(m.directory)
 		}
@@ -389,7 +431,7 @@ func (h *Hub) Observe(ctx context.Context, source localui.Caller) {
 			return
 		}
 		connection, cancel := context.WithCancel(ctx)
-		manager := &sourceManager{h: h, source: source, ctx: connection, owners: map[string]*sourceOwner{}, directory: make(chan struct{}, 1)}
+		manager := &sourceManager{cycle: rand.Text(), h: h, source: source, ctx: connection, owners: map[string]*sourceOwner{}, directory: make(chan struct{}, 1)}
 		manager.wg.Add(1)
 		go func() {
 			defer manager.wg.Done()

@@ -13,69 +13,10 @@ import (
 
 	"github.com/jjyr/pot/internal/localui"
 	"github.com/jjyr/pot/internal/testutil"
-	"github.com/jjyr/pot/pkg/agentlink"
 )
-
-// Batch driver for deterministic source contracts; all event decisions and
-// cursor commits use the same functions as the resident independent queues.
-func (h *Hub) readSources(ctx context.Context, source localui.Caller, states map[string]sourceState, topics map[string]bool, reset bool) error {
-	directory, err := readDirectory(ctx, source)
-	if err != nil {
-		return err
-	}
-	active := map[string]Owner{}
-	for _, owner := range directory.Owners {
-		active[owner.ID] = owner
-		before, known := states[owner.ID]
-		fresh := reset || !known || before.Boot != sourceBoot(directory, owner)
-		next := before
-		if fresh {
-			next = sourceState{Boot: sourceBoot(directory, owner)}
-		}
-		events := replyEvents(owner, before, fresh)
-		if len(events) > 0 && !sourceCurrent(ctx, source, owner, directory.Boot, "") {
-			return ErrSourceChanged
-		}
-		next.Reply = owner.ReplyID
-		next.Count = owner.ReplyCount
-		if err = h.commitSource(ctx, owner.ID, next, events, "reply"); err != nil {
-			return err
-		}
-		states[owner.ID] = next
-		if owner.Capabilities.Supports(agentlink.TaskOutcomes) && (fresh || topics["task-outcomes"] || topics["agent-links"]) {
-			next.Cursor, err = taskRead(ctx, source, owner, directory.Boot, next.Cursor, func(cursor *uint64, events []Event) error {
-				return h.commitSource(ctx, owner.ID, sourceState{Boot: next.Boot, Cursor: cursor}, events, "task")
-			})
-			if errors.Is(err, ErrSourceChanged) {
-				return err
-			}
-			states[owner.ID] = next
-		}
-		if owner.Capabilities.Supports(agentlink.Approvals) && (fresh || topics["permissions"] || topics["agent-links"]) {
-			next.Approvals, err = approvalRead(ctx, source, owner, directory.Boot, next.Approvals, func(approvals map[string]bool, events []Event) error {
-				return h.commitSource(ctx, owner.ID, sourceState{Boot: next.Boot, Approvals: approvals}, events, "approval")
-			})
-			if errors.Is(err, ErrSourceChanged) {
-				return err
-			}
-			states[owner.ID] = next
-		}
-	}
-	for id := range states {
-		if _, ok := active[id]; !ok {
-			delete(states, id)
-		}
-	}
-	h.mu.Lock()
-	h.control = directory.Control
-	h.owners = active
-	h.mu.Unlock()
-	return nil
-}
 
 func TestResidentSourceQueuesDoNotBlockApprovalsOrOtherOwners(t *testing.T) {
 	h := testHub(t)
-	device(t, h, "q", "push")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var mu sync.Mutex
@@ -124,7 +65,9 @@ func TestResidentSourceQueuesDoNotBlockApprovalsOrOtherOwners(t *testing.T) {
 			}
 			items := []any{}
 			if cursor > 10 && strings.Contains(path, "after=10") {
-				items = append(items, map[string]any{"id": "task", "sequence": cursor, "phase": "complete", "title": "Build"})
+				for _, phase := range []string{"failed", "cancelled", "complete", "interrupted"} {
+					items = append(items, map[string]any{"id": phase, "sequence": cursor, "phase": phase, "title": "Build"})
+				}
 			}
 			out = map[string]any{"cursor": cursor, "items": items}
 		case strings.HasPrefix(path, "/api/v1/permissions"):
@@ -132,7 +75,7 @@ func TestResidentSourceQueuesDoNotBlockApprovalsOrOtherOwners(t *testing.T) {
 			if strings.Contains(path, "assistant_id=alpha") {
 				owner, id = "alpha", aApproval
 			}
-			out = map[string]any{"pending": []any{map[string]any{"id": id, "request": map[string]string{"owner": owner}}}}
+			out = map[string]any{"pending": []any{map[string]any{"id": id, "request": map[string]string{"owner": owner, "args": "never-notify-tool-arguments"}}}}
 		default:
 			return nil, errors.New("unexpected resident source path")
 		}
@@ -188,7 +131,7 @@ func TestResidentSourceQueuesDoNotBlockApprovalsOrOtherOwners(t *testing.T) {
 	// outcome response is still suspended. No extra PWA observer is involved.
 	eventually(func() bool {
 		var count int
-		return h.db.QueryRow("SELECT count(*) FROM notification_events").Scan(&count) == nil && count == 3
+		return h.db.QueryRow("SELECT count(*) FROM notification_events").Scan(&count) == nil && count == 4
 	})
 	var alphaTasks int
 	h.db.QueryRow("SELECT count(*) FROM notification_events WHERE json_extract(body,'$.owner')='alpha' AND json_extract(body,'$.kind')='task-complete'").Scan(&alphaTasks)
@@ -211,6 +154,11 @@ func TestResidentSourceQueuesDoNotBlockApprovalsOrOtherOwners(t *testing.T) {
 	h.db.QueryRow("SELECT count(*) FROM notification_events WHERE json_extract(body,'$.owner')='alpha' AND json_extract(body,'$.kind')='task-complete'").Scan(&alphaTasks)
 	if alphaTasks != 0 {
 		t.Fatal("late deleted-owner outcome notified")
+	}
+	var leaked int
+	h.db.QueryRow("SELECT count(*) FROM notification_events WHERE body LIKE '%never-notify-tool-arguments%'").Scan(&leaked)
+	if leaked != 0 {
+		t.Fatal("approval arguments leaked")
 	}
 }
 
@@ -294,4 +242,222 @@ func TestResidentSourceIgnoresHeartbeatWithoutLosingBusinessVersions(t *testing.
 		}
 		time.Sleep(time.Millisecond)
 	}
+}
+
+func TestObserveRecoversOneFailedReadWithoutAnotherTopic(t *testing.T) {
+	for _, topic := range []string{"task-outcomes", "permissions"} {
+		t.Run(topic, func(t *testing.T) {
+			h := testHub(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			updates := make(chan map[string]uint64, 2)
+			var changed, fail atomic.Bool
+			source := localui.Functions{Request: func(_ context.Context, _ string, path string, _ json.RawMessage) (json.RawMessage, error) {
+				var value any
+				switch {
+				case path == "/api/v1/runtime":
+					value = map[string]string{"runtime_id": "node", "boot_id": "boot"}
+				case path == "/api/v1/assistants":
+					value = []any{map[string]any{"id": "alpha", "reply_id": "old", "reply_count": 1, "capabilities": map[string]any{"version": 1, "operations": []string{"chat.read", "task.outcomes", "approvals.manage"}}}}
+				case path == "/api/v1/agent-links":
+					value = map[string]any{"items": []any{}}
+				case strings.HasPrefix(path, "/api/v1/tasks/outcomes"):
+					if topic == "task-outcomes" && fail.Swap(false) {
+						return nil, errors.New("one transient Task read")
+					}
+					cursor := 10
+					items := []any{}
+					if topic == "task-outcomes" && changed.Load() {
+						cursor = 11
+						items = append(items, map[string]any{"id": "task", "sequence": 11, "phase": "complete", "title": "Build"})
+					}
+					value = map[string]any{"cursor": cursor, "items": items}
+				case strings.HasPrefix(path, "/api/v1/permissions"):
+					if topic == "permissions" && fail.Swap(false) {
+						return nil, errors.New("one transient approval read")
+					}
+					id := "old"
+					if topic == "permissions" && changed.Load() {
+						id = "new"
+					}
+					value = map[string]any{"pending": []any{map[string]any{"id": id, "request": map[string]string{"owner": "alpha"}}}}
+				default:
+					return nil, fmt.Errorf("unexpected %s", path)
+				}
+				return json.Marshal(value)
+			}, Events: func(ctx context.Context, _ string, receive func(localui.Event) error) error {
+				for {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case v := <-updates:
+						data, _ := json.Marshal(v)
+						if err := receive(localui.Event{Type: "changed", Data: data}); err != nil {
+							return err
+						}
+					}
+				}
+			}}
+			done := make(chan struct{})
+			go func() { defer close(done); h.Observe(ctx, source) }()
+			defer func() { cancel(); <-done }()
+			updates <- map[string]uint64{"assistants": 1, "task-outcomes": 1, "permissions": 1}
+			wait := func(query string, want int) {
+				t.Helper()
+				for deadline := time.Now().Add(testutil.Timeout(t, 2*time.Second)); ; {
+					var count int
+					if h.db.QueryRow(query).Scan(&count) == nil && count == want {
+						return
+					}
+					if time.Now().After(deadline) {
+						t.Fatalf("notification source did not recover without another topic: %s", topic)
+					}
+					time.Sleep(time.Millisecond)
+				}
+			}
+			wait("SELECT count(*) FROM notification_sources WHERE task_cursor=10 AND approvals IS NOT NULL", 1)
+			changed.Store(true)
+			fail.Store(true)
+			updates <- map[string]uint64{topic: 2}
+			wait("SELECT count(*) FROM notification_events", 1)
+		})
+	}
+}
+
+func TestLinkedSourceIdentityAndRevocationFence(t *testing.T) {
+	h := testHub(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var mu sync.Mutex
+	updates := make(chan map[string]uint64, 8)
+	boot := "boot"
+	reply := "old"
+	count := 4
+	cursor := 20
+	approval := "old"
+	status := "connected"
+	revokeLate := false
+	owner := "agent-link:link:codex"
+	source := localui.Functions{Request: func(_ context.Context, _ string, path string, _ json.RawMessage) (json.RawMessage, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		var out any
+		switch {
+		case path == "/api/v1/runtime":
+			out = map[string]string{"runtime_id": "node", "boot_id": boot}
+		case path == "/api/v1/assistants":
+			out = []any{}
+		case path == "/api/v1/agent-links":
+			out = map[string]any{"items": []any{map[string]any{"id": "link", "status": status, "assistants": []any{map[string]any{"address": map[string]string{"node_id": "peer", "kind": "assistant", "agent_id": "codex"}, "name": "Codex", "reply_id": reply, "reply_count": count, "preview": "Linked completed reply", "capabilities": map[string]any{"version": 1, "operations": []string{"chat.read", "task.outcomes", "approvals.manage"}}}}}}}
+		case strings.HasPrefix(path, "/api/v1/tasks/outcomes"):
+			if !strings.Contains(path, "assistant_id=agent-link%3Alink%3Acodex") {
+				t.Fatal("linked owner lost", path)
+			}
+			if revokeLate {
+				status = "revoked"
+			}
+			items := []any{}
+			if strings.Contains(path, "after=") && cursor > 20 {
+				items = append(items, map[string]any{"id": "linked-task", "phase": "complete", "title": "Build", "sequence": cursor})
+			}
+			out = map[string]any{"cursor": cursor, "items": items}
+		case strings.HasPrefix(path, "/api/v1/permissions"):
+			out = map[string]any{"pending": []any{map[string]any{"id": approval, "task_title": "Build", "request": map[string]any{"owner": owner, "task": "linked-task", "args": "never-send-this"}}}}
+		default:
+			return nil, errors.New("unexpected linked read")
+		}
+		data, err := json.Marshal(out)
+		return data, err
+	}, Events: func(ctx context.Context, _ string, receive func(localui.Event) error) error {
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case v := <-updates:
+				if v == nil {
+					return errors.New("synthetic stream disconnect")
+				}
+				data, _ := json.Marshal(v)
+				if err := receive(localui.Event{Type: "changed", Data: data}); err != nil {
+					return err
+				}
+			}
+		}
+	}}
+
+	done := make(chan struct{})
+	go func() { defer close(done); h.Observe(ctx, source) }()
+	defer func() { cancel(); <-done }()
+	wait := func(query string, want int) {
+		t.Helper()
+		for deadline := time.Now().Add(testutil.Timeout(t, 3*time.Second)); ; {
+			var got int
+			if h.db.QueryRow(query).Scan(&got) == nil && got == want {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("linked source stalled", query, got)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	updates <- map[string]uint64{"agent-links": 1}
+	wait("SELECT count(*) FROM notification_sources WHERE task_cursor=20 AND approvals IS NOT NULL", 1)
+	mu.Lock()
+	reply = "new"
+	count++
+	cursor++
+	approval = "new"
+	mu.Unlock()
+	updates <- map[string]uint64{"agent-links": 2}
+	wait("SELECT count(*) FROM notification_events", 3)
+	rows, err := h.db.Query("SELECT body FROM notification_events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var previous Event
+	for rows.Next() {
+		var body string
+		rows.Scan(&body)
+		json.Unmarshal([]byte(body), &previous)
+		if previous.Owner != owner || previous.Space != "node" || previous.Control != "node" || strings.Contains(body, "never-send-this") {
+			t.Fatal(previous)
+		}
+	}
+	rows.Close()
+	mu.Lock()
+	cursor++
+	revokeLate = true
+	mu.Unlock()
+	updates <- map[string]uint64{"task-outcomes": 2}
+	for deadline := time.Now().Add(testutil.Timeout(t, 2*time.Second)); h.ValidateScope("node", "node", []string{owner}); {
+		if time.Now().After(deadline) {
+			t.Fatal("revoked linked authority retained")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	wait("SELECT count(*) FROM notification_events", 3)
+	if h.Current(previous) {
+		t.Fatal("revoked owner event is still current")
+	}
+	mu.Lock()
+	revokeLate = false
+	status = "connected"
+	boot = "replacement"
+	reply = "boot-reply"
+	count++
+	mu.Unlock()
+	updates <- map[string]uint64{"agent-links": 3}
+	wait("SELECT count(*) FROM notification_sources WHERE reply_id='boot-reply'", 1)
+	wait("SELECT count(*) FROM notification_events", 3)
+	// Reconnecting the same Runtime must create another authority cycle and a
+	// baseline, not replay replies observed while the stream was disconnected.
+	updates <- nil
+	mu.Lock()
+	reply = "offline-reply"
+	count++
+	mu.Unlock()
+	updates <- map[string]uint64{"agent-links": 4}
+	wait("SELECT count(*) FROM notification_sources WHERE reply_id='offline-reply'", 1)
+	wait("SELECT count(*) FROM notification_events", 3)
 }

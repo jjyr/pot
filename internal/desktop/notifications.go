@@ -67,7 +67,6 @@ func (s *Service) SetSystemNotificationsEnabled(enabled bool) error {
 		return err
 	}
 	s.app.Event.Emit("pot:notification-preference")
-	s.wakeNotifications()
 	return nil
 }
 func (s *Service) SetNotificationView(surface string, view NotificationView) error {
@@ -78,7 +77,6 @@ func (s *Service) SetNotificationView(surface string, view NotificationView) err
 	defer s.mu.Unlock()
 	s.notificationViews[surface] = view
 	s.notificationLocale = view.Locale
-	s.wakeNotifications()
 	return nil
 }
 func (s *Service) sendSystemNotification(event SystemNotification) error {

@@ -458,91 +458,105 @@ in-flight attempt and the durable attempted marker. Native and Web preferences
 remain independent; native preference/authorization history stays in the private
 `system-notifications.json`, while browser intent stays in origin local storage.
 
-### Shared event service and delivery
+### Events and independent delivery services
 
-`internal/systemnotifications` owns all business notification rules. Native and
-browser hosts run the same source reader against authenticated Control resources
-and their committed `/changes` stream. This is a resident backend reader, not a
-page SSE observer or a PWA-specific polling loop. `internal/pwapush` only validates
-subscriptions, supplies VAPID and encrypts/sends HTTP requests; it never observes
-replies, Tasks, approvals or reading state.
+`internal/systemnotifications` produces the notification event contract. Its
+resident source adapter reads authenticated Control resources after `/changes`
+invalidations, independently of any page lifetime. It owns stable event IDs,
+business selection, source cursors and current owner/boot authority. It has no
+Push sender, subscription, permission, device registration or local/Push branch.
+The adapter exists because committed reply catalogue, Task outcome and approval
+resources have different cursors and capability boundaries; it does not deliver
+notifications or request model work.
 
 ```text
-Control commits → /changes → shared source reader + owner/cursor fences
+Control commits -> /changes -> source rules + owner/cursor fences
                                       |
-                  structured Event + device intent + reading leases
-                                      |
-                     (event ID, device ID) delivery ledger
-                         /                            \
-              local device receiver            Push dispatcher
-                /             \                      |
-      page Notification   native notifier     pwapush: VAPID + RFC8291
-                                                     |
-                                               push service → SW
-                                                     |
-                                      exact Chat/Task click target
+                           durable notification event log
+                         independent consumer subscriptions
+                           /                         \
+                  native consumer              browser recipients
+                         |                     single chosen channel
+               existing preferences,            /               \
+               window state, claims      local receipts       Push receipts
+                         |                      |                   |
+                 native notifier        page Notification    PWA Push service
+                                                               subscriptions,
+                                                        VAPID, retry, invalidation
+                                                                   |
+                                                           encrypted HTTP -> SW
 ```
 
-- A changed completed `reply_id` with an increased `reply_count` creates a reply
-  event, including for linked assistants. The catalogue preview collapses
-  whitespace and is bounded to 120 Unicode code points. Empty previews use the
-  shared localized completion phrase. Token/output updates never notify.
-- Task outcome sequences identify `complete` and `interrupted` transitions.
-  Failure first enters assistant recovery; only an unresolved assistant reply
-  alerts. Cancellation and intermediate phases do not alert. The compact,
-  owner-scoped [Task outcome API](task-coordination.md#client-notification-outcomes)
-  supplies cursors; output events never cause Task notification polling.
-- New pending approval IDs create approval events with a bounded name and
-  localized description. Tool arguments are never read into notification events.
+- A changed completed `reply_id` with an increased `reply_count` produces a reply,
+  including for linked assistants. Preview whitespace collapses and content is
+  bounded to 120 Unicode code points; empty previews use the localized phrase.
+- Task outcome sequences identify `complete` and `interrupted`. Failure first
+  enters assistant recovery; only an unresolved assistant reply alerts.
+  Cancellation/intermediate phases never alert. The compact owner-scoped
+  [Task outcome API](task-coordination.md#client-notification-outcomes) supplies
+  cursors, without polling tool/output histories.
+- New pending approval IDs produce bounded names and a localized description;
+  notification events never read tool arguments.
 
-Reply, Task and approval cursors/baselines are independent. A failed reader keeps
-its last successful cursor without blocking the other readers. Initial reads,
-source reconnections and Runtime boot replacements establish baselines and expire
-queued history. Enabling a new device does not scan old events. Reads that finish
-after owner deletion, capability revocation, peer replacement or a boot change
-cannot publish events or advance their old cursor. Linked assistant routing IDs
-retain the complete link/assistant identity; retained directory data never grants
-notification authority.
+Reply, Task and approval baselines are independent. A slow or failing reader
+cannot block another reader/owner. A transient resource read keeps its successful
+cursor and retries with cancellable backoff from 250 milliseconds to 15 seconds,
+even if no new topic arrives. Named heartbeats do not change business versions.
+An initial snapshot schedules baselines once. Startup, source reconnect and
+Runtime replacement establish fresh baselines, with no historical flood. Late
+reads revalidate owner, boot and linked capabilities before committing. Retained
+catalogue data never grants authority.
 
-Events use stable Control identity as their canonical Space. Browser presentation
-may call that Space `local`; the adapter maps current, confirmed presentation
-identity at the lease/click boundary. It never substitutes a different owner or
-falls back to another Space. A visible focused corresponding Chat suppresses its
-assistant's reply, Task and approval events; an exact Task detail suppresses that
-Task. Background/minimized windows and another Chat allow delivery. The same
-predicate applies to every channel. Browser sessions renew reading leases every
-10 seconds, with a 25-second expiry. Monotonic session sequences reject late reading updates,
-and unchanged views/registrations do not generate per-render HTTP writes. Native leases renew every 5 seconds and also
-verify actual Wails main/tray visibility and focus at delivery time. An expired
-lease stops suppressing; it does not cause a silent Push or background page poll.
+Each consumer has an independent in-process cursor over the persisted log. Its
+buffered memory channel is only a coalesced wakeup; notifications are not passed
+through a competing Go channel. A failed consumer queue write leaves the record
+unacknowledged for retry. New subscriptions start at the log tail, intentionally
+not replaying old events after startup. This is not an exactly-once broker.
+Browser recipients record their activation sequence in the same SQLite writer
+transaction as intent changes, so delayed event consumption cannot notify a new
+or re-enabled installation about events committed before activation.
 
-Each event selects one channel per device. The Control database records
-`suppressed`, `queued`, `sending`, `accepted`, `failed`, `unknown` or `expired`.
-An atomic reservation precedes sending; acceptance is recorded afterward. One
-device cannot consume another's event. A network error or interrupted send has an
-uncertain outcome and is never blindly retried or moved to another channel.
-Explicit temporary service rejections have at most three attempts, with bounded
-backoff up to one minute. Local queued events expire after 25 seconds; Push TTL
-and maximum queue age are five minutes. Claims/events are retained for seven days.
-Acceptance means the service accepted a request, not that the OS displayed a banner.
+`internal/browsernotifications` stores browser intent, session bindings, reading
+leases and per-installation receipts. Its single event consumer
+queues each installation once on its selected channel; local receivers and
+`internal/pwapush.Service` consume their own receipts. Push owns subscription
+registration, private VAPID material, encrypted HTTP sending, provider retries
+and invalidation. Composition/startup connects these services;
+the source never starts or selects a delivery mechanism.
 
-Local browser receivers share one Web Lock per installation when supported,
-so additional tabs do not each occupy another notification HTTP connection.
-Transient receiver failures keep that lock and reading lease while retrying one
-request at a time, with cancellable backoff from 250 milliseconds to 15 seconds.
-This transport retry does not rebuild the source baseline or replay a displayed
-event. Authentication rejection, denied permission and disabled intent stop it.
-`pagehide`, offline and freeze abort notification IO and suspend its lease timer;
-`pageshow`, online and resume restore only this notification transport, with a
-fresh delivery baseline. This does not change the Chat subscription or its
-snapshot/reconnection state machine. A live local-capable page is still required
-for local browser delivery. Native observation continues while windows are hidden;
-Quit stops it. Web Push observation/delivery continues while a page is closed or
-suspended, without relying on page timers, SSE or JavaScript execution.
-Every asynchronous setup continuation checks the current lifecycle and intent
-before changing installation state or starting more IO. Suspending or disposing a
-page does not remove an enabled Push installation; its backend delivery continues.
-Named stream heartbeats carry liveness only and never replace business versions.
+Events use stable Control identity as canonical Space. Browser presentation may
+call that Space `local`; current confirmed identity is mapped at lease/click
+boundaries. The shared `View.Viewing` predicate suppresses an assistant's events
+while its corresponding Chat is focused, or an exact Task's events while that
+Task is focused. A different Chat, background or minimized window permits delivery.
+Browser sessions renew reading leases every 10 seconds, expiring at 25 seconds;
+monotonic sequences reject late updates. Native delivery uses actual Wails window
+visibility/focus directly, without browser registration, leases or receipts.
+Main/tray share the existing native preference, authorization and durable claims.
+An OS send error retains uncertainty rather than blindly resending.
+
+Browser event/device receipts distinguish suppressed, queued, sending, accepted,
+failed, unknown and expired. Reservation records uncertainty before an external
+effect; acceptance afterward does not prove the OS showed a banner. Devices cannot
+consume each other's work. Network errors/interruption never trigger a blind
+resend or another channel. Push owns at most three attempts for explicit temporary
+provider rejection, with backoff bounded to one minute; 404/410 clears that
+subscription. Local age/lease limits are 25 seconds; Push queue age/TTL is five
+minutes. Event history is bounded to seven days. Source authority cycles fence
+queued events from disconnected/replaced owners.
+
+Local browser receivers retain one Web Lock per installation during transient
+IO retry. The first receiver establishes its baseline while holding the lock;
+standby takeover retains current queued work. Permission rejection and disabled
+intent stop retry. `pagehide`, offline and freeze abort notification IO and the
+lease timer; `pageshow`, online and resume restore only notification transport.
+Every setup continuation checks current lifetime/intent before writes or more IO.
+Disposal/suspension keeps an enabled background Push installation, while explicit
+off removes only that device. Chat subscribe/attach/recovery is independent.
+
+A live page is required for local browser delivery. Native consumption continues
+while windows are hidden and stops on Quit. The backend Push consumer continues
+with closed/suspended pages; it does not rely on page SSE/timers or silent Push.
 
 ### Push installation and operation
 

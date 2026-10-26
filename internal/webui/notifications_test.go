@@ -8,6 +8,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/jjyr/pot/internal/pwapush"
+	"github.com/jjyr/pot/internal/systemnotifications"
+	"github.com/jjyr/pot/internal/testutil"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,17 +18,29 @@ import (
 	"testing"
 	"testing/fstest"
 	"time"
-
-	"github.com/jjyr/pot/internal/localui"
-	"github.com/jjyr/pot/internal/pwapush"
-	"github.com/jjyr/pot/internal/systemnotifications"
 )
 
-func TestAuthenticatedNotificationDevicesAndClosedPageDelivery(t *testing.T) {
+type fixturePush func(context.Context, pwapush.Subscription, []byte) pwapush.Result
+
+func (f fixturePush) Send(ctx context.Context, s pwapush.Subscription, p []byte) pwapush.Result {
+	return f(ctx, s, p)
+}
+
+type notificationFixture struct {
+	server  *Server
+	config  Config
+	pushed  chan string
+	advance func(string)
+	invoke  func(string, any, *http.Cookie, string) *httptest.ResponseRecorder
+	login   func() *http.Cookie
+}
+
+// One isolated source/service/HTTP fixture protects both normal delivery and the
+// blocked-body authority races, instead of maintaining two copies of startup.
+func notificationHarness(t *testing.T) notificationFixture {
+	t.Helper()
 	var mu sync.Mutex
-	replyID := "old"
-	count := 1
-	version := 1
+	reply, count, version := "old", 1, 1
 	updates := make(chan struct{}, 16)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer private-control" {
@@ -35,13 +50,12 @@ func TestAuthenticatedNotificationDevicesAndClosedPageDelivery(t *testing.T) {
 		}
 		if r.URL.Path == "/api/v1/changes" {
 			w.Header().Set("Content-Type", "text/event-stream")
-			flusher := w.(http.Flusher)
 			for {
 				mu.Lock()
 				v := version
 				mu.Unlock()
 				fmt.Fprintf(w, "event: changed\ndata: {\"assistant-mail\":%d}\n\n", v)
-				flusher.Flush()
+				w.(http.Flusher).Flush()
 				select {
 				case <-r.Context().Done():
 					return
@@ -55,44 +69,46 @@ func TestAuthenticatedNotificationDevicesAndClosedPageDelivery(t *testing.T) {
 		case "/api/v1/runtime":
 			json.NewEncoder(w).Encode(map[string]string{"runtime_id": "node", "boot_id": "boot"})
 		case "/api/v1/assistants":
-			json.NewEncoder(w).Encode([]any{map[string]any{"id": "alpha", "name": "Alpha", "reply_id": replyID, "reply_count": count, "preview": "Synthetic completed reply"}})
+			json.NewEncoder(w).Encode([]any{map[string]any{"id": "alpha", "name": "Alpha", "reply_id": reply, "reply_count": count, "preview": "Synthetic completed reply"}})
 		case "/api/v1/agent-links":
 			w.Write([]byte(`{"items":[]}`))
 		default:
-			t.Error("unexpected upstream request", r.URL.Path)
+			t.Error("unexpected upstream", r.URL.Path)
 			w.WriteHeader(404)
 		}
 	}))
-	defer upstream.Close()
+	t.Cleanup(upstream.Close)
 	config := NewConfig()
 	server, err := New(Options{Origin: "http://localhost", Config: config, Upstream: Upstream{URL: upstream.URL, Credential: "private-control", Client: upstream.Client()}, Assets: fstest.MapFS{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	hub, err := systemnotifications.OpenHub(t.TempDir() + "/control.sqlite")
+	pushed := make(chan string, 16)
+	transport := fixturePush(func(_ context.Context, _ pwapush.Subscription, p []byte) pwapush.Result {
+		var data struct {
+			Device string
+			Event  systemnotifications.Event
+		}
+		if err := json.Unmarshal(p, &data); err != nil {
+			t.Error(err)
+		}
+		pushed <- data.Device + ":" + data.Event.Owner
+		return pwapush.Result{Status: 201}
+	})
+	n, err := startNotifications(t.TempDir(), server.upstream, "http://localhost", config, transport)
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, _ := pwapush.GenerateKey()
-	sender, _ := pwapush.New(key, "http://localhost")
-	ctx, cancel := context.WithCancel(context.Background())
-	n := &notificationService{hub: hub, push: sender, cancel: cancel}
 	server.notifications = n
-	pushed := make(chan string, 8)
-	hub.Push = func(_ context.Context, d systemnotifications.Device, e systemnotifications.Event) systemnotifications.Result {
-		pushed <- d.ID + ":" + e.Owner
-		return systemnotifications.Result{State: "accepted"}
-	}
-	n.wg.Add(2)
-	go func() {
-		defer n.wg.Done()
-		hub.Observe(ctx, localui.NewHTTPClient(upstream.URL, upstream.Client(), "private-control", ""))
-	}()
-	go func() { defer n.wg.Done(); hub.Dispatch(ctx) }()
-	defer server.Close()
-	for deadline := time.Now().Add(time.Second); hub.Control() == ""; {
+	devices := n.devices
+	t.Cleanup(func() { server.Close() })
+	for deadline := time.Now().Add(testutil.Timeout(t, time.Second)); ; {
+		var baseline int
+		if devices.DB.QueryRow("SELECT count(*) FROM notification_sources WHERE reply_id='old'").Scan(&baseline) == nil && baseline == 1 {
+			break
+		}
 		if time.Now().After(deadline) {
-			t.Fatal("source did not establish baseline")
+			t.Fatal("source baseline unavailable")
 		}
 		time.Sleep(time.Millisecond)
 	}
@@ -109,6 +125,7 @@ func TestAuthenticatedNotificationDevicesAndClosedPageDelivery(t *testing.T) {
 		return w
 	}
 	login := func() *http.Cookie {
+		t.Helper()
 		r := httptest.NewRequest("POST", "http://localhost/access/token", nil)
 		r.Header.Set("Authorization", "Bearer "+config.Token)
 		w := httptest.NewRecorder()
@@ -118,6 +135,18 @@ func TestAuthenticatedNotificationDevicesAndClosedPageDelivery(t *testing.T) {
 		}
 		return w.Result().Cookies()[0]
 	}
+	return notificationFixture{server: server, config: config, pushed: pushed, advance: func(id string) {
+		mu.Lock()
+		reply = id
+		count++
+		version++
+		mu.Unlock()
+		updates <- struct{}{}
+	}, invoke: invoke, login: login}
+}
+func TestAuthenticatedNotificationDevicesAndClosedPageDelivery(t *testing.T) {
+	f := notificationHarness(t)
+	server, config, invoke, login, pushed := f.server, f.config, f.invoke, f.login, f.pushed
 	cookieA := login()
 	cookieB := login()
 	idA := strings.Repeat("a", 24)
@@ -165,12 +194,7 @@ func TestAuthenticatedNotificationDevicesAndClosedPageDelivery(t *testing.T) {
 	delete(local, "subscription")
 	// No browser/SSE client is running. Only the host source reader observes a
 	// committed reply change, and the shared dispatcher reaches the Push sender.
-	mu.Lock()
-	replyID = "new"
-	count++
-	version++
-	mu.Unlock()
-	updates <- struct{}{}
+	f.advance("new")
 	select {
 	case got := <-pushed:
 		if got != idB+":alpha" {
@@ -187,12 +211,7 @@ func TestAuthenticatedNotificationDevicesAndClosedPageDelivery(t *testing.T) {
 	if w := invoke("/access/logout", nil, cookieB, ""); w.Code != 200 {
 		t.Fatal(w.Code, w.Body)
 	}
-	mu.Lock()
-	replyID = "after-logout"
-	count++
-	version++
-	mu.Unlock()
-	updates <- struct{}{}
+	f.advance("after-logout")
 	// An authoritative new source read is observable through the local queue;
 	// logging out B must not consume A's pending device notifications.
 	w := invoke("/api/v1/notifications/next", map[string]string{"device": idA, "session": "tab"}, cookieA, "")
@@ -206,30 +225,10 @@ func TestAuthenticatedNotificationDevicesAndClosedPageDelivery(t *testing.T) {
 	}
 	next := NewConfig()
 	next.Generation = config.Generation + 1
-	if err = server.ReplaceAccess(next); err != nil {
+	if err := server.ReplaceAccess(next); err != nil {
 		t.Fatal(err)
 	}
 	if got := invoke("/api/v1/notifications/device", local, cookieA, "").Code; got != 401 {
 		t.Fatal("old generation retained authority", got)
-	}
-}
-
-func TestPushPayloadBoundsAndNavigationWhitelist(t *testing.T) {
-	control := strings.Repeat("n", 128)
-	owner := "agent-link:" + strings.Repeat("l", 128) + ":" + strings.Repeat("a", 128)
-	id, _ := json.Marshal([]string{control, owner, "reply", strings.Repeat("r", 256)})
-	event := systemnotifications.Event{ID: string(id), Boot: "private-boot", Space: control, Control: control, Owner: owner, Kind: "reply", Name: strings.Repeat("😀", 60), Preview: strings.Repeat("😀", 119) + "…", BodyKey: "notifications.replyComplete"}
-	payload, err := pushPayload(systemnotifications.Device{ID: strings.Repeat("d", 128), Locale: "zh-CN"}, event)
-	if err != nil || len(payload) > 3072 {
-		t.Fatal("maximum legal target exceeded encrypted record budget", len(payload), err)
-	}
-	var message map[string]json.RawMessage
-	if err = json.Unmarshal(payload, &message); err != nil {
-		t.Fatal(err)
-	}
-	var target map[string]any
-	json.Unmarshal(message["event"], &target)
-	if len(target) != 7 || target["owner"] != owner || target["preview"] != nil || target["boot"] != nil || target["body_key"] != nil {
-		t.Fatal("push did not use the navigation whitelist")
 	}
 }

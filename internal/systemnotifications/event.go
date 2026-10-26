@@ -7,6 +7,9 @@ import (
 	assets "github.com/jjyr/pot/web"
 )
 
+// Authority lets consumers discard events whose owner or source boot was retired.
+type Authority interface{ Current(Event) bool }
+
 // Event is the sole notification contract, independent of presentation channel.
 // It contains no tool arguments, credentials or arbitrary navigation URL.
 type Event struct {

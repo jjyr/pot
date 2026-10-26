@@ -7,8 +7,8 @@ const preferenceKey='pot-system-notifications-browser-v1';
 const failureText=reason=>reason?.message||String(reason??'Unknown notification failure');
 export const browserNotificationPermission=notificationPermission;
 
-// Business event selection, device deduplication and foreground suppression live
-// in the backend hub. This adapter owns permission, host presentation and leases.
+// The backend source selects business events; browser services own per-device
+// receipts and reading suppression. This adapter owns permission and presentation.
 export function createSystemNotifications({client,surface,view,open,locale,host=window,onboardingClaim=claimNotificationOnboarding}){
   const listeners=new Set();let disposed=false,enabled=true,permission='loading',error='',generation=0,ready=false,awaitingDirectory=true,pendingClick=null;
   let onboardingAttempted=false,onboarding=false,authorization=null,authorizing=false,statusEpoch=0,initialized=null,registered=false,loop=null,leaseTimer=null,synchronizing=Promise.resolve(),suspended=false,leaseSequence=0,lastLease='',lastLeaseAt=0;
