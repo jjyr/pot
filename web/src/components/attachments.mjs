@@ -29,7 +29,7 @@ const mimeOf=file=>file.type||({'png':'image/png','jpg':'image/jpeg','jpeg':'ima
 
 // One shared byte-upload UI for DOM File objects in browsers and Wails WebViews.
 // Every asynchronous operation captures its owner/Space before starting.
-export function createAttachmentComposer({client,form,input,getKey,getCaps,canSelect,canUpload,changed,locale}) {
+export function createAttachmentComposer({client,form,input,getKey,getCaps,canSelect,canUpload,changed,draftChanged=()=>{},locale}) {
   const drafts=new Map(),notices=new Map(),urls=new Set();let disposed=false,signature='',intent=null;
   const dropTarget=form.closest('.workspace')||form;
   const strip=node('div','composer-attachments'),hint=node('div','attachment-hint'),toolbar=node('div','composer-toolbar'),menu=node('div','attachment-menu');
@@ -43,7 +43,7 @@ export function createAttachmentComposer({client,form,input,getKey,getCaps,canSe
   toolbar.append(plusHost,menu);form.prepend(strip);form.append(hint,toolbar);
   const list=(key=getKey())=>drafts.get(key)||[];
   const refresh=()=>{signature='';if(!disposed)changed();};
-  const set=(key,items)=>{drafts.set(key,items);refresh();};
+  const set=(key,items)=>{drafts.set(key,items);draftChanged(key);refresh();};
   const zh=()=>locale()==='zh-CN';
   const t=key=>translate(locale(),key);
   const context=()=>({key:getKey(),scope:{...client.scope()}});
@@ -81,7 +81,8 @@ export function createAttachmentComposer({client,form,input,getKey,getCaps,canSe
   }
   async function upload(item,key){
     if(!live(item,key)||item.pending||key!==getKey()||!canUpload()||!attachmentAllowed(getCaps(),item.attachment.mime_type))return;
-    item.phase='uploading';item.error='';item.abort=new AbortController();item.started=true;
+    if(!item.file)return;
+    item.phase='uploading';item.error='';item.abort=new AbortController();item.started=true;draftChanged(key);
     const check=()=>{if(!live(item,key)||item.abort.signal.aborted)throw new DOMException('Cancelled','AbortError');};
     item.pending=(async()=>{
       const send=async body=>{check();const result=await client.request('/api/v1/attachments',{...item.scope,method:'POST',body,signal:item.abort.signal});check();return result;};
@@ -98,7 +99,7 @@ export function createAttachmentComposer({client,form,input,getKey,getCaps,canSe
       }
       if(!status.ready)throw Error('Attachment upload did not finish');
       item.attachment=status.attachment;item.phase='ready';item.progress=1;
-    })().catch(reason=>{if(live(item,key)){item.phase='failed';item.error=reason.message||String(reason);}}).finally(()=>{item.pending=null;refresh();});
+    })().catch(reason=>{if(live(item,key)){item.phase='failed';item.error=reason.message||String(reason);}}).finally(()=>{item.pending=null;if(live(item,key))draftChanged(key);refresh();});
     refresh();await item.pending;
   }
   function add(files,selection=context()){
@@ -129,9 +130,20 @@ export function createAttachmentComposer({client,form,input,getKey,getCaps,canSe
     refs:()=>list().map(item=>item.attachment),
     problem:()=>attachmentProblem(list(),getCaps(),zh())||(list().length&&!canUpload()?t('attachments.waiting'):''),
     cancelSelection(){cancelPicker(true);refresh();},
-    markSubmitted(key,refs){const ids=new Set(refs.map(a=>a.id));for(const item of list(key))if(ids.has(item.attachment.id))item.submitted=true;},
+    markSubmitted(key,refs){const ids=new Set(refs.map(a=>a.id));for(const item of list(key))if(ids.has(item.attachment.id))item.submitted=true;draftChanged(key);},
     clearSubmitted(key,refs){const ids=new Set(refs.map(a=>a.id));for(const item of list(key))if(ids.has(item.attachment.id)&&item.url){URL.revokeObjectURL(item.url);urls.delete(item.url);}set(key,list(key).filter(item=>!ids.has(item.attachment.id)));},
     restore(key,refs,scope){if(list(key).length)return;set(key,refs.map(attachment=>({attachment,scope,phase:'ready',progress:1})));},
+    hydrate(key,records,files,scope){
+      const originals=new Map(files.map(file=>[file.id,file]));
+      const items=records.map(record=>{
+        const original=originals.get(record.attachment.id),file=original&&new File([original.blob],record.attachment.name,{type:record.attachment.mime_type,lastModified:original.lastModified});
+        const item={...record,scope:{...scope},file,phase:file&&record.phase==='ready'?'waiting':record.phase,progress:0};
+        if(file&&attachmentKind(item.attachment.mime_type)==='image'){item.url=URL.createObjectURL(file);urls.add(item.url);}
+        return item;
+      });
+      set(key,items);
+    },
+    discard(key){for(const item of list(key)){item.removed=true;item.abort?.abort();if(item.url){URL.revokeObjectURL(item.url);urls.delete(item.url);}}drafts.delete(key);notices.delete(key);},
     forget(scope){
       if(intent?.scope.space===scope.space&&intent?.scope.owner===scope.owner)cancelPicker(true);
       for(const [key,items]of drafts){if(items.some(item=>item.scope.space===scope.space&&item.scope.owner===scope.owner)){for(const item of [...items])remove(item,key);drafts.delete(key);notices.delete(key);}}

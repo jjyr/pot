@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Assistant draft storage contract</title><pre id="results"></pre>
+<script type="module">
+import {assistantDraftStorage} from '../assistant-drafts-storage.mjs';
+const output=document.querySelector('#results');
+try{await assistantDraftStorage(line=>output.textContent+=line+'\n');output.textContent+='DONE assistant draft storage';}
+catch(error){output.textContent+='FAIL '+error.stack;}
+</script></html>

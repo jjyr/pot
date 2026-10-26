@@ -37,7 +37,8 @@ export function createSendConfirmation({state,client,changed,accepted,rejected=(
       if(!current(op))return;
       // An explicit rejection of the original call is definitive. Once a wait
       // was lost, a later rejection alone cannot disprove earlier acceptance.
-      if(!recovery && reason?.status>=400 && reason.status<500 && reason.status!==408)finish(op,false,reason);
+      if(reason?.accepted===true)finish(op,true);
+      else if(!recovery && reason?.status>=400 && reason.status<500 && reason.status!==408)finish(op,false,reason);
       else {op.receipt.phase='uncertain';changed();}
     }
   }
@@ -63,11 +64,19 @@ export function createSendConfirmation({state,client,changed,accepted,rejected=(
     },delays[op.index++]);
   }
   return {
-    start(receipt){
-      const scope={...client.scope?.()};
+    start(receipt,capturedScope=client.scope?.()){
+      const scope={...capturedScope};
       const control=(client.spaces||[]).find(space=>space.id===scope.space)?.control_id||client.runtime?.runtime_id;
       const op={receipt,scope,control,waits:new Set(),index:0};operations.set(receipt,op);
-      transmit(op);schedule(op);
+      transmit(op).finally(()=>schedule(op));
+    },
+    // A reloaded draft may already have been accepted. Reconcile its captured
+    // immutable request without issuing a POST, including on explicit recovery.
+    restore(receipt,scope){
+      scope={...scope};
+      const control=(client.spaces||[]).find(space=>space.id===scope.space)?.control_id||client.runtime?.runtime_id;
+      const op={receipt,scope,control,waits:new Set(),index:0,readOnly:true};operations.set(receipt,op);
+      query(op).catch(()=>{}).finally(()=>schedule(op));
     },
     // Snapshot reconciliation already settled state; cancel only this attempt's
     // client waits and clean its submitted attachments exactly once.
@@ -76,7 +85,7 @@ export function createSendConfirmation({state,client,changed,accepted,rejected=(
       const op=operations.get(receipt);
       if(!op||!current(op)||op.recovering)return;
       op.recovering=true;receipt.recoverable=false;receipt.phase='confirming';changed();
-      try {if(!await query(op) && current(op))await transmit(op,true);}
+      try {if(!await query(op) && current(op)&&!op.readOnly)await transmit(op,true);}
       catch{/* Keep the fixed attempt for another explicit recovery. */}
       finally{op.recovering=false;if(current(op)){receipt.phase='uncertain';receipt.recoverable=true;changed();}}
     },

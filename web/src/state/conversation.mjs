@@ -71,11 +71,11 @@ export function draft(state, key = state.snapshot && ownerKey(state.snapshot)) {
 }
 
 export function setDraft(state, text, key = state.snapshot && ownerKey(state.snapshot)) {
-  if (key && draft(state,key)!==text) { state.drafts.set(key, text); state.draftVersions.set(key,(state.draftVersions.get(key)||0)+1); }
+  if (key && draft(state,key)!==text) { state.drafts.set(key, text); state.draftVersions.set(key,(state.draftVersions.get(key)||0)+1); state.draftChanged?.(key); }
 }
 
 export function draftReferences(state, key = state.snapshot && ownerKey(state.snapshot)) { return state.referenceDrafts.get(key) || []; }
-export function setDraftReferences(state, refs, key = state.snapshot && ownerKey(state.snapshot)) { if(key && JSON.stringify(draftReferences(state,key))!==JSON.stringify(refs)){state.referenceDrafts.set(key,refs.map(ref=>({...ref})));state.referenceVersions.set(key,(state.referenceVersions.get(key)||0)+1);} }
+export function setDraftReferences(state, refs, key = state.snapshot && ownerKey(state.snapshot)) { if(key && JSON.stringify(draftReferences(state,key))!==JSON.stringify(refs)){state.referenceDrafts.set(key,refs.map(ref=>({...ref})));state.referenceVersions.set(key,(state.referenceVersions.get(key)||0)+1);state.draftChanged?.(key);} }
 
 export function beginSend(state, requestID, {allowRunning=false,attachments=[],retryUserMessageID}={}) {
   if (!state.snapshot || (state.snapshot.running&&!allowRunning)) return null;

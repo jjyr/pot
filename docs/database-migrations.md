@@ -117,7 +117,10 @@ authoritative history or initiate work.
 count/byte metadata. Its one-time upgrade scans existing records to initialize
 accounting while preserving messages, positions and disclosures.
 `0003_domain_projections.mjs` adds display projections and invalidation epochs;
-`0004_task_checkpoints.mjs` adds atomic Task transcript checkpoints. The shared
+`0004_task_checkpoints.mjs` adds atomic Task transcript checkpoints.
+`0005_assistant_drafts.mjs` adds per-assistant composer metadata and a separate
+original-Blob store. These stores are excluded from rebuildable cache retention
+and clearing; see [Assistant drafts](assistant-drafts.md). The shared
 IndexedDB opener applies pending versions in the browser upgrade transaction;
 a failed upgrade rolls back its stores and converted values. Open clients close
 on `versionchange`, and a later open can retry an aborted upgrade. Existing
