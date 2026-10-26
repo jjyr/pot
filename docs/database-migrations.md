@@ -206,9 +206,3 @@ receiver option, while an explicit empty string selects a supported default. The
 migration preserves original request payloads for exact retry recovery, assistant/native
 thread identities, revisions and task executor configuration. New owner-configured
 scopes use the same registry; deleting an assistant does not delete its scope.
-
-`control/0004_message_file_rules` records the optional version on captured
-message-file sources. Missing versions retain the original confined rule and
-receipt identity; only new sources select version 2 local ordinary-file sharing.
-This ledger-only migration preserves source JSON, delivery states and immutable
-resources without initiating reads or retries. See [Display resources](display-resources.md).

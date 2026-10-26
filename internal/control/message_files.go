@@ -8,13 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/jjyr/pot/internal/resources"
-	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
@@ -26,7 +24,7 @@ var errFileChanged = errors.New("file reference changed")
 // messageFileCompletion freezes the host execution identity before model/tool
 // execution. A later directory replacement cannot become a newly allowed root.
 func (s *Service) messageFileCompletion(owner, task, run, root string) func(string, string) {
-	source := resources.Source{Rules: resources.LocalFileRules, Node: s.options.RuntimeID, Owner: owner, Task: task, Run: run, Root: root}
+	source := resources.Source{Node: s.options.RuntimeID, Owner: owner, Task: task, Run: run, Root: root}
 	if info, err := os.Lstat(root); err == nil && info.IsDir() {
 		source.RootID, _ = taskDirectoryIdentity(info)
 	}
@@ -62,7 +60,7 @@ func (s *Service) bindMessageFileSource(source resources.Source, message, text s
 		if err != nil || r == nil {
 			return denied
 		}
-		bound := resources.Source{Rules: source.Rules, Owner: owner, Task: u.Host}
+		bound := resources.Source{Owner: owner, Task: u.Host}
 		if r.Launch == nil {
 			return bound
 		}
@@ -134,173 +132,7 @@ func (s *Service) snapshotMessageFile(ctx context.Context, ref resources.Message
 	if err := s.Resources.ValidateOwner(ctx, src.Owner); err != nil {
 		return nil, errFileForbidden
 	}
-	if src.Rules == resources.LocalFileRules {
-		return s.snapshotLocalMessageFile(ctx, ref)
-	}
-	if src.Rules != 0 && src.Rules != 1 {
-		return nil, errFileForbidden
-	}
-	root := src.Root
-	rootID := src.RootID
-	taskRoot := src.Task
-	path := ref.Href
-	if match := fileLine.FindStringSubmatchIndex(path); match != nil {
-		if _, err := strconv.ParseUint(path[match[2]:match[3]], 10, 32); err != nil {
-			return nil, errFileForbidden
-		}
-		path = path[:match[0]]
-	}
-	if strings.HasPrefix(path, "pot-file://") {
-		u, err := url.Parse(path)
-		if err != nil || !core.Identifier(u.Host) || u.RawQuery != "" || u.Fragment != "" {
-			return nil, errFileForbidden
-		}
-		if src.Task == "" || u.Host != src.Task {
-			return nil, errFileForbidden
-		}
-		path = strings.TrimPrefix(u.Path, "/")
-	}
-
-	if !strings.HasPrefix(ref.Href, "pot-file://") {
-		decoded, err := url.PathUnescape(path)
-		if err != nil {
-			return nil, errFileForbidden
-		}
-		path = decoded
-	}
-	config := false
-	if filepath.IsAbs(path) {
-		if src.Task == "" && path == src.Config && src.Config == filepath.Join(s.Registry.Directory(src.Owner), "AGENTS.md") {
-			root = filepath.Dir(path)
-			path = "AGENTS.md"
-			config = true
-			rootID = src.ConfigID
-			if src.ConfigID == "" {
-				return nil, errFileForbidden
-			}
-		} else {
-			if !pathWithin(path, root) {
-				return nil, errFileForbidden
-			}
-			var err error
-			path, err = filepath.Rel(root, path)
-			if err != nil {
-				return nil, errFileForbidden
-			}
-		}
-	}
-	path = filepath.ToSlash(path)
-	if !protocol.ValidFilePath(path) {
-		return nil, errFileForbidden
-	}
-	// Repeated links (including differing line numbers/labels) share one immutable
-	// receipt in this message revision. Retrying ready references never rereads.
-	hash, _ := core.HashJSON([]any{src, root, path, ref.Message, ref.Revision})
-	request := "message-file-" + hash
-	if previous, err := s.Resources.Receipt(ctx, src.Owner, request, hash); err != nil {
-		return nil, err
-	} else if previous != nil {
-		return previous, nil
-	}
-	if config {
-		info, err := os.Lstat(root)
-		if err != nil {
-			return nil, err
-		}
-		if !info.IsDir() {
-			return nil, errFileForbidden
-		}
-	}
-	if taskRoot != "" {
-		r, err := s.Tasks.Get(ctx, src.Owner, taskRoot)
-		if err != nil || r == nil {
-			return nil, errFileForbidden
-		}
-		original, err := s.Tasks.Run(ctx, src.Owner, taskRoot, src.Run)
-		if err != nil || original == nil || original.Launch == nil {
-			return nil, protocol.APIError{Code: "original_execution_unavailable"}
-		}
-		if original.Launch.ExecutionTarget.RuntimeID != src.Node {
-			return nil, protocol.APIError{Code: "original_execution_unavailable"}
-		}
-		workspace, err := s.RunJournal.TaskWorkspace(ctx, taskRoot)
-		if err != nil || workspace == nil {
-			return nil, protocol.APIError{Code: "original_execution_unavailable"}
-		}
-		if workspace.Path != root || workspace.DirectoryID != rootID {
-			return nil, errFileForbidden
-		}
-	}
-	var handle *os.Root
-	var err error
-	if taskRoot != "" {
-		handle, err = s.openTaskWorkspace(ctx, taskRoot)
-	} else {
-		handle, err = os.OpenRoot(root)
-		if err == nil {
-			info, e := handle.Stat(".")
-			if e != nil {
-				err = e
-			} else {
-				id, e := taskDirectoryIdentity(info)
-				if e != nil || rootID == "" || id != rootID {
-					err = errFileForbidden
-				}
-			}
-		}
-	}
-	if err != nil {
-		if handle != nil {
-			handle.Close()
-		}
-		return nil, err
-	}
-	defer handle.Close()
-	stamps := map[string]string{}
-	read := func(path string, limit int) ([]byte, error) {
-		info, err := handle.Stat(path)
-		if err != nil {
-			return nil, err
-		}
-		before, err := taskFileRevision(info)
-		if err != nil {
-			return nil, err
-		}
-		data, err := readBoundRoot(ctx, handle, path, limit, config, before)
-		if err != nil {
-			return nil, err
-		}
-		info, err = handle.Stat(path)
-		if err != nil {
-			return nil, err
-		}
-		after, err := taskFileRevision(info)
-		if err != nil {
-			return nil, err
-		}
-		if before != after {
-			return nil, errFileChanged
-		}
-		stamps[path] = after
-		return data, nil
-	}
-	verify := func() error {
-		for path, stamp := range stamps {
-			info, err := handle.Stat(path)
-			if err != nil {
-				return err
-			}
-			current, err := taskFileRevision(info)
-			if err != nil {
-				return err
-			}
-			if stamp != current {
-				return errFileChanged
-			}
-		}
-		return nil
-	}
-	return s.registerMessageSnapshot(ctx, ref, request, hash, path, read, verify)
+	return s.snapshotLocalMessageFile(ctx, ref)
 }
 
 func (s *Service) registerMessageSnapshot(ctx context.Context, ref resources.MessageFile, request, hash, path string, read func(string, int) ([]byte, error), verify func() error) (*resources.Resource, error) {
@@ -328,23 +160,11 @@ func (s *Service) registerMessageSnapshot(ctx context.Context, ref resources.Mes
 	}
 	return &saved, nil
 }
-func readBoundRoot(ctx context.Context, root *os.Root, path string, limit int, config bool, expected string, guards ...func(os.FileInfo) error) ([]byte, error) {
+func readBoundRoot(ctx context.Context, root *os.Root, path string, limit int, expected string, guards ...func(os.FileInfo) error) ([]byte, error) {
 	if limit < 0 {
 		return nil, errFileTooLarge
 	}
-	if config {
-		info, err := root.Lstat(path)
-		if err != nil {
-			return nil, err
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return nil, errFileForbidden
-		}
-	}
 	flags := os.O_RDONLY | syscall.O_NONBLOCK
-	if config {
-		flags |= syscall.O_NOFOLLOW
-	}
 	file, err := root.OpenFile(path, flags, 0)
 	if err != nil {
 		if strings.Contains(err.Error(), "escapes from parent") {

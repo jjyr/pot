@@ -27,7 +27,7 @@
       "TestRulesDenyHostBeforeTrustedAndManualCRUD",
       "TestLocalMessageFilesShareOrdinaryFilesAcrossPolicies",
       "TestLocalMessageFilesAuthenticationAliasesAndDependencies",
-      "TestLocalMessageFilesKeepLegacyAuthorizationAndReceipts",
+      "TestMessageFilesUnifiedPolicyAndRetry",
       "TestLocalMessageFileRejectsMutationDuringRead",
       "TestLocalTaskUsesSharedCapacityOwnerModelAndSummary"
     ],

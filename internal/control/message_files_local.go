@@ -112,10 +112,28 @@ func (s *Service) snapshotLocalMessageFile(ctx context.Context, ref resources.Me
 	// available even after their source directory or symlink target disappears.
 	// Task references carry stronger identity/path constraints than ordinary
 	// links; a successful ordinary-link receipt must never satisfy a Task link.
-	hash, _ := core.HashJSON([]any{src, taskLink, path, ref.Message, ref.Revision})
+	sourceIdentity := any(src)
+	if len(ref.ReceiptSource) != 0 {
+		sourceIdentity = ref.ReceiptSource
+	}
+	hash, _ := core.HashJSON([]any{sourceIdentity, taskLink, path, ref.Message, ref.Revision})
 	request := "message-file-" + hash
 	if previous, err := s.Resources.Receipt(ctx, src.Owner, request, hash); err != nil || previous != nil {
 		return previous, err
+	}
+	// Pre-existing confined snapshots used root-relative receipt identities. This
+	// lookup only recovers saved bytes; every fresh read uses the same policy.
+	legacyRoot := src.Root
+	if !taskLink && src.Task == "" && path == src.Config && src.Config == filepath.Join(s.Registry.Directory(src.Owner), "AGENTS.md") {
+		legacyRoot = filepath.Dir(src.Config)
+	}
+	if pathWithin(path, legacyRoot) {
+		if relative, err := filepath.Rel(legacyRoot, path); err == nil && protocol.ValidFilePath(filepath.ToSlash(relative)) {
+			legacyHash, _ := core.HashJSON([]any{sourceIdentity, legacyRoot, filepath.ToSlash(relative), ref.Message, ref.Revision})
+			if previous, err := s.Resources.Receipt(ctx, src.Owner, "message-file-"+legacyHash, legacyHash); err != nil || previous != nil {
+				return previous, err
+			}
+		}
 	}
 	authenticationGuard := s.messageAuthenticationGuard()
 	if src.Task != "" {
@@ -213,7 +231,7 @@ func (s *Service) snapshotLocalMessageFile(ctx context.Context, ref resources.Me
 		if err != nil {
 			return nil, err
 		}
-		data, err := readBoundRoot(ctx, disk, relative, limit, false, revision, func(info os.FileInfo) error {
+		data, err := readBoundRoot(ctx, disk, relative, limit, revision, func(info os.FileInfo) error {
 			return authenticationGuard(target, info)
 		})
 		if err != nil {

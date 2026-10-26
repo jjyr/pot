@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -35,7 +34,7 @@ func TestLocalMessageFilesShareOrdinaryFilesAcrossPolicies(t *testing.T) {
 		before, _, _ := s.Permissions.Policy(s.options.RuntimeID)
 		s.bindMessageFiles(a.ID, "", "run", policy, fmt.Sprintf("[outside](%s:2)\n\n[inside](inside.txt)\n\n[alias](alias)\n\n[sibling](%s)", outside, foreign), root)
 		for _, ref := range awaitFiles(t, s, a.ID, policy) {
-			if ref.State != "ready" || ref.Source.Rules != resources.LocalFileRules {
+			if ref.State != "ready" {
 				t.Fatalf("policy %s: %+v", policy, ref)
 			}
 		}
@@ -52,14 +51,7 @@ func TestLocalMessageFilesShareOrdinaryFilesAcrossPolicies(t *testing.T) {
 	if got := awaitFiles(t, s, a.ID, "remote-absolute")[0].State; got != "source_offline" {
 		t.Fatal("remote execution was mapped to the local path", got)
 	}
-	source.Node = s.options.RuntimeID
-	source.Rules = resources.LocalFileRules + 1
-	if err := s.Resources.BindMessage(ctx, a.ID, "main", "unknown-rules", "[source]("+outside+")", source); err != nil {
-		t.Fatal(err)
-	}
-	if got := awaitFiles(t, s, a.ID, "unknown-rules")[0].State; got != "forbidden" {
-		t.Fatal("unknown rules did not fail closed", got)
-	}
+
 }
 
 func TestLocalMessageFileRejectsMutationDuringRead(t *testing.T) {
@@ -73,7 +65,7 @@ func TestLocalMessageFileRejectsMutationDuringRead(t *testing.T) {
 	defer root.Close()
 	info, _ := root.Stat("source.txt")
 	revision, _ := taskFileRevision(info)
-	data, err := readBoundRoot(t.Context(), root, "source.txt", 1024, false, revision, func(os.FileInfo) error {
+	data, err := readBoundRoot(t.Context(), root, "source.txt", 1024, revision, func(os.FileInfo) error {
 		// The descriptor is open and its initial revision has been captured;
 		// mutate before its bytes are read to exercise the post-read fence.
 		return os.WriteFile(path, []byte("mutated during read"), 0600)
@@ -145,7 +137,7 @@ func TestLocalMessageFilesAuthenticationAliasesAndDependencies(t *testing.T) {
 	}
 	defer disk.Close()
 	guard := s.messageAuthenticationGuard()
-	data, err := readBoundRoot(ctx, disk, filepath.Base(key), 1024, false, revision, func(info os.FileInfo) error {
+	data, err := readBoundRoot(ctx, disk, filepath.Base(key), 1024, revision, func(info os.FileInfo) error {
 		return guard("innocent-alias", info)
 	})
 	if !errors.Is(err, errFileForbidden) || len(data) != 0 {
@@ -157,76 +149,6 @@ func TestLocalMessageFilesAuthenticationAliasesAndDependencies(t *testing.T) {
 	writeTaskFixture(t, key, "replacement synthetic key")
 	if err := guard(key+"-old", info); !errors.Is(err, errFileForbidden) {
 		t.Fatal("credential replacement freed its prior identity", err)
-	}
-}
-
-func TestLocalMessageFilesKeepLegacyAuthorizationAndReceipts(t *testing.T) {
-	s, _ := configurationService(t)
-	ctx := context.Background()
-	a, _ := s.CreateAssistant(ctx, CreateAssistant{RequestID: "legacy-files", Name: "Files"})
-	root, _ := s.ExecutionWorkspace(a.ID)
-	outside := filepath.Join(t.TempDir(), "external.txt")
-	writeTaskFixture(t, outside, "external")
-	writeTaskFixture(t, filepath.Join(root, "saved.txt"), "immutable original")
-	info, _ := os.Stat(root)
-	id, _ := taskDirectoryIdentity(info)
-	old := resources.Source{Node: s.options.RuntimeID, Owner: a.ID, Root: root, RootID: id}
-	old.Config = filepath.Join(s.Registry.Directory(a.ID), "AGENTS.md")
-	writeTaskFixture(t, old.Config, "synthetic legacy rules")
-	configInfo, _ := os.Stat(filepath.Dir(old.Config))
-	old.ConfigID, _ = taskDirectoryIdentity(configInfo)
-	text := "[external](" + outside + ")\n\n[saved](saved.txt)\n\n[rules](" + old.Config + ")"
-	if err := s.Resources.BindMessage(ctx, a.ID, "main", "old", text, old); err != nil {
-		t.Fatal(err)
-	}
-	refs := awaitFiles(t, s, a.ID, "old")
-	if refs[0].State != "forbidden" || refs[1].State != "ready" || refs[0].Source.Rules != 0 {
-		t.Fatal(refs)
-	}
-	// Completion recovery must not replace a stored source with today's rules.
-	s.bindMessageFiles(a.ID, "", "run", "old", text, root)
-	if err := s.RetryMessageFile(ctx, a.ID, "", "old", refs[0].ID); err != nil {
-		t.Fatal(err)
-	}
-	if got := awaitFiles(t, s, a.ID, "old")[0]; got.State != "forbidden" || got.Source.Rules != 0 {
-		t.Fatal("legacy source gained authorization", got)
-	}
-	if err := os.Remove(filepath.Join(root, "saved.txt")); err != nil {
-		t.Fatal(err)
-	}
-	// A resolving queue item after a crash must reuse the original v1 receipt.
-	if err := s.Resources.FileState(ctx, refs[1].ID, "resolving", nil); err != nil {
-		t.Fatal(err)
-	}
-	recovered := awaitFiles(t, s, a.ID, "old")[1]
-	if recovered.State != "ready" || recovered.Resource.ID != refs[1].Resource.ID {
-		t.Fatal("legacy receipt lost", recovered)
-	}
-	s.bindMessageFiles(a.ID, "", "run", "new", "[external]("+outside+")", root)
-	current := awaitFiles(t, s, a.ID, "new")[0]
-	if current.State != "ready" {
-		t.Fatal(current)
-	}
-	os.Remove(outside)
-	s.Resources.FileState(ctx, current.ID, "resolving", nil)
-	if got := awaitFiles(t, s, a.ID, "new")[0]; got.State != "ready" || got.Resource.ID != current.Resource.ID {
-		t.Fatal("v2 receipt reread its deleted source", got)
-	}
-	file, _, err := s.Resources.OpenFile(ctx, a.ID, current.Resource.ID, current.Resource.Entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	data, _ := io.ReadAll(file)
-	if string(data) != "external" {
-		t.Fatal("snapshot changed")
-	}
-	if err := os.Rename(filepath.Dir(old.Config), filepath.Dir(old.Config)+"-gone"); err != nil {
-		t.Fatal(err)
-	}
-	s.Resources.FileState(ctx, refs[2].ID, "resolving", nil)
-	if got := awaitFiles(t, s, a.ID, "old")[2]; got.State != "ready" || got.Resource.ID != refs[2].Resource.ID {
-		t.Fatal("legacy configuration receipt reread a removed source", got)
 	}
 }
 

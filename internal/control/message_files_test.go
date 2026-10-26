@@ -181,7 +181,7 @@ func TestMessageFilesDirectoryReplacementAndRegularFileLimits(t *testing.T) {
 	}
 }
 
-func TestConfigurationAliasUsesCapturedRules(t *testing.T) {
+func TestConfigurationAliasUsesOrdinaryFilePolicy(t *testing.T) {
 	s, _ := configurationService(t)
 	ctx := context.Background()
 	a, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "config-alias", Name: "Configuration"})
@@ -203,14 +203,11 @@ func TestConfigurationAliasUsesCapturedRules(t *testing.T) {
 	if rows[0].State != "ready" {
 		t.Fatal("ordinary configuration alias was not shareable", rows)
 	}
-	legacy := rows[0].Source
-	legacy.Rules = 0
-	if err := s.Resources.BindMessage(ctx, a.ID, "main", "legacy-config", "[rules]("+filepath.Join(directory, "AGENTS.md")+")", legacy); err != nil {
-		t.Fatal(err)
+	old := storedMessageFile(t, s, "historical-config-alias", filepath.Join(directory, "AGENTS.md"), historicalSource(t, rows[0].Source, 1), "pending", nil)
+	if got := awaitFiles(t, s, a.ID, old.Message)[0]; got.State != "ready" {
+		t.Fatal("historical configuration alias used the former policy", got)
 	}
-	if got := awaitFiles(t, s, a.ID, "legacy-config")[0]; got.State != "forbidden" || got.Resource != nil {
-		t.Fatal("legacy configuration alias gained access", got)
-	}
+
 }
 
 // Direct completed-message fixtures use the same host binding callback.
@@ -262,7 +259,7 @@ func TestMessageFileReadRejectsReplacementBetweenStatAndOpen(t *testing.T) {
 	if err := os.Rename(replacement, path); err != nil {
 		t.Fatal(err)
 	}
-	if data, err := readBoundRoot(context.Background(), root, "source.txt", 1024, false, revision); err != errFileChanged || len(data) != 0 {
+	if data, err := readBoundRoot(context.Background(), root, "source.txt", 1024, revision); err != errFileChanged || len(data) != 0 {
 		t.Fatal("opened an uncaptured file revision", string(data), err)
 	}
 }

@@ -10,13 +10,9 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 )
 
-const LocalFileRules = 2
-
 // Source is minted only by the execution host, never from Markdown or HTTP.
-// Root is the captured execution directory, not the v2 absolute-path boundary.
-// Missing Rules retains the original confined policy and receipt hashes.
+// Root is the captured execution directory and relative-path anchor.
 type Source struct {
-	Rules    int    `json:"rules,omitempty"`
 	RootID   string `json:"root_id"`
 	ConfigID string `json:"config_id,omitempty"`
 	Node     string `json:"node"`
@@ -31,9 +27,12 @@ type MessageFile struct {
 	Message  string `json:"message"`
 	Revision string `json:"revision"`
 	Link
-	Source   Source    `json:"-"`
-	State    string    `json:"state"`
-	Resource *Resource `json:"resource,omitempty"`
+	Source Source `json:"-"`
+	// ReceiptSource preserves the saved serialization solely for immutable receipt lookup.
+	// Unknown fields never select file-reading authority.
+	ReceiptSource json.RawMessage `json:"-"`
+	State         string          `json:"state"`
+	Resource      *Resource       `json:"resource,omitempty"`
 }
 
 func (s *Store) BindMessage(ctx context.Context, owner, conversation, message, text string, source Source) error {
@@ -106,6 +105,7 @@ func (s *Store) queryFiles(ctx context.Context, query string, args ...any) ([]Me
 		if err = json.Unmarshal([]byte(source), &f.Source); err != nil {
 			return nil, err
 		}
+		f.ReceiptSource = json.RawMessage(source)
 		if resource != "" {
 			if err = json.Unmarshal([]byte(resource), &f.Resource); err != nil {
 				return nil, err

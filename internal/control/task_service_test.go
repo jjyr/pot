@@ -3,6 +3,8 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/jjyr/pot/internal/resources"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/testutil"
@@ -161,8 +163,24 @@ func TestLocalTaskUsesSharedCapacityOwnerModelAndSummary(t *testing.T) {
 		if i == 2 {
 			want = "forbidden"
 		}
-		if item.State != want || item.Source.Rules != resources.LocalFileRules {
+		if item.State != want {
 			t.Fatal("Task absolute-file policy", item)
+		}
+	}
+	// Historical sources use the same category-separated receipts. A successful
+	// ordinary symlink snapshot cannot authorize a pot-file escape on recovery.
+	for i, rules := range []any{nil, 1, 2} {
+		raw := historicalSource(t, ref.Source, rules)
+		message := fmt.Sprintf("historical-task-%d", i)
+		ordinary := storedMessageFile(t, s, message, "outside-alias", raw, "pending", nil)
+		if got := awaitFiles(t, s, "main", message)[0]; got.State != "ready" {
+			t.Fatal("historical Task ordinary link failed", got)
+		}
+		// Use the same message/revision to target exactly the receipt inputs;
+		// link category must be the remaining distinction.
+		ordinary.Href = "pot-file://" + accepted.Info.ID + "/outside-alias"
+		if _, err := s.snapshotMessageFile(ctx, ordinary); !errors.Is(err, errFileForbidden) {
+			t.Fatal("Task link reused ordinary symlink receipt", err)
 		}
 	}
 	invalid := ref.Source

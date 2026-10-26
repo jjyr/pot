@@ -58,15 +58,15 @@ supply replacement paths or manufacture a source binding.
 ```text
 execution completion -> explicit Markdown nodes -> provenance + pending references
                                                          |
-                                             background versioned reads
+                                              background guarded reads
                                                          |
                                                 immutable resource Store
                                                          |
 message/ref ID -> owner/Space checked status -> existing ResourceView + Download
 ```
 
-New sources capture file-sharing rules version 2. Main assistants and local Tasks
-can deliver ordinary OS-readable files by absolute path, including source,
+Main assistants and local Tasks can deliver ordinary OS-readable files by
+absolute path, including source,
 documentation and reports outside their execution workspace or in another
 assistant's directory. No copy, per-file registration or prior tool read is
 required. Relative paths resolve against the captured execution directory. That
@@ -83,7 +83,7 @@ references remain confined to the verified Task root, including symlink targets;
 ordinary absolute paths do not claim Task identity or resource API ownership.
 Remote sources are never substituted with same-named local files.
 
-Version 2 excludes only these exact product authentication file identities:
+File sharing excludes only these exact product authentication file identities:
 
 - This Runtime root's `runtime.json` (local API bearer token).
 - This Runtime root's `machines.sqlite`, `machines.sqlite-wal`,
@@ -107,15 +107,14 @@ closed. HTML assets remain under the execution root for entries inside it; for
 external entries, assets are limited to the canonical entry's directory. A
 dependency symlink cannot escape that base or include an excluded credential.
 
-Sources without a rules field retain version 1: absolute paths stay inside the
-captured root except the originating main assistant's exact configuration
-`AGENTS.md` mapping. The ledger-only `control/0004_message_file_rules` migration
-records the new optional JSON field without rewriting old source JSON, receipt
-identities, statuses or resources. Recovery and retries use each stored source's
-rules; a new completion callback cannot replace an already-bound source. Unknown
-versions fail closed. No upgrade scans historical conversations or retries old
-forbidden references under new authority. Immutable receipts retain their saved
-bytes even after the original path changes or disappears.
+All captured sources use the same file-sharing rules, including old messages.
+An explicit retry of a failed reference reads the current file under these rules;
+no upgrade or history load scans or retries historical failures. Files that were
+never successfully read have no historical bytes to recover. A completion callback
+cannot replace an already-bound source. Existing ready resources and recovered
+receipts retain their original saved bytes after the source changes or disappears,
+including snapshots created with the former own-AGENTS mapping. Stored receipt
+identities are preserved for lookup only; they never select reading authority.
 
 Remote original-execution reads are currently unavailable in Control. A bound
 remote source reports `source_offline`; it is never substituted with a local path.
