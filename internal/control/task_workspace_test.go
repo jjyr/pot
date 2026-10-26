@@ -182,8 +182,8 @@ func TestTemporaryWorkspaceRetainsOriginalAndFencesLostPreparation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	canonical, _ := filepath.EvalSymlinks(tmp)
-	if !strings.HasPrefix(w.Path, canonical+string(filepath.Separator)) {
+	canonical, _ := filepath.EvalSymlinks(s.options.Workspace)
+	if filepath.Dir(w.Path) != filepath.Join(canonical, "tasks") || pathWithin(w.Path, tmp) {
 		t.Fatal(w.Path)
 	}
 	w2, err := s.prepareTaskWorkspace(ctx, l, MachinePolicy{ExecutionAccess: "allow"})
