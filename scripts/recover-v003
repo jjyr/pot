@@ -1,0 +1,358 @@
+#!/usr/bin/env python3
+"""Read-only provenance and byte guards for the one-time frozen v0.0.3 recovery."""
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import tempfile
+import urllib.request
+import zipfile
+
+REPOSITORY = "jjyr/pot"
+SOURCE = "d3455d52936c2781d1056afb30d8298b6b18ee8f"
+TAG_OBJECT = "812560d2b920dbf824428f18c3b17af422d9e3da"
+HARNESS = "17254ce2f19609563bf27ecd2b77189152d5fb3d"
+ORIGINAL_RUN = 40252322117
+HARNESS_RUN = 40256606423
+RELEASE_ID = 423774760
+EXECUTION_TAG = "v0.0.3-recovery-d345"
+PUBLIC_KEY = "1no7ZVavQez/gU1egd1/xzPVDVA8ZV0hkW8oOhguqXM="
+# id, byte size, SHA-256: the eight already published assets must never change.
+BASELINE = {
+    "pot-0.0.3-linux-amd64.tar.gz": (
+        676629817,
+        77976724,
+        "2405c2e3da2d1499f008fee5c64d5ee5a20f6eba0be767f515b50a36a80b6805",
+    ),
+    "pot-0.0.3-linux-amd64.tar.gz.sha256": (
+        676630105,
+        95,
+        "fb80a3944f9999c916bd1b139a2cf3f7b581d188f14b66a1b1b25c82369583d7",
+    ),
+    "pot-0.0.3-linux-arm64.tar.gz": (
+        676629934,
+        76685198,
+        "c5d09564bbd6cab5cdc7702a5feb1978adcc28a2b7f2933c278aa7d661b6465d",
+    ),
+    "pot-0.0.3-linux-arm64.tar.gz.sha256": (
+        676630131,
+        95,
+        "b4fc5fa435941ba76d27617735421bb38fe8a403ca75811a00a571af153f5dfd",
+    ),
+    "pot-desktop_0.0.3_linux_amd64.deb": (
+        676631615,
+        93221972,
+        "4e5bd7882b6d944bd7d09004d35d9fedc58b62dd94cf9419e7b2ff4bcdbd2d16",
+    ),
+    "pot-desktop_0.0.3_linux_amd64.deb.sha256": (
+        676631735,
+        100,
+        "f19777e84dba0cd6d0b08aad162e7e8e1dda664c22723ed394a7fc8cd3ab07b7",
+    ),
+    "SHA256SUMS-desktop": (
+        676631752,
+        100,
+        "f19777e84dba0cd6d0b08aad162e7e8e1dda664c22723ed394a7fc8cd3ab07b7",
+    ),
+    "SHA256SUMS-server": (
+        676630142,
+        190,
+        "b46da6c4b8e05b15b8ac04c302c3b741b416b7f8d8077565673e62bed55cf3b0",
+    ),
+}
+ADDITIONS = {
+    "Pot-0.0.3-arm64.zip",
+    "Pot-0.0.3-arm64.zip.sha256",
+    "pot-0.0.3-darwin-arm64.tar.gz",
+    "pot-0.0.3-darwin-arm64.tar.gz.sha256",
+    "MACOS-RELEASE.txt",
+    "update.json",
+    "SHA256SUMS-macos",
+}
+# The ZIP artifact digest is deliberately distinct from its contained tar digest.
+CLI = {
+    "amd64": (12621776505, "a9e27c6aec1beca4c8fd72e0a548f6c5d48e2056478a33a4dca9bc8c859647f3"),
+    "arm64": (12622155247, "2f2cba1953b223ebbeee6bccae37674b5f04ac3dec312b04a1e940c0ba4401b9"),
+}
+FIXTURE_FILES = ("scripts/tests/macos-update-smoke.py", "scripts/tests/native_update_discovery.py")
+
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def api(endpoint):
+    # This helper has no remote write, signing, dispatch, tag or publication API.
+    return json.loads(
+        subprocess.check_output(["gh", "api", f"repos/{REPOSITORY}/{endpoint}"], text=True)
+    )
+
+
+def digest(path):
+    with path.open("rb") as source:
+        return hashlib.file_digest(source, "sha256").hexdigest()
+
+
+def execution(env, selected_sha):
+    require(env.get("GITHUB_REPOSITORY") == REPOSITORY, "wrong repository")
+    require(env.get("GITHUB_EVENT_NAME") == "workflow_dispatch", "manual recovery only")
+    require(env.get("GITHUB_REF") == "refs/tags/" + EXECUTION_TAG, "wrong execution ref")
+    expected = f"{REPOSITORY}/.github/workflows/recover-v003.yml@refs/tags/{EXECUTION_TAG}"
+    require(env.get("GITHUB_WORKFLOW_REF") == expected, "wrong caller workflow")
+    sha = env.get("GITHUB_WORKFLOW_SHA", "")
+    require(
+        re.fullmatch("[0-9a-f]{40}", sha) and sha == env.get("GITHUB_SHA") == selected_sha,
+        "execution tag/workflow commit moved",
+    )
+    require(
+        env.get("RELEASE_SHA") == SOURCE and env.get("RELEASE_VERSION") == "0.0.3",
+        "recovery cannot select another product or version",
+    )
+    require(env.get("POT_UPDATE_PUBLIC_KEY") == PUBLIC_KEY, "pinned update key changed")
+    require(not env.get("GOFLAGS"), "formal package jobs cannot use a Go overlay")
+
+
+def release_state(release, dist=None, *, before_signing=False):
+    require(
+        release["id"] == RELEASE_ID
+        and release["tag_name"] == "v0.0.3"
+        and release["target_commitish"] == SOURCE
+        and not release["draft"]
+        and not release["prerelease"],
+        "reviewed public Release identity changed",
+    )
+    assets = {asset["name"]: asset for asset in release["assets"]}
+    require(len(assets) == len(release["assets"]), "duplicate asset names")
+    require(
+        set(BASELINE) <= assets.keys() and assets.keys() <= set(BASELINE) | ADDITIONS,
+        "unexpected or missing existing assets",
+    )
+    for name, (asset_id, size, sha) in BASELINE.items():
+        asset = assets[name]
+        require(
+            (asset["id"], asset["size"], asset.get("digest")) == (asset_id, size, "sha256:" + sha),
+            "published bytes/identity changed: " + name,
+        )
+    if dist is None and not before_signing:
+        require(
+            assets.keys() == BASELINE.keys(),
+            "partial macOS effects exist; do not rebuild/restart recovery",
+        )
+    elif dist is not None:
+        for name in ADDITIONS:
+            path = dist / name
+            require(path.is_file() and path.stat().st_size > 0, "missing qualified file: " + name)
+            if name in assets:
+                asset = assets[name]
+                require(
+                    (asset["size"], asset.get("digest"))
+                    == (path.stat().st_size, "sha256:" + digest(path)),
+                    "refusing different recovery bytes: " + name,
+                )
+    return assets
+
+
+def provenance(dist=None, *, before_signing=False, qualification=True):
+    ref = api("git/ref/tags/v0.0.3")["object"]
+    require(ref["type"] == "tag" and ref["sha"] == TAG_OBJECT, "product tag object changed")
+    require(api("git/tags/" + TAG_OBJECT)["object"]["sha"] == SOURCE, "product tag source changed")
+    release = api(f"releases/{RELEASE_ID}")
+    require(api("releases/tags/v0.0.3")["id"] == RELEASE_ID, "canonical Release ID changed")
+    assets = release_state(release, dist, before_signing=before_signing)
+    if not qualification:
+        return assets
+    run = api(f"actions/runs/{ORIGINAL_RUN}")
+    require(
+        run["head_sha"] == SOURCE
+        and run["event"] == "push"
+        and run["head_branch"] == "v0.0.3"
+        and run["path"] == ".github/workflows/ci.yml"
+        and run["run_attempt"] == 2
+        and run["status"] == "completed"
+        and run["conclusion"] == "failure",
+        "original run provenance changed",
+    )
+    jobs = api(f"actions/runs/{ORIGINAL_RUN}/jobs?filter=all&per_page=100")
+    require(len(jobs["jobs"]) == jobs["total_count"], "unexpected job pagination")
+    latest = {}
+    for job in sorted(jobs["jobs"], key=lambda item: item["id"]):
+        latest[job["name"]] = job["conclusion"]
+    required = [f"Native CLI (linux-{arch})" for arch in CLI]
+    required.extend(
+        [
+            "Resolve source and release intent",
+            "Experimental Linux desktop",
+            "Native container smoke (amd64)",
+            "Native container smoke (arm64)",
+            "Multiarchitecture OCI distribution",
+            "publish-server / publish",
+            "publish-desktop / publish",
+            "publish-container / Publish verified OCI image to GHCR",
+        ]
+    )
+    for platform in ("ubuntu-24.04", "macos-26"):
+        required.append(f"Headless build checks ({platform})")
+        required.append(f"product / Full product / Normal and static checks ({platform})")
+        required.extend(
+            f"product / Full product / Race {shard}/4 ({platform})" for shard in range(1, 5)
+        )
+    require(
+        all(latest.get(name) == "success" for name in required),
+        "original qualified channels/shared gates changed",
+    )
+    harness = api(f"actions/runs/{HARNESS_RUN}")
+    require(
+        harness["head_sha"] == HARNESS
+        and harness["path"] == ".github/workflows/ci.yml"
+        and harness["event"] == "workflow_dispatch"
+        and harness["run_attempt"] == 1
+        and harness["status"] == "completed"
+        and harness["conclusion"] == "success",
+        "harness qualification changed",
+    )
+    for arch, (artifact_id, sha) in CLI.items():
+        artifact = api(f"actions/artifacts/{artifact_id}")
+        require(
+            artifact["name"] == "package-cli-linux-" + arch
+            and not artifact["expired"]
+            and artifact["digest"] == "sha256:" + sha
+            and artifact["workflow_run"]["id"] == ORIGINAL_RUN
+            and artifact["workflow_run"]["head_sha"] == SOURCE,
+            "original artifact provenance changed",
+        )
+    return assets
+
+
+def compare_public(path, asset):
+    require(
+        path.stat().st_size == asset["size"] and "sha256:" + digest(path) == asset["digest"],
+        "artifact differs from pinned Release metadata: " + path.name,
+    )
+    expected_url = f"https://github.com/{REPOSITORY}/releases/download/v0.0.3/{path.name}"
+    require(asset["browser_download_url"] == expected_url, "unexpected public download URL")
+    with urllib.request.urlopen(expected_url, timeout=90) as response, path.open("rb") as local:
+        while chunk := response.read(1024 * 1024):
+            require(local.read(len(chunk)) == chunk, "public download bytes differ: " + path.name)
+        require(not local.read(1), "truncated public download: " + path.name)
+
+
+def extract_cli(archive, output, arch):
+    names = {f"pot-0.0.3-linux-{arch}.tar.gz", f"pot-0.0.3-linux-{arch}.tar.gz.sha256"}
+    with zipfile.ZipFile(archive) as package:
+        require(
+            set(package.namelist()) == names and len(package.infolist()) == 2,
+            "unexpected artifact ZIP layout",
+        )
+        output.mkdir(parents=True, exist_ok=False)
+        for name in sorted(names):
+            info = package.getinfo(name)
+            require(info.file_size == BASELINE[name][1], "artifact entry size changed")
+            require((info.external_attr >> 16) & 0o170000 != 0o120000, "artifact symlink")
+            with package.open(info) as source, (output / name).open("xb") as target:
+                shutil.copyfileobj(source, target)
+    name = f"pot-0.0.3-linux-{arch}.tar.gz"
+    require(
+        (output / (name + ".sha256")).read_text() == f"{digest(output / name)}  {name}\n",
+        "sidecar mismatch",
+    )
+
+
+def restore_cli(output, arch=None):
+    assets = provenance()
+    output.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="v003-artifacts-", dir=output) as temporary:
+        selected = CLI.items() if arch is None else [(arch, CLI[arch])]
+        for arch, (artifact_id, sha) in selected:
+            archive = Path(temporary) / (arch + ".zip")
+            with archive.open("wb") as target:
+                subprocess.run(
+                    [
+                        "gh",
+                        "api",
+                        f"repos/{REPOSITORY}/actions/artifacts/{artifact_id}/zip",
+                        "--allow-escape-sequences",
+                    ],
+                    stdout=target,
+                    check=True,
+                )
+            require(digest(archive) == sha, "artifact ZIP digest mismatch")
+            restored = output / arch
+            extract_cli(archive, restored, arch)
+            for path in sorted(restored.iterdir()):
+                compare_public(path, assets[path.name])
+                print(
+                    "Verified original artifact and public bytes:",
+                    path.name,
+                    digest(path),
+                    flush=True,
+                )
+
+
+def head(path):
+    return subprocess.check_output(["git", "-C", str(path), "rev-parse", "HEAD"], text=True).strip()
+
+
+def prepare_fixture(product, harness):
+    require(head(product) == SOURCE and head(harness) == HARNESS, "fixture inputs are not pinned")
+    require(
+        not subprocess.check_output(
+            ["git", "-C", str(product), "status", "--porcelain"], text=True
+        ),
+        "fixture checkout is dirty",
+    )
+    changed = subprocess.check_output(
+        ["git", "-C", str(harness), "diff", "--name-only", SOURCE, HARNESS], text=True
+    ).splitlines()
+    require(
+        set(changed) == set(FIXTURE_FILES) | {"docs/development.md"},
+        "harness contains product changes",
+    )
+    for name in FIXTURE_FILES:
+        expected = subprocess.check_output(["git", "-C", str(harness), "show", f"{HARNESS}:{name}"])
+        require((harness / name).read_bytes() == expected, "harness file changed")
+        (product / name).write_bytes(expected)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="operation", required=True)
+    for operation in ("guard", "publication-guard"):
+        guard = sub.add_parser(operation)
+        guard.add_argument("--dist", type=Path)
+    sub.add_parser(
+        "before-signing", help="recheck identity before regenerating a retained candidate feed"
+    )
+    sub.add_parser("inspect", help="read-only current provenance; does not authorize execution")
+    restore = sub.add_parser(
+        "restore-cli", help="download and compare only the two fixed CLI artifacts"
+    )
+    restore.add_argument("output", type=Path)
+    restore.add_argument("--arch", choices=tuple(CLI))
+    fixture = sub.add_parser("prepare-fixture")
+    fixture.add_argument("product", type=Path)
+    fixture.add_argument("harness", type=Path)
+    args = parser.parse_args()
+    if args.operation in {"guard", "publication-guard", "before-signing"}:
+        execution(os.environ, api("commits/refs/tags/" + EXECUTION_TAG)["sha"])
+        provenance(
+            getattr(args, "dist", None),
+            before_signing=args.operation == "before-signing",
+            qualification=args.operation == "guard",
+        )
+    elif args.operation == "inspect":
+        provenance()
+    elif args.operation == "restore-cli":
+        restore_cli(args.output, args.arch)
+    else:
+        prepare_fixture(args.product, args.harness)
+    print("Fixed v0.0.3 recovery guard passed:", args.operation)
+
+
+if __name__ == "__main__":
+    main()

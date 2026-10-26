@@ -339,6 +339,53 @@ rejects earlier root/storage discriminators. It does not convert data or migrate
 running services. Equal-version self-update remains disabled; manual installation
 requires a separate unused root. See [Updates](updates.md).
 
+## One-time frozen v0.0.3 macOS recovery
+
+`recover-v003.yml` is restricted to the reviewed `v0.0.3-recovery-d345` execution
+ref and explicit `confirm-recovery=true`. It has no product SHA, harness, run,
+version, artifact or Release selectors. `scripts/recover-v003` pins the original
+v0.0.3 tag object/source, public Release ID, eight existing asset identities and
+bytes, original qualified Linux CLI artifacts, and the reviewed harness commit.
+Expired artifacts or changed provenance stop recovery; there is no rebuild fallback.
+A full restart requires exactly the original eight assets; unexpected or partial
+macOS effects stop it. A failed publication job may reuse its same qualified
+artifacts only when every existing addition matches their digest and size.
+
+The recovery reruns the complete frozen Linux/macOS product and headless build
+gates. It builds and smokes App/CLI archives in a clean d345 checkout, with no
+Go overlay. A separate d345 fixture checkout receives only the two reviewed
+harness files and runs all three real native lifecycle scenarios. Original Linux
+CLI artifact ZIPs are digest-checked, and each extracted tar/sidecar is compared
+byte-for-byte with the public download before reupload to the recovery run.
+Previously qualified server/desktop/container channels are not rebuilt or republished;
+the aggregate unsigned bundle remains separate from channel publication gates.
+
+The caller's relative `./.github/workflows/release.yml` binds to the **recovery
+entry commit**, not d345. Its default-off `recover-v003` input fences this exact
+caller/ref/source/version before release credentials are used, preserves existing
+permissions/concurrency/sealing/tag checks, and binds the immutable publisher to
+Release ID423774760. Only the new provenance/artifact jobs request `actions: read`; reusable publication
+guards use contents APIs and retain the original permission limits.
+Product and release-tool checkouts still use d345. Only the
+seven missing macOS/feed assets may be added; shared Linux assets must match.
+The existing post-publication Homebrew proposal remains subject to review.
+
+Only after review and explicit approval of the PR merges, exact execution commit,
+execution tag and recovery action, dispatch:
+
+```sh
+gh workflow run recover-v003.yml --ref v0.0.3-recovery-d345 -f confirm-recovery=true
+```
+
+The execution tag must point to that reviewed entry commit; the runner rechecks it
+against the resolved workflow SHA. It satisfies the existing release environment's
+`v*` tag policy but is not an exact stable product tag. Creating it also starts the
+ordinary nonpublishing CI (complete product/native/container validation, version
+0.0.0), consuming additional hosted Linux/macOS time. Neither workflow creates a
+tag, moves v0.0.3, changes environment policy or installs a running product. The
+workflow must first exist on the default branch to be dispatchable; merely adding
+it to main does not put it in the frozen v0.0.3 tag.
+
 ## Homebrew generation
 
 The website and README expose macOS through Homebrew only. Release assets retain

@@ -1,0 +1,189 @@
+name: Recover frozen v0.0.3 macOS channel
+
+# One reviewed operation; no source, run, version, artifact or Release selectors.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm-recovery:
+        description: Add only the missing reviewed v0.0.3 macOS/feed assets
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pot-v003-frozen-recovery
+  cancel-in-progress: false
+
+env:
+  MISE_AUTO_INSTALL: 'false'
+  RELEASE_SHA: d3455d52936c2781d1056afb30d8298b6b18ee8f
+  RELEASE_VERSION: 0.0.3
+  POT_APP_VERSION: 0.0.3
+  POT_BUILD_REVISION: d3455d52936c2781d1056afb30d8298b6b18ee8f
+  POT_UPDATE_PUBLIC_KEY: ${{ vars.POT_UPDATE_PUBLIC_KEY }}
+
+jobs:
+  guard:
+    permissions:
+      contents: read
+      actions: read
+    if: inputs.confirm-recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - run: python3 scripts/tests/recover-v003.py
+      - name: Check exact execution ref, product tag, partial Release and qualified sources
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/recover-v003 guard
+
+  product:
+    needs: guard
+    uses: jjyr/pot/.github/workflows/tests.yml@d3455d52936c2781d1056afb30d8298b6b18ee8f
+    with:
+      ref: d3455d52936c2781d1056afb30d8298b6b18ee8f
+      use-cache: false
+
+  build-checks:
+    needs: [guard, product]
+    name: Frozen headless build checks (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: d3455d52936c2781d1056afb30d8298b6b18ee8f
+          persist-credentials: false
+      - uses: ./.github/actions/test-setup
+        with:
+          scope: builds
+          cache: false
+      - run: mise run build:go
+      - run: mise run build:linux
+
+  original-cli:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    permissions:
+      contents: read
+      actions: read
+    needs: [guard, product, build-checks]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Restore only the two fixed qualified artifacts and compare public bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/recover-v003 restore-cli restored-cli --arch ${{ matrix.arch }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: package-cli-linux-${{ matrix.arch }}
+          path: restored-cli/${{ matrix.arch }}/*
+          if-no-files-found: error
+          retention-days: 7
+
+  macos:
+    permissions:
+      contents: read
+      actions: read
+    needs: [guard, product, build-checks]
+    name: Frozen native macOS packages and reviewed lifecycle harness
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      POT_MACOS_RELEASE_MODE: unsigned
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Recheck recovery boundary before building
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/recover-v003 guard
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: d3455d52936c2781d1056afb30d8298b6b18ee8f
+          path: product
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: d3455d52936c2781d1056afb30d8298b6b18ee8f
+          path: fixture
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: 17254ce2f19609563bf27ecd2b77189152d5fb3d
+          fetch-depth: 2
+          path: harness
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.10.10
+          cache: false
+          install_args: go python node
+      - name: Build and smoke clean frozen distribution without overlay
+        working-directory: product
+        run: |
+          test -z "$(git status --porcelain)"
+          test -z "${GOFLAGS:-}"
+          test -z "$(mise exec -- go env GOFLAGS)"
+          mise exec -- python scripts/release 0.0.3 --app-only --output dist
+          mise exec -- python scripts/package-server --platform darwin-arm64 --output dist
+          mise exec -- python scripts/sign-macos-release 0.0.3 dist --mode unsigned
+          mise exec -- python scripts/generate-cask 0.0.3 dist
+          mise exec -- python scripts/generate-formula 0.0.3 dist
+          mise exec -- python scripts/tests/server-package-smoke.py dist/pot-0.0.3-darwin-arm64.tar.gz
+          ruby -c dist/pot.rb
+          ruby -c dist/pot-cli.rb
+          brew ruby scripts/tests/homebrew-cask.rb Casks/pot.rb dist/pot.rb
+          brew ruby scripts/tests/homebrew-formula.rb Formula/pot-cli.rb dist/pot-cli.rb
+          mise exec -- python scripts/tests/macos-package-smoke.py dist/Pot-0.0.3-arm64.zip
+      - name: Install only the reviewed test files into the separate fixture checkout
+        run: python3 scripts/recover-v003 prepare-fixture fixture harness
+      - name: Real verified discovery, upgrade, launch failure and startup rollback
+        working-directory: fixture
+        run: mise run test:macos-update
+      - name: Keep formal source and effective Go flags separate from the fixture
+        working-directory: product
+        run: |
+          git diff --exit-code
+          test -z "$(mise exec -- go env GOFLAGS)"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: package-macos
+          path: product/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-macos:
+    needs: [guard, product, build-checks, original-cli, macos]
+    # Relative reusable workflows bind to THIS reviewed recovery commit. Its
+    # product/tool checkouts remain pinned by sha; d345 lacks the recovery input.
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      sha: d3455d52936c2781d1056afb30d8298b6b18ee8f
+      version: 0.0.3
+      public-key: ${{ vars.POT_UPDATE_PUBLIC_KEY }}
+      recover-v003: true
+    secrets: inherit
