@@ -79,6 +79,12 @@ reconcile by their scoped identities. Search inputs, focus, selection, disclosur
 state and scroll positions survive unchanged projections. Shell navigation,
 approval actions and Chat task strips retain their nodes too. Action handlers use
 the current projection; pending mutations stay disabled across refreshes.
+The assistant directory retains its last confirmed execution activity during a
+background revalidation in the same connection and Control scope. A stale read
+does not imply that execution ended. Retained directory entries still lose command
+capabilities until confirmed again; execution activity does not grant authority.
+A confirmed completion replaces that activity, and a cold retained cache or new
+connection cannot establish execution activity from an older connection.
 An open conversation menu keeps existing actions and keyboard focus during a
 retained directory revalidation, marking unavailable actions `aria-disabled` and
 rejecting their execution until fresh capabilities return. This presentation is
