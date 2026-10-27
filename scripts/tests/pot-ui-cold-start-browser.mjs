@@ -1,3 +1,4 @@
+import {waitForDraftSaved} from './draft-persistence-browser.mjs';
 // Isolated production bootstrap + real SW/IndexedDB/SSE. No Control, account,
 // model, product root, Push registration or browser profile is used.
 import assert from 'node:assert/strict';
@@ -88,7 +89,7 @@ else{
  for(const viewport of [{width:1280,height:800},{width:390,height:844}]){
   hold='';auth=200;authenticated=true;control='synthetic-control';spaceControl='';release='one';failAsset='';
   const context=await browser.newContext({viewport});let page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',error=>errors.push(error.message));
-  await page.goto(origin+'/?locale=en');if(viewport.width<500)await page.getByText('Synthetic Alpha',{exact:true}).first().click();await waitChat(page);await editor(page).fill('Persistent synthetic draft');await page.getByText('Draft saved on this device',{exact:false}).waitFor().catch(()=>{});
+  await page.goto(origin+'/?locale=en');if(viewport.width<500)await page.getByText('Synthetic Alpha',{exact:true}).first().click();await waitChat(page);await editor(page).fill('Persistent synthetic draft');await waitForDraftSaved(page);
   // Cache the second assistant, then return to Alpha without losing its draft.
   if(viewport.width<500)await page.getByRole('button',{name:'Back to Assistants',exact:true}).click();
   await page.getByText('Synthetic Beta',{exact:true}).first().click();await page.getByText('BETA cached message 90.',{exact:false}).first().waitFor();await page.waitForFunction(()=>!document.querySelector('.send-button').disabled);

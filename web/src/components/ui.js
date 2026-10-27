@@ -236,7 +236,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   if(attachmentUI){form.classList.add('has-attachments');attachmentUI.toolbar.append(send);}
   const referenceDraftHost=el('div','composer-references');form.prepend(referenceDraftHost);
   const referenceStatus=el('div','reference-announcement');referenceStatus.setAttribute('role','status');composerArea.append(referenceStatus);
-  const draftStatus=el('div','draft-storage-status');draftStatus.setAttribute('role','status');composerArea.append(draftStatus);
+  const draftStatus=el('div','draft-storage-status');draftStatus.hidden=true;draftStatus.setAttribute('role','status');composerArea.append(draftStatus);
   let draftStatusSignature='';
   let referenceDraftSignature='',referenceNotice='';
   let historyLoading=false,historyFailure='',historyGeneration=0,historyFlight=null,historyRecovery=null,historyAbort=new AbortController();
@@ -381,11 +381,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(directoryStorageFailed)error=t('storage.failed');
     const snapshot = state.snapshot;
     const saved=assistantDrafts?.status(editorOwner);
-    const draftSignature=JSON.stringify([!!saved,saved?.cleanup,saved?.error?.message,saved?.loading,saved?.dirty,locale]);
+    const draftSignature=JSON.stringify([saved?.cleanup,saved?.error?.message,locale]);
     if(draftSignature!==draftStatusSignature){
-      draftStatusSignature=draftSignature;draftStatus.hidden=!saved;draftStatus.classList.toggle('inline-error',!!saved?.error);
-      const draftLabel=saved?.cleanup?'drafts.cleanupFailed':saved?.error?'drafts.failed':saved?.loading?'drafts.loading':saved?.dirty?'drafts.saving':'drafts.saved';
-      draftStatus.replaceChildren(el('span','',saved?t(draftLabel):''));
+      draftStatusSignature=draftSignature;draftStatus.hidden=!saved?.error;draftStatus.classList.toggle('inline-error',!!saved?.error);
+      draftStatus.replaceChildren();
+      if(saved?.error)draftStatus.append(el('span','',t(saved.cleanup?'drafts.cleanupFailed':'drafts.failed')));
       if(saved?.error){const retry=el('button','text-button',t('retry'));retry.type='button';retry.onclick=()=>assistantDrafts.retry(editorOwner).catch(()=>{});draftStatus.append(retry);const details=el('details'),summary=el('summary','',t('web.error.details'));details.append(summary,el('span','',saved.error.message||String(saved.error)));draftStatus.append(details);}
     }
     const pending = snapshot && state.pending.get(ownerKey(snapshot));
