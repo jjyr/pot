@@ -28,14 +28,14 @@ try{
       await context.request.post(fixture.origin+'/fixture/control',{data:{conversation:'replacement',publish:true}});
       await context.setOffline(false);
       await waitForOutbox(page,([rows])=>rows.length===2&&rows[1].state==='failed'&&rows[1].problem==='conversationRetired');
-      const history=page.locator('.workspace > .history');
+      const history=page.locator('.workspace > .history:not([data-preparation-surface])');
       const oldVisible=()=>history.locator('article.message:visible').filter({hasText:'original conversation'}).count();
       if(version==='before'){
         await history.locator('article.message:visible').filter({hasText:'Queued original conversation'}).waitFor();
         assert.equal(await oldVisible(),2);report.checks.push('exact555 negative: both accepted optimistic and queued old rows appear in replacement chat');
         await page.screenshot({path:resolve(output,'before.png')});
       }else{
-        await page.waitForFunction(()=>![...document.querySelectorAll('.workspace > .history article.message')].some(row=>!row.closest('[data-preparation-surface]')&&getComputedStyle(row).visibility==='visible'&&row.textContent.includes('original conversation')));
+        await page.waitForFunction(()=>![...document.querySelectorAll('.workspace > .history:not([data-preparation-surface]) article.message')].some(row=>!row.closest('[data-preparation-surface]')&&getComputedStyle(row).visibility==='visible'&&row.textContent.includes('original conversation')));
         assert.equal(await oldVisible(),0);report.checks.push('complete target isolates queued and accepted optimistic rows from replacement chat');
         await page.screenshot({path:resolve(output,'after.png')});
         await send('New replacement conversation submission');

@@ -48,10 +48,10 @@ try{
       const identities=queued.rows.map(row=>({target:row.target,request:row.request,sequence:row.sequence}));
       await page.locator('#pot-composer').fill('Ordinary unsent draft '+width);
       await waitForOutbox(page,([rows,drafts])=>drafts.some(row=>row.text.startsWith('Ordinary unsent draft')));
-      const history=page.locator('.workspace > .history');await history.waitFor();
-      await page.waitForFunction(()=>{const h=document.querySelector('.workspace > .history');return h&&!h.hasAttribute('aria-busy')&&h.scrollHeight>h.clientHeight;});
+      const history=page.locator('.workspace > .history:not([data-preparation-surface])');await history.waitFor();
+      await page.waitForFunction(()=>{const h=document.querySelector('.workspace > .history:not([data-preparation-surface])');return h&&!h.hasAttribute('aria-busy')&&h.scrollHeight>h.clientHeight;});
       const box=await history.boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.wheel(0,-350);
-      await page.waitForFunction(()=>{const h=document.querySelector('.workspace > .history');return h&&h.scrollTop+h.clientHeight<h.scrollHeight-100;});
+      await page.waitForFunction(()=>{const h=document.querySelector('.workspace > .history:not([data-preparation-surface])');return h&&h.scrollTop+h.clientHeight<h.scrollHeight-100;});
       const reading=await history.evaluate(h=>{const edge=h.getBoundingClientRect().top;const row=[...h.querySelectorAll('article[data-message-id]')].find(row=>row.getBoundingClientRect().top>=edge);return {id:row.dataset.messageId,top:row.getBoundingClientRect().top-edge};});
       await page.getByRole('button',{name:t('assistantSettings'),exact:true}).click();
       const name=page.getByLabel(locale==='en'?'Name':'名称',{exact:true});await name.waitFor();
@@ -86,7 +86,7 @@ try{
       // remain usable. The queued payloads must not acquire settings fields.
       await page.waitForFunction(()=>document.querySelector('#pot-composer')?.value.startsWith('Ordinary unsent draft'));
       check(await page.locator('#pot-composer').inputValue()==='Ordinary unsent draft '+width,'returning from settings preserves ordinary draft '+width);
-      await page.waitForFunction(reading=>{const h=document.querySelector('.workspace > .history'),row=h&&[...h.querySelectorAll('article[data-message-id]')].find(row=>row.dataset.messageId===reading.id);return row&&Math.abs(row.getBoundingClientRect().top-h.getBoundingClientRect().top-reading.top)<=24;},reading);
+      await page.waitForFunction(reading=>{const h=document.querySelector('.workspace > .history:not([data-preparation-surface])'),row=h&&[...h.querySelectorAll('article[data-message-id]')].find(row=>row.dataset.messageId===reading.id);return row&&Math.abs(row.getBoundingClientRect().top-h.getBoundingClientRect().top-reading.top)<=24;},reading);
       check(true,'settings return preserves the latest reading anchor within 24px '+width);
       const unchanged=await waitForOutbox(page,([rows])=>rows.length===2);
       assert.deepEqual(unchanged.rows.map(row=>({target:row.target,request:row.request,sequence:row.sequence})),identities);
