@@ -1,0 +1,8 @@
+<!doctype html><meta charset="utf-8"><style>html,body{margin:0;padding:0}#text{font:16px/20px sans-serif;overflow-wrap:anywhere;padding:8px}</style><input id="state" aria-label="State value"><button id="inside">Inside next</button><div id="text"></div><script>
+const token=new URL(location.href).searchParams.get('token'),documentID=crypto.randomUUID();let state=17,last;
+const input=document.querySelector('#state');document.querySelector('#text').textContent='Synthetic responsive wrapping content. '.repeat(18);
+const send=(label,event)=>parent.postMessage({type:'fixture-native',token,documentID,label,state,value:input.value,internalFocus:document.activeElement?.id,trusted:event?.isTrusted,key:event?.key},'*');
+input.addEventListener('input',e=>send('input',e));document.addEventListener('keydown',e=>{if(e.key==='Enter')state++;send('keydown',e);});document.addEventListener('focusin',e=>send('focusin',e));
+addEventListener('message',e=>{if(e.data?.type==='fixture-probe')send(e.data.label);});parent.postMessage({type:'fixture-boot',token,documentID},'*');
+function report(){const value=document.body.getBoundingClientRect().height;if(value===last)return;last=value;parent.postMessage({type:'pot-resource',token,action:'resize',value},'*');}new ResizeObserver(report).observe(document.body);addEventListener('resize',report);report();parent.postMessage({type:'pot-resource',token,action:'ready'},'*');
+</script>

@@ -174,7 +174,9 @@ export function finishPreparedNative(context,{commit=false,preparedOnly=false}={
     if(commit)delete entry.owner.nativeReflowDeadline;
     original.inert=entry.inert;if(entry.hidden===null)original.removeAttribute('aria-hidden');else original.setAttribute('aria-hidden',entry.hidden);
     delete original.nativePreparation;delete projection.nativePreparation;home.remove();context.nativeIslands.delete(original);
-    if(entry.focus&&original.isConnected&&original.ownerDocument.activeElement!==original)original.focus({preventScroll:true});
+    // The browsing context never moved. Preserve its current native focus;
+    // the focus captured before an async handoff cannot override a later Tab
+    // or click destination, including during cancellation and owner retirement.
   }
 }
 export function cancelPreparedNative(root){

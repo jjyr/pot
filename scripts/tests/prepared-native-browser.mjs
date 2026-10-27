@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {preparedNativeFocusIntent} from './prepared-focus-browser.mjs';
 
 export async function preparedNativeLifecycle(browser,origin){
   const results=[];
@@ -48,5 +49,6 @@ export async function preparedNativeLifecycle(browser,origin){
     assert.equal(result.failure,null);assert.deepEqual(errors,[]);assert.deepEqual(result.errors,[]);
     assert.equal(result.acquired,result.released);results.push(result);
   }finally{await context.close();}
+  results.push({focusIntent:await preparedNativeFocusIntent(browser,origin)});
   return results;
 }

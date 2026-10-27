@@ -189,7 +189,10 @@ top-layer viewport, retaining its DOM parent, document state and lease. An inert
 projection of the old measured frame shows the loading status during this bounded
 handoff and never supplies a new reading anchor. Only an already focused native
 document retains its existing focus; new candidates stay inside the inert hidden
-surface. Commit and cancellation restore the native viewport before retiring the
+surface. Native viewport restoration does not restore an earlier focus snapshot:
+Tab or click destinations chosen during preparation remain authoritative through
+commit, resize cancellation and owner retirement. Commit and cancellation restore
+the native viewport before retiring the
 surface. Cancellation retains the unfinished native reflow budget until commit;
 this does not renew an unresolved component's content deadline. Resize, result
 and dependency notices carry resource revisions through
