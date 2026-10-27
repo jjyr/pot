@@ -283,6 +283,7 @@ func writeResourceFixtures(t *testing.T, workspace string) {
 	save("plain.txt", []byte(markdownResourceSource))
 	save("raw.md", []byte(`<script>window.markdownExecuted=true</script>`+"\n\n# Literal HTML\n\n<img src=\"https://resource-isolation.invalid/raw\" onerror=\"window.markdownExecuted=true\">"))
 	save("report.txt", []byte("Savings plan\nMonthly: 2000\nAnnual: 24000\n"))
+	writeHTMLScrollFixtures(t, workspace)
 }
 
 func TestResourceHTTPToolsRangeDownloadAndIsolation(t *testing.T) {
@@ -329,7 +330,9 @@ func TestResourceBrowserFixture(t *testing.T) {
 		t.Skip("opt-in local browser fixture")
 	}
 	var app *Application
-	if os.Getenv("POT_MESSAGE_FILE_FIXTURE") == "1" {
+	if os.Getenv("POT_HTML_SCROLL_FIXTURE") == "1" {
+		app, _ = resourceApplicationSources(t, []string{"scroll-long.html", "scroll-nested.html", "scroll-short.html"})
+	} else if os.Getenv("POT_MESSAGE_FILE_FIXTURE") == "1" {
 		app, _ = resourceApplicationSources(t, []string{"landscape.png", "review.md", "pulse.gif", "voice.wav", "sample.webm", "notes.pdf", "demo.html", "report.txt", "archive.zip"})
 	} else if os.Getenv("POT_MARKDOWN_RESOURCE_FIXTURE") == "1" {
 		app, _ = resourceApplicationSources(t, markdownResourceSources, "Quarterly review.html")
