@@ -21,12 +21,12 @@ function replyText(text, lifecycle) {
   }catch{}
   return text;
 }
-// Reply identities survive the optimistic send, its receipt, and the first
-// streamed assistant message. Transport loss never declares execution failed.
+// Execution activity has its own stable identity, independent of model rounds.
+// Prose/tool ordering stays chronological; transport loss never ends execution.
 export function projectChatReplies(snapshot, send, {offline=false}={}) {
   const messages=snapshot?.messages||[],inputs=new Map(),replyInputs=new Map(),firstReplies=new Set(),rows=[];
   const positions=new Map(messages.map((message,index)=>[message.id,index])),anchors=new Map(),turnInputs=new Map();
-  const completedInputs=new Set((snapshot?.replies||[]).filter(reply=>reply.state==='completed').map(reply=>reply.input_id));
+  const lifecycleInputs=new Set((snapshot?.replies||[]).map(reply=>reply.input_id));
   let currentInput='';
   for(const message of messages){
     if((message.role==='user'&&!message.steering)||message.role==='system'&&!message.compaction){
@@ -51,10 +51,11 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
     }
     if(message.role==='assistant'){
       const input=inputs.get(replyInputs.get(message.id));
-      // Tool-only model rounds have no prose to keep. The next output adopts
-      // their waiting bubble instead of leaving empty cards in the transcript.
-      if(!message.text.trim()&&!message.presentation&&(message.status==='complete'||completedInputs.has(input?.id||message.reply_to)))continue;
+      // Empty model rounds do not own activity. Only the receiver lifecycle
+      // owns that frame, including between tool completion and the next round.
+      if(!message.text.trim()&&!message.presentation&&(lifecycleInputs.has(input?.id||message.reply_to)||message.status==='complete'))continue;
       row.inputID=input?.id||message.reply_to;
+      row.activity=false;
       if(input&&!firstReplies.has(input.id)){
         row.viewKey=`reply:${input.request_id||input.id}`;firstReplies.add(input.id);
       }
@@ -65,7 +66,7 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
   if(send&&!send.request.user_message_id&&!send.request.retry_user_message_id&&!messages.some(message=>message.request_id===send.request.request_id)){
     const request=send.request;
     rows.push({id:`pending:${request.request_id}`,viewKey:`input:${request.request_id}`,role:'user',text:request.text,attachments:request.attachments,references:request.references,status:'accepted'});
-    rows.push({id:`pending-reply:${request.request_id}`,viewKey:`reply:${request.request_id}`,role:'assistant',text:'',status:'accepted',phase:send.phase==='failed'?'failed':send.phase==='uncertain'||offline?'reconnecting':send.phase,error:send.detail||'',local:true});
+    rows.push({id:`pending-reply:${request.request_id}`,viewKey:`activity:${request.request_id}`,role:'assistant',text:'',status:'accepted',phase:send.phase==='failed'?'failed':send.phase==='uncertain'||offline?'reconnecting':send.phase,error:send.detail||'',local:true,activity:true});
   }
   // The same execution contract applies to every endpoint. A persisted user
   // message settles sending; only its receiver-owned lifecycle settles waiting.
@@ -74,22 +75,20 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
     const outputs=rows.filter(row=>row.role==='assistant'&&row.inputID===input.id);
     // Successful execution does not require a user-facing reply. Settling an
     // empty turn removes its activity bubble without inventing assistant text.
-    if(lifecycle.state==='completed'&&!outputs.length)continue;
-    for(const output of outputs)output.text=replyText(output.text,lifecycle);
+    if(lifecycle.state==='completed')continue;
+    for(const output of outputs){output.text=replyText(output.text,lifecycle);if(!output.text.trim()&&!output.presentation)rows.splice(rows.indexOf(output),1);}
     const terminal=['completed','failed','cancelled','unknown'].includes(lifecycle.state);
     if(terminal&&!outputs.length&&!rows.some(row=>row.id===input.id))continue;
-    let reply=outputs.at(-1);
-    if(!reply){
-      reply={id:`waiting:${input.id}`,viewKey:`reply:${input.request_id||input.id}`,role:'assistant',text:'',status:terminal?'complete':'streaming',inputID:input.id};rows.push(reply);
-      // A lifecycle has no durable message sequence of its own. Keep its
-      // placeholder after that input's last output/tool, before later messages.
-      positions.set(reply.id,anchors.get(input.id)+0.5);
-    }
-    const phase={pending:'awaiting',queued:'queued',running:reply.text?'streaming':'thinking',waiting:'waiting',paused:'paused',cancelling:'cancelling',completed:'complete',failed:'failed',cancelled:'stopped',unknown:'unknown'}[lifecycle.state];
+    const reply={id:`waiting:${input.id}`,viewKey:`activity:${input.request_id||input.id}`,role:'assistant',text:'',status:terminal?'complete':'streaming',inputID:input.id,activity:true};rows.push(reply);
+    // Keep the current execution visible at Latest even when another input's
+    // output arrives late. Queued/terminal outcomes retain their input context.
+    const current=!terminal&&(snapshot.turn_id===input.id||!snapshot.turn_id&&lifecycle.state==='running');
+    positions.set(reply.id,current?messages.length+positions.get(input.id)/(messages.length+1):anchors.get(input.id)+0.5);
+    const phase={pending:'awaiting',queued:'queued',running:'thinking',waiting:'waiting',paused:'paused',cancelling:'cancelling',completed:'complete',failed:'failed',cancelled:'stopped',unknown:'unknown'}[lifecycle.state];
     if(!terminal&&(offline||lifecycle.uncertain))reply.phase='reconnecting';
     else {
       const tools=lifecycle.state==='running'?messages.filter(message=>activeTool(message.tool)&&message.tool.turn_id===(input.request_id||input.id)):[];
-      reply.phase=tools.length?tools.every(message=>message.tool.phase==='waiting_approval')?'approval':'tools':phase;
+      reply.phase=tools.length?tools.every(message=>message.tool.phase==='waiting_approval')?'approval':'tools':lifecycle.state==='running'&&outputs.some(output=>output.status==='streaming'&&output.text)?'streaming':phase;
     }
     if(lifecycle.error)reply.error=lifecycle.error;
   }

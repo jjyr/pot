@@ -160,6 +160,10 @@ button.assistant-profile-trigger:hover { background:var(--navigation); }
   .message-speaker { font-size: 11px; margin-bottom: 8px; }
 }
 .reply-status { color: var(--muted); }
+.has-active-status > .reply-status { box-sizing:border-box; height:2lh; min-height:2lh; overflow:auto; display:flex; align-items:center; }
+.reply-activity-icon { display:inline-flex; width:24px; height:20px; flex:none; align-items:center; justify-content:center; }
+.reply-activity-icon > [hidden] { display:none; }
+.message.is-activity > .message-body { width:100%; }
 .reply-content:not([hidden]) + .reply-status:not([hidden]) { margin-top: 12px; }
 .message-body:has(pot-mermaid) { width: 100%; min-width: 0; }
 pot-mermaid { display: block; width: 100%; min-width: 0; max-width: 100%; margin: 12px 0; white-space: normal; }

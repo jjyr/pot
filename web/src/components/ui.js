@@ -816,6 +816,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       messageNodes.set(message.viewKey, record);
     }
     const {row, bubble} = record;
+    row.classList.toggle('is-activity',!!message.activity);
     row.dataset.messageId=message.id;row.dataset.sequence=message.sequence||'';
     row.dataset.scrollAnchor=`message:${message.viewKey}`;
     if(message.compaction){
@@ -840,7 +841,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       record.text = message.text; record.role = message.role;
       row.className = `message role-${message.role}`;
     }
-    if(message.role==='assistant'){
+    if(message.role==='assistant'&&!message.activity){
       const name=selectedAssistant?.name||'Pot',image=selectedAssistant?.avatar;
       if(!record.speaker||record.speakerName!==name||record.speakerImage!==image){
         record.speaker?.remove();record.speakerName=name;record.speakerImage=image;
@@ -848,7 +849,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         record.speaker.append(assistantAvatar(selectedAssistant,25),el('span','',name));
         row.prepend(record.speaker);
       }
-    }
+    }else if(record.speaker){record.speaker.remove();record.speaker=null;}
     const source=message.role==='assistant'?bubble.querySelector('.reply-content'):message.role==='user'?bubble.querySelector('.message-prose'):null;
     if(source&&message.text&&!message.id.startsWith('pending:'))source.dataset.referenceSource=message.id;
     const referenceSignature=JSON.stringify([message.references||[],locale]);

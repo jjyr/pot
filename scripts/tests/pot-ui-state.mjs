@@ -246,14 +246,16 @@ const thinking=projectChatReplies(waiting);
 const streaming=projectChatReplies({...waiting,messages:[chatInput,{...chatReply,text:'Partial'}]});
 assert.equal(optimistic[0].viewKey,thinking[0].viewKey,'Optimistic user input becomes the accepted message');
 assert.equal(optimistic[1].viewKey,thinking[1].viewKey,'Sending becomes Thinking in the same reply');
-assert.equal(thinking[1].viewKey,streaming[1].viewKey,'Streaming adopts the existing waiting bubble');
+assert.equal(thinking[1].viewKey,streaming.at(-1).viewKey,'Streaming retains the execution activity after its prose');
+assert.equal(streaming[1].text,'Partial');assert.equal(streaming[1].activity,false,'Prose does not also own the execution status');
 const settling=projectChatReplies({...waiting,messages:[chatInput,{...chatReply,text:'Done',status:'complete'}]});
-assert.equal(settling.length,2,'Finishing a message before turn cleanup must not create another bubble');
-assert.equal(settling[1].viewKey,thinking[1].viewKey,'Turn cleanup keeps activity in the original reply');
+assert.equal(settling.length,3,'Message completion retains one separate execution activity until its terminal lifecycle');
+assert.equal(settling.at(-1).viewKey,thinking[1].viewKey,'Completing prose does not move its activity into an output');
 const toolInput={...chatReply,text:'',status:'complete'},toolOutput={id:'tool',role:'tool',text:'result',status:'complete'},nextOutput={...chatReply,id:'next',text:'Done'};
 const toolRound=projectChatReplies({...waiting,messages:[chatInput,toolInput,toolOutput]});
 const afterTool=projectChatReplies({...waiting,messages:[chatInput,toolInput,toolOutput,nextOutput]});
-assert.equal(afterTool.filter(row=>row.role==='assistant').length,1,'Tool-only rounds do not leave empty reply bubbles');
+assert.equal(afterTool.filter(row=>row.activity).length,1,'Tool rounds retain exactly one execution activity');
+assert.equal(afterTool.filter(row=>row.role==='assistant'&&!row.activity).length,1,'Only nonempty output creates a prose row');
 for(const text of ['',' \n\t'])for(const status of ['streaming','complete']){
   const silent=projectChatReplies({...waiting,running:false,turn_id:null,replies:[{input_id:'input',state:'completed'}],messages:[chatInput,{...chatReply,text,status}]});
   assert.deepEqual(silent.filter(row=>row.role==='assistant'),[],'Successful empty execution removes activity without generating a chat bubble');
@@ -303,10 +305,10 @@ assert.equal(mailRows[0].viewKey,'input:pot-result-mail','Receipt identity survi
 assert.equal(projectChatReplies({...mailSnapshot,messages:[{...receivedMail,context_only:true}]}).length,0,'History dependencies do not duplicate receipt cards');
 assert.equal(projectChatReplies(waiting,null,{offline:true})[1].phase,'reconnecting','Connection loss does not declare execution failed');
 const failed=projectChatReplies({...waiting,running:false,turn_id:null,replies:[{input_id:'input',state:'failed',error:'HTTP 404'}],messages:[chatInput,{...chatReply,text:'Partial',status:'failed',error:'HTTP 404'}]});
-assert.equal(failed.filter(row=>row.phase==='failed').length,1,'Only one failed reply is displayed');
+assert.equal(failed.filter(row=>row.activity&&row.phase==='failed').length,1,'Only one failure status is displayed');
 assert.equal(failed[1].text,'Partial','Partial prose stays in the original reply');
 assert.equal(failed[1].error,'HTTP 404');
-assert.equal(failed[1].viewKey,thinking[1].viewKey,'Failure updates the original reply');
+assert.equal(failed.at(-1).viewKey,thinking[1].viewKey,'Failure updates the original activity');
 assert.equal(projectChatReplies(waiting,{request:{request_id:'request',text:'Hello'},phase:'uncertain'}).length,2,'An uncertain receipt cannot duplicate an already accepted input');
 assert.equal(projectChatReplies({...waiting,replies:[{input_id:'input',state:'paused'}]})[1].phase,'paused','Paused turns do not keep thinking');
 assert.equal(replyFailureKind('model provider returned HTTP 404'),'configuration');
@@ -318,10 +320,10 @@ for(const state of ['failed','cancelled','unknown'])for(const partial of ['', 'P
  const payload=JSON.stringify({state:state==='unknown'?'failed':state,error:remoteError,partial_output:partial});
  const snapshot={messages:[chatInput,{id:'remote-reply',reply_to:chatInput.id,role:'assistant',text:payload,status:'complete'}],replies:[{input_id:chatInput.id,state,error:remoteError}]};
  const rows=projectChatReplies(snapshot);
- assert.equal(rows.length,2,'An empty failed outcome still has one reply');
- assert.equal(rows[1].text,partial,'The failure envelope is not model prose');
- assert.equal(rows[1].phase,state==='cancelled'?'stopped':state);
- assert.equal(rows[1].error,remoteError,'Detailed receiver diagnostics stay separate from prose');
+ assert.equal(rows.length,partial?3:2,'An empty failed outcome leaves only its status; partial prose is separate');
+ assert.equal(rows.find(row=>row.role==='assistant'&&!row.activity)?.text||'',partial,'The failure envelope is not model prose');
+ assert.equal(rows.at(-1).phase,state==='cancelled'?'stopped':state);
+ assert.equal(rows.at(-1).error,remoteError,'Detailed receiver diagnostics stay separate from prose');
  assert.equal(snapshot.messages[1].text,payload,'Projection does not rewrite stored mail');
  for(const lifecycle of [{state:'completed',error:remoteError},{state:'running',error:remoteError},{state,error:'other error'},{state:'failed',error:remoteError+' other'}]){
   const unchanged=projectChatReplies({...snapshot,replies:[{input_id:chatInput.id,...lifecycle}]});
@@ -353,7 +355,7 @@ for(const owner of ['main','agent-link:peer:assistant','an-arbitrary-endpoint'])
  assert.equal(state.sends.size,0,'Send confirmation is independent of execution');
  rows=update('queued');assert.equal(rows[0].phase,'queued');
  rows=update('running');assert.equal(rows[0].phase,'thinking');
- rows=update('running',{messages:[input,{...chatReply,text:'Progress',status:'complete'}]});assert.equal(rows[0].phase,'streaming','Intermediate prose never ends an active turn');
+ rows=update('running',{messages:[input,{...chatReply,text:'Progress',status:'complete'}]});assert.equal(rows.at(-1).phase,'thinking','Completed intermediate prose never ends an active execution');assert(rows.at(-1).activity);
  rows=update('running',{uncertain:true});assert.equal(rows[0].phase,'reconnecting');
  rows=update('failed',{error:'preparation failed'});assert.equal(rows[0].phase,'failed');assert.equal(rows[0].error,'preparation failed');
  rows=update('completed');assert.deepEqual(rows,[],'A successful empty result settles silently for every endpoint');
@@ -368,7 +370,10 @@ assert(!acceptSnapshot(invalidLifecycle,snapshot({replies:[{input_id:'input',sta
 assert(!acceptSnapshot(invalidLifecycle,snapshot({replies:[{input_id:'input',state:'running',uncertain:'yes'}]}),invalidEpoch),'Invalid connection certainty is rejected');
 const parallelRows=projectChatReplies({messages:[{id:'one',request_id:'one',role:'user',text:'one',status:'accepted'},{id:'two',request_id:'two',role:'user',text:'two',status:'accepted'},{id:'answer-two',reply_to:'two',role:'assistant',text:'answer two',status:'complete'},{id:'answer-one',reply_to:'one',role:'assistant',text:'partial one',status:'complete'}],replies:[{input_id:'one',state:'running'},{input_id:'two',state:'completed'}]});
 assert.equal(parallelRows.find(row=>row.id==='answer-two').phase,'complete');
-assert.equal(parallelRows.find(row=>row.id==='answer-one').phase,'streaming','Out-of-order output keeps its own input lifecycle');
+assert.equal(parallelRows.find(row=>row.id==='answer-one').activity,false);
+assert.equal(parallelRows.at(-1).inputID,'one','The active execution stays at Latest after out-of-order prose');
+assert.equal(parallelRows.at(-1).phase,'thinking');
+assert.deepEqual(parallelRows.filter(row=>!row.activity).map(row=>row.id),['one','two','answer-two','answer-one'],'Activity never reorders nonempty messages');
 
 assert.deepEqual(projectChatReplies({messages:[{...chatInput,context_only:true}],replies:[{input_id:chatInput.id,state:'completed'}]}),[],'Historical context dependencies cannot create visible empty replies');
 
@@ -378,7 +383,8 @@ const silentInputs=Array.from({length:3},(_,i)=>({id:`silent-${i}`,request_id:`s
 const laterInput={id:'later',request_id:'later-request',role:'user',text:'New message',status:'accepted'};
 for(const phase of ['queued','running','failed','cancelled','unknown']){
   const ordered=projectChatReplies({messages:[...silentInputs,laterInput],replies:[...silentInputs].reverse().map(input=>({input_id:input.id,state:phase}))});
-  assert.deepEqual(ordered.map(row=>row.id),silentInputs.flatMap(input=>[input.id,`waiting:${input.id}`]).concat(laterInput.id),`${phase} outcomes stay with their inputs instead of following newer messages`);
+  assert.deepEqual(ordered.map(row=>row.id),phase==='running'?[...silentInputs.map(input=>input.id),laterInput.id,...silentInputs.map(input=>`waiting:${input.id}`)]:silentInputs.flatMap(input=>[input.id,`waiting:${input.id}`]).concat(laterInput.id),`${phase} activity/outcomes retain their execution identity and current placement`);
+  assert.deepEqual(ordered.filter(row=>row.activity).map(row=>row.inputID),silentInputs.map(input=>input.id),'Parallel lifecycles cannot adopt another input');
 }
 const silentTool={id:'silent-tool',role:'tool',text:'result',status:'complete',tool:{turn_id:silentInputs[0].request_id,id:'call',phase:'completed'}};
 const silentOutput={id:'silent-output',role:'assistant',reply_to:silentInputs[0].id,text:'',status:'complete'};
