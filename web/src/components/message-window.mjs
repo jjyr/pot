@@ -12,6 +12,16 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
   let lastReadable=[],lastReadableTop=0;const held=new Map(),layoutHosts=new Set([host]);
   let requested=rows,requestedRevision='[]',committedRevision='[]',requestedOptions={},flight=null,layoutEpoch=0,layoutFingerprint='',committing=null,measuredOptions={},layoutReframe=false,queueUpdating=false,preparationError=false;
   const inheritedPreparation=currentPreparedRender();
+  const nativePresentations=new Set();
+  function prepared(){return !closed&&!suspended&&!preparationError&&!nativePresentations.size&&!layoutReframe&&!flight&&requestedRevision===committedRevision&&(requestedOptions.regions||[]).every(region=>regionRevisions.get(region.key)===layoutEpoch+':'+region.revision);}
+  function nativePresentationChanged(presentation,pending){
+    if(pending){if(closed){presentation.cancel();return;}nativePresentations.add(presentation);}
+    else{nativePresentations.delete(presentation);if(!closed){if(prepared())afterPreparedCommit(requestedOptions);else invalidate();}}
+  }
+  function afterPreparedCommit(options){
+    if(nativePresentations.size){host.dataset.preparedPending='';host.setAttribute('aria-busy','true');return;}
+    delete host.dataset.preparedPending;host.removeAttribute('aria-busy');options.afterCommit?.();
+  }
   const deadlines=inheritedPreparation?.context.deadlines||new Map();
   const preparationBudget=inheritedPreparation?.context.budget||createPreparationBudget();
   const indexesByKey = new Map(), indexesByID = new Map();
@@ -224,10 +234,10 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     const retired=flight;flight=null;
     for(const job of retired.jobs.values()){job.context.alive=false;job.context.connectionContext.alive=false;job.wait?.cancel();disposePreparation(job);job.surface.close();}
     for(const job of retired.regions.values()){job.context.alive=false;job.context.connectionContext.alive=false;job.wait?.cancel();job.surface.close();}
-    delete host.dataset.preparedPending;host.removeAttribute('aria-busy');
+    if(!nativePresentations.size){delete host.dataset.preparedPending;host.removeAttribute('aria-busy');}
   }
   function preparationFailed(reason,current=flight){
-    if(current&&flight===current){preparationError=true;committing=null;discardPreparation();releaseHold();releaseLayout();layoutReframe=true;cancelAnimationFrame(frame);frame=0;}
+    if(current&&flight===current){preparationError=true;committing=null;discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();delete host.dataset.preparedPending;host.removeAttribute('aria-busy');releaseHold();releaseLayout();layoutReframe=true;cancelAnimationFrame(frame);frame=0;}
   }
   function rejectPreparation(reason,current){
     if(reason.name==='AbortError')return;
@@ -324,9 +334,9 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     if(!flight&&requestedRevision===committedRevision&&!layoutReframe&&
       (liveItems.length||!requested.length)&&liveItems.every(item=>mounted.get(item.key)?.preparedSignature===signature(rows[item.index]))&&
       (requestedOptions.regions||[]).every(region=>regionRevisions.get(region.key)===layoutEpoch+':'+region.revision)){
-      requestedOptions.beforeCommit?.();updateMeasured(rows,requestedOptions);requestedOptions.afterCommit?.();return;
+      requestedOptions.beforeCommit?.();updateMeasured(rows,requestedOptions);afterPreparedCommit(requestedOptions);return;
     }
-    if(!requested.length&&!requestedOptions.regions?.length){releaseLayout();releaseHold();discardPreparation();heights.clear();geometry.clear();requestedOptions.beforeCommit?.();updateMeasured(requested,requestedOptions);committedRevision=requestedRevision;layoutReframe=false;requestedOptions.afterCommit?.();return;}
+    if(!requested.length&&!requestedOptions.regions?.length){releaseLayout();releaseHold();discardPreparation();heights.clear();geometry.clear();requestedOptions.beforeCommit?.();updateMeasured(requested,requestedOptions);committedRevision=requestedRevision;layoutReframe=false;afterPreparedCommit(requestedOptions);return;}
     if(!flight){
       for(const region of requestedOptions.regions||[])layoutHosts.add(region.host);
       for(const element of layoutHosts)freezePreparedLayout(element);
@@ -353,6 +363,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       if(!job){
         const surface=createPreparationSurface(scroller,region.host),context=createPreparedRender({previousRoot:region.host,renderContext:current.options.renderContext,deadlines,member:region.key,reframe:current.reframe,budget:preparationBudget});
         surface.host.preparedContext=context.connectionContext;context.connectionContext.changed=invalidate;
+        context.nativePresentationChanged=nativePresentationChanged;
         surface.host.classList.remove('prepared-region');
         job={region,signature:stamp,surface,context};current.regions.set(region.key,job);
         withPreparedRender(context,region.key,()=>region.render(surface.host));context.root=surface.host;
@@ -370,6 +381,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
         if(admitted++>=96){waiting=true;continue;}
         const surface=createPreparationSurface(scroller,host),context=createPreparedRender({previousRoot:old?.row,renderContext:current.options.renderContext,deadlines,member:message.id,reframe:current.reframe,budget:preparationBudget});
         context.connectionContext.changed=invalidate;
+        context.nativePresentationChanged=nativePresentationChanged;
         const start=measuredStart(current,index);if(start!==undefined)context.liveTop=()=>scroller.getBoundingClientRect().top+margin+start-scroller.scrollTop;
         job={message,signature:stamp,surface,context};current.jobs.set(key,job);
         job.record=withPreparedRender(context,message.id,()=>render(message,undefined));context.root=job.record.row;job.record.row.preparedContext=context.connectionContext;surface.host.append(job.record.row);
@@ -420,7 +432,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     for(const [key,value]of current.measurements){geometry.delete(key);geometry.set(key,value);}
     const loaded=new Set(current.rows.map(message=>message.viewKey));
     for(const key of geometry.keys()){if(geometry.size<=loaded.size+1280)break;if(!loaded.has(key))geometry.delete(key);}
-    committing=null;flight=null;delete host.dataset.preparedPending;layoutHosts.clear();layoutHosts.add(host);for(const region of current.options.regions||[])layoutHosts.add(region.host);for(const record of mounted.values())layoutHosts.add(record.row);for(const element of layoutHosts)rememberPreparedLayout(element);committedRevision=current.revision;layoutReframe=false;host.removeAttribute('aria-busy');current.options.afterCommit?.();
+    committing=null;flight=null;layoutHosts.clear();layoutHosts.add(host);for(const region of current.options.regions||[])layoutHosts.add(region.host);for(const record of mounted.values())layoutHosts.add(record.row);for(const element of layoutHosts)rememberPreparedLayout(element);committedRevision=current.revision;layoutReframe=false;afterPreparedCommit(current.options);
     if(requestedRevision!==current.revision||JSON.stringify(requestedOptions.regions?.map(region=>[region.key,region.revision]))!==JSON.stringify(current.options.regions?.map(region=>[region.key,region.revision])))invalidate();
     }catch(reason){
       preparationFailed(reason);
@@ -455,14 +467,14 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     const environment=currentPreparedRender();if(!environment)return;measuredOptions.beforeCommit?.();
     for(const message of rows){const record=mounted.get(message.viewKey);if(record){withPreparedRender(environment.context,message.id,()=>record.commit?.());record.preparing=false;}}
     measuredOptions.afterCommit?.();
-  },reset(){releaseLayout();releaseHold();lastReadable=[];discardPreparation();deadlines.clear();geometry.clear();rowRevisions.clear();revealedRows.clear();requested=[];requestedRevision='[]';committedRevision=null;requestedOptions={};regionRevisions.clear();controller?.reset();},get prepared(){return !layoutReframe&&!flight&&requestedRevision===committedRevision&&(requestedOptions.regions||[]).every(region=>regionRevisions.get(region.key)===layoutEpoch+':'+region.revision);},suspend(){
-    releaseLayout();releaseHold();lastReadable=[];discardPreparation();
+  },reset(){committedRevision=null;releaseLayout();releaseHold();lastReadable=[];discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();deadlines.clear();geometry.clear();rowRevisions.clear();revealedRows.clear();requested=[];requestedRevision='[]';requestedOptions={};regionRevisions.clear();controller?.reset();},get prepared(){return prepared();},suspend(){
+    suspended=true;releaseLayout();releaseHold();lastReadable=[];discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();
     cancelAnimationFrame(frame);frame=0;
     owner?.suspend();
     suspended=true;virtualizer.cancelScroll();unmount();
     for(const record of mounted.values())record.childrenWindow?.suspend();
   },close(){
-    closed=true;releaseLayout();releaseHold();lastReadable=[];discardPreparation();scroller.removeEventListener('click',interaction,true);scroller.removeEventListener('pot:prepare-resize',interaction);host.ownerDocument.fonts?.removeEventListener('loading',fontChanged);host.ownerDocument.fonts?.removeEventListener('loadingdone',fontChanged);cancelAnimationFrame(frame);geometryObserver?.disconnect();owner?.close();virtualizer.cancelScroll();unmount();
+    closed=true;releaseLayout();releaseHold();lastReadable=[];discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();scroller.removeEventListener('click',interaction,true);scroller.removeEventListener('pot:prepare-resize',interaction);host.ownerDocument.fonts?.removeEventListener('loading',fontChanged);host.ownerDocument.fonts?.removeEventListener('loadingdone',fontChanged);cancelAnimationFrame(frame);geometryObserver?.disconnect();owner?.close();virtualizer.cancelScroll();unmount();
     for(const record of mounted.values())dispose(record);
     mounted.clear();indexesByKey.clear();indexesByID.clear();
     for(const spacer of spacers)spacer.remove();

@@ -130,7 +130,7 @@ function register(){
       delete this.nativeReflowDeadline;
       for(const media of this.querySelectorAll('audio,video')){media.pause();media.removeAttribute('src');media.load();}
       for(const image of this.querySelectorAll('img'))image.removeAttribute('src');
-      for(const frame of this.querySelectorAll('iframe')){frame.removeAttribute('src');frame.srcdoc='';}
+      for(const frame of this.querySelectorAll('iframe')){frame.nativePresentation?.cancel();frame.removeAttribute('src');frame.srcdoc='';}
       this.lease?.release();this.lease=null;
     }
   });

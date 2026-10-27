@@ -19,7 +19,7 @@ addEventListener('focusin',()=>events.push(snapshot('focusin')),true);
 addEventListener('message',e=>{if(e.source!==original()?.contentWindow)return;if(e.data?.type==='fixture-native')messages.push({...e.data,outerFocus:document.activeElement===original(),phase,at:performance.now()});if(e.data?.type==='fixture-boot')boot.push(e.data);});
 let running=true;function tick(){if(!running)return;frames.push(snapshot('frame'));requestAnimationFrame(tick);}requestAnimationFrame(tick);
 window.nativeCase={get ready(){return ui.prepared&&host.querySelector('pot-resource')?.dataset.state==='ready';},get staged(){return !!original()?.nativePreparation&&document.querySelector('[data-preparation-surface] pot-message-file[data-state="loading"]');},messages,boot,errors,events,frames,snapshot,
-start(){phase='pending';window.originalNative=original();original().addEventListener('load',()=>loads++);rows=[{...rows[0],text:'[Held synthetic file](pending.md)'}];scroller.style.width='340px';draw();},
+start(){phase='pending';window.originalNative=original();original().addEventListener('load',()=>loads++);const inputReturn=new URLSearchParams(location.search).has('input-return');if(inputReturn){scroller.style.height='1600px';app.style.height='1700px';}rows=[{...rows[0],text:inputReturn?'':'[Held synthetic file](pending.md)'}];scroller.style.width='340px';draw();},
 resize(){phase='resize-cancel';scroller.style.width='420px';draw();},
 release(){phase='released';for(const resolve of pending.splice(0))resolve([]);},
 probe(label){original()?.contentWindow.postMessage({type:'fixture-probe',label},'*');},

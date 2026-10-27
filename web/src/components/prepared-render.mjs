@@ -134,8 +134,9 @@ function stageNativeIslands(context){
     // candidate. An unchanged embedded viewport already has its real layout:
     // staging it would unnecessarily retire the browser's current input surface.
     if(entry.projection&&box.width===oldBox.width&&box.height===oldBox.height&&entry.projection.clientWidth===original.clientWidth&&entry.projection.clientHeight===original.clientHeight)continue;
+    original.nativePresentation?.cancel();
     owner.nativeReflowDeadline??=performance.now()+5000;
-    entry.style=original.getAttribute('style');entry.popover=original.getAttribute('popover');entry.inert=original.inert;entry.hidden=original.getAttribute('aria-hidden');entry.focus=document.activeElement===original;
+    entry.style=original.getAttribute('style');entry.popover=original.getAttribute('popover');entry.inert=original.inert;entry.hidden=original.getAttribute('aria-hidden');entry.tabindex=original.getAttribute('tabindex');entry.focus=document.activeElement===original;
     entry.home=original.ownerDocument.createElement('div');entry.home.className=original.className;entry.home.style.cssText='box-sizing:border-box;width:'+oldBox.width+'px;height:'+oldBox.height+'px;max-width:100%';entry.home.inert=true;entry.home.setAttribute('aria-hidden','true');entry.home.dataset.conversationHold='';entry.home.dataset.nativePreparationPlaceholder='';
     // Prepare the temporary status in the same connected hidden surface. The
     // old measured frame is a hold, never ready content or a reading anchor.
@@ -165,6 +166,42 @@ function nativeIslandsPending(context,deadlineFor,now){
   }
   return pending;
 }
+function presentNativeIsland(entry){
+  const {original,owner,home,context}=entry,view=original.ownerDocument.defaultView,parent=original.parentElement;
+  const source=original.getAttribute('src'),generation=owner.generation,window=original.contentWindow;
+  const position=parent.style.getPropertyValue('position'),priority=parent.style.getPropertyPriority('position'),positioned=getComputedStyle(parent).position==='static';
+  if(positioned)parent.style.position='relative';
+  // The iframe has its final flow, styles and input eligibility while the
+  // existing loading hold covers it. Removing this sibling later does not
+  // perform another native viewport/input-surface transition.
+  home.style.cssText='position:absolute;inset:0;width:auto;height:auto;max-width:none;max-height:none;margin:0;z-index:1;background:var(--surface);pointer-events:auto';home.inert=false;parent.append(home);
+  original.setAttribute('aria-hidden','true');if(original.ownerDocument.activeElement!==original)original.setAttribute('tabindex','-1');
+  let animation=0,previous,stable=0,closed=false;
+  const presentation={cancel:finish};original.nativePresentation=presentation;
+  function finish(){
+    if(closed)return;closed=true;view.cancelAnimationFrame(animation);home.remove();
+    if(positioned&&parent.style.position==='relative'){if(position)parent.style.setProperty('position',position,priority);else parent.style.removeProperty('position');}
+    if(original.nativePresentation===presentation){
+      delete original.nativePresentation;
+      if(entry.hidden===null)original.removeAttribute('aria-hidden');else original.setAttribute('aria-hidden',entry.hidden);
+      if(entry.tabindex===null)original.removeAttribute('tabindex');else original.setAttribute('tabindex',entry.tabindex);
+    }
+    context.nativePresentationChanged(presentation,false);
+  }
+  function check(){
+    if(closed)return;
+    if(original.nativePresentation!==presentation||!original.isConnected||owner.generation!==generation||original.getAttribute('src')!==source||original.contentWindow!==window)return finish();
+    if(original.closest('[data-preparation-surface]')){previous=undefined;stable=0;animation=view.requestAnimationFrame(check);return;}
+    const box=original.getBoundingClientRect(),next=JSON.stringify([box.x,box.y,box.width,box.height,original.clientWidth,original.clientHeight,owner.nativeResizeRevision||0]);
+    stable=next===previous?stable+1:0;previous=next;
+    // RAF runs before rendering. Two matching subsequent callbacks leave a
+    // full rendering opportunity after the final flow/child viewport update;
+    // a layout or native resize revision restarts this presentation boundary.
+    if(stable>=2)return finish();
+    animation=view.requestAnimationFrame(check);
+  }
+  context.nativePresentationChanged(presentation,true);if(!closed)animation=view.requestAnimationFrame(check);
+}
 export function finishPreparedNative(context,{commit=false,preparedOnly=false}={}){
   for(const entry of [...context.nativeIslands.values()]){
     const {original,home,projection}=entry;
@@ -179,12 +216,14 @@ export function finishPreparedNative(context,{commit=false,preparedOnly=false}={
     if(commit&&projection.closest('pot-resource')?.dataset.preparedFallback==='true')entry.owner.dataset.preparedFallback='true';
     original.inert=entry.inert;if(entry.hidden===null)original.removeAttribute('aria-hidden');else original.setAttribute('aria-hidden',entry.hidden);
     delete original.nativePreparation;delete projection.nativePreparation;home.remove();context.nativeIslands.delete(original);
+    if(context.nativePresentationChanged&&original.isConnected)presentNativeIsland(entry);
     // The browsing context never moved. Preserve its current native focus;
     // the focus captured before an async handoff cannot override a later Tab
     // or click destination, including during cancellation and owner retirement.
   }
 }
 export function cancelPreparedNative(root){
+  for(const original of [root,...root.querySelectorAll('iframe')])original.nativePresentation?.cancel();
   const contexts=new Set([root,...root.querySelectorAll(components+',iframe,[data-native-preparation]')].map(element=>element.nativePreparation?.context).filter(Boolean));
   for(const context of contexts)finishPreparedNative(context);
 }

@@ -197,8 +197,18 @@ document retains its existing focus; new candidates stay inside the inert hidden
 surface. Native viewport restoration does not restore an earlier focus snapshot:
 Tab or click destinations chosen during preparation remain authoritative through
 commit, resize cancellation and owner retirement. Commit and cancellation restore
-the native viewport before retiring the
-surface. Cancellation retains the unfinished native reflow budget until commit;
+the native viewport before retiring the surface. A restored iframe does not
+immediately publish input readiness: its existing loading hold covers the final
+flow viewport until matching animation-frame observations span the browser's
+rendering update. Source, browsing-context and resource-generation identity must
+remain current; geometry or native resize revisions restart that boundary.
+The window remains unprepared and busy until presentation completes. Publishing
+readiness removes the sibling hold without another iframe style, popover or inert
+transition. An unfocused returning iframe is temporarily excluded from sequential
+Tab navigation; a focused document keeps its current keyboard target. New hidden
+candidates remain inside the inert preparation surface. A new viewport handoff,
+reset, suspension or owner retirement cancels the previous presentation wait.
+Cancellation retains the unfinished native reflow budget until commit;
 this does not renew an unresolved component's content deadline. Resize, result
 and dependency notices carry resource revisions through
 the same preparation batch; a late revision invalidates an older measurement.

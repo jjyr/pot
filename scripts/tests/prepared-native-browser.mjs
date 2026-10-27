@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {preparedNativeFocusIntent} from './prepared-focus-browser.mjs';
+import {preparedNativeInputReady,preparedNativeUnfocusedTab,preparedNativePresentationFences} from './prepared-native-input-browser.mjs';
 
 export async function preparedNativeLifecycle(browser,origin){
   const results=[];
@@ -55,5 +56,8 @@ export async function preparedNativeLifecycle(browser,origin){
     assert.equal(result.acquired,result.released);results.push(result);
   }finally{await context.close();}
   results.push({focusIntent:await preparedNativeFocusIntent(browser,origin)});
+  results.push({inputReady:await preparedNativeInputReady(browser,origin)});
+  results.push({unfocusedTab:await preparedNativeUnfocusedTab(browser,origin)});
+  results.push({presentationFences:await preparedNativePresentationFences(browser,origin)});
   return results;
 }
