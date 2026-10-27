@@ -87,6 +87,8 @@ class InstallTests(unittest.TestCase):
             installer.install(self.home, self.binary, build=False, receiver=True)
         receiver = self.home / ".local/bin/pot-codex-agent"
         self.assertEqual(receiver.read_bytes(), self.binary.read_bytes())
+        self.assertFalse((self.home / ".codex/plugins/pot").exists())
+        self.assertFalse((self.home / ".agents/plugins/marketplace.json").exists())
         with mock.patch.object(installer.shutil, "which", return_value=None):
             with self.assertRaisesRegex(ValueError, "Go is required"):
                 installer.install(self.home, self.binary, build=True, receiver=True)

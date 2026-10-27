@@ -34,7 +34,9 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def install(home, binary=None, build=False, codex=None, receiver=False):
+def install(home, binary=None, build=False, receiver=False):
+    if receiver:
+        return install_receiver(home, binary, build)
     destination = home / ".codex/plugins/pot"
     marketplace = home / ".agents/plugins/marketplace.json"
     if any(
@@ -82,28 +84,6 @@ def install(home, binary=None, build=False, codex=None, receiver=False):
             and previous.get(relative) != digest(target)
         ):
             raise ValueError(f"Existing local change retained: {relative}")
-    if receiver and build:
-        go = shutil.which("go")
-        if not go:
-            raise ValueError(
-                "Go is required to build the Agent Link host; use mise exec -- python3 integrations/codex/install.py or --binary PATH"
-            )
-        subprocess.run(
-            [go, "build", "-mod=readonly", "-o", str(binary), "./cmd/pot-codex-agent"],
-            cwd=REPO,
-            check=True,
-        )
-    if receiver:
-        if binary is None or not binary.is_file():
-            raise ValueError("Receiver binary missing; build it or pass --binary PATH")
-        # Execution is an independent installation, never an MCP plugin command.
-        receiver_binary = home / ".local/bin/pot-codex-agent"
-        if any(p.is_symlink() for p in [receiver_binary, *receiver_binary.parents]):
-            raise ValueError("Refusing symlink at receiver destination")
-        if receiver_binary.exists() and receiver_binary.read_bytes() != binary.read_bytes():
-            raise ValueError("Receiver executable exists; explicitly replace it while stopped")
-    else:
-        receiver_binary = None
     for relative, data in desired.items():
         path = destination / relative
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -122,12 +102,39 @@ def install(home, binary=None, build=False, codex=None, receiver=False):
     old["pot"] = expected
     catalog["plugins"] = list(old.values())
     atomic(marketplace, json.dumps(catalog, indent=2) + "\n")
-    if receiver_binary:
-        receiver_binary.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        receiver_binary.write_bytes(binary.read_bytes())
-        receiver_binary.chmod(0o700)
     print(f"Installed optional setup helper: {destination}")
     print("Independent MCP connections and receiver processes have separate lifecycles.")
+    return destination
+
+
+def install_receiver(home, binary, build):
+    destination = home / ".local/bin/pot-codex-agent"
+    if any(p.is_symlink() for p in [destination, *destination.parents]):
+        raise ValueError("Refusing symlink at receiver destination")
+    if build:
+        go = shutil.which("go")
+        if not go:
+            raise ValueError("Go is required to build the receiver; use --receiver --binary PATH")
+        subprocess.run(
+            [go, "build", "-mod=readonly", "-o", str(binary), "./cmd/pot-codex-agent"],
+            cwd=REPO,
+            check=True,
+        )
+    if binary is None or not binary.is_file():
+        raise ValueError("Receiver binary missing; build it or pass --binary PATH")
+    if destination.exists() and destination.read_bytes() != binary.read_bytes():
+        raise ValueError("Receiver executable exists; explicitly replace it while stopped")
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".pot-", dir=destination.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(binary.read_bytes())
+        os.chmod(temporary, 0o700)
+        os.replace(temporary, destination)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    print(f"Installed independent receiver executable: {destination}")
+    print("Connect and start it explicitly; the optional helper was not installed.")
     return destination
 
 
@@ -181,7 +188,7 @@ def main():
     parser.add_argument(
         "--receiver",
         action="store_true",
-        help="Also install the independent receiver executable; never start it",
+        help="Install the independent receiver instead of the optional helper; never start it",
     )
     parser.add_argument(
         "--binary", type=Path, help="Built receiver executable (requires --receiver)"
@@ -207,10 +214,9 @@ def main():
                 home,
                 binary,
                 build=args.receiver and args.binary is None,
-                codex=codex,
                 receiver=args.receiver,
             )
-            if codex and not args.source_only:
+            if codex and not args.source_only and not args.receiver:
                 codex_home = args.codex_home or (
                     Path(os.environ["CODEX_HOME"])
                     if os.environ.get("CODEX_HOME")

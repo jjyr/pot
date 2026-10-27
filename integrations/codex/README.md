@@ -91,6 +91,7 @@ python3 integrations/codex/install.py --receiver --source-only
   --root ~/.config/pot-codex/agent --connection CONNECTION_ID
 ```
 
+The receiver installation does not install or activate the optional helper.
 Receiver commands are provided by the shared Host. Serve is an explicit foreground
 lifecycle; the helper never launches it. The installer refuses to overwrite a
 different executable at `~/.local/bin/pot-codex-agent`; replace it explicitly while
