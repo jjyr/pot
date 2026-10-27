@@ -93,6 +93,37 @@ func mcpRedirectValid(value string) bool {
 	ip := net.ParseIP(u.Hostname())
 	return u.Scheme == "http" && (u.Hostname() == "localhost" || ip != nil && ip.IsLoopback())
 }
+
+// RFC 8252 permits a native client's ephemeral port to change only for an
+// IP-literal loopback HTTP redirect. Everything else remains an exact match;
+// the authorization code stores the exact requested URI for token exchange.
+func mcpOAuthRedirectMatches(registered []string, requested string) bool {
+	if slices.Contains(registered, requested) {
+		return true
+	}
+	candidate, e := url.Parse(requested)
+	if e != nil || candidate.Scheme != "http" || candidate.User != nil || candidate.Fragment != "" {
+		return false
+	}
+	ip := net.ParseIP(candidate.Hostname())
+	if ip == nil || !ip.IsLoopback() {
+		return false
+	}
+	for _, raw := range registered {
+		fixed, e := url.Parse(raw)
+		if e != nil || fixed.Scheme != "http" || fixed.Hostname() != candidate.Hostname() {
+			continue
+		}
+		a, b := *fixed, *candidate
+		a.Host = net.JoinHostPort(a.Hostname(), "0")
+		b.Host = net.JoinHostPort(b.Hostname(), "0")
+		if a.String() == b.String() {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *MCPOAuthServer) client(ctx context.Context, id string) (client mcpOAuthClient, err error) {
 	var raw string
 	err = s.options.DB.QueryRowContext(ctx, "SELECT metadata FROM mcp_oauth_clients WHERE id=?", id).Scan(&raw)
@@ -193,7 +224,7 @@ func (s *MCPOAuthServer) authorize(w http.ResponseWriter, r *http.Request) {
 	v := r.URL.Query()
 	client, e := s.client(r.Context(), v.Get("client_id"))
 	challenge, e2 := base64.RawURLEncoding.DecodeString(v.Get("code_challenge"))
-	if e != nil || !mcpSingleValues(v) || !slices.Contains(client.RedirectURIs, v.Get("redirect_uri")) || v.Get("response_type") != "code" || v.Get("resource") != s.resource || (v.Get("scope") != "" && v.Get("scope") != mcpAccessScope) || v.Get("code_challenge_method") != "S256" || e2 != nil || len(challenge) != 32 || len(v.Get("state")) > 1024 {
+	if e != nil || !mcpSingleValues(v) || !mcpOAuthRedirectMatches(client.RedirectURIs, v.Get("redirect_uri")) || v.Get("response_type") != "code" || v.Get("resource") != s.resource || (v.Get("scope") != "" && v.Get("scope") != mcpAccessScope) || v.Get("code_challenge_method") != "S256" || e2 != nil || len(challenge) != 32 || len(v.Get("state")) > 1024 {
 		mcpOAuthError(w, 400, "invalid_request")
 		return
 	}
