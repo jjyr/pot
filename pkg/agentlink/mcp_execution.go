@@ -116,3 +116,16 @@ type MCPNodeSubmit struct {
 	Actor protocol.AgentRef `json:"actor" required:"true"`
 	Input MCPSubmitInput    `json:"input" required:"true"`
 }
+
+type MCPNodeRead struct {
+	Actor  protocol.AgentRef `json:"actor" required:"true"`
+	TaskID string            `json:"task_id" required:"true"`
+}
+type MCPNodeInput struct {
+	Actor protocol.AgentRef `json:"actor" required:"true"`
+	Input MCPTaskInput      `json:"input" required:"true"`
+}
+type MCPNodeCancel struct {
+	Actor protocol.AgentRef `json:"actor" required:"true"`
+	Input MCPCancelInput    `json:"input" required:"true"`
+}
