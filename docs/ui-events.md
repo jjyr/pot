@@ -483,8 +483,10 @@ immediately, including small movements within the bottom proximity threshold.
 Following resumes at the bottom or through Latest. Older and newer history start
 prefetching within two viewports of the relevant edge (at least 360 px), extending
 up to four viewports with observed scroll speed and request latency. Upward gestures also trigger it
-when the loaded content cannot scroll. Page reads remain serialized and preserve
-the visible message anchor. When the complete conversation fits in the viewport,
+when the loaded content cannot scroll. Local page probes remain independent;
+matching network reads share one request. Committed pages preserve the visible
+message anchor unless the current explicit navigation replaces the window. When
+the complete conversation fits in the viewport,
 upward gestures leave it still, without history reads or a Latest action; new
 messages continue following. Only confirmation matching the captured request and
 owner clears a submitted attempt. A user message's `request_id` confirms an ordinary send; steer messages
