@@ -48,6 +48,30 @@ another supported client's initial proposal. The protocol package reuses SDK
 server types and registration through `NewServer` and `AddTool`; business handlers
 remain with their owning component.
 
+`NewStreamableHTTPHandler(func(*http.Request) *Server, *StreamableHTTPOptions)`
+exposes that same server as a standard `http.Handler`. `StreamableHTTPHandler`
+and `StreamableHTTPOptions` are SDK aliases; the constructor forwards options
+without introducing transport defaults or a separate protocol loop. For example,
+an embedding service can construct its handler as follows:
+
+```go
+server := mcp.NewServer(&mcp.Implementation{Name: "example", Version: "1"}, nil)
+// Register the service's tools on server before accepting requests.
+handler := mcp.NewStreamableHTTPHandler(
+    func(*http.Request) *mcp.Server { return server },
+    &mcp.StreamableHTTPOptions{SessionTimeout: 5 * time.Minute},
+)
+```
+
+The embedding service owns routing, authentication, caller binding, HTTP policy,
+listeners and shutdown. Constructing a handler starts no listener and grants no
+business authority. Session timeout, stateful/stateless mode and JSON/SSE response
+policy remain explicit SDK options. The SDK handler has no public `Close` method;
+after stopping HTTP admission, the service can close each remaining session from
+`server.Sessions()`. A client's `Session.Close` sends the SDK's session-deletion
+request for stateful HTTP sessions. Transport cancellation concerns the in-flight
+MCP call; durable business work needs its own cancellation semantics.
+
 The SDK's exported `Connection` interface permits a small stdio decorator for
 explicitly registered incoming extension methods. This is needed because the
 Go SDK does not expose client-side custom receiving-method registration. The
