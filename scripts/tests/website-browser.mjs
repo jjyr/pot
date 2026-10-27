@@ -19,6 +19,18 @@ await page.route('https://api.github.com/repos/jjyr/pot',async route=>{
 await page.addInitScript(()=>{Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.copied=text;}}});});
 for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  await page.goto(`${origin}/website/${locale}/`);
+ assert.equal(await page.locator('#view-overview').isVisible(),true);
+ assert.equal(await page.locator('#view-security').isVisible(),false);
+ assert.equal(await page.locator('#view-install').isVisible(),false);
+ assert.equal(await page.locator('#view-changelog').isVisible(),false);
+ await page.locator('[data-view-tab="security"]').click();
+ assert.equal(await page.locator('#view-security').isVisible(),true);
+ assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} security overflow`);
+ await page.locator('[data-view-tab="changelog"]').click();
+ assert.equal(await page.locator('#view-changelog').isVisible(),true);
+ assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} changelog overflow`);
+ await page.locator('[data-view-tab="install"]').click();
+ assert.equal(await page.locator('#view-install').isVisible(),true);
  assert.equal(await page.locator('#agent-prompt').textContent(),install.prompt);
  assert.equal(await page.locator('.install-panel').count(),4);
  assert.deepEqual(await page.locator('[role=tab]').evaluateAll(tabs=>tabs.map(t=>t.dataset.install)),['agent','macos','linux','web']);
@@ -84,6 +96,8 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  for(const selector of ['#install-linux .linux-native .primary','#install-web .web-server .primary'])
   for(const link of await page.locator(selector).all())assert.equal(await link.getAttribute('href'),'https://github.com/jjyr/pot/releases');
  if(!installOnly){
+ await page.locator('[data-view-tab="overview"]').click();
+ assert.equal(await page.locator('#view-overview').isVisible(),true);
  // 01 is a local conversation with communication disclosures and a result preview.
  assert.equal(await page.locator('#assistant [role=tab], #assistant [data-flow], #run-project').count(),0);
  assert.equal(await page.locator('.a01-communication').count(),2);
@@ -111,6 +125,7 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  }
  console.log(installOnly?'installation, responsive, clipboard and keyboard:':'locale, responsive, clipboard, assistant story and collaboration:',locale,'passed');
 }
+await page.locator('[data-view-tab="install"]').click();
 await page.locator('[data-install="web"]').click();
 await page.selectOption('#language-select','ja');await page.waitForURL('**/ja/**');
 assert.equal(await page.locator('[role=tab][aria-selected=true]').getAttribute('data-install'),'web');
@@ -138,8 +153,10 @@ const before=starRequests;await page.reload();await page.waitForTimeout(100);ass
 await page.addInitScript(()=>{Object.defineProperty(window,'localStorage',{configurable:true,get(){throw Error('Unavailable storage')}})});
 starMode='limited';await page.reload();await page.waitForTimeout(100);assert.equal((await page.locator('.github-star').innerText()).trim(),'Star');
 await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw Error('Denied')}}}));
+await page.locator('[data-view-tab="install"]').click();
 await page.locator('[data-install="agent"]').click();await page.locator('[data-copy="agent-prompt"]').click();assert.equal(await page.evaluate(()=>getSelection().toString()),install.prompt);assert.match(await page.locator('#copy-status').innerText(),/Select and copy/);
 // Keyboard activation and modal focus restoration use native controls.
+await page.locator('[data-view-tab="overview"]').click();
 await page.locator('#a01-openResult').focus();await page.keyboard.press('Enter');assert(await page.locator('#a01-resultDialog').evaluate(e=>e.open));
 await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.activeElement.id),'a01-openResult');
 await page.locator('.github-star').focus();assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('href')),'https://github.com/jjyr/pot');
@@ -155,6 +172,7 @@ if(!installOnly){
 await offline.locator('#a01-openResult').click();assert(await offline.locator('#a01-resultDialog').evaluate(e=>e.open));
 await offline.keyboard.press('Escape');
 }
+await offline.locator('[data-view-tab="install"]').click();
 await offline.locator('[data-install="web"]').click();await offline.selectOption('#language-select','es');
 assert.equal(await offline.locator('[role=tab][aria-selected=true]').getAttribute('data-install'),'web');
 assert(await offline.locator('#install-web .web-server').isVisible());
