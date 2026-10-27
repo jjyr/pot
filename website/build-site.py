@@ -188,14 +188,6 @@ def render_releases():
     return "\n".join(blocks)
 
 
-def initial_demo(catalog, prefix):
-    d = catalog["demo"]
-    a = d["agentTalk"][0]
-    icon = f'<span class="agent-icon codex" aria-hidden="true"><img src="{prefix}assets/codex.png" alt=""></span>'
-    conversation = f'<div class="conversation-user">{esc(a[0])}</div><div class="conversation-reply">{icon}<div><b>Codex</b><p>{esc(a[1])}</p></div></div><div class="conversation-result"><span>↳</span><div>{esc(a[2])}<small>{esc(d["directExample"])}</small></div></div>'
-    return conversation
-
-
 def render(code, prefix="../", root=False):
     catalog = CATALOGS[code]
     texts = catalog["page"]
@@ -228,6 +220,7 @@ def render(code, prefix="../", root=False):
     page = page.replace('href="assets/', 'href="' + prefix + "assets/").replace(
         'src="assets/', 'src="' + prefix + "assets/"
     )
+    page = page.replace('srcset="assets/', 'srcset="' + prefix + "assets/")
     page = page.replace('href="style.css"', 'href="' + prefix + 'style.css"')
     options = "".join(
         f'<option value="{k}" lang="{k}"'
@@ -254,13 +247,6 @@ def render(code, prefix="../", root=False):
     config = {**catalog, "install": install, "locale": code, "assetBase": prefix}
     scripts = f'<script src="{prefix}locale.js"></script><script id="pot-data" type="application/json">{payload(config)}</script><script src="{prefix}app.js" defer></script>'
     page = page.replace('<script src="app.js" defer></script>', alternatives + scripts)
-    conversation = initial_demo(catalog, prefix)
-    page = page.replace(
-        '<div id="agent-conversation" class="agent-conversation" aria-live="polite"></div>',
-        '<div id="agent-conversation" class="agent-conversation" aria-live="polite">'
-        + conversation
-        + "</div>",
-    )
     fallback = (
         '<noscript><nav class="language-fallback" aria-label="'
         + esc(demo["switchLanguage"])
@@ -293,6 +279,8 @@ def embedded_assets():
         "deepinfra": "deepinfra.svg",
         "product_work": "product-work.png",
         "product_agent_link": "product-agent-link.png",
+        "product_assistants": "product-assistants.png",
+        "product_work_mobile": "product-work-mobile.png",
     }.items():
         path = ROOT / "assets" / file
         mime = mimetypes.guess_type(file)[0]
@@ -326,6 +314,8 @@ def preview():
             "deepinfra": "deepinfra.svg",
             "product_work": "product-work.png",
             "product_agent_link": "product-agent-link.png",
+            "product_assistants": "product-assistants.png",
+            "product_work_mobile": "product-work-mobile.png",
         }.items():
             body = body.replace("assets/" + file, assets[key])
         config = {**config, "assets": assets}

@@ -17,6 +17,25 @@ await page.route('https://api.github.com/repos/jjyr/pot',async route=>{
  await route.fulfill({status:starMode==='missing'?404:starMode==='limited'?403:200,contentType:'application/json',body:JSON.stringify({stargazers_count:starMode==='invalid'?'wrong':starMode==='zero'?0:1234})});
 });
 await page.addInitScript(()=>{Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.copied=text;}}});});
+async function capture(){
+ const dir='docs/pr-images/redesign-website';await fs.mkdir(dir,{recursive:true});
+ for(const width of [1280,390,320])for(const version of ['before','after']){
+  await page.setViewportSize({width,height:900});
+  await page.goto(`${origin}/${version==='before'?'output/website-before/':''}website/zh-CN/`);
+  await page.screenshot({path:`${dir}/manual-home-${width}-${version}.png`});
+ }
+ await page.setViewportSize({width:1280,height:900});
+ for(const view of ['security','install','changelog'])for(const version of ['before','after']){
+  await page.goto(`${origin}/${version==='before'?'output/website-before/':''}website/zh-CN/`);
+  await page.locator(`[data-view-tab="${view}"]`).click();
+  await page.screenshot({path:`${dir}/manual-${view}-1280-${version}.png`});
+ }
+ await page.goto(`${origin}/website/zh-CN/#assistant`);
+ await page.locator('img').evaluateAll(images=>images.forEach(image=>image.loading='eager'));
+ await page.locator('img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
+ await page.screenshot({path:`${dir}/manual-design-1280-after.png`,fullPage:true});
+}
+if(process.argv.includes('--capture-only')){await capture();await browser.close();process.exit(0);}
 for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  await page.goto(`${origin}/website/${locale}/`);
  assert.equal(await page.locator('#view-overview').isVisible(),true);
@@ -36,7 +55,7 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  assert.deepEqual(await page.locator('[role=tab]').evaluateAll(tabs=>tabs.map(t=>t.dataset.install)),['agent','macos','linux','web']);
  assert.equal(await page.locator('[role=tab][aria-selected=true]').getAttribute('data-install'),'macos');
  assert.equal(await page.locator('.install-panel:visible').count(),1);
- for(const width of [1280,390]){
+ for(const width of [1280,390,320]){
   await page.setViewportSize({width,height:width===390?844:900});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} overflow at ${width}`);
   const mark=page.locator('.github-star img');
@@ -52,7 +71,6 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
   }),`${locale} Invertocat stays compact without the stylesheet at ${width}`);
   assert(await page.locator('.github-star').evaluate(e=>e.getBoundingClientRect().height>=44&&getComputedStyle(e).cursor==='pointer'));
   assert(await page.locator('.github-star').getAttribute('aria-label'));
-  if(width===390)assert(await page.evaluate(()=>{const star=document.querySelector('.github-star').getBoundingClientRect(),start=document.querySelector('.nav-cta').getBoundingClientRect();return star.right<=start.left&&Math.abs((star.top+star.bottom-start.top-start.bottom)/2)<2;}),`${locale} header actions share a row`);
   for(const [channel,id] of [['agent','agent-prompt'],['macos','brew-command'],['linux',null],['web','docker-image'],['web','server-command']]){
    await page.locator(`[data-install="${channel}"]`).click();
    assert.equal(await page.locator('.install-panel:visible').count(),1);
@@ -113,16 +131,31 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  assert.match(await page.locator('.release-title-link').first().innerText(),/Pot 0\.0\.4/);
  await page.locator('[data-view-tab="overview"]').click();
  assert.equal(await page.locator('#view-overview').isVisible(),true);
- const postHref=await page.locator('.philosophy-post-link').first().getAttribute('href');
+ const postHref=await page.locator('.further').getAttribute('href');
  assert.equal(postHref,locale==='zh-CN'||locale==='zh-TW'?'https://jjylab.com/posts/why-agent-coding-is-exhausting/':'https://jjylab.com/en/posts/why-agent-coding-is-exhausting/');
  for(const width of [1280,390,320]){
   await page.setViewportSize({width,height:900});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} overview overflow at ${width}`);
  }
- await page.locator('[data-agent="claude"]').click();assert.equal(await page.locator('#preview-name').innerText(),'Claude');
- await page.locator('[data-mode="delegate"]').click();assert(await page.locator('#agent-conversation').innerText());
+ // Direct links, refresh and history must reveal their target panel.
+ await page.goto(`${origin}/website/${locale}/#view-security`);
+ assert(await page.locator('#view-security').isVisible());
+ await page.locator('[data-view-tab="install"]').click();
+ await page.locator('[data-install="linux"]').click();
+ await page.reload();assert(await page.locator('#install-linux').isVisible());
+ await page.goBack();assert(await page.locator('#view-security').isVisible());
+ await page.goForward();assert(await page.locator('#view-install').isVisible());
+ await page.locator('[data-view-tab="overview"]').click();
+ assert.equal(new URL(page.url()).hash,'#philosophy');
+ assert(await page.locator('#philosophy').isVisible());
+ assert.equal(await page.locator('.product-figure').count(),2);
+ await page.locator('.product-figure img').first().scrollIntoViewIfNeeded();
+ await page.locator('.product-figure img').first().evaluate(img=>img.decode());
+ assert(await page.locator('.product-figure img').first().evaluate(img=>img.naturalWidth>300));
+ assert.equal(await page.locator('.product-figure a').first().getAttribute('href'),'../assets/product-work.png');
+
  }
- console.log(installOnly?'installation, responsive, clipboard and keyboard:':'locale, responsive, clipboard, changelog links and collaboration:',locale,'passed');
+ console.log(installOnly?'installation, responsive, clipboard and keyboard:':'locale, responsive, clipboard, changelog links and navigation:',locale,'passed');
 }
 await page.locator('[data-view-tab="install"]').click();
 await page.locator('[data-install="web"]').click();
@@ -140,7 +173,7 @@ for(const mode of ['ok','missing','limited','network','invalid','zero','timeout'
  const label=await page.locator('.github-star').innerText();
  assert.equal(await page.locator('.github-star').getAttribute('href'),'https://github.com/jjyr/pot');
  assert.equal(label.includes('1,234'),mode==='ok',mode);
- if(mode!=='ok'&&mode!=='zero')assert.equal(label.trim(),'Star');
+ if(mode!=='ok'&&mode!=='zero')assert.equal(label.trim(),'GitHub');
  if(mode==='zero')assert.match(label,/0/);
  console.log('Star',mode,'passed');
 }
@@ -148,7 +181,7 @@ for(const mode of ['ok','missing','limited','network','invalid','zero','timeout'
 await page.evaluate(()=>localStorage.setItem('pot-github-stars-v1',JSON.stringify({time:Date.now(),count:987})));
 const before=starRequests;await page.reload();await page.waitForTimeout(100);assert.equal(starRequests,before);assert.match(await page.locator('.github-star').innerText(),/987/);
 await page.addInitScript(()=>{Object.defineProperty(window,'localStorage',{configurable:true,get(){throw Error('Unavailable storage')}})});
-starMode='limited';await page.reload();await page.waitForTimeout(100);assert.equal((await page.locator('.github-star').innerText()).trim(),'Star');
+starMode='limited';await page.reload();await page.waitForTimeout(100);assert.equal((await page.locator('.github-star').innerText()).trim(),'GitHub');
 await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw Error('Denied')}}}));
 await page.locator('[data-view-tab="install"]').click();
 await page.locator('[data-install="agent"]').click();await page.locator('[data-copy="agent-prompt"]').click();assert.equal(await page.evaluate(()=>getSelection().toString()),install.prompt);assert.match(await page.locator('#copy-status').innerText(),/Select and copy/);
@@ -160,6 +193,8 @@ assert.deepEqual(errors,[]);
 console.log('cache, unavailable storage, clipboard fallback and keyboard checks passed');
 }
 assert.deepEqual(errors,[]);
+if(process.argv.includes('--capture'))await capture();
+
 const offline=await browser.newPage();const outgoing=[];
 offline.on('request',request=>{if(request.url().startsWith('https://'))outgoing.push(request.url())});
 await offline.goto(origin+'/website/pot-preview.html');
@@ -174,6 +209,16 @@ assert.equal(await noJS.locator('#install-linux #docker-image').count(),0);
 assert(await noJS.locator('#install-web .web-docker').isVisible());
 assert.deepEqual(outgoing,[]);
 console.log('Offline preview and no-JavaScript install content passed');
+for(const [language,saved,expected] of [['ja-JP',null,'ja'],['zh-Hant',null,'zh-TW'],['zh-Hans-TW',null,'zh-CN'],['fr-FR',null,'en'],['ko-KR','es','es']]){
+ const context=await browser.newContext({locale:language});
+ if(saved)await context.addInitScript(value=>localStorage.setItem('pot.website.language',value),saved);
+ const entry=await context.newPage();await entry.route('https://api.github.com/**',route=>route.abort());
+ await entry.goto(origin+'/website/');await entry.waitForURL(`**/${expected}/`);
+ assert.equal(await entry.locator('html').getAttribute('lang'),expected);
+ await entry.goto(origin+'/website/en/');assert.equal(await entry.locator('html').getAttribute('lang'),'en');
+ await context.close();
+}
+console.log('Root language detection, saved preference and explicit locale paths passed');
 } finally {
  await browser.close();
 }

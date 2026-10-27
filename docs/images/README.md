@@ -29,7 +29,10 @@ The capture script accepts `POT_PLAYWRIGHT_MODULE` and `POT_WEBSITE_ORIGIN`, lik
 the website browser checks. It verifies the loaded Development avatar, task
 counts and read-only fixture before writing the two images and website copies.
 
-The website's `assets/product-work.png` and `assets/product-agent-link.png` are
-copies for its local result gallery. Refresh those copies when these images
-change. These are product illustrations using synthetic content, not evidence
+The same capture script writes website assets: a focused conversation crop
+(`product-work.png`), an assistant-list crop (`product-assistants.png`), a 390px
+conversation capture (`product-work-mobile.png`), and the Agent Link copy
+(`product-agent-link.png`). Refresh these alongside the full product images.
+The website links each figure to its full image, with a native picture source
+for the mobile conversation. These are product illustrations using synthetic content, not evidence
 that the illustrated installation checks ran on a user's computer.
