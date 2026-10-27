@@ -166,15 +166,23 @@ async function focused(page,name,origin){
   await page.goto(origin+'/scripts/tests/fixtures/linked-approvals.html?assistant_id=main&locale=zh-CN&theme=light');
   if(name==='patch-approvals')return contract('pot-ui-patch-approvals-browser.js',page,{origin});
   const chatApprovals=page.locator('.history:not([data-preparation-surface]) .chat-approvals');
+  const expectedApproval={scope:JSON.stringify(['one','main']),id:'linked:fixture-request',command:'ssh deployment-host hostname'};
+  const waitForOpenApproval=()=>page.waitForFunction(expected=>{
+    const history=document.querySelector('.history:not([data-preparation-surface])'),card=history?.querySelector('.chat-approvals .approval-card'),command=card?.querySelector('.approval-arguments');
+    if(document.querySelector('.assistant-row.is-selected')?.dataset.viewKey!==expected.scope||card?.dataset.approvalId!==expected.id||!card.open||command?.textContent!==expected.command||command.innerText!==expected.command)return false;
+    const box=command.getBoundingClientRect(),viewport=history.getBoundingClientRect();
+    return command.isConnected&&getComputedStyle(command).visibility==='visible'&&box.width>0&&Math.min(box.bottom,viewport.bottom)-Math.max(box.top,viewport.top)>=24;
+  },expectedApproval,{timeout:8000});
   await chatApprovals.locator('.approval-card summary').click();
+  await waitForOpenApproval();
   if(await chatApprovals.locator('.approval-actions button').count()!==2)throw Error('Approval broader than one operation');
   if(!(await chatApprovals.locator('.approval-arguments').first().innerText()).includes('ssh deployment-host hostname'))throw Error('Missing exact command');
   await page.evaluate(()=>linkedApprovalFixture.language('en'));
   await page.getByRole('button',{name:'Deny',exact:true}).click();await chatApprovals.waitFor({state:'hidden'});
   if(await chatApprovals.locator('.approval-actions button').count())throw Error('Stale decision remains');
-  await page.evaluate(()=>linkedApprovalFixture.reset());await chatApprovals.locator('.approval-card summary').click();
+  await page.evaluate(()=>linkedApprovalFixture.reset());await chatApprovals.locator('.approval-card summary').click();await waitForOpenApproval();
   await page.getByRole('button',{name:'Allow once',exact:true}).click();await page.waitForFunction(()=>!linkedApprovalFixture.pending);
   const state=await page.evaluate(()=>({calls:linkedApprovalFixture.calls,errors:linkedApprovalFixture.errors}));
-  if(JSON.stringify(state.calls.map(call=>call.action))!==JSON.stringify(['deny','allow_once'])||state.errors.length)throw Error(JSON.stringify(state));
+  if(JSON.stringify(state.calls.map(call=>[call.id,call.action]))!==JSON.stringify([[expectedApproval.id,'deny'],[expectedApproval.id,'allow_once']])||state.errors.length)throw Error(JSON.stringify(state));
   return {passed:true};
 }
