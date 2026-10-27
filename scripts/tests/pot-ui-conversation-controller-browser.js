@@ -60,12 +60,12 @@ async (page,{origin=new URL(page.url()).origin}={})=>{
   assert((await sample()).top===mountedTop&&(await page.evaluate(()=>controllerScene.writes.length))===writes,'New row initial measurement and RO share one intent');
   // Native input interleaved with unreported DOM growth must translate the
   // committed anchor by the input delta, not adopt the whole shifted DOM.
-  const box=await page.locator('.controlled-history').boundingBox();await page.mouse.move(box.x+box.width-18,box.y+180);
+  const box=await page.locator('.controlled-history:not([data-preparation-surface])').boundingBox();await page.mouse.move(box.x+box.width-18,box.y+180);
   await phase('wheel between DOM and RO');const beforeWheel=await sample();
   await page.evaluate(()=>controllerScene.grow(80,{layout:false}));await page.mouse.wheel(0,-36);await settle();const wheel=await offset(36);
   assert(Math.abs(wheel.top-beforeWheel.top-(80-36))<=.6,'Only the real wheel delta changes reading intent');
   await page.evaluate(()=>{measurementDelivery.release();controllerScene.repeat();});await settle();await offset(36);
-  await phase('key between DOM and RO');await page.locator('.controlled-history').focus();const keyStart=await sample();
+  await phase('key between DOM and RO');await page.locator('.controlled-history:not([data-preparation-surface])').focus();const keyStart=await sample();
   await page.evaluate(()=>controllerScene.grow(50,{layout:false}));await page.keyboard.press('ArrowUp');await page.waitForTimeout(300);const key=await sample();
   const keyInput=await page.evaluate(()=>controllerScene.inputs.filter(input=>input.phase==='key between DOM and RO').reduce((sum,input)=>sum+input.delta,0));
   assert(keyInput<0,'The real ArrowUp generated native movement');
@@ -100,7 +100,7 @@ async (page,{origin=new URL(page.url()).origin}={})=>{
   assert(await page.evaluate(()=>controllerScene.restoreCalls)===restores,'Range/layout updates never request another page restoration');
   await phase('prepend');await page.evaluate(()=>controllerScene.prepend());await settle();await offset(0);
   await phase('width reflow');await page.evaluate(()=>{controllerScene.wrap();controllerScene.scroller.style.width='320px';});await settle();await offset(0);
-  const reflowedBox=await page.locator('.controlled-history').boundingBox();await page.mouse.move(reflowedBox.x+reflowedBox.width-18,reflowedBox.y+180);
+  const reflowedBox=await page.locator('.controlled-history:not([data-preparation-surface])').boundingBox();await page.mouse.move(reflowedBox.x+reflowedBox.width-18,reflowedBox.y+180);
   await phase('target interrupt');await page.evaluate(()=>controllerScene.list.locate({id:'r40'}));await settle();await page.mouse.wheel(0,-36);await settle();
   assert(await page.evaluate(()=>controllerScene.list.destination===null),'Real input interrupts explicit target navigation');
   const reading=await sample();await page.evaluate(()=>controllerScene.repeat());await settle();assert(Math.abs((await sample()).offset-reading.offset)<=.6,'No stale target command replays after input');
@@ -110,7 +110,7 @@ async (page,{origin=new URL(page.url()).origin}={})=>{
   const trimmed=await sample();assert(trimmed.state.mode==='reading','Geometry clamping at the boundary does not enable following');
   assert(trimmed.top===0&&trimmed.offset===30,'A short trimmed list clamps at zero; the header makes the original zero offset unreachable');
   assert(trimmed.mounted===2,'Trimming retires removed rows');
-  await phase('boundary without movement');await page.locator('.controlled-history').focus();
+  await phase('boundary without movement');await page.locator('.controlled-history:not([data-preparation-surface])').focus();
   await page.keyboard.press('ArrowUp');await page.waitForTimeout(220);await page.evaluate(()=>controllerScene.repeat());await settle();
   const boundary=await sample();
   assert(boundary.top===0&&boundary.state.mode==='reading'&&(await page.evaluate(()=>controllerScene.writes.length))===0,'Boundary keyboard input settles without inventing movement or navigation');

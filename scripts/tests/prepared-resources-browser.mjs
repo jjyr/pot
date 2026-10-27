@@ -1,3 +1,4 @@
+import {preparedRevisionTransfers,preparedResponsiveMedia} from './prepared-handoffs-browser.mjs';
 import {preparedApprovalGeneration} from './prepared-approval-generation-browser.mjs';
 import assert from 'node:assert/strict';
 import {sourceServer,launchBrowser} from './browser-harness.mjs';
@@ -7,6 +8,7 @@ import {preparedLifetimes,preparedTaskDisclosure} from './prepared-lifetimes-bro
 const source=await sourceServer(),browser=await launchBrowser();
 try{
  const context=await browser.newContext(),page=await context.newPage(),errors=[];page.setDefaultTimeout(12000);page.on('pageerror',error=>errors.push(error.message));
+ await preparedRevisionTransfers(page,source.origin);await preparedResponsiveMedia(page,source.origin);
  await page.goto(source.origin+'/empty-prepared-fixture');
  await page.evaluate(async()=>{
   const {createReplyBubble}=await import('/components/reply.mjs');

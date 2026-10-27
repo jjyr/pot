@@ -1,3 +1,4 @@
+import {observePreparedGeometry} from './prepared-geometry-observer.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
@@ -9,7 +10,7 @@ const source=await sourceServer({root:process.env.POT_PREPARED_SOURCE||resolve('
 try{
  for(const phone of [false,true]){
   const fixture=await preparedChatFixture(source.origin),context=await browser.newContext({viewport:phone?{width:390,height:852}:{width:1280,height:800},isMobile:phone,hasTouch:phone,serviceWorkers:'block'}),page=await context.newPage(),errors=[];
-  page.setDefaultTimeout(15000);page.on('pageerror',error=>errors.push(error.message));
+  await observePreparedGeometry(page);page.setDefaultTimeout(15000);page.on('pageerror',error=>errors.push(error.message));
   await context.route('**/*',route=>new URL(route.request().url()).origin===fixture.origin?route.continue():route.abort());
   const control=async value=>{const response=await fetch(fixture.origin+'/fixture/control',{method:'POST',body:JSON.stringify(value)});assert(response.ok);return response.json();};
   const frames=()=>page.evaluate(async()=>{for(let i=0;i<12;i++)await new Promise(requestAnimationFrame);});
@@ -32,7 +33,7 @@ try{
    const held=await page.evaluate(()=>{const saved=retainedPrepared,row=document.querySelector('.history:not([data-preparation-surface]) [data-message-id="active-answer"]');return {same:row===saved.row&&row.querySelector('p')===saved.paragraph,resources:row.querySelectorAll('pot-resource').length,visible:getComputedStyle(document.querySelector('.history:not([data-preparation-surface])')).visibility,selection:getSelection().anchorNode===saved.selection};});
    assert.deepEqual(held,{same:true,resources:0,visible:'visible',selection:true},'Pending bytes retain the old live version and selection');
    await control({holdPreview:false});await page.locator('.history:not([data-preparation-surface]) [data-message-id="active-answer"] pot-mermaid[data-state="ready"]').waitFor();await frames();
-   const committed=await page.evaluate(()=>{const saved=retainedPrepared,row=document.querySelector('.history:not([data-preparation-surface]) [data-message-id="active-answer"]'),resource=row.querySelector('pot-resource'),diagram=row.querySelector('pot-mermaid'),last=preparedEvidence.frames.at(-1);return {sameRow:row===saved.row,sameParagraph:row.querySelector('p')===saved.paragraph,sameCode:row.querySelector('pre')===saved.code,scroll:saved.code.scrollLeft,savedScroll:saved.scroll,selection:getSelection().anchorNode===saved.selection,height:row.getBoundingClientRect().height,measured:Number.parseFloat(row.style.getPropertyValue('--prepared-row-height')),staged:preparedEvidence.resources.some(item=>item.id===last.resource.id),resource:resource.dataset.state,diagram:diagram.dataset.state};});
+   const committed=await page.evaluate(()=>{const saved=retainedPrepared,row=document.querySelector('.history:not([data-preparation-surface]) [data-message-id="active-answer"]'),resource=row.querySelector('pot-resource'),diagram=row.querySelector('pot-mermaid'),last=preparedEvidence.frames.at(-1);return {sameRow:row===saved.row,sameParagraph:row.querySelector('p')===saved.paragraph,sameCode:row.querySelector('pre')===saved.code,scroll:saved.code.scrollLeft,savedScroll:saved.scroll,selection:getSelection().anchorNode===saved.selection,height:row.getBoundingClientRect().height,measured:preparedGeometry.rows[row.dataset.messageId]?.height,staged:preparedEvidence.resources.some(item=>item.id===last.resource.id),resource:resource.dataset.state,diagram:diagram.dataset.state};});
    assert(committed.sameRow&&committed.sameParagraph&&committed.sameCode&&committed.selection,'Prepared replay preserves actual live Markdown nodes');assert.equal(committed.scroll,committed.savedScroll);assert.equal(committed.resource,'ready');assert.equal(committed.diagram,'ready');assert(committed.staged,'The actual connected candidate resource is transferred');assert(Math.abs(committed.height-committed.measured)<1,'Staged border size equals the committed live row');
    await page.evaluate(()=>getSelection().removeAllRanges());
    await control({scenario:'custom',text:base});await page.waitForFunction(()=>!document.querySelector('.history:not([data-preparation-surface]) [data-message-id="active-answer"] pot-message-file'));await frames();

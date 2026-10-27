@@ -13,7 +13,7 @@ const taskKey=task=>JSON.stringify([task._space_id,task.assistant_id,task.id]);
 // detail navigation and refreshes. It is never part of the transcript.
 export function createBackgroundTasks({locale,onOpen,onToggle}) {
   const element=node('section','background-tasks'),states=new Map();
-  const id=`background-tasks-${crypto.randomUUID()}`;
+  const baseID=`background-tasks-${crypto.randomUUID()}`;let presentation=0;
   let current=null,signature='';
   function update(scope,tasks,needsApproval,target=element,now=Date.now()) {
     let state=states.get(scope);
@@ -29,6 +29,7 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
     // Keep existing order within each approval group; clock/status refreshes and
     // backend updated-at ordering must not shuffle the reader's task rows.
     const ordered=state.order.map(key=>byID.get(key)).sort((a,b)=>Number(needsApproval(b.id,b.phase))-Number(needsApproval(a.id,a.phase)));
+    const id=baseID+'-'+ ++presentation;
     const t=key=>translate(locale(),key),projection=node('section','background-tasks');
     projection.setAttribute('aria-labelledby',`${id}-heading`);
     const heading=node('h2','background-tasks-heading',t('tasks.backgroundCount').replace('{count}',tasks.length.toLocaleString(locale())));

@@ -127,7 +127,15 @@ export function createMarkdownView(host,{slot='markdown'}={}) {
     next=original(next);
     if(old===next)return old;
     if(!old||old.nodeType!==next.nodeType||old.nodeName!==next.nodeName)return adopt(next);
-    if(old.nodeType===3){if(old.data!==next.data)old.data=next.data;return old;}
+    if(old.nodeType===3){
+      if(old.data===next.data)return old;
+      const selection=getSelection(),endpoints=selection?.rangeCount?[selection.anchorNode,selection.anchorOffset,selection.focusNode,selection.focusOffset]:null;
+      if(endpoints&&old.parentNode&&[0,2].every(index=>endpoints[index]!==old||old.data.slice(0,endpoints[index+1])===next.data.slice(0,endpoints[index+1]))){
+        moveConversationNode(old.parentNode,next,old);
+        selection.setBaseAndExtent(...endpoints.map((value,index)=>index%2===0&&value===old?next:value));
+      }
+      return next;
+    }
     if(old.localName==='pot-message-file'){if(old.identity!==next.identity)return next;if(next.preparationUpdates)old.preparationUpdates=next.preparationUpdates;return old;}
     if(old.localName==='pot-mermaid')return old.sourceText===next.sourceText&&old.closed===next.closed?old:next;
     if(old.localName==='pot-file-image')return old.file.task===next.file.task&&old.file.path===next.file.path&&old.label===next.label?old:next;

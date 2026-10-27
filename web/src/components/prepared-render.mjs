@@ -50,13 +50,18 @@ export function withPreparedRender(context,member,work){
 }
 
 export function createPreparedRender({previousRoot,renderContext,deadlines=new Map(),member='',reframe=false,budget=createPreparationBudget()}={}){
-  const context={phase:'prepare',now:Date.now(),previousRoot,previousRoots:new Map(),registeredRoots:new WeakSet(),renderContext,deadlines,member,budget,connectionContext:{budget,alive:true},localDeadlines:new Map(),reframe,frames:new Map(),islands:new Map(),slots:new Map(),incompleteSources:new Map(),assets:new Map(),used:new Map(),alive:true};
+  const context={phase:'prepare',disclosures:new Map(),now:Date.now(),previousRoot,previousRoots:new Map(),registeredRoots:new WeakSet(),renderContext,deadlines,member,budget,connectionContext:{budget,alive:true},localDeadlines:new Map(),reframe,frames:new Map(),islands:new Map(),slots:new Map(),incompleteSources:new Map(),assets:new Map(),used:new Map(),alive:true};
   registerPreparedRoot(context,previousRoot);return context;
 }
 export function preparedPreviousRoot(context,member){return context.previousRoots.get(member)||context.previousRoot;}
+function disclosureKey(detail,member,counts){
+  const base=JSON.stringify([detail.closest('article[data-message-id]')?.dataset.messageId||member,detail.dataset.cacheKey||detail.dataset.approvalId||detail.className]);
+  const index=counts.get(base)||0;counts.set(base,index+1);return base+':'+index;
+}
 export function registerPreparedRoot(context,root){
   if(!root||context.registeredRoots.has(root))return;context.registeredRoots.add(root);
   for(const row of [root,...root.querySelectorAll('article[data-message-id]')])if(row.dataset.messageId)context.previousRoots.set(row.dataset.messageId,row);
+  const counts=new Map();for(const detail of [root,...root.querySelectorAll('details')].filter(node=>node.localName==='details')){const key=disclosureKey(detail,context.member,counts);if(detail.preparedOpenIntent!==undefined)context.disclosures.set(key,detail.preparedOpenIntent);}
   for(const element of root.querySelectorAll(components)){
     const member=element.closest('article[data-message-id]')?.dataset.messageId||'';
     const key=member+':'+componentKey(element);
@@ -74,15 +79,20 @@ export function staticPreparationClone(source){
     next.removeAttribute('id');next.removeAttribute('autofocus');
     if(next.localName.includes('-')){
       const environment=currentPreparedRender();
-      if(environment?.context.phase==='prepare'&&environment.context.reframe){next.classList.remove('prepared-frame','initial-layout-slot');environment.context.frames.set(old,next);}
+      if(environment?.context.phase==='prepare'&&environment.context.reframe&&old.dataset.preparedFallback!=='true'){next.classList.remove('prepared-frame','initial-layout-slot');environment.context.frames.set(old,next);}
       next.preparationSurrogate=true;next.preparationOriginal=old.preparationOriginal||old;
       for(const key of ['identity','sourceText','closed','file','label','presentation','line','noticeKey','renderSlot'])next[key]=old[key];
     }
     if(['img','iframe','audio','video','source'].includes(next.localName)){
       const box=old.getBoundingClientRect();next.removeAttribute('src');next.removeAttribute('srcset');next.removeAttribute('srcdoc');next.removeAttribute('autoplay');
-      // Replaced elements have intrinsic content which cloning cannot prepare
-      // without duplicating media or running another interactive document.
-      next.style.width=box.width+'px';next.style.height=box.height+'px';
+      const reframing=currentPreparedRender()?.context.phase==='prepare'&&currentPreparedRender().context.reframe;
+      // Ready media must reflow from intrinsic dimensions and current CSS. An
+      // old rendered box is valid only while its layout generation is valid.
+      // Keep documents/media inert: no second iframe, playback or resource lease.
+      const intrinsicWidth=old.naturalWidth||old.videoWidth,intrinsicHeight=old.naturalHeight||old.videoHeight;
+      if(reframing&&old.dataset.preparedFallback!=='true'){
+        if(intrinsicWidth&&intrinsicHeight&&!old.hasAttribute('width')&&!old.hasAttribute('height')){next.setAttribute('width',String(intrinsicWidth));next.setAttribute('height',String(intrinsicHeight));}
+      }else{next.style.width=box.width+'px';next.style.height=box.height+'px';}
       next.preparationMedia=true;
     }
   }
@@ -124,10 +134,49 @@ export function preparedAsset(slot,source,create){
     if(!entry||entry.source!==source)throw Error('Prepared render slot does not match its committed revision: '+key);
     context.assets.delete(key);if(!entry.nodes)return entry.value;
     const fragment=entry.value.ownerDocument.createDocumentFragment();
-    for(const node of entry.nodes){const copy=staticPreparationClone(node);copy.preparedNode=node;fragment.append(copy);}
+    for(const node of entry.nodes)moveConversationNode(fragment,node);
     return fragment;
   }
   return create();
+}
+
+// A mutable view keeps its stable container and state, while every entering
+// child is taken from its connected prepared projection. Callers may retain
+// existing native islands by replacing their surrogates before the transfer.
+export function adoptPreparedChildren(target,source,{retain=[]}={}){
+  if(target===source)return;
+  const attributes=[...source.attributes].map(attribute=>[attribute.name,attribute.value]);
+  const oldText=target.childNodes.length===1&&target.firstChild.nodeType===3?target.firstChild:null,newText=source.childNodes.length===1&&source.firstChild.nodeType===3?source.firstChild:null;
+  const selection=getSelection(),endpoints=oldText&&newText&&selection?.rangeCount?[selection.anchorNode,selection.anchorOffset,selection.focusNode,selection.focusOffset]:null;
+  for(const [candidate,live]of retain)if(candidate&&live&&candidate!==live&&candidate.parentNode){moveConversationNode(candidate.parentNode,live,candidate);candidate.remove();}
+  consumePreparationSurrogates(source);
+  const nodes=[...source.childNodes];
+  for(const [index,node]of nodes.entries())moveConversationNode(target,node,target.childNodes[index]||null);
+  if(endpoints&&[0,2].every(index=>endpoints[index]!==oldText||oldText.data.slice(0,endpoints[index+1])===newText.data.slice(0,endpoints[index+1])))selection.setBaseAndExtent(...endpoints.map((value,index)=>index%2===0&&value===oldText?newText:value));
+  for(const node of [...target.childNodes])if(!nodes.includes(node))node.remove();
+  source.removeAttribute('id');for(const attribute of [...target.attributes])if(!attributes.some(([name])=>name===attribute.name))target.removeAttribute(attribute.name);
+  for(const [name,value]of attributes)target.setAttribute(name,value);
+}
+export function preparedDOM(target,slot,source,render,options){
+  const environment=currentPreparedRender();
+  if(environment?.context.phase==='commit'){
+    const projection=preparedAsset('dom:'+slot,source,()=>{throw Error('Missing prepared DOM slot: '+slot);});
+    adoptPreparedChildren(target,projection,typeof options==='function'?options(projection):options);return;
+  }
+  render(target);
+  if(environment?.context.phase==='prepare')preparedAsset('dom:'+slot,source,()=>target);
+}
+export function preparedText(target,slot,value){
+  const text=String(value??''),environment=currentPreparedRender();
+  if(environment?.context.phase==='commit'){
+    if(target.textContent===text)return;
+    const candidate=preparedAsset('text:'+slot,text,()=>{throw Error('Missing prepared text: '+slot);});
+    for(const node of candidate.nodes)moveConversationNode(target,node);
+    for(const node of [...target.childNodes])if(!candidate.nodes.includes(node))node.remove();
+    return;
+  }
+  if(target.textContent!==text)target.textContent=text;
+  if(environment?.context.phase==='prepare')preparedAsset('text:'+slot,text,()=>({nodes:[...target.childNodes]}));
 }
 
 export function retirePreparedTree(root){
@@ -171,7 +220,7 @@ export function settlePreparedTree(root,context,{valid=()=>true,layout=()=>{},ti
       animation=0;if(closed)return;
       if(!context.alive||!valid())return cancel();
       if(!root.isConnected)return schedule();
-      layout();observer.takeRecords();
+      layout();const counts=new Map();for(const detail of [root,...root.querySelectorAll('details')].filter(node=>node.localName==='details')){const key=disclosureKey(detail,context.member,counts);if(context.disclosures.has(key)){detail.preparedOpenIntent=context.disclosures.get(key);detail.open=detail.preparedOpenIntent;}}observer.takeRecords();
       if(root.querySelector('[data-prepared-pending]')){previous=undefined;return schedule();}
       const now=performance.now(),all=[...root.querySelectorAll(components)],pending=[];
       for(const element of all){

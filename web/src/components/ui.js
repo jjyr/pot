@@ -1,4 +1,5 @@
-import {currentPreparedRender} from './prepared-render.mjs';
+import {moveConversationNode} from './conversation-dom.mjs';
+import {currentPreparedRender,preparedAsset,consumePreparationSurrogates} from './prepared-render.mjs';
 import {domainsFor} from '../state/domains/index.mjs';
 import {machinePresentation} from '../state/machine-identity.mjs';
 import {storedPreference} from '../state/preferences.mjs';
@@ -14,7 +15,7 @@ import {createAssistantDrafts} from '../state/assistant-drafts.mjs';
 import {bindMessageSelection,renderMessageReferences,referenceProblem} from './message-references.mjs';
 import {createSystemNotifications} from '../adapters/notifications.mjs';
 import {createToolCall} from './tool-call.mjs';
-import {messageIdentities} from '../state/message-identities.mjs';
+import {messageIdentities,resolveMessageRenderIdentity,messageRenderIssuer} from '../state/message-identities.mjs';
 import {toolForest} from '../state/tool-calls.mjs';
 import {projectScriptRuns} from '../state/script-runs.mjs';
 import {avatar} from './avatar.mjs';
@@ -149,10 +150,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   root.append(rail, titlebar, directory, workspace, menu, preferences, assistantProfile);
   chatApprovals.dataset.scrollAnchor='chat-approvals';
   const messageNodes=new Map(),toolMemory=new Map(),windowHeights=new Map();
+  const renderIdentities=()=>currentPreparedRender()?.context.renderContext?.identities;
+  const resolveRenderIdentity=address=>renderIdentities()?resolveMessageRenderIdentity(renderIdentities(),address):messageIdentities(client).resolve(address);
+  const renderTasks=scope=>currentPreparedRender()?.context.renderContext?.tasks||projectedTasks(scope);
   const messageWindow=createWorkRecordWindow({
     blocked:message=>!!pages?.approvalFor(message.tool),
     scroller:history,host:windowHost,render:(...args)=>renderMessage(...args),dispose:entry=>disposeMessage(entry),heights:windowHeights,
-    locale:()=>locale,actor:()=>messageIdentities(client).actor(client.scope?.()),resolveIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,scope:()=>JSON.stringify(client.scope?.()),
+    locale:()=>locale,actor:()=>renderIdentities()?.actor||messageIdentities(client).actor(client.scope?.()),resolveIdentity:resolveRenderIdentity,memory:toolMemory,scope:()=>JSON.stringify(messageRenderIssuer(client,client.scope?.())),
     active:()=>chatShown&&!disposed,
     requestRender:()=>renderMessages(true),
     interact:()=>cancelChatPosition(),
@@ -829,7 +833,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
  record.compact.update(message);
  }else if(message.role==='tool'&&message.tool){
       const scope=context.scope||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
-      if(!record.tool){record.tool=createToolCall({messageActor:()=>messageIdentities(client).actor(scope),resolveTask:id=>projectedTasks(scope).find(task=>task.id===id),onOpenTask:task=>openChatTask(task,scope),resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key,locale:()=>locale,machineLabel:id=>machinePresentation(client).label(id,scope,locale),onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>messageWindow.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
+      if(!record.tool){record.tool=createToolCall({messageActor:()=>renderIdentities()?.actor||messageIdentities(client).actor(scope),resolveTask:id=>renderTasks(scope).find(task=>task.id===id),onOpenTask:task=>openChatTask(task,scope),resolveMessageIdentity:resolveRenderIdentity,memory:toolMemory,key,locale:()=>locale,machineLabel:id=>currentPreparedRender()?.context.renderContext?.machineLabels?.[id]??machinePresentation(client).label(id,scope,locale),onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>messageWindow.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
       record.tool.update(message,{expanded:messageWindow.revealing&&messageWindow.visibilityPath.has(message.id)||messageWindow.destination?.expand&&messageWindow.destination.id===message.id,offline:context.offline,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
     }else if(message.role==='assistant'){
       record.reply ||= createReplyBubble(bubble);
@@ -839,10 +843,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         onRetrySend:submit,canRetrySend:context.canRetrySend});
       record.text=message.text;record.role=message.role;
     }else if (record.text !== message.text || record.role !== message.role) {
-      bubble.replaceChildren();
-      if (message.role === 'tool') bubble.append(el('pre','',message.text));
-      else if (message.role === 'system') bubble.textContent = message.text;
-      else {const scope=context.scope,prose=el('div','message-prose');updateMarkdown(prose,message.text,{...markdownFiles(scope),renderSlot:'user-prose'});bubble.append(prose);}
+      if(message.role==='user'){
+        if(!record.prose){record.prose=preparedAsset('user-prose-host','user',()=>el('div','message-prose'));bubble.prepend(record.prose);}
+        updateMarkdown(record.prose,message.text,{...markdownFiles(context.scope),renderSlot:'user-prose'});
+      }else bubble.replaceChildren(preparedAsset('plain-body',JSON.stringify([message.role,message.text]),()=>message.role==='tool'?el('pre','',message.text):document.createTextNode(message.text)));
       record.text = message.text; record.role = message.role;
       row.className = `message role-${message.role}`;
     }
@@ -850,28 +854,27 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       const name=context.assistant?.name||'Pot',image=context.assistant?.avatar;
       if(!record.speaker||record.speakerName!==name||record.speakerImage!==image){
         record.speaker?.remove();record.speakerName=name;record.speakerImage=image;
-        record.speaker=el('div','message-speaker');
-        record.speaker.append(assistantAvatar(context.assistant,25),el('span','',name));
-        row.prepend(record.speaker);
+        record.speaker=preparedAsset('speaker',JSON.stringify([name,image]),()=>{const speaker=el('div','message-speaker');speaker.append(assistantAvatar(context.assistant,25),el('span','',name));return speaker;});
+        moveConversationNode(row,record.speaker,row.firstChild);
       }
     }else if(record.speaker){record.speaker.remove();record.speaker=null;}
     const source=message.role==='assistant'?bubble.querySelector('.reply-content'):message.role==='user'?bubble.querySelector('.message-prose'):null;
     if(source&&message.text&&!message.id.startsWith('pending:'))source.dataset.referenceSource=message.id;
-    const referenceSignature=JSON.stringify([message.references||[],locale]);
+    const referenceSignature=JSON.stringify([message.references||[],locale,(message.references||[]).map(ref=>{const source=snapshot?.messages?.find(row=>row.id===ref.message_id);return [source?.role,ref.quote?null:source?.text];})]);
     if(message.role==='user'&&(record.referenceSignature!==referenceSignature||record.referenceNode&&!record.referenceNode.isConnected)){
       record.referenceNode?.remove();record.referenceSignature=referenceSignature;
-      if(message.references?.length){record.referenceNode=renderMessageReferences(message.references,{messages:snapshot?.messages||[],locale:()=>locale,onJump:jumpToMessage});bubble.prepend(record.referenceNode);}
+      if(message.references?.length){record.referenceNode=preparedAsset('references',referenceSignature,()=>renderMessageReferences(message.references,{messages:snapshot?.messages||[],locale:()=>locale,onJump:jumpToMessage}));moveConversationNode(bubble,record.referenceNode,bubble.firstChild);}
     }
     const attachmentSignature=JSON.stringify([message.attachments||[],snapshot?.agent?.attachments]);
     if(message.role==='user'&&(record.attachmentSignature!==attachmentSignature||!record.attachmentNode?.isConnected)){
-      record.attachmentNode?.dispose?.();record.attachmentNode?.remove();record.attachmentSignature=attachmentSignature;
-      if(message.attachments?.length){record.attachmentNode=renderMessageAttachments(message.attachments,{client,caps:snapshot?.agent?.attachments,scope:{...context.scope},locale:()=>locale,onError:reason=>{error=reason.message;updateControls();}});bubble.append(record.attachmentNode);}
+      const prepared=message.attachments?.length?preparedAsset('attachments',attachmentSignature,()=>renderMessageAttachments(message.attachments,{client,caps:snapshot?.agent?.attachments,scope:{...context.scope},locale:()=>locale,onError:reason=>{error=reason.message;updateControls();}})):null;
+      if(prepared&&currentPreparedRender()?.context.phase==='commit')consumePreparationSurrogates(prepared);
+      record.attachmentNode?.dispose?.();record.attachmentNode?.remove();record.attachmentSignature=attachmentSignature;record.attachmentNode=prepared;
+      if(prepared)moveConversationNode(bubble,prepared);
     }
     if ((message.role === 'assistant'||message.role==='user') && message.text && !record.copy) {
-      const copy = button('copy',t('copy'),'copy-message');
-      copy.type = 'button';
-      copyFeedback(copy,{text:()=>record.text,locale:()=>locale,translate,onError:reason=>{error=reason.message;updateControls();}});
-      row.append(copy); record.copy = copy;
+      const copy=preparedAsset('copy-control','message-copy',()=>{const control=button('copy',t('copy'),'copy-message');control.type='button';copyFeedback(control,{text:()=>control.copyRecord.text,locale:()=>locale,translate,onError:reason=>{error=reason.message;updateControls();}});return control;});
+      copy.copyRecord=record;moveConversationNode(row,copy);record.copy=copy;
     }
     if (record.copy) {const label=t(record.copy.dataset.copied?'copied':'copy');record.copy.title=label;record.copy.setAttribute('aria-label',label);}
     if (message.role==='tool'&&!message.tool&&message.status === 'streaming' && !record.dot) {
@@ -931,7 +934,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const regions=[{key:'chat-history-status',host:historyStatus,revision:JSON.stringify(historyChrome),render:target=>{target.hidden=historyChrome.hidden;target.disabled=historyChrome.disabled;target.textContent=historyChrome.label;}},
       {key:'chat-empty',host:emptyChat,revision:JSON.stringify(empty),render:target=>{target.hidden=empty.hidden;target.textContent=empty.text;}},
       ...(client.production?[backgroundTaskView.region(JSON.stringify(client.scope()),tasks,(id,phase)=>pages.taskNeedsApproval(id,phase)),pages.approvalRegion()]:[])];
-    messageWindow.setMessages(roots,{parents,regions,afterCommit:()=>taskClock.refresh(),layoutEpoch:[layoutKey(),snapshot?.runtime_id,snapshot?.boot_id,snapshot?.owner_id,snapshot?.conversation_id,selectedAssistant?.name,selectedAssistant?.avatar,snapshot?.agent?.attachments,toolOffline,canRetrySend],renderContext:{snapshot,sending,forest,scope:{...client.scope?.()},assistant:selectedAssistant,t,offline:toolOffline,canRetrySend}});
+    const identities=messageIdentities(client).snapshot(client.scope?.());
+    const machineLabels=Object.fromEntries(roots.flatMap(message=>[message.tool?.target?.runtime_id]).filter(Boolean).map(id=>[id,machinePresentation(client).label(id,client.scope?.(),locale)]));
+    const referenceProps=roots.flatMap(message=>(message.references||[]).map(ref=>{const source=snapshot?.messages?.find(row=>row.id===ref.message_id);return [ref.message_id,source?.role,ref.quote?null:source?.text];}));
+    messageWindow.setMessages(roots,{parents,regions,afterCommit:()=>taskClock.refresh(),layoutEpoch:[layoutKey(),snapshot?.runtime_id,snapshot?.boot_id,snapshot?.owner_id,snapshot?.conversation_id,selectedAssistant?.name,selectedAssistant?.avatar,snapshot?.agent?.attachments,toolOffline,canRetrySend,identities,tasks,referenceProps,machineLabels],renderContext:{identities,tasks,machineLabels,snapshot,sending,forest,scope:{...client.scope?.()},assistant:selectedAssistant,t,offline:toolOffline,canRetrySend}});
     if(navigation&&snapshot&&!historyLoading&&navigation.kind!=='message')chatPosition=null;
     latest.hidden=messageWindow.following;
     state.uiAnchor=messageWindow.following?null:selectedSequence()||messageWindow.anchor?.sequence||null;

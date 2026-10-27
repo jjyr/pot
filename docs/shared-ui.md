@@ -150,10 +150,26 @@ The previous visible version remains usable while a candidate waits. Only the
 initial Chat/Task reveal waits behind a hidden layout of the real width; ordinary
 updates and pagination keep the history visible.
 
-A window prepares at most 96 rows at once and admits at most 32 component loads
-at once. It retains one running snapshot and the newest pending revision, so
+A window measures the entire loaded collection before registering its canvas;
+unknown rows never enter the index with estimated heights. Initial measurement
+uses cohorts of up to 96 rows, retaining up to 64 ready destination candidates
+between cohorts. Other candidates release their DOM and leases after measurement,
+leaving numeric geometry. The final candidate set covers the measured viewport,
+12-row overscan, navigation destination and native focus/selection pins. A viewport
+containing more than 96 very short rows can therefore require more than 96 final
+candidates; this does not retain offscreen DOM for the entire loaded collection.
+At most 32 component loads run concurrently across the window and its regions.
+It retains one running snapshot and the newest pending revision, so
 continuous tokens do not indefinitely replace an otherwise publishable batch.
 Width, font, locale, scope and navigation changes retire incompatible candidates.
+Identity profiles, Task mappings/titles, reference source text, inline approvals
+and machine labels join captured renderer props and invalidate the appropriate
+layout generation. Task geometry also belongs to its request scope, issuing
+Control and boot; changing that ownership retires its old resource DOM.
+Changed children and scalar text enter the live view from their connected
+candidate. Stable native containers and unchanged content can remain in place;
+commit does not reconstruct new content from strings. Each hidden presentation
+owns separate IDs and matching ARIA references.
 Logical component slots carry their original five-second deadline across token
 updates and candidate replacement. A committed removal retires that slot's
 deadline, so a new component added later receives its own five seconds; retiring
@@ -163,6 +179,11 @@ temporary long source is not a preview.
 Closing the fence can replace that waiting candidate without restarting its
 deadline. Other Markdown parsing and code formatting finish synchronously in the
 candidate.
+
+Ready media reflows from intrinsic dimensions and current ancestor CSS when the
+layout generation changes. A measurement surrogate must not carry its old rendered
+width or height into the new generation. The fixed deadline frame belongs to an
+unresolved component's lifetime and remains distinct from this ready-media reflow.
 
 Tool candidates inherit the live tool's one-time approval auto-open state and
 never write shared disclosure intent. A first pending approval can still open

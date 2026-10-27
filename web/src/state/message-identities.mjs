@@ -20,6 +20,12 @@ export function messageIdentities(client){
     const control=(client.spaces||[]).find(item=>item.id===scope?.space)?.control_id||scope?.space;
     const item=(client.assistants||[]).find(item=>item.id===scope?.owner&&item.control_id===control);
     return item?.origin?{node_id:item.origin.node_id,kind:'assistant',agent_id:item.origin.assistant_id}:item?.control_id&&item?.id?{node_id:item.control_id,kind:'assistant',agent_id:item.id}:undefined;
+  },snapshot(scope){
+    presentation.resolve();
+    const profiles=Object.fromEntries([...cache,...index]);
+    for(const task of taskIdentities.snapshot())profiles[addressKey(task.address)]={name:task.title,task};
+    const issuer=messageRenderIssuer(client,scope);
+    return structuredClone({actor:presentation.actor(scope),profiles,issuer});
   },resolve(address){
     const nextEpoch=JSON.stringify([client.runtime?.runtime_id,client.runtime?.boot_id]);
     if(epoch!==nextEpoch){epoch=nextEpoch;directory=undefined;index=new Map();cache.clear();}
@@ -46,3 +52,5 @@ export function messageIdentities(client){
   }};
   presentations.set(client,presentation);return presentation;
 }
+export function resolveMessageRenderIdentity(snapshot,address){return snapshot?.profiles?.[addressKey(address)];}
+export function messageRenderIssuer(client,scope){return {space:scope?.space,owner:scope?.owner,control:(client.spaces||[]).find(item=>item.id===scope?.space)?.control_id,runtime:client.runtime?.runtime_id,boot:client.runtime?.boot_id};}

@@ -1,4 +1,4 @@
-import {currentPreparedRender,withPreparedRender,registerPreparedRoot} from './prepared-render.mjs';
+import {currentPreparedRender,withPreparedRender,registerPreparedRoot,preparedDOM,preparedText} from './prepared-render.mjs';
 import {moveConversationNode as place} from './conversation-dom.mjs';
 import {createMessageWindow} from './message-window.mjs';
 import {createWorkRecordProjection,workRecordParents} from '../state/work-records.mjs';
@@ -74,20 +74,22 @@ export function createWorkRecordWindow({locale=()=> 'en',actor=()=>undefined,res
     const destination=window.destination?.id,nativeReading=message.members.some(member=>window.position?.anchors?.[0]?.key===`message:${member.viewKey}`);
     if(window.revealing&&(destination&&message.members.some(member=>member.id===destination||window.visibilityPath.has(member.id))||nativeReading&&window.visibilityPath.has(message.id))){group.details.open=true;if(!preparing)memory.set(currentScope+message.viewKey,{open:true});}
     const work=message.work,format=value=>value.toLocaleString(locale()),t=key=>translate(locale(),'work.'+key);
-    group.title.textContent=t('title');
-    group.counts.textContent=(work.tools?[t('tools').replace('{count}',format(work.tools))]:[]).concat(work.messages?[t('messages').replace('{count}',format(work.messages))]:[]).join(' · ');
+    preparedText(group.title,'work-record-window:group.title',t('title'));
+    preparedText(group.counts,'work-record-window:group.counts',(work.tools?[t('tools').replace('{count}',format(work.tools))]:[]).concat(work.messages?[t('messages').replace('{count}',format(work.messages))]:[]).join(' · '));
     group.counts.title=group.counts.textContent;
-    group.failure.hidden=!work.failures;group.failure.textContent=work.failures?t('failures').replace('{count}',format(work.failures)):'';
-    const marks=node('span','work-record-participants');
-    work.participants.forEach((address,index)=>{const mark=communicationParticipant(address,{resolveIdentity,locale});mark.dataset.participantIndex=String(index);marks.append(mark);});
-    // Keep the first two counterparts at every width. Further objects stay
-    // available in this group, with an overflow count rather than a long list.
-    if(work.participants.length>2){const more=node('span','work-record-more',`+${format(work.participants.length-2)}`);more.title=t('participants').replace('{count}',format(work.participants.length));more.setAttribute('aria-label',more.title);marks.append(more);}
-    reconcile(group.participants,marks);group.participants.hidden=!work.participants.length;
-    const people=node('div','work-record-people');for(const address of work.participants)people.append(communicationParticipant(address,{resolveIdentity,locale}));
-    reconcile(group.people,people);group.people.hidden=work.participants.length<2;
+    group.failure.hidden=!work.failures;preparedText(group.failure,'work-record-window:group.failure',work.failures?t('failures').replace('{count}',format(work.failures)):'');
+    const participantRevision=JSON.stringify([work.participants,locale(),work.participants.map(address=>resolveIdentity(address))]);
+    preparedDOM(group.participants,'work-participants',participantRevision,target=>{
+      const marks=node('span','work-record-participants');
+      work.participants.forEach((address,index)=>{const mark=communicationParticipant(address,{resolveIdentity,locale});mark.dataset.participantIndex=String(index);marks.append(mark);});
+      if(work.participants.length>2){const more=node('span','work-record-more',`+${format(work.participants.length-2)}`);more.title=t('participants').replace('{count}',format(work.participants.length));more.setAttribute('aria-label',more.title);marks.append(more);}
+      reconcile(target,marks);
+    });group.participants.hidden=!work.participants.length;
+    preparedDOM(group.people,'work-people',participantRevision,target=>{
+      const people=node('div','work-record-people');for(const address of work.participants)people.append(communicationParticipant(address,{resolveIdentity,locale}));reconcile(target,people);
+    });group.people.hidden=work.participants.length<2;
     group.activity.hidden=!work.active;
-    group.activity.textContent=work.active?t('activity').replace('{name}',work.active.name==='compaction'?translate(locale(),'compact.title'):translate(locale(),'tool.'+presentationLabel(work.active))):'';
+    preparedText(group.activity,'work-record-window:group.activity',work.active?t('activity').replace('{name}',work.active.name==='compaction'?translate(locale(),'compact.title'):translate(locale(),'tool.'+presentationLabel(work.active))):'');
     let index=0;
     for(const member of message.members){
       // Each member keeps its own disclosure. Already mounted bodies stay alive.

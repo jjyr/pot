@@ -202,6 +202,12 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
   const fontChanged=()=>{deadlines.delete('fonts');layoutFingerprint='';layoutReframe=true;if(!nested)invalidate();};
   const interaction=event=>{
     if(event.type==='click'&&!event.target.closest?.('summary'))return;
+    if(event.type==='click'){
+      const summary=event.target.closest('summary'),detail=summary?.parentElement;
+      if(detail?.localName==='details'&&!detail.matches('.tool-call,.tool-raw,.work-records,.task-goal')&&!summary.closest('.prepared-frame')&&!event.target.closest('button,a,input,select,textarea')){
+        event.preventDefault();detail.preparedOpenIntent=!(detail.preparedOpenIntent??detail.open);requestRender?.();
+      }
+    }
     let row=event.target.closest?.('article[data-window-key]');
     for(let parent=row?.parentElement.closest('article[data-window-key]');parent&&host.contains(parent);parent=parent.parentElement.closest('article[data-window-key]'))row=parent;
     if(row&&host.contains(row)){revealedRows.delete(row.dataset.windowKey);rowRevisions.set(row.dataset.windowKey,(rowRevisions.get(row.dataset.windowKey)||0)+1);}
@@ -379,7 +385,8 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     for(const job of current.regions.values()){
       for(const [element,clone]of job.context.frames){const box=clone.getBoundingClientRect();framePreparedElement(element,box.height,element.matches('pot-message-file[data-block="false"]')?box.width:undefined);}
       job.context.phase='commit';consumePreparationSurrogates(job.surface.host);
-      for(const attribute of ['hidden','disabled','open','aria-label']){if(job.surface.host.hasAttribute(attribute))job.region.host.setAttribute(attribute,job.surface.host.getAttribute(attribute));else job.region.host.removeAttribute(attribute);}
+      const attributes=new Set(['hidden','disabled','open',...[...job.region.host.attributes,...job.surface.host.attributes].map(attribute=>attribute.name).filter(name=>name.startsWith('aria-'))]);
+      for(const attribute of attributes){if(job.surface.host.hasAttribute(attribute))job.region.host.setAttribute(attribute,job.surface.host.getAttribute(attribute));else job.region.host.removeAttribute(attribute);}
       const preparedNodes=[...job.surface.host.childNodes];for(const node of preparedNodes)moveConversationNode(job.region.host,node);
       for(const node of [...job.region.host.childNodes])if(!preparedNodes.includes(node))node.remove();
       job.region.didCommit?.();job.context.phase='live';

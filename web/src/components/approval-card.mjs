@@ -1,3 +1,4 @@
+import {currentPreparedRender,preparedPreviousRoot} from './prepared-render.mjs';
 import {node as n,action} from './primitives.mjs';
 import {translate} from '../locales/messages.mjs';
 import {toolSummary} from '../state/tool-calls.mjs';
@@ -12,6 +13,7 @@ export function createApprovalCard({locale,machineLabel=()=>translate(locale(),'
   let current,signature='',busy=false,fresh=true;
   const buttons=new Map();
   function update(approval,{taskTitle=approval.task_title||''}={}) {
+    const environment=currentPreparedRender();if(!current&&environment?.context.phase==='prepare'){const previous=preparedPreviousRoot(environment.context,environment.member);const card=previous&&[previous,...previous.querySelectorAll('.approval-card')].find(node=>node.dataset.approvalId===approval.id);element.open=card?.preparedOpenIntent??card?.open??false;}
     current=approval;fresh=approval.fresh!==false;const request=approval.request;
     element.dataset.approvalId=approval.id;element.dataset.taskId=request.task||'';
     title.textContent=taskTitle||t('approvalTitle');machine.textContent=approval.source||machineLabel(request.machine_id);state.textContent=fresh?t('waiting_approval'):translate(locale(),'approvals.unverified');
