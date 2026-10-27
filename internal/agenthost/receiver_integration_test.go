@@ -147,7 +147,7 @@ func TestReceiverRealPotHTTPAdmissionRecoveryAndContinuation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.session.Close()
+	defer client.close()
 	registration := agentlink.MCPReceiverRegistration{Version: 1, Receiver: agentlink.Identity{Address: agentlink.NodeTarget(p.backend.nodeID), Name: "Fixture native receiver", Adapter: "codex"}, Capabilities: Codex().ReceiverCapabilities()}
 	if err = client.Register(ctx, registration); err != nil {
 		t.Fatal(err)
@@ -163,7 +163,7 @@ func TestReceiverRealPotHTTPAdmissionRecoveryAndContinuation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer caller.session.Close()
+	defer caller.close()
 	var accepted control.MCPTaskAcceptance
 	submit := agentlink.MCPSubmitInput{RequestID: "http-submit", Target: registration.Receiver.Address, Text: "actual Pot HTTP fixture"}
 	if err = caller.call(ctx, "pot_task_submit", submit, &accepted); err != nil {
@@ -203,7 +203,7 @@ func TestReceiverRealPotHTTPAdmissionRecoveryAndContinuation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reconnected.session.Close()
+	defer reconnected.close()
 	if err = reconnected.Register(ctx, registration); err != nil {
 		t.Fatal(err)
 	}

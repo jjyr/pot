@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jjyr/pot/internal/mcpreceiver"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/storage"
 )
@@ -29,7 +30,8 @@ type receiverPump struct {
 // step reconciles saved receipts before asking for more work. Calls may be
 // repeated after response loss, but the backend is entered only through its
 // durable transaction. Neither transport reconnect nor a poll creates a run.
-func (p *receiverPump) step(ctx context.Context) error {
+func (p *receiverPump) step(ctx context.Context) error { return mcpreceiver.Step(ctx, p.remote, p) }
+func (p *receiverPump) CheckActive(ctx context.Context) error {
 	var state string
 	if err := p.control.QueryRowContext(ctx, "SELECT state FROM mcp_receiver_connections WHERE id=? AND node_id=?", p.identity.ConnectionID(), p.identity.NodeID()).Scan(&state); err != nil {
 		return err
@@ -37,40 +39,40 @@ func (p *receiverPump) step(ctx context.Context) error {
 	if state != "active" {
 		return agentlink.ErrUnauthorized
 	}
+	return nil
+}
+func (p *receiverPump) Records(ctx context.Context) ([]agentlink.MCPReceiverRecord, error) {
 	rows, err := p.backend.db.QueryContext(ctx, "SELECT delivery_id FROM mcp_receiver_journal WHERE connection_id=? ORDER BY rowid", p.identity.ConnectionID())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var ids []string
 	for rows.Next() {
 		var id string
 		if err = rows.Scan(&id); err != nil {
 			rows.Close()
-			return err
+			return nil, err
 		}
 		ids = append(ids, id)
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return err
+		return nil, err
 	}
+	result := []agentlink.MCPReceiverRecord{}
 	for _, id := range ids {
-		r, err := readReceiverRecord(ctx, p.backend.db, p.identity.ConnectionID(), id)
-		if err != nil {
-			return err
+		r, e := readReceiverRecord(ctx, p.backend.db, p.identity.ConnectionID(), id)
+		if e != nil {
+			return nil, e
 		}
-		if err = p.advance(ctx, &r); err != nil {
-			// Admission capacity is known to have had no effect. Keep polling
-			// controls so a pending Work cannot block cancellation of active jobs.
-			if errors.Is(err, agentlink.ErrCapacity) {
-				continue
-			}
-			return err
-		}
+		result = append(result, r)
 	}
+	return result, nil
+}
+func (p *receiverPump) ClaimRequest(ctx context.Context) (string, error) {
 	var request string
-	err = storage.Transaction(ctx, p.control, func(tx *sql.Tx) error {
+	err := storage.Transaction(ctx, p.control, func(tx *sql.Tx) error {
 		var state string
 		if err := tx.QueryRowContext(ctx, "SELECT state,claim_request_id FROM mcp_receiver_connections WHERE id=? AND node_id=?", p.identity.ConnectionID(), p.identity.NodeID()).Scan(&state, &request); err != nil {
 			return err
@@ -85,24 +87,14 @@ func (p *receiverPump) step(ctx context.Context) error {
 		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	d, err := p.remote.Claim(ctx, request, 1000)
-	if err != nil {
-		return err
-	}
-	if d.Claim != nil {
-		if err = p.accept(ctx, d); err != nil {
-			return err
-		}
-	} else if d.Work != nil || d.Control != nil {
-		return agentlink.ErrInvalid
-	}
-	// A crash between the two databases simply re-fetches the same claim and
-	// reconciles the identical immutable delivery, never the next queue item.
-	_, err = p.control.ExecContext(ctx, "UPDATE mcp_receiver_connections SET claim_request_id='',revision=revision+1 WHERE id=? AND claim_request_id=?", p.identity.ConnectionID(), request)
+	return request, err
+}
+func (p *receiverPump) ClearClaimRequest(ctx context.Context, request string) error {
+	_, err := p.control.ExecContext(ctx, "UPDATE mcp_receiver_connections SET claim_request_id='',revision=revision+1 WHERE id=? AND claim_request_id=?", p.identity.ConnectionID(), request)
 	return err
+}
+func (p *receiverPump) Accept(ctx context.Context, d agentlink.MCPReceiverDelivery) error {
+	return p.accept(ctx, d)
 }
 
 func (p *receiverPump) advance(ctx context.Context, r *receiverRecord) error {

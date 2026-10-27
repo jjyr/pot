@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jjyr/pot/internal/mcpreceiver"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
@@ -16,75 +17,13 @@ import (
 // The single pending event is an outbox: its bytes survive until the exact
 // claim/sequence/digest receipt commits. Network retries never launch execution.
 type receiverRecord = agentlink.MCPReceiverRecord
-type receiverDelivery agentlink.MCPReceiverDelivery
+type receiverDelivery = agentlink.MCPReceiverDelivery
 
-func (d receiverDelivery) record(ctx agentlink.MCPReceiver) (receiverRecord, error) {
-	var r receiverRecord
-	if d.Claim == nil || (d.Work == nil) == (d.Control == nil) {
-		return r, agentlink.ErrInvalid
-	}
-	c := *d.Claim
-	if err := c.ValidateAgainst(ctx, c); err != nil {
-		return r, err
-	}
-	if d.Work != nil {
-		if err := d.Work.Validate(); err != nil {
-			return r, err
-		}
-		if c.DeliveryID != d.Work.DeliveryID || c.Binding != d.Work.Binding {
-			return r, agentlink.ErrFenced
-		}
-	} else {
-		if err := d.Control.Validate(); err != nil {
-			return r, err
-		}
-		if c.DeliveryID != d.Control.DeliveryID || c.Binding != d.Control.Dispatch {
-			return r, agentlink.ErrFenced
-		}
-	}
-	r = receiverRecord{SchemaVersion: 2, Claim: c, Work: d.Work, Control: d.Control, Ack: agentlink.MCPDeliveryAck{Claim: c, Accepted: true}, Revision: 1}
-	return r, nil
+func readReceiverRecord(ctx context.Context, q mcpreceiver.Query, connection, delivery string) (receiverRecord, error) {
+	return mcpreceiver.Read(ctx, q, connection, delivery)
 }
-
-func readReceiverRecord(ctx context.Context, q interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, connection, delivery string) (receiverRecord, error) {
-	var r receiverRecord
-	var raw string
-	err := q.QueryRowContext(ctx, "SELECT revision,body FROM mcp_receiver_journal WHERE connection_id=? AND delivery_id=?", connection, delivery).Scan(&r.Revision, &raw)
-	if err != nil {
-		return r, err
-	}
-	rev := r.Revision
-	if err = json.Unmarshal([]byte(raw), &r); err != nil {
-		return r, err
-	}
-	r.Revision = rev
-	if r.SchemaVersion != 2 || r.Claim.ConnectionID != connection || r.Claim.DeliveryID != delivery {
-		return r, agentlink.ErrFenced
-	}
-	return r, nil
-}
-
 func saveReceiverRecord(ctx context.Context, tx *sql.Tx, r *receiverRecord) error {
-	var task, run any
-	if r.Admission != nil {
-		task = r.Admission.Binding.Task.AgentID
-		run = r.Admission.Binding.RunID
-	}
-	result, err := tx.ExecContext(ctx, "UPDATE mcp_receiver_journal SET body=?,execution_task=?,execution_run=?,revision=revision+1 WHERE connection_id=? AND delivery_id=? AND revision=?", encoded(r), task, run, r.Claim.ConnectionID, r.Claim.DeliveryID, r.Revision)
-	if err != nil {
-		return err
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n != 1 {
-		return agentlink.ErrConflict
-	}
-	r.Revision++
-	return nil
+	return mcpreceiver.Save(ctx, tx, r)
 }
 
 func (p *receiverPump) save(ctx context.Context, r *receiverRecord) error {
@@ -92,7 +31,7 @@ func (p *receiverPump) save(ctx context.Context, r *receiverRecord) error {
 }
 
 func (p *receiverPump) accept(ctx context.Context, d receiverDelivery) error {
-	r, err := d.record(p.identity)
+	r, err := mcpreceiver.Record(p.identity, d)
 	if err != nil {
 		return err
 	}

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/jjyr/pot/internal/mcpreceiver"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -109,7 +110,7 @@ func TestReceiverOAuthRejectsUnrelatedResourceAndInvalidURLs(t *testing.T) {
 func TestReceiverBearerNeverFollowsResourceOrCredentialRedirect(t *testing.T) {
 	target, _ := url.Parse("http://pot.invalid/mcp")
 	called := false
-	transport := receiverBearer{token: "fixture-secret", endpoint: target, base: hostRoundTripper(func(r *http.Request) (*http.Response, error) {
+	transport := mcpreceiver.Bearer{Token: "fixture-secret", Endpoint: target, Base: hostRoundTripper(func(r *http.Request) (*http.Response, error) {
 		called = true
 		if r.Header.Get("Authorization") != "Bearer fixture-secret" {
 			t.Error("missing receiver credential")
