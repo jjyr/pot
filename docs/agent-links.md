@@ -18,6 +18,10 @@ reports the denial. See [Agent execution](task-coordination.md#agent-execution).
 The [architecture overview](architecture.md) shows the shared local/peer operation
 port and its execution adapters.
 
+Pot MCP connection setup and receiver operation are described in
+[Pot MCP connections](pot-mcp-connections.md). The coordinated cutover owns old
+TCP entry-point removal; the MCP connection path never falls back to pairing.
+
 ## Nodes and assistants
 
 A stable Ed25519 `peer.Identity` authenticates `{node_id, public_key}`. Assistant

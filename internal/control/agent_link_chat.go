@@ -20,6 +20,20 @@ func linkChatID(link, assistant string) string {
 	return id
 }
 func (s *Service) linkChatTarget(ctx context.Context, link, assistant string) (agentlink.Connection, agentlink.Identity, error) {
+	if s.isPotMCP(ctx, link) {
+		c, e := s.PotMCPConnection(ctx, link)
+		if e != nil {
+			return agentlink.Connection{}, agentlink.Identity{}, e
+		}
+		if c.Directory != nil {
+			for _, endpoint := range c.Directory.Assistants() {
+				if endpoint.Address.AgentID == assistant {
+					return agentlink.Connection{ID: c.ID, State: c.State, Directory: c.Directory}, endpoint.Identity, nil
+				}
+			}
+		}
+		return agentlink.Connection{}, agentlink.Identity{}, agentlink.ErrNotFound
+	}
 	c, e := s.agentLinks.service.Get(ctx, link)
 	if e != nil {
 		return c, agentlink.Identity{}, e
@@ -40,6 +54,9 @@ func (s *Service) linkChatTarget(ctx context.Context, link, assistant string) (a
 func (s *Service) SendLinkChat(ctx context.Context, link, assistant, request, text string) (protocol.SendMessageAccepted, error) {
 	if !core.Identifier(request) || strings.TrimSpace(text) == "" || len(text) > protocol.MaxMailText {
 		return protocol.SendMessageAccepted{}, agentlink.ErrInvalid
+	}
+	if s.isPotMCP(ctx, link) {
+		return s.sendPotMCPChat(ctx, link, assistant, request, text)
 	}
 	c, to, e := s.linkChatTarget(ctx, link, assistant)
 	if e != nil {

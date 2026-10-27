@@ -33,7 +33,7 @@ Code defines actual behavior.
 | Agent-assisted Codex connection | [Connect with an agent](connect-with-agent.md) |
 | Codex sessions and adapter | [Codex Agent Link](../integrations/codex/README.md) |
 | Assistant messaging and Agent Links | [Assistant messages](assistant-messages.md) |
-| Node connections and reliable message transport | [Agent Link](agent-links.md) |
+| Node connections and reliable message transport | [Agent Link](agent-links.md), [Pot MCP connections](pot-mcp-connections.md) |
 | Runtime hooks and notification routes | [Hooks](hooks.md) |
 | Tasks, schedules and usage | [Tasks](task-coordination.md), [schedules](scheduled-tasks.md), [token usage](token-usage.md) |
 | Model connections, provider plugins and offline metadata | [Model directory](model-directory.md) |

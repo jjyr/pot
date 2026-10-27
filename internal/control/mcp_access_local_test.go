@@ -41,7 +41,7 @@ func TestMCPAccessLocalPotBusinessProjection(t *testing.T) {
 	}
 	for _, endpoint := range directory.Targets {
 		for _, op := range endpoint.Capabilities.Operations {
-			if op != agentlink.TaskSubmit && op != agentlink.TaskRead && op != agentlink.TaskCancel && op != agentlink.ChatSend && op != agentlink.ChatRead && op != agentlink.ChatReceipt {
+			if op != agentlink.TaskSubmit && op != agentlink.TaskRead && op != agentlink.TaskCancel && op != agentlink.ChatSend && op != agentlink.ChatRead && op != agentlink.ChatReceipt && op != agentlink.Approvals {
 				t.Fatal("owner/unsupported capability", op)
 			}
 		}

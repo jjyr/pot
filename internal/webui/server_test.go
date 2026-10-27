@@ -11,6 +11,49 @@ import (
 	"time"
 )
 
+func TestPotMCPOAuthCallbackNavigationKeepsAPIsFenced(t *testing.T) {
+	s, err := New(Options{Origin: "https://pot.example", Config: NewConfig(), Upstream: Upstream{URL: "http://runtime", Credential: "control", Client: &http.Client{}}, Assets: fstest.MapFS{"mcp-pot-callback.html": &fstest.MapFile{Data: []byte("callback")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, test := range []struct {
+		method, path, mode, dest, origin, host string
+		status                                 int
+	}{
+		{"GET", "/mcp-pot-callback.html?state=opaque&code=opaque", "navigate", "document", "", "pot.example", 200},
+		{"GET", "/mcp-pot-callback.html", "cors", "empty", "", "pot.example", 403},
+		{"POST", "/mcp-pot-callback.html", "navigate", "document", "", "pot.example", 403},
+		{"GET", "/mcp-pot-callback.html", "navigate", "document", "https://foreign.example", "pot.example", 403},
+		{"GET", "/mcp-pot-callback.html", "navigate", "document", "", "foreign.example", 403},
+		{"GET", "/api/v1/agent-links/mcp", "navigate", "document", "", "pot.example", 403},
+		{"POST", "/api/v1/agent-links/mcp", "navigate", "document", "", "pot.example", 403},
+		{"GET", "/access/status", "navigate", "document", "", "pot.example", 403},
+	} {
+		r := httptest.NewRequest(test.method, "https://pot.example"+test.path, nil)
+		r.Host = test.host
+		r.Header.Set("Sec-Fetch-Site", "cross-site")
+		r.Header.Set("Sec-Fetch-Mode", test.mode)
+		r.Header.Set("Sec-Fetch-Dest", test.dest)
+		r.Header.Set("Origin", test.origin)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		if w.Code != test.status {
+			t.Fatalf("%+v: %d %s", test, w.Code, w.Body.String())
+		}
+		if test.status == 200 && (w.Body.String() != "callback" || w.Header().Get("Referrer-Policy") != "no-referrer" || w.Header().Get("Content-Security-Policy") == "") {
+			t.Fatal("callback content or headers", w.Body.String(), w.Header())
+		}
+	}
+	// Loading the callback does not establish an owner session.
+	r := httptest.NewRequest("POST", "https://pot.example/api/v1/agent-links/mcp", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	if w.Code != 401 {
+		t.Fatal("callback bypassed API authentication", w.Code)
+	}
+}
+
 func TestAuthenticationAllowlistCredentialSeparationAndRotation(t *testing.T) {
 	requests := make(chan string, 4)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -255,6 +298,10 @@ func TestAgentLinkPublicationAllowlist(t *testing.T) {
 		{"POST", "/api/v1/assistants/agent-link:..:codex", false},
 		{"GET", "/api/v1/agent-links", true},
 		{"POST", "/api/v1/agent-links", true},
+		{"GET", "/api/v1/agent-links/mcp", true},
+		{"POST", "/api/v1/agent-links/mcp", true},
+		{"DELETE", "/api/v1/agent-links/mcp", false},
+		{"POST", "/api/v1/agent-links/mcp/private", false},
 		{"POST", "/api/v1/agent-links/invitation", true},
 		{"GET", "/api/v1/agent-links/invitation", false},
 		{"DELETE", "/api/v1/agent-links", false},

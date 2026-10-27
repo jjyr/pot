@@ -52,6 +52,7 @@ type Options struct {
 	IntegrationAdapters []integrations.Adapter
 }
 type Service struct {
+	potMCP              potMCPConnections
 	mcpAccess           atomic.Pointer[MCPAccess]
 	linkMu              sync.Mutex
 	chatRecoveryMu      sync.Mutex
@@ -198,6 +199,9 @@ func Open(options Options) (*Service, error) {
 	s.watchAssistantFiles()
 	s.fileWG.Add(1)
 	go s.messageFileLoop()
+	if err = s.resumePotMCP(s.ctx); err != nil {
+		return nil, err
+	}
 	success = true
 	return s, nil
 }
@@ -466,6 +470,7 @@ func (s *Service) Close() error {
 		engines = append(engines, e)
 	}
 	s.mu.Unlock()
+	s.potMCP.wg.Wait()
 	linkErr := s.closeAgentLinks()
 	s.pluginWG.Wait()
 	if s.agentLinks != nil {

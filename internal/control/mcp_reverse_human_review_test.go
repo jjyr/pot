@@ -50,9 +50,12 @@ func (b *reverseHumanFixture) MCPHumanDecision(_ context.Context, r agentlink.MC
 	return nil
 }
 func TestMCPReverseHumanReviewIsConditionalAndReceiverOnly(t *testing.T) {
-	g := gatewayFixtureFor(t, true)
 	ctx := context.Background()
-	tools, e := g.receiver.ListTools(ctx)
+	// The bare queue has no human backend. A real Service now implements the
+	// conditional interface and is covered by the two-Control tests.
+	bare := mcpAccessTestFixture(t)
+	receiver := bare.session(t, bare.grant(t, true))
+	tools, e := receiver.ListTools(ctx)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -61,6 +64,7 @@ func TestMCPReverseHumanReviewIsConditionalAndReceiverOnly(t *testing.T) {
 			t.Fatal("unimplemented backend advertised")
 		}
 	}
+	g := gatewayFixtureFor(t, true)
 	backend := &reverseHumanFixture{connection: g.identity.ConnectionID(), review: agentlink.MCPHumanReview{Caller: g.execution.Binding.Actor, RequestID: "original-delegation", TaskID: "accepted-public-task", ExecutionTask: protocol.AgentRef{NodeID: g.f.queue.NodeID, Kind: "task", AgentID: "actual-local-task"}, RunID: "actual-local-run", Generation: 1, Epoch: "actual-server-epoch", Approval: agentlink.ExecutionApproval{ID: "actual-pending", JobID: "actual-local-task", Method: "exec_command", Params: json.RawMessage(`{"cmd":"fixture"}`)}}}
 	g.f.access.options.HumanReview = backend
 	g.f.access.reverseHumanReviewTools()

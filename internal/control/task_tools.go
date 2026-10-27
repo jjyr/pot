@@ -231,5 +231,26 @@ func (s *Service) MailDirectory(ctx context.Context) (protocol.Directory, error)
 	for _, v := range definitions {
 		d.Assistants = append(d.Assistants, protocol.MailAssistant{Address: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "assistant", AgentID: v.ID}, Name: v.Name})
 	}
+	connections, e := s.PotMCPConnections(ctx)
+	if e != nil {
+		return d, e
+	}
+	incoming, e := s.inboundPotMCPConnections(ctx)
+	if e != nil {
+		return d, e
+	}
+	connections = append(connections, incoming...)
+	seen := map[protocol.AgentRef]bool{}
+	for _, c := range connections {
+		if c.State == "revoked" || c.Directory == nil {
+			continue
+		}
+		for _, endpoint := range c.Directory.Assistants() {
+			if !seen[endpoint.Address] {
+				d.Assistants = append(d.Assistants, protocol.MailAssistant{Address: endpoint.Address, Name: endpoint.Name})
+				seen[endpoint.Address] = true
+			}
+		}
+	}
 	return d, nil
 }

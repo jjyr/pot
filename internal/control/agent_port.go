@@ -40,6 +40,17 @@ func (s *Service) agentTarget(ctx context.Context, owner string) (context.Contex
 		return ctx, agentlink.AssistantTarget(s.options.RuntimeID, owner), nil
 	}
 	parts := strings.SplitN(strings.TrimPrefix(owner, "agent-link:"), ":", 2)
+	if s.isPotMCP(ctx, parts[0]) {
+		c, e := s.PotMCPConnection(ctx, parts[0])
+		if e != nil {
+			return ctx, protocol.AgentRef{}, e
+		}
+		target := agentlink.AssistantTarget(c.RemoteNodeID, parts[1])
+		if c.Directory == nil || !c.Directory.Capabilities(target).Supports(agentlink.TaskRead) {
+			return ctx, protocol.AgentRef{}, agentlink.ErrNotFound
+		}
+		return context.WithValue(ctx, agentRouteKey{}, c.ID), target, nil
+	}
 	c, err := s.agentLinks.service.Get(ctx, parts[0])
 	if err != nil {
 		return ctx, protocol.AgentRef{}, err
@@ -51,6 +62,21 @@ func (s *Service) agentLinkRoute(ctx context.Context, target protocol.AgentRef) 
 		return "", agentlink.ErrInvalid
 	}
 	if pinned, ok := ctx.Value(agentRouteKey{}).(string); ok {
+		if s.isPotMCP(ctx, pinned) {
+			c, e := s.PotMCPConnection(ctx, pinned)
+			if e != nil {
+				return "", e
+			}
+			if c.Directory == nil {
+				return "", agentlink.ErrUnavailable
+			}
+			for _, endpoint := range c.Directory.Targets {
+				if endpoint.Address == target {
+					return c.ID, nil
+				}
+			}
+			return "", agentlink.ErrConflict
+		}
 		c, err := s.agentLinks.service.Get(ctx, pinned)
 		if err != nil {
 			return "", err
@@ -62,6 +88,11 @@ func (s *Service) agentLinkRoute(ctx context.Context, target protocol.AgentRef) 
 	}
 	if target.NodeID == s.options.RuntimeID {
 		return "", nil
+	}
+	if c, found, e := s.potMCPRoute(ctx, target); e != nil {
+		return "", e
+	} else if found {
+		return c.ID, nil
 	}
 	connections, err := s.agentLinks.service.List(ctx)
 	if err != nil {
@@ -187,6 +218,23 @@ func (p agentPort) Describe(ctx context.Context, target protocol.AgentRef) (agen
 			return agentlink.Description{}, errors.New("assistant unavailable")
 		}
 		return agentlink.Description{Version: 1, Scope: "owner", Operations: agentlink.OwnerOperations()}, nil
+	}
+	if p.s.isPotMCP(ctx, link) {
+		c, e := p.s.PotMCPConnection(ctx, link)
+		if e != nil {
+			return agentlink.Description{}, e
+		}
+		if c.Directory == nil {
+			return agentlink.Description{}, agentlink.ErrUnavailable
+		}
+		d := c.Directory.Capabilities(target)
+		if d.Supports(agentlink.ChatRead) {
+			d.Operations = append(d.Operations, agentlink.ChatSubscribe)
+		}
+		if d.Supports(agentlink.TaskRead) {
+			d.Operations = append(d.Operations, agentlink.TaskList, agentlink.TaskArchive, agentlink.TaskOutcomes)
+		}
+		return d, nil
 	}
 	c, err := p.s.agentLinks.service.Get(ctx, link)
 	if err != nil {

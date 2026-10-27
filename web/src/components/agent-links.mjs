@@ -1,3 +1,4 @@
+import {createPotMCPConnections} from './pot-mcp-connections.mjs';
 import {linkDisplayName,linkHostLabel} from '../state/machine-identity.mjs';
 import {translate} from '../locales/messages.mjs';
 import {node as n, action, field} from './primitives.mjs';
@@ -7,6 +8,7 @@ import {connectionBrand} from './connection-visuals.mjs';
 const base='/api/v1/agent-links';
 // Invitations live only in the open address picker, never in snapshots or storage.
 export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({}),edit,onConnected=()=>{},signal,showConnections=false}) {
+  const potMCP=createPotMCPConnections({root,request,locale,scope,signal,onConnected});
   const t=key=>translate(locale(),key),section=n('section','agent-links'),status=n('p','hint'),actions=n('div','page-toolbar'),list=n('div','agent-link-list');
   const add=action(t('agentLinks.add'),addAgent,{primary:true}),choose=action(t('agentLinks.copy'),toggleAddresses);
   choose.classList.add('agent-link-choose');choose.setAttribute('aria-haspopup','dialog');choose.setAttribute('aria-expanded','false');
@@ -15,7 +17,7 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
   const addresses=n('div','agent-link-addresses'),addressRows=new Map();
   const manual=n('div','agent-link-manual-copy'),manualLabel=n('label'),manualHint=n('p','hint'),manualAddress=n('textarea','field-input'),copy=action('',copyPreparedAddress);
   manualAddress.id='agent-link-invitation-'+crypto.randomUUID();manualAddress.readOnly=true;manualAddress.rows=3;manualAddress.autocomplete='off';manualAddress.spellcheck=false;manualLabel.htmlFor=manualAddress.id;manual.hidden=true;manual.append(manualLabel,manualHint,manualAddress,copy);
-  const message=n('p','inline-error');message.setAttribute('role','alert');copyError.setAttribute('role','alert');status.setAttribute('role','status');actions.append(choose,add);picker.append(pickerHeader,status,addresses,manual,copyError);section.append(actions,picker,message,list);root.append(section);
+  const message=n('p','inline-error');message.setAttribute('role','alert');copyError.setAttribute('role','alert');status.setAttribute('role','status');choose.hidden=true;actions.append(choose,add);picker.append(pickerHeader,status,addresses,manual,copyError);section.append(actions,picker,message,list);root.append(section);
   let snapshot=null,disposed=false,version=0,busy=false,localEditor=null,loadedScope='',addressVersion=0,copied=false,copyTimer;
   const active=()=>!disposed&&!signal?.aborted&&root.isConnected;
   const captured=()=>typeof scope==='function'?scope():scope;
@@ -53,17 +55,17 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
     list.hidden=!showConnections;list.replaceChildren();
     if(showConnections){
       if(!snapshot?.items?.length)list.append(n('p','hint',t('agentLinks.noConnections')));
-      for(const link of snapshot?.items||[]){
-        const paused=link.status==='disconnected',row=n('div','agent-link-row'),info=n('div','row-info'),buttons=n('div','page-toolbar');
-        info.append(n('strong','',linkDisplayName(link)),n('span','hint',linkHostLabel(link)||t('machine.unavailable')),n('span','hint',t(paused?'agentLinks.disconnected':'agentLinks.status.'+(link.status==='connected'?'connected':link.status==='connecting'?'connecting':'offline'))));
-        const lifecycle=action(t(paused?'agentLinks.reconnect':'agentLinks.disconnect'),async event=>{event.currentTarget.disabled=true;try{await (paused?reconnect(link):disconnect(link));}catch{}finally{sync();}});
-        buttons.append(lifecycle,action(t('agentLinks.delete'),()=>remove(link),{danger:true}));row.append(connectionBrand(link.peer?.kind),info,buttons);list.append(row);
+      for(const link of (snapshot?.items||[]).filter(item=>item.transport!=='mcp')){
+        const row=n('div','agent-link-row'),info=n('div','row-info'),buttons=n('div','page-toolbar');
+        info.append(n('strong','',linkDisplayName(link)),n('span','hint',linkHostLabel(link)||t('machine.unavailable')),n('span','hint',t('potMCP.legacy')),n('span','hint',t('potMCP.lastState').replace('{state}',t(link.status==='disconnected'?'agentLinks.disconnected':'agentLinks.status.'+(['connected','connecting'].includes(link.status)?link.status:'offline')))));
+
+        row.append(connectionBrand(link.peer?.kind),info,buttons);list.append(row);
       }
     }
 
   }
   async function load(){const generation=++version,key=JSON.stringify(captured());if(key!==loadedScope){closePicker();loadedScope=key;snapshot=null;sync();}try{const value=await call(base,{signal});if(active()&&generation===version)update(value);return value;}catch(error){if(active()&&generation===version&&error.name!=='AbortError'){snapshot=null;sync();failure(error);}}}
-  function update(value){snapshot=value;sync();}
+  function update(value){snapshot=value;sync();potMCP.load();}
   async function prepareAddress(endpoint){
     if(busy)return;clearInvitation();const generation=addressVersion;busy=true;sync();
     try{const value=await call(base+'/invitation',{method:'POST',body:{endpoint}});if(!active()||generation!==addressVersion||!picker.matches(':popover-open'))return;manualAddress.value=value.address;manual.hidden=false;positionPicker();manualAddress.focus({preventScroll:true});manualAddress.select();}
@@ -87,6 +89,14 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
   }
   function addAgent({guideKey,kind,onChangeKind}={}){
     closePicker();
+    if(!kind||kind==='pot'){
+      const ownerScope={...captured()},form=openEditor(t('potMCP.title'),{url:''},[{name:'url',label:t('potMCP.url'),kind:'url',required:true,placeholder:t('potMCP.placeholder')}],async values=>{
+        const redirect=new URL('/mcp-pot-callback.html',location.href);if(ownerScope.space)redirect.searchParams.set('space_id',ownerScope.space);
+        const result=await request(base+'/mcp',{...ownerScope,method:'POST',body:{action:'authorize',url:values.url.trim(),redirect_uri:redirect.href}});location.assign(result.authorization_url);
+      },t('potMCP.connect'));
+      form.lifecycle.dispose=()=>{};form.lifecycle.locale=()=>{form.lifecycle.setTitle?.(t('potMCP.title'));const label=form.form.querySelector('.form-label'),input=form.controls.get('url');if(label)label.textContent=t('potMCP.url');if(input){input.setAttribute('aria-label',t('potMCP.url'));input.placeholder=t('potMCP.placeholder');}const submit=form.form.querySelector('.editor-actions .primary');if(submit)submit.textContent=t('potMCP.connect');};return form;
+    }
+
     const guided=['codex','antigravity','pot'].includes(kind),titleKey=guided?'assistantStart.'+kind+'Action':'agentLinks.add';
     const initial={address:''},ownerScope={...captured()};
     const definitions=[{name:'address',label:t('agentLinks.peerAddress'),required:true,placeholder:t('agentLinks.pasteAddress')}];
@@ -159,5 +169,5 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
     dialog.addEventListener('cancel',event=>{if(confirm.disabled)event.preventDefault();});buttons.append(cancel,confirm);dialog.append(error,buttons);document.body.append(dialog);dialog.showModal();
   }
   const preference=()=>{sync();localEditor?.lifecycle?.locale?.();for(const status of root.querySelectorAll('[data-error-key]')){const span=status.querySelector(':scope>span');if(span)span.textContent=t(status.dataset.errorKey);const summary=status.querySelector('details>summary');if(summary)summary.textContent=t('agentLinks.diagnostics');}};window.addEventListener('pot:locale',preference);signal?.addEventListener('abort',()=>{disposed=true;closePicker();window.removeEventListener('resize',positionPicker);window.removeEventListener('pot:locale',preference);},{once:true});sync();
-  return {update,load,addAgent,disconnect,reconnect,remove,get snapshot(){return snapshot;},dispose(){disposed=true;closePicker();window.removeEventListener('resize',positionPicker);window.removeEventListener('pot:locale',preference);localEditor?.lifecycle?.dispose?.();localEditor?.root.remove();section.remove();}};
+  return {update,load,addAgent,disconnect,reconnect,remove,get snapshot(){return snapshot;},dispose(){potMCP.dispose();disposed=true;closePicker();window.removeEventListener('resize',positionPicker);window.removeEventListener('pot:locale',preference);localEditor?.lifecycle?.dispose?.();localEditor?.root.remove();section.remove();}};
 }

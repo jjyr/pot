@@ -223,6 +223,7 @@ func (s *Service) taskLoop() {
 			s.Changes.Notify("schedules")
 		}
 		s.deliverNotificationsForOwners(s.ctx)
+		s.syncInboundPotMCPMail(s.ctx)
 		s.deliverAssistantMail(s.ctx)
 		at, err := s.Schedules.NextWake(s.ctx)
 		var timer *time.Timer

@@ -251,8 +251,6 @@ func (s *Service) AgentLinks(ctx context.Context) (any, error) {
 		status, reason = "needs_access", networkError
 	}
 	self := map[string]any{"id": identity.Address.AgentID, "node_id": s.options.RuntimeID, "kind": "pot", "name": identity.Name, "address": config.Endpoint, "endpoint": config.Endpoint, "status": status, "reason_code": reason}
-	localDirectory, _ := (potLinkBackend{s}).Directory(ctx)
-	self["name"] = localDirectory.Name
 	localObservation, observationErr := (potLinkBackend{s}).Observe(ctx, "")
 	localSample := agentlink.ObservationSample{ObservedAtMS: time.Now().UnixMilli()}
 	if observationErr == nil {
@@ -306,6 +304,28 @@ func (s *Service) AgentLinks(ctx context.Context) (any, error) {
 			lastExchange = c.LastSeen.UnixMilli()
 		}
 		items = append(items, map[string]any{"assistants": assistants, "directory": c.Directory, "id": c.ID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "node_id": c.Peer.Address.NodeID, "kind": c.Peer.Adapter, "name": peerName, "address": c.Endpoint}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError, "last_exchange_at_ms": lastExchange, "outbox": localOutbox, "observation": h.service.Observation(c.ID)})
+	}
+	mcpConnections, e := s.PotMCPConnections(ctx)
+	if e != nil {
+		return nil, e
+	}
+	incoming, e := s.inboundPotMCPConnections(ctx)
+	if e != nil {
+		return nil, e
+	}
+	mcpConnections = append(mcpConnections, incoming...)
+	for _, connection := range mcpConnections {
+		assistants := []any{}
+		if connection.Directory != nil {
+			for _, endpoint := range connection.Directory.Assistants() {
+				assistants = append(assistants, map[string]any{"address": endpoint.Address, "name": endpoint.Name, "avatar": endpoint.Avatar, "adapter": endpoint.Adapter, "capabilities": endpoint.Capabilities})
+			}
+		}
+		name := connection.RemoteNodeID
+		if connection.Directory != nil {
+			name = connection.Directory.Name
+		}
+		items = append(items, map[string]any{"id": connection.ID, "transport": "mcp", "inbound": connection.Inbound, "peer": map[string]any{"node_id": connection.RemoteNodeID, "kind": "pot", "name": name, "address": connection.URL}, "assistants": assistants, "directory": connection.Directory, "status": connection.Status, "revision": connection.Revision, "last_error": connection.LastError, "last_exchange_at_ms": connection.LastSeenAt})
 	}
 	addresses, err := s.agentAddresses(ctx)
 	if err != nil {
@@ -477,6 +497,11 @@ func (s *Service) probeAgentEndpoint(ctx context.Context, endpoint string) error
 }
 
 func (s *Service) linkedPeer(ctx context.Context, local, peer protocol.AgentRef) bool {
+	if local.NodeID == s.options.RuntimeID {
+		if c, found, e := s.potMCPRoute(ctx, peer); e == nil && found {
+			return c.State == "active" && c.Directory != nil && c.Directory.Capabilities(peer).Supports(agentlink.ChatSend)
+		}
+	}
 	if s.agentLinks == nil {
 		return false
 	}

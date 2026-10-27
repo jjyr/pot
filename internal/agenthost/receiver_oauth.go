@@ -13,17 +13,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jjyr/pot/internal/mcpreceiver"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"golang.org/x/oauth2"
 )
 
-type receiverToken struct {
-	SchemaVersion int       `json:"schema_version"`
-	AccessToken   string    `json:"access_token"`
-	TokenType     string    `json:"token_type"`
-	ExpiresAt     time.Time `json:"expires_at"`
-	ClientID      string    `json:"client_id"`
-}
+type receiverToken = mcpreceiver.OAuthToken
 
 // receiverURL applies no certificate or reachability policy. Deployers own the
 // configured HTTP(S) resource; userinfo and fragments are never credentials.
@@ -196,6 +191,6 @@ func authorizeReceiver(ctx context.Context, endpoint, node string, open func(str
 	if _, err = agentlink.NewMCPReceiver(connection, node); err != nil {
 		return saved, "", err
 	}
-	saved = receiverToken{1, token.AccessToken, "Bearer", token.Expiry, clientID}
+	saved = receiverToken{SchemaVersion: 1, AccessToken: token.AccessToken, TokenType: "Bearer", ExpiresAt: token.Expiry, ClientID: clientID}
 	return saved, connection, nil
 }
