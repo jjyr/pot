@@ -268,6 +268,10 @@ run = ["go test -race ./internal/agenthost ./pkg/agentlink ./pkg/storage", "pyth
 description = "Trusted wheel continuity, mixed/nested heights and reading anchors (isolated Chromium)"
 run = "node scripts/tests/ui-regressions.mjs --group scroll"
 
+[tasks."test:ui-chat-position"]
+description = "Send and assistant-switch position contracts with isolated HTTP/SSE and IndexedDB"
+run = "node scripts/tests/chat-scroll-http-browser.mjs"
+
 [tasks."test:ui-nav"]
 description = "Trusted touch Back intermediate frames and keyed conversation navigation"
 run = "node scripts/tests/ui-regressions.mjs --group nav"

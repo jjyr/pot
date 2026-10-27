@@ -8,8 +8,10 @@ import {composerContinuationBrowser} from './composer-continuation-browser.mjs';
 import {attachmentPickerBrowser} from './attachment-picker-browser.mjs';
 import {assistantDraftsBrowser} from './assistant-drafts-browser.mjs';
 import {chatStreamRecovery} from './chat-stream-recovery-browser.mjs';
+import {chatDirectoryActivity} from './chat-directory-activity-browser.mjs';
 import {taskHistoryBrowser,taskHistoryEdges} from './task-history-browser.mjs';
 import {referenceCancellation} from './reference-cancel-browser.mjs';
+import {queryResourceCommits} from './query-resource-commits-browser.mjs';
 const {values}=parseArgs({options:{group:{type:'string',default:'all'},list:{type:'boolean'},fault:{type:'string'},case:{type:'string'}}});
 let selected=select(values.group);
 if(values.case){if(!selected.includes(values.case))throw Error('Unknown scenario in selected group: '+values.case);selected=[values.case];}
@@ -30,11 +32,13 @@ else {
           try{result.push(await referenceCancellation(await context.newPage(),server.origin));}finally{await context.close();}
         }
       }
+      else if(name==='query-resource-commits')result=await queryResourceCommits(browser,{sourceOrigin:server.origin});
       else if(name==='composer-continuation-drafts')result=await composerContinuationDraftsBrowser(browser,{sourceOrigin:server.origin});
       else if(name==='composer-continuation')result=await composerContinuationBrowser(browser,{sourceOrigin:server.origin});
       else if(name==='attachment-picker')result=await attachmentPickerBrowser(browser,{sourceOrigin:server.origin});
       else if(name==='assistant-drafts')result=await assistantDraftsBrowser(browser,{sourceOrigin:server.origin});
       else if(name==='chat-stream-recovery')result=await chatStreamRecovery(browser,{sourceOrigin:server.origin});
+      else if(name==='chat-directory-activity')result=await chatDirectoryActivity(browser,{sourceOrigin:server.origin});
       else if(name==='directory')result=await contract('pot-ui-mobile-directory-browser.js',null,{browser,origin:server.origin});
       else if(name==='composer-enter')result=await contract('pot-ui-mobile-enter-browser.js',null,{browser,origin:server.origin,base:server.origin+'/web/src'});
       else result=await isolatedPage(browser,server.origin,async page=>{

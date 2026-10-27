@@ -56,11 +56,11 @@ catalogRead.resolve({version:2});assert.equal((await confirmedRead).version,2);
 assert.equal((await postCreateReads.read('/api/v1/assistants')).version,2,'Subsequent directory reads cannot erase a just-created assistant with an old cached catalogue');
 
 for(const topic of ['tasks','runner']){
+  await resources.read('/api/v1/assistants',{authoritative:true});
   const before=calls.filter(call=>call.path==='/api/v1/assistants').length;
-  await resources.read('/api/v1/assistants');
   resources.invalidate([topic],{space:'b'});
   await resources.read('/api/v1/assistants');await tick();
-  assert.equal(calls.filter(call=>call.path==='/api/v1/assistants').length,before+(topic==='tasks'?2:1),'Background execution invalidates the assistant catalogue');
+  assert.equal(calls.filter(call=>call.path==='/api/v1/assistants').length,before+(topic==='tasks'?1:0),'Task state refreshes directory; transcript-only output does not');
 }
 
 // Exercise the real shared transport's command hook, including a scope switch

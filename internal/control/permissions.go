@@ -660,6 +660,7 @@ func (p *PermissionStore) Decide(owner, id, action string) error {
 func (p *PermissionStore) Expire(owner, turn string, generation uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	changed := false
 	for id, d := range p.pending {
 		r := d.approval.Request
 		if r.Owner == owner && r.Turn == turn && r.Generation == generation {
@@ -670,6 +671,7 @@ func (p *PermissionStore) Expire(owner, turn string, generation uint64) {
 				close(d.done)
 			}
 			delete(p.pending, id)
+			changed = true
 			if pending {
 				p.approvalHookLocked(hooks.ApprovalExpired, d)
 			}
@@ -678,14 +680,18 @@ func (p *PermissionStore) Expire(owner, turn string, generation uint64) {
 	for id, r := range p.denied {
 		if r.Owner == owner && r.Turn == turn && r.Generation == generation {
 			delete(p.denied, id)
+			changed = true
 		}
 	}
 	for id, g := range p.grants {
 		if g.Owner == owner && g.Turn == turn && g.Generation == generation {
 			delete(p.grants, id)
+			changed = true
 		}
 	}
-	p.Changes.Notify("permissions")
+	if changed {
+		p.Changes.Notify("permissions")
+	}
 }
 
 // CheckRevision is the final local admission check after preparation. Policy

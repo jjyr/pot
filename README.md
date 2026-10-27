@@ -2,13 +2,27 @@
   <img src="resources/app/assets/Pot384.png" width="96" height="96" alt="Pot">
 </p>
 <h1 align="center">Pot</h1>
-<p align="center"><strong>Your AI assistant. From a conversation to completed work.</strong></p>
+<p align="center"><strong>The open-source AI assistant that coordinates your coding agents—so you don't have to micromanage them.</strong></p>
 
-[Website](https://pot.jjylab.com) · [Getting started](#install) · [Connect other assistants](#connect-other-assistants) · [Documentation](docs/README.md) · [Releases](https://github.com/jjyr/pot/releases)
+<p align="center">
+  <a href="README.md">English</a> · <a href="README_zh.md">简体中文</a>
+</p>
 
-Pot helps you turn a goal into work you can use. Your assistant can run background
-tasks, bring their results back to your conversation, and keep working with you.
-**Agent Link** brings your other assistants into that conversation across computers.
+[Website](https://pot.jjylab.com) · [Why Pot?](#why-pot) · [Getting started](#install) · [Agent Link](#agent-link-your-multi-agent-hub) · [Documentation](docs/README.md) · [Releases](https://github.com/jjyr/pot/releases)
+
+Pot turns conversational goals into completed work. Instead of constantly micromanaging one-off prompts and fragmented contexts, Pot acts as a persistent assistant: delegating background tasks, coordinating external agents across machines, and only interrupting you when high-level decisions are needed.
+
+## Why Pot?
+
+Coding with agents has promised 10x productivity, but many developers find themselves exhausted—spending entire afternoons micromanaging AI, re-explaining repo habits across sessions, and inspecting code line by line.
+
+Pot is designed around a simple belief: **Human oversight should stay at the architecture level, while assistants handle the repetition.**
+
+- **Assistants over one-off agents**: Assistants run long-lived sessions, accumulating instructions, repo habits, and personal preferences without forgetting them across compactions.
+- **Goal delegation & background execution**: Give your assistant a goal. It splits the work into background tasks, tracks progress, and brings finished results back to the conversation.
+- **Cross-machine hub**: Run Pot headless on a Linux server, steer it through mobile Web UI, and dispatch coding jobs to Codex on your local Mac.
+
+👉 *Read the full design philosophy:* **[Why Coding with Agents Is Exhausting](https://jjylab.com/en/posts/why-agent-coding-is-exhausting/)**
 
 ## From a conversation to completed work
 
@@ -24,19 +38,21 @@ to refine the work: “Make the mobile screenshots larger; keep this docs versio
 
 *Pot’s shared product UI with synthetic project work and background tasks. Click to enlarge.*
 
-## Bring your other agents into the conversation
+## Agent Link: Your Multi-Agent Hub
 
-Connect another Pot or **Codex** through Agent Link. Talk to a connected assistant
-directly, or let Pot delegate work and collect the result. Each agent retains its
-own models, credentials, workspace and permissions. Pot-to-Pot connections and
-the [Codex adapter](integrations/codex/README.md) are supported. See
-[Connect other assistants](#connect-other-assistants) for setup and the status
-of Claude, Grok and Antigravity. Codex tasks use
-independent persistent threads and can run in parallel.
+Modern AI development doesn't happen in a single tool or on a single machine. **Agent Link** turns Pot into a universal mesh connecting your preferred coding agents, specialized bots, and remote instances—while preserving each agent's native models, credentials, and sandboxed workspaces.
+
+- **Cross-Computer Collaboration**: Connect a headless Pot on your cloud server with your local developer workstation seamlessly.
+- **Independent Task Execution**: Dispatched tasks run in isolated, persistent threads without jamming your active chat.
+- **Ecosystem Integration**:
+  - **Codex**: **Supported.** Full bi-directional task delegation and review workflows via adapter.
+  - **Claude**: *Coming soon.*
+  - **Grok**: *Coming soon.*
+  - **Antigravity**: *Coming soon.*
 
 [![Pot using Agent Link to request a Codex review and receive the result](docs/images/agent-link.png)](docs/images/agent-link.png)
 
-*Agent Link messages and returned review in the actual product UI, using synthetic records. Click to enlarge.*
+*Agent Link messages and returned review in the actual product UI. Click to enlarge.*
 
 ## Install
 

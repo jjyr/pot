@@ -11,6 +11,35 @@ import (
 	"time"
 )
 
+func TestExpireWithoutPermissionChangesDoesNotInvalidate(t *testing.T) {
+	p := &PermissionStore{grants: map[string]TaskGrant{}}
+	sub := p.Changes.Subscribe()
+	defer sub.Close()
+	if _, err := sub.Next(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	unchanged := func() {
+		t.Helper()
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if topics, err := sub.Next(ctx); !errors.Is(err, context.Canceled) {
+			t.Fatalf("no-op expiry published %v: %v", topics, err)
+		}
+	}
+	p.Expire("owner", "turn", 1)
+	unchanged()
+	p.grants["grant"] = TaskGrant{Owner: "owner", Turn: "turn", Generation: 1}
+	p.Expire("other", "turn", 1)
+	unchanged()
+	p.Expire("owner", "turn", 1)
+	topics, err := sub.Next(t.Context())
+	if err != nil || topics["permissions"] == 0 || len(p.grants) != 0 {
+		t.Fatalf("real expiry lost invalidation: %v %v", topics, err)
+	}
+	p.Expire("owner", "turn", 1)
+	unchanged()
+}
+
 func hostRequest(call string) HostRequest {
 	return HostRequest{Owner: "assistant", Turn: "turn", Generation: 1, CallID: call, MachineID: "machine", EnrollmentEpoch: "epoch", Tool: "exec_command", Args: json.RawMessage(`{"cmd":"npm test","request_unsandboxed":true,"justification":"Access required by the execution contract test"}`), Host: true, Command: &CommandContext{Command: "npm test", Directory: "/workspace", Shell: "/bin/bash"}}
 }

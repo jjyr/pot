@@ -237,7 +237,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   if(attachmentUI){form.classList.add('has-attachments');attachmentUI.toolbar.append(send);}
   const referenceDraftHost=el('div','composer-references');form.prepend(referenceDraftHost);
   const referenceStatus=el('div','reference-announcement');referenceStatus.setAttribute('role','status');composerArea.append(referenceStatus);
-  const draftStatus=el('div','draft-storage-status');draftStatus.setAttribute('role','status');composerArea.append(draftStatus);
+  const draftStatus=el('div','draft-storage-status');draftStatus.hidden=true;draftStatus.setAttribute('role','status');composerArea.append(draftStatus);
   let draftStatusSignature='';
   let referenceDraftSignature='',referenceNotice='';
   let historyLoading=false,historyFailure='',historyGeneration=0,historyFlight=null,historyRecovery=null,historyAbort=new AbortController();
@@ -331,7 +331,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     changed:()=>{if(!disposed){syncEditor();restoreFailedAttachments();updateControls();}},
   });
   if(client.production){
-    assistantDrafts=createAssistantDrafts({client,state,attachments:attachmentUI,changed:()=>updateControls(),restored:key=>{if(key===editorOwner)syncEditor();},restorePending:(receipt,scope)=>confirmations.restore(receipt,scope)});
+    assistantDrafts=createAssistantDrafts({client,state,attachments:attachmentUI,changed:()=>updateControls(),restored:key=>{if(key===editorOwner){if(!chatPreparing)prepareChat();syncEditor();}},restorePending:(receipt,scope)=>confirmations.restore(receipt,scope)});
     state.draftChanged=key=>assistantDrafts.change(key);
   }
   async function submit() {
@@ -344,6 +344,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if (!receipt) return;
     receipt.scope={...client.scope()};
     if(assistantDrafts)receipt.phase='preparing';
+    // The user's send resumes following before the optimistic row is laid out.
+    // Receipts after the durable draft fence must not replace newer navigation.
+    positionChat({kind:'latest'});
     attachmentUI?.markSubmitted(receipt.key,refs);
     if(refs.length||receipt.request.references?.length)attachmentAttempts.set(receipt.key,{requestID:receipt.request.request_id,cursor:state.snapshot.cursor});
     error = '';
@@ -382,11 +385,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(directoryStorageFailed)error=t('storage.failed');
     const snapshot = state.snapshot;
     const saved=assistantDrafts?.status(editorOwner);
-    const draftSignature=JSON.stringify([!!saved,saved?.cleanup,saved?.error?.message,saved?.loading,saved?.dirty,locale]);
+    const draftSignature=JSON.stringify([saved?.cleanup,saved?.error?.message,locale]);
     if(draftSignature!==draftStatusSignature){
-      draftStatusSignature=draftSignature;draftStatus.hidden=!saved;draftStatus.classList.toggle('inline-error',!!saved?.error);
-      const draftLabel=saved?.cleanup?'drafts.cleanupFailed':saved?.error?'drafts.failed':saved?.loading?'drafts.loading':saved?.dirty?'drafts.saving':'drafts.saved';
-      draftStatus.replaceChildren(el('span','',saved?t(draftLabel):''));
+      draftStatusSignature=draftSignature;draftStatus.hidden=!saved?.error;draftStatus.classList.toggle('inline-error',!!saved?.error);
+      draftStatus.replaceChildren();
+      if(saved?.error)draftStatus.append(el('span','',t(saved.cleanup?'drafts.cleanupFailed':'drafts.failed')));
       if(saved?.error){const retry=el('button','text-button',t('retry'));retry.type='button';retry.onclick=()=>assistantDrafts.retry(editorOwner).catch(()=>{});draftStatus.append(retry);const details=el('details'),summary=el('summary','',t('web.error.details'));details.append(summary,el('span','',saved.error.message||String(saved.error)));draftStatus.append(details);}
     }
     const pending = snapshot && state.pending.get(ownerKey(snapshot));
@@ -555,8 +558,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     chatCacheFailed=true;error=t('chatCache.failed');console.error('Chat cache:',reason);updateControls();
     if(!state.snapshot){initialLayout.cancel();chatPreparing=false;initialIntent=null;history.style.visibility='';history.removeAttribute('aria-busy');}
   }
+  // Hydrating text, references and attachments can resize the composer after
+  // cached history arrives. Include that geometry in the hidden first layout.
+  const draftLayoutReady=()=>{const status=assistantDrafts?.status(editorOwner);return !assistantDrafts||assistantDrafts.ready(editorOwner)||!!status?.error&&!status.cleanup;};
   const initialLayout=createInitialChatLayout({history,
-    ready:()=>!disposed&&chatPreparing&&!!state.snapshot&&!historyLoading&&chatShown,
+    ready:()=>!disposed&&chatPreparing&&!!state.snapshot&&!historyLoading&&chatShown&&draftLayoutReady(),
     layout:()=>{editor.resize();renderMessagesNow(true);},
     position:()=>{if(initialIntent)applyChatPosition(initialIntent);},
     fontFallback:()=>root.classList.add('chat-font-fallback'),
@@ -569,7 +575,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     root.classList.remove('chat-font-fallback');
   }
   function revealChat(){
-    if(chatPreparing&&!initialLayout.pending&&state.snapshot&&!historyLoading&&chatShown)initialLayout.start();
+    if(chatPreparing&&!initialLayout.pending&&state.snapshot&&!historyLoading&&chatShown&&draftLayoutReady())initialLayout.start();
   }
   const closeAssistantProfile = () => assistantProfile.hidePopover();
   window.addEventListener('resize', closeAssistantProfile);
@@ -1170,8 +1176,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if(source.boot&&state.snapshot&&(!source.space||source.space===client.scope().space)&&state.snapshot.boot_id!==source.boot)loadSnapshot(true);
       if(source.reset){notifications?.refresh({reset:true,space:source.space});loadDirectory();}
       else if(relevantChange(keys,['task-outcomes','permissions']))notifications?.refresh({topics:keys,space:source.space});
-      if(relevantChange(keys,['spaces','assistants','assistant-mail','agent-links','conversation','runtime','permissions','tasks','runner']))loadDirectory();
-      if(relevantChange(keys,['tasks','runner'],client.scope().space,source))refreshBackgroundTasks();
+      if(relevantChange(keys,['spaces','assistants','assistant-mail','agent-links','conversation','runtime','permissions','tasks']))loadDirectory();
+      if(relevantChange(keys,['tasks'],client.scope().space,source))refreshBackgroundTasks();
       pages.refresh(keys,{...source,domainNotified:true});if(relevantChange(keys,['permissions','spaces','runtime'],pages.approvalSpace,source))pages.permissions();
     },{space:''});
   }
