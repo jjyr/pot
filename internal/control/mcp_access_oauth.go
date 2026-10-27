@@ -388,6 +388,11 @@ func (s *MCPOAuthServer) token(w http.ResponseWriter, r *http.Request) {
 		if _, e = tx.ExecContext(r.Context(), "UPDATE mcp_oauth_codes SET consumed=1 WHERE digest=?", mcpCredentialDigest(v.Get("code"))); e != nil {
 			return e
 		}
+		// Reauthorization rotates the connection credential without reviving a
+		// revoked grant or leaving the previous bearer active.
+		if _, e = tx.ExecContext(r.Context(), "DELETE FROM mcp_oauth_tokens WHERE connection_id=?", id); e != nil {
+			return e
+		}
 		_, e = tx.ExecContext(r.Context(), "INSERT INTO mcp_oauth_tokens VALUES(?,?,?,?)", mcpCredentialDigest(token), id, resource, time.Now().Add(mcpAccessLifetime).Unix())
 		connection = id
 		return e
@@ -467,7 +472,7 @@ func (s *MCPOAuthServer) connections(w http.ResponseWriter, r *http.Request) {
 		mcpOAuthError(w, 405, "invalid_request")
 		return
 	}
-	rows, e := s.options.DB.QueryContext(r.Context(), `SELECT c.id,c.created_at,c.revoked_at,c.receiver_node,j.metadata FROM mcp_oauth_connections c JOIN mcp_oauth_clients j ON j.id=c.client_id ORDER BY c.created_at DESC`)
+	rows, e := s.options.DB.QueryContext(r.Context(), `SELECT c.id,c.created_at,c.revoked_at,c.receiver_node,j.metadata,COALESCE((SELECT MAX(t.expires_at) FROM mcp_oauth_tokens t WHERE t.connection_id=c.id),0) FROM mcp_oauth_connections c JOIN mcp_oauth_clients j ON j.id=c.client_id ORDER BY c.created_at DESC`)
 	if e != nil {
 		mcpOAuthError(w, 500, "server_error")
 		return
@@ -476,8 +481,8 @@ func (s *MCPOAuthServer) connections(w http.ResponseWriter, r *http.Request) {
 	result := []map[string]any{}
 	for rows.Next() {
 		var id, node, raw string
-		var created, revoked int64
-		if e = rows.Scan(&id, &created, &revoked, &node, &raw); e != nil {
+		var created, revoked, expires int64
+		if e = rows.Scan(&id, &created, &revoked, &node, &raw, &expires); e != nil {
 			mcpOAuthError(w, 500, "server_error")
 			return
 		}
@@ -486,7 +491,7 @@ func (s *MCPOAuthServer) connections(w http.ResponseWriter, r *http.Request) {
 			mcpOAuthError(w, 500, "server_error")
 			return
 		}
-		result = append(result, map[string]any{"connection_id": id, "client_name": client.ClientName, "receiver_node": node, "created_at": created, "revoked_at": revoked})
+		result = append(result, map[string]any{"connection_id": id, "client_name": client.ClientName, "receiver_node": node, "created_at": created, "revoked_at": revoked, "expires_at": expires})
 	}
 	if rows.Err() != nil {
 		mcpOAuthError(w, 500, "server_error")

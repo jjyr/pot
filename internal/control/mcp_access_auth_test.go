@@ -134,6 +134,14 @@ func TestMCPAccessLoopbackReauthorizationKeepsCaller(t *testing.T) {
 	client := f.registerClient(t, registered)
 	var prior mcpFixtureGrant
 	for index, redirect := range []string{registered, "http://127.0.0.1:9001/callback?native=1"} {
+		var oldActor agentlink.MCPCaller
+		if index == 1 {
+			old, e := f.oauth.Verify(context.Background(), prior.Token, nil)
+			if e != nil {
+				t.Fatal(e)
+			}
+			oldActor = old.Extra["caller"].(agentlink.MCPCaller)
+		}
 		code := f.consentCode(t, client, redirect)
 		// Exchange is still exact to the selected URI, despite RFC8252 registration matching.
 		bad := f.tokenValues(client, registered, code)
@@ -154,12 +162,11 @@ func TestMCPAccessLoopbackReauthorizationKeepsCaller(t *testing.T) {
 			if grant.Connection != prior.Connection || grant.Token == prior.Token {
 				t.Fatal("credential rotation replaced caller")
 			}
-			old, e := f.oauth.Verify(context.Background(), prior.Token, nil)
-			if e != nil {
-				t.Fatal(e)
+			if _, e := f.oauth.Verify(context.Background(), prior.Token, nil); e == nil {
+				t.Fatal("rotated bearer remains active")
 			}
 			next, e := f.oauth.Verify(context.Background(), grant.Token, nil)
-			if e != nil || old.Extra["caller"].(agentlink.MCPCaller).Actor() != next.Extra["caller"].(agentlink.MCPCaller).Actor() {
+			if e != nil || oldActor.Actor() != next.Extra["caller"].(agentlink.MCPCaller).Actor() {
 				t.Fatal("actor rotated", e)
 			}
 		}

@@ -87,7 +87,7 @@ func (b potLinkBackend) Submit(ctx context.Context, r agentlink.TaskRequest) (ag
 		if err != nil {
 			return agentlink.Task{}, err
 		}
-		return agentlink.Task{ID: record.Info.ID, RequestID: r.RequestID, Receiver: identity, State: string(record.Info.Phase), CreatedAt: time.UnixMilli(record.Info.CreatedAtMS), UpdatedAt: time.UnixMilli(record.Info.UpdatedAtMS)}, nil
+		return agentlink.Task{RunID: record.Info.RunID, ID: record.Info.ID, RequestID: r.RequestID, Receiver: identity, State: string(record.Info.Phase), CreatedAt: time.UnixMilli(record.Info.CreatedAtMS), UpdatedAt: time.UnixMilli(record.Info.UpdatedAtMS)}, nil
 	}
 	b.s.linkMu.Lock()
 	defer b.s.linkMu.Unlock()
@@ -151,7 +151,7 @@ func (b potLinkBackend) task(ctx context.Context, from protocol.AgentRef, id str
 				if err != nil {
 					return agentlink.Task{}, err
 				}
-				result := agentlink.Task{ID: id, RequestID: record.Request.RequestID, Receiver: identity, State: string(record.Info.Phase), Error: record.Error, CreatedAt: time.UnixMilli(record.Info.CreatedAtMS), UpdatedAt: time.UnixMilli(record.Info.UpdatedAtMS)}
+				result := agentlink.Task{RunID: record.Info.RunID, ID: id, RequestID: record.Request.RequestID, Receiver: identity, State: string(record.Info.Phase), Error: record.Error, CreatedAt: time.UnixMilli(record.Info.CreatedAtMS), UpdatedAt: time.UnixMilli(record.Info.UpdatedAtMS)}
 				if record.Outcome != nil {
 					result.Result = record.Outcome.Text
 				}
@@ -183,7 +183,7 @@ func (b potLinkBackend) task(ctx context.Context, from protocol.AgentRef, id str
 		}
 		assistant = agentlink.Identity{Address: protocol.AgentRef{NodeID: b.s.options.RuntimeID, Kind: "assistant", AgentID: owner}, Name: owner, Adapter: "pot"}
 	}
-	t := agentlink.Task{ID: id, RequestID: request, Receiver: assistant, State: string(record.Info.Phase), Error: record.Error, CreatedAt: time.UnixMilli(record.Info.CreatedAtMS), UpdatedAt: time.UnixMilli(record.Info.UpdatedAtMS)}
+	t := agentlink.Task{RunID: record.Info.RunID, ID: id, RequestID: request, Receiver: assistant, State: string(record.Info.Phase), Error: record.Error, CreatedAt: time.UnixMilli(record.Info.CreatedAtMS), UpdatedAt: time.UnixMilli(record.Info.UpdatedAtMS)}
 	if record.Outcome != nil {
 		t.Result = record.Outcome.Text
 	}

@@ -19,10 +19,13 @@ import (
 type MCPAccessOptions struct {
 	OAuth *MCPOAuthServer
 	Queue *MCPAccessQueue
+	Local *Service
 	// ReceiverCapabilities supplies the provisioned driver's effective description.
 	// A nil callback disables registration, rather than trusting an advertisement.
 	ReceiverCapabilities func(context.Context, agentlink.MCPReceiver, protocol.AgentRef) (agentlink.Description, error)
 }
+type mcpAdmissionCheckKey struct{}
+
 type MCPAccess struct {
 	options MCPAccessOptions
 	sdk     *mcp.Server
@@ -72,7 +75,11 @@ func mcpDecodeBody(w http.ResponseWriter, r *http.Request, limit int64, value an
 	}
 	return agentlink.DecodeMCPContract(raw, value)
 }
-func mcpToolError(err error) *mcp.CallToolResult {
+func mcpFailure(err error) agentlink.MCPError {
+	var existing agentlink.MCPError
+	if errors.As(err, &existing) {
+		return existing
+	}
 	code := agentlink.MCPUnknown
 	switch {
 	case errors.Is(err, agentlink.ErrInvalid):
@@ -88,7 +95,11 @@ func mcpToolError(err error) *mcp.CallToolResult {
 	case errors.Is(err, agentlink.ErrNotFound), errors.Is(err, agentlink.ErrUnavailable):
 		code = agentlink.MCPUnavailable
 	}
-	return &mcp.CallToolResult{IsError: true, StructuredContent: agentlink.MCPError{Code: code}, Content: []mcp.Content{&mcp.TextContent{Text: string(code)}}}
+	return agentlink.MCPError{Code: code}
+}
+func mcpToolError(err error) *mcp.CallToolResult {
+	failure := mcpFailure(err)
+	return &mcp.CallToolResult{IsError: true, StructuredContent: failure, Content: []mcp.Content{&mcp.TextContent{Text: string(failure.Code)}}}
 }
 func mcpToolResult(value any) *mcp.CallToolResult {
 	raw, _ := json.Marshal(value)
@@ -113,6 +124,9 @@ func mcpReceiver(request *mcp.CallToolRequest) (agentlink.MCPReceiver, error) {
 	return agentlink.NewMCPReceiver(caller.ConnectionID(), node)
 }
 func mcpSchema(properties map[string]any, required ...string) map[string]any {
+	if required == nil {
+		required = []string{}
+	}
 	return map[string]any{"type": "object", "properties": properties, "required": required, "additionalProperties": false}
 }
 func mcpStringSchema() map[string]any { return map[string]any{"type": "string"} }
@@ -137,6 +151,12 @@ func (a *MCPAccess) tool(name string, schema any, fn func(context.Context, *mcp.
 		if e != nil || current.UserID != request.Extra.TokenInfo.UserID {
 			return mcpToolError(agentlink.ErrUnauthorized), nil, nil
 		}
+		ctx = context.WithValue(ctx, mcpAdmissionCheckKey{}, func() error {
+			if _, e := a.options.OAuth.Verify(ctx, parts[1], nil); e != nil {
+				return agentlink.ErrUnauthorized
+			}
+			return nil
+		})
 		value, e := fn(ctx, request, raw)
 		if e != nil {
 			return mcpToolError(e), nil, nil
@@ -145,6 +165,42 @@ func (a *MCPAccess) tool(name string, schema any, fn func(context.Context, *mcp.
 	})
 }
 func (a *MCPAccess) tools() {
+	a.tool("pot_task_receipt", mcpContractSchema(MCPAccessReceiptInput{}), func(ctx context.Context, r *mcp.CallToolRequest, raw json.RawMessage) (any, error) {
+		var input MCPAccessReceiptInput
+		if agentlink.DecodeMCPContract(raw, &input) != nil {
+			return nil, agentlink.ErrInvalid
+		}
+		c, e := mcpCaller(r)
+		if e != nil {
+			return nil, e
+		}
+		return a.mutationReceipt(ctx, c, input)
+	})
+
+	a.tool("pot_message_read", mcpContractSchema(MCPAccessMessageRead{}), func(ctx context.Context, r *mcp.CallToolRequest, raw json.RawMessage) (any, error) {
+		var input MCPAccessMessageRead
+		if agentlink.DecodeMCPContract(raw, &input) != nil {
+			return nil, agentlink.ErrInvalid
+		}
+		c, e := mcpCaller(r)
+		if e != nil {
+			return nil, e
+		}
+		return a.messages(ctx, c, input)
+	})
+
+	a.tool("pot_message_send", mcpContractSchema(MCPAccessMessageInput{}), func(ctx context.Context, r *mcp.CallToolRequest, raw json.RawMessage) (any, error) {
+		var input MCPAccessMessageInput
+		if agentlink.DecodeMCPContract(raw, &input) != nil {
+			return nil, agentlink.ErrInvalid
+		}
+		c, e := mcpCaller(r)
+		if e != nil {
+			return nil, e
+		}
+		return a.message(ctx, c, input)
+	})
+
 	a.tool("pot_directory", mcpSchema(map[string]any{}), func(ctx context.Context, r *mcp.CallToolRequest, raw json.RawMessage) (any, error) {
 		var input struct{}
 		if e := agentlink.DecodeMCPContract(raw, &input); e != nil {
@@ -153,7 +209,7 @@ func (a *MCPAccess) tools() {
 		if _, e := mcpCaller(r); e != nil {
 			return nil, e
 		}
-		return a.options.Queue.Directory(ctx)
+		return a.directory(ctx)
 	})
 	a.tool("pot_task_submit", mcpSchema(map[string]any{"request_id": mcpStringSchema(), "target": mcpRefSchema(), "text": mcpStringSchema()}, "request_id", "target", "text"), func(ctx context.Context, r *mcp.CallToolRequest, raw json.RawMessage) (any, error) {
 		var input agentlink.MCPSubmitInput
@@ -164,7 +220,7 @@ func (a *MCPAccess) tools() {
 		if e != nil {
 			return nil, e
 		}
-		return a.options.Queue.Submit(ctx, c, input)
+		return a.submit(ctx, c, input)
 	})
 	a.tool("pot_task_read", mcpSchema(map[string]any{"task_id": mcpStringSchema()}, "task_id"), func(ctx context.Context, r *mcp.CallToolRequest, raw json.RawMessage) (any, error) {
 		var input struct {
@@ -177,7 +233,7 @@ func (a *MCPAccess) tools() {
 		if e != nil {
 			return nil, e
 		}
-		return a.options.Queue.Task(ctx, c, input.TaskID)
+		return a.task(ctx, c, input.TaskID)
 	})
 	a.tool("pot_task_input", mcpSchema(map[string]any{"request_id": mcpStringSchema(), "task_id": mcpStringSchema(), "run_id": mcpStringSchema(), "text": mcpStringSchema()}, "request_id", "task_id", "run_id", "text"), func(ctx context.Context, r *mcp.CallToolRequest, raw json.RawMessage) (any, error) {
 		var input agentlink.MCPTaskInput
@@ -199,7 +255,7 @@ func (a *MCPAccess) tools() {
 		if e != nil {
 			return nil, e
 		}
-		return a.options.Queue.Control(ctx, c, nil, &input)
+		return a.cancel(ctx, c, input)
 	})
 	a.tool("pot_receiver_register", mcpContractSchema(agentlink.MCPReceiverRegistration{}), func(ctx context.Context, r *mcp.CallToolRequest, raw json.RawMessage) (any, error) {
 		receiver, e := mcpReceiver(r)

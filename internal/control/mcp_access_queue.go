@@ -36,6 +36,16 @@ func mcpMissing(err error) error {
 // Register checks the authenticated node against an effective driver description.
 // The caller must obtain actual from a trusted receiver configuration, not tool metadata.
 func (q *MCPAccessQueue) Register(ctx context.Context, receiver agentlink.MCPReceiver, registration agentlink.MCPReceiverRegistration, actual agentlink.Description) error {
+	if q.CheckConnection != nil {
+		if e := q.CheckConnection(ctx, receiver.ConnectionID()); e != nil {
+			return e
+		}
+	}
+	for _, op := range registration.Capabilities.Operations {
+		if op != agentlink.TaskSubmit && op != agentlink.TaskRead && op != agentlink.TaskCancel && op != agentlink.TaskInput && op != agentlink.TaskEvents {
+			return agentlink.ErrUnsupported
+		}
+	}
 	if err := registration.ValidateAgainst(receiver, actual); err != nil {
 		return err
 	}
@@ -44,7 +54,15 @@ func (q *MCPAccessQueue) Register(ctx context.Context, receiver agentlink.MCPRec
 		var connection string
 		err := tx.QueryRowContext(ctx, "SELECT connection_id FROM mcp_receiver_endpoints WHERE address=?", address).Scan(&connection)
 		if err == nil && connection != receiver.ConnectionID() {
-			return agentlink.ErrUnauthorized
+			// Explicit new owner consent may replace a revoked endpoint for
+			// future work. Existing deliveries keep their original connection;
+			// accepted claims are never migrated or replayed.
+			if q.CheckConnection == nil || !errors.Is(q.CheckConnection(ctx, connection), agentlink.ErrUnauthorized) {
+				return agentlink.ErrUnauthorized
+			}
+			if _, err = tx.ExecContext(ctx, "DELETE FROM mcp_receiver_endpoints WHERE connection_id=? AND address=?", connection, address); err != nil {
+				return err
+			}
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
@@ -56,19 +74,24 @@ func (q *MCPAccessQueue) Register(ctx context.Context, receiver agentlink.MCPRec
 
 func (q *MCPAccessQueue) Directory(ctx context.Context) (agentlink.Directory, error) {
 	d := agentlink.Directory{NodeID: q.NodeID, Name: "Pot", Adapter: "pot", Targets: []agentlink.Endpoint{}}
-	rows, err := q.DB.QueryContext(ctx, "SELECT registration FROM mcp_receiver_endpoints ORDER BY address")
+	rows, err := q.DB.QueryContext(ctx, "SELECT connection_id,registration FROM mcp_receiver_endpoints ORDER BY address")
 	if err != nil {
 		return d, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var raw string
+		var raw, connection string
 		var r agentlink.MCPReceiverRegistration
-		if err = rows.Scan(&raw); err != nil {
+		if err = rows.Scan(&connection, &raw); err != nil {
 			return d, err
 		}
 		if err = mcpRead(raw, &r); err != nil {
 			return d, err
+		}
+		if q.CheckConnection != nil {
+			if e := q.CheckConnection(ctx, connection); e != nil {
+				continue
+			}
 		}
 		d.Targets = append(d.Targets, agentlink.Endpoint{Identity: r.Receiver, Capabilities: r.Capabilities})
 	}
@@ -102,6 +125,11 @@ func saveMutation(ctx context.Context, tx *sql.Tx, c agentlink.MCPCaller, op age
 	return err
 }
 func (q *MCPAccessQueue) Submit(ctx context.Context, c agentlink.MCPCaller, in agentlink.MCPSubmitInput) (a MCPTaskAcceptance, err error) {
+	if q.CheckConnection != nil {
+		if e := q.CheckConnection(ctx, c.ConnectionID()); e != nil {
+			return a, e
+		}
+	}
 	defer func() {
 		if err == nil {
 			q.Tasks.Notify()
@@ -128,6 +156,11 @@ func (q *MCPAccessQueue) Submit(ctx context.Context, c agentlink.MCPCaller, in a
 		e = tx.QueryRowContext(ctx, "SELECT connection_id,registration FROM mcp_receiver_endpoints WHERE address=?", mcpJSON(in.Target)).Scan(&connection, &raw)
 		if e != nil {
 			return mcpMissing(e)
+		}
+		if q.CheckConnection != nil {
+			if e = q.CheckConnection(ctx, connection); e != nil {
+				return agentlink.ErrUnavailable
+			}
 		}
 		var r agentlink.MCPReceiverRegistration
 		if e = mcpRead(raw, &r); e != nil {
@@ -175,12 +208,22 @@ func ownedMCPTask(ctx context.Context, tx *sql.Tx, c agentlink.MCPCaller, id str
 	return
 }
 func (q *MCPAccessQueue) Task(ctx context.Context, c agentlink.MCPCaller, id string) (t agentlink.Task, err error) {
+	if q.CheckConnection != nil {
+		if e := q.CheckConnection(ctx, c.ConnectionID()); e != nil {
+			return t, e
+		}
+	}
 	err = storage.Transaction(ctx, q.DB, func(tx *sql.Tx) error { var e error; t, _, e = ownedMCPTask(ctx, tx, c, id); return e })
 	return
 }
 
 // Control serializes original caller ownership, expected-run CAS and enqueue.
 func (q *MCPAccessQueue) Control(ctx context.Context, c agentlink.MCPCaller, input *agentlink.MCPTaskInput, cancel *agentlink.MCPCancelInput) (a MCPTaskAcceptance, err error) {
+	if q.CheckConnection != nil {
+		if e := q.CheckConnection(ctx, c.ConnectionID()); e != nil {
+			return a, e
+		}
+	}
 	defer func() {
 		if err == nil {
 			q.Tasks.Notify()
@@ -228,6 +271,11 @@ func (q *MCPAccessQueue) Control(ctx context.Context, c agentlink.MCPCaller, inp
 		if e != nil {
 			return mcpMissing(e)
 		}
+		if q.CheckConnection != nil {
+			if e = q.CheckConnection(ctx, connection); e != nil {
+				return agentlink.ErrUnavailable
+			}
+		}
 		var registration agentlink.MCPReceiverRegistration
 		if e = mcpRead(raw, &registration); e != nil {
 			return e
@@ -253,6 +301,9 @@ func (q *MCPAccessQueue) Control(ctx context.Context, c agentlink.MCPCaller, inp
 			return e
 		}
 		if cancel != nil {
+			if e = q.Tasks.StopExecutionTx(ctx, tx, c.Actor().AgentID, id); e != nil {
+				return e
+			}
 			_, e = tx.ExecContext(ctx, "UPDATE mcp_service_tasks SET cancel_requested=1 WHERE id=?", id)
 			if e != nil {
 				return e
@@ -274,11 +325,19 @@ type MCPClaimedDelivery struct {
 // Claim durably allocates one delivery. requestID reconciles response loss;
 // claims never expire into permission to replay or reassign execution.
 func (q *MCPAccessQueue) Claim(ctx context.Context, r agentlink.MCPReceiver, requestID string, wait time.Duration) (result *MCPClaimedDelivery, err error) {
+	if _, e := agentlink.NewMCPReceiver(r.ConnectionID(), r.NodeID()); e != nil {
+		return nil, e
+	}
 	if !core.Identifier(requestID) || wait < 0 || wait > 30*time.Second {
 		return nil, agentlink.ErrInvalid
 	}
 	deadline := time.Now().Add(wait)
 	for {
+		if check, ok := ctx.Value(mcpAdmissionCheckKey{}).(func() error); ok {
+			if e := check(); e != nil {
+				return nil, e
+			}
+		}
 		if q.CheckConnection != nil {
 			if e := q.CheckConnection(ctx, r.ConnectionID()); e != nil {
 				return nil, e
@@ -289,7 +348,10 @@ func (q *MCPAccessQueue) Claim(ctx context.Context, r agentlink.MCPReceiver, req
 			e := tx.QueryRowContext(ctx, `SELECT receipt FROM mcp_service_claim_requests WHERE connection_id=? AND request_id=?`, r.ConnectionID(), requestID).Scan(&raw)
 			if e == nil {
 				result = &MCPClaimedDelivery{}
-				return mcpRead(raw, result)
+				if e = mcpRead(raw, result); e != nil {
+					return e
+				}
+				return result.Claim.ValidateAgainst(r, result.Claim)
 			}
 			if !errors.Is(e, sql.ErrNoRows) {
 				return e
@@ -368,7 +430,17 @@ func loadMCPDelivery(ctx context.Context, tx *sql.Tx, r agentlink.MCPReceiver, c
 	err = claim.ValidateAgainst(r, d.claim)
 	return
 }
-func (q *MCPAccessQueue) Ack(ctx context.Context, r agentlink.MCPReceiver, ack agentlink.MCPDeliveryAck) error {
+func (q *MCPAccessQueue) Ack(ctx context.Context, r agentlink.MCPReceiver, ack agentlink.MCPDeliveryAck) (err error) {
+	if q.CheckConnection != nil {
+		if e := q.CheckConnection(ctx, r.ConnectionID()); e != nil {
+			return e
+		}
+	}
+	defer func() {
+		if err == nil {
+			q.Tasks.Notify()
+		}
+	}()
 	if err := ack.Validate(); err != nil {
 		return err
 	}
@@ -384,6 +456,30 @@ func (q *MCPAccessQueue) Ack(ctx context.Context, r agentlink.MCPReceiver, ack a
 			}
 			return nil
 		}
+		if !ack.Accepted && d.work != "" {
+			var actorRaw, taskRaw string
+			e = tx.QueryRowContext(ctx, "SELECT actor,task FROM mcp_service_tasks WHERE id=?", ack.Claim.Binding.Task.AgentID).Scan(&actorRaw, &taskRaw)
+			if e != nil {
+				return e
+			}
+			var actor protocol.AgentRef
+			var task agentlink.Task
+			if e = mcpRead(actorRaw, &actor); e != nil {
+				return e
+			}
+			if e = mcpRead(taskRaw, &task); e != nil {
+				return e
+			}
+			if e = q.Tasks.RejectExecutionTx(ctx, tx, actor.AgentID, task.ID, string(ack.Error.Code)); e != nil {
+				return e
+			}
+			task.State = string(protocol.TaskFailed)
+			task.Error = string(ack.Error.Code)
+			task.UpdatedAt = time.Now().UTC()
+			if _, e = tx.ExecContext(ctx, "UPDATE mcp_service_tasks SET task=? WHERE id=?", mcpJSON(task), task.ID); e != nil {
+				return e
+			}
+		}
 		_, e = tx.ExecContext(ctx, "UPDATE mcp_service_deliveries SET ack=? WHERE id=?", raw, ack.Claim.DeliveryID)
 		return e
 	})
@@ -393,6 +489,11 @@ func acceptedMCPDelivery(d mcpSavedDelivery) bool {
 	return d.ack != "" && mcpRead(d.ack, &ack) == nil && ack.Accepted
 }
 func (q *MCPAccessQueue) Admit(ctx context.Context, r agentlink.MCPReceiver, a agentlink.MCPRunAdmission) (err error) {
+	if q.CheckConnection != nil {
+		if e := q.CheckConnection(ctx, r.ConnectionID()); e != nil {
+			return e
+		}
+	}
 	defer func() {
 		if err == nil {
 			q.Tasks.Notify()
@@ -453,7 +554,7 @@ func (q *MCPAccessQueue) Admit(ctx context.Context, r agentlink.MCPReceiver, a a
 		t.Result = ""
 		t.Error = ""
 		t.UpdatedAt = time.Now().UTC()
-		if e = q.projectCatalogue(ctx, tx, t, a.Binding, a.PreviousRunID); e != nil {
+		if e = q.projectCatalogue(ctx, tx, t, a.Binding, a.PreviousRunID, nil); e != nil {
 			return e
 		}
 		_, e = tx.ExecContext(ctx, "UPDATE mcp_service_tasks SET execution=?,current_claim=?,task=? WHERE id=?", mcpJSON(a.Binding), a.Claim.ClaimID, mcpJSON(t), t.ID)
@@ -465,6 +566,11 @@ func (q *MCPAccessQueue) Admit(ctx context.Context, r agentlink.MCPReceiver, a a
 	})
 }
 func (q *MCPAccessQueue) Event(ctx context.Context, r agentlink.MCPReceiver, event agentlink.MCPExecutionEvent) (receipt agentlink.MCPEventReceipt, err error) {
+	if q.CheckConnection != nil {
+		if e := q.CheckConnection(ctx, r.ConnectionID()); e != nil {
+			return receipt, e
+		}
+	}
 	defer func() {
 		if err == nil {
 			q.Tasks.Notify()
@@ -527,7 +633,7 @@ func (q *MCPAccessQueue) Event(ctx context.Context, r agentlink.MCPReceiver, eve
 			task.Result = event.Result.Text
 			task.Error = event.Result.Error
 		}
-		if e = q.projectCatalogue(ctx, tx, task, binding, binding.RunID); e != nil {
+		if e = q.projectCatalogue(ctx, tx, task, binding, binding.RunID, event.Result); e != nil {
 			return e
 		}
 		receipt = agentlink.MCPEventReceipt{Claim: event.Claim, Sequence: event.Sequence, Digest: digest}

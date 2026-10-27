@@ -134,3 +134,9 @@ package. GitHub subscription CRUD, default initialization, filtering and shared
 scan aggregation remain in the GitHub plugin. The host's inbox/checkpoint
 transaction remains unchanged. See [plugins](plugins.md#github-notifications) and
 [independent MCP connections](extensions.md#independent-mcp-servers).
+
+`TokenInfo`, `TokenVerifier`, `RequireBearerTokenOptions`, `RequireBearerToken`
+and `TokenInfoFromContext` expose the SDK bearer middleware through the same
+protocol facade. Business hosts supply credential verification, consent,
+revocation, audience and logical identity. They do not import the SDK auth package
+directly or place product authorization logic in this package.

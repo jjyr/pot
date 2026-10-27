@@ -142,12 +142,22 @@ func newConversation() string {
 // Send receives sender identity only from the owning adapter. parent is the
 // currently processed inbound message. Replies to its sender are linked
 // automatically; forwarding to another agent retains the causal hop bound.
-func (m *Mailbox) Send(ctx context.Context, id string, from protocol.AgentRef, send protocol.SendMail, parent *protocol.Envelope) (protocol.Envelope, error) {
+func (m *Mailbox) Send(ctx context.Context, id string, from protocol.AgentRef, send protocol.SendMail, parent *protocol.Envelope) (message protocol.Envelope, err error) {
+	err = storage.Transaction(ctx, m.db, func(tx *sql.Tx) error { var e error; message, e = m.SendTx(ctx, tx, id, from, send, parent); return e })
+	if err == nil {
+		m.Changes.Notify("assistant-mail")
+	}
+	return
+}
+
+// SendTx retains the existing immutable envelope and processing-parent fences
+// while allowing an authenticated gateway receipt to share its transaction.
+// Callers notify Changes only after their transaction commits.
+func (m *Mailbox) SendTx(ctx context.Context, tx *sql.Tx, id string, from protocol.AgentRef, send protocol.SendMail, parent *protocol.Envelope) (message protocol.Envelope, err error) {
 	if from.NodeID != m.nodeID || from == send.To {
 		return protocol.Envelope{}, errors.New("invalid sender or self-message")
 	}
-	var message protocol.Envelope
-	err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
+	err = func() error {
 		var replyTo *string
 		if parent != nil && send.To == parent.From {
 			reply := parent.ID
@@ -207,11 +217,8 @@ func (m *Mailbox) Send(ctx context.Context, id string, from protocol.AgentRef, s
 			}
 		}
 		return insertMail(ctx, tx, message, direction)
-	})
-	if err == nil {
-		m.Changes.Notify("assistant-mail")
-	}
-	return message, err
+	}()
+	return
 }
 func (m *Mailbox) Deliver(ctx context.Context, message protocol.Envelope) (protocol.Receipt, error) {
 	return m.deliver(ctx, message, "queued")

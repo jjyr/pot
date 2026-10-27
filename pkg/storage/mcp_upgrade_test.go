@@ -38,6 +38,30 @@ func TestMCPUpgradePreservesHistory(t *testing.T) {
 			if e = migrateDatabase(context.Background(), db, kind, previous); e != nil {
 				t.Fatal(e)
 			}
+			// Seed immutable historical payloads before any MCP table exists. These
+			// are opaque archive bytes; migrations must not reinterpret/replay them.
+			preserved := map[string]string{}
+			if kind == TasksDatabase {
+				for _, statement := range []string{
+					`INSERT INTO tasks VALUES('old-owner','historical-task','interrupted',123,'{"schema_version":14,"marker":"old-task-keep"}')`,
+					`INSERT INTO task_run_history VALUES('old-owner','historical-task','historical-run','{"artifact":"old-node/report.txt","state":"unknown"}')`,
+					`INSERT INTO run_workspaces VALUES('old-node','historical-task','historical-run','{"path":"/original/readonly/archive"}')`,
+					`INSERT INTO retired_execution_receipts VALUES('old-node','historical-task','historical-run','uncertain-command','digest','unknown','receipt','immutable-input')`,
+				} {
+					if _, e = db.Exec(statement); e != nil {
+						t.Fatal(e)
+					}
+				}
+				preserved[`SELECT body FROM tasks WHERE id='historical-task'`] = `{"schema_version":14,"marker":"old-task-keep"}`
+				preserved[`SELECT body FROM task_run_history WHERE task_id='historical-task'`] = `{"artifact":"old-node/report.txt","state":"unknown"}`
+				preserved[`SELECT body FROM run_workspaces WHERE task_id='historical-task'`] = `{"path":"/original/readonly/archive"}`
+				preserved[`SELECT phase FROM retired_execution_receipts WHERE command_id='uncertain-command'`] = `unknown`
+			} else {
+				if _, e = db.Exec(`INSERT INTO agent_link_received_tasks VALUES('old-receipt','{"node_id":"old-peer","kind":"assistant","agent_id":"old-owner"}','old-request','old-owner','{"text":"immutable historical request"}','historical-task')`); e != nil {
+					t.Fatal(e)
+				}
+				preserved[`SELECT payload FROM agent_link_received_tasks WHERE id='old-receipt'`] = `{"text":"immutable historical request"}`
+			}
 			// Preserve the entire prior schema, including all historical task/report tables.
 			rows, e := db.Query("SELECT name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND name!='pot_migrations' ORDER BY name")
 			if e != nil {
@@ -104,6 +128,12 @@ func TestMCPUpgradePreservesHistory(t *testing.T) {
 			var count int
 			if e = db.QueryRow(fmt.Sprintf("SELECT count(*) FROM %s", table)).Scan(&count); e != nil || count != 1 {
 				t.Fatal(count, e)
+			}
+			for query, want := range preserved {
+				var got string
+				if e = db.QueryRow(query).Scan(&got); e != nil || got != want {
+					t.Fatalf("history altered: %s %q %v", query, got, e)
+				}
 			}
 			for name := range old {
 				if strings.HasPrefix(name, "mcp_") {

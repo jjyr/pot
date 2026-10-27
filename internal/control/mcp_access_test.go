@@ -317,6 +317,10 @@ func TestMCPAccessHTTPIsolationAndReceiverLifecycle(t *testing.T) {
 	fixtureCallError(t, receiverSession, "pot_receiver_admit", agentlink.MCPRunAdmission{Claim: control.Claim, Binding: next, PreviousRunID: "wrong"}, agentlink.MCPFenced)
 	fixtureCall(t, receiverSession, "pot_receiver_admit", agentlink.MCPRunAdmission{Claim: control.Claim, Binding: next, PreviousRunID: binding.RunID}, nil)
 	fixtureCallError(t, receiverSession, "pot_receiver_event", event, agentlink.MCPFenced)
+	oldRun, e := f.queue.Tasks.Run(context.Background(), caller.Actor().AgentID, task.ID, binding.RunID)
+	if e != nil || oldRun == nil || oldRun.Outcome == nil || oldRun.Outcome.Text != "Actual result" || oldRun.RunID != binding.RunID {
+		t.Fatal("continuation erased prior execution", oldRun, e)
+	}
 	cancel := agentlink.MCPCancelInput{RequestID: "cancel", TaskID: task.ID, RunID: next.RunID}
 	fixtureCall(t, callerSession, "pot_task_cancel", cancel, nil)
 	fixtureCall(t, callerSession, "pot_task_read", map[string]string{"task_id": task.ID}, &task)

@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -102,6 +103,13 @@ func (s *Service) UpdateExecutionTx(ctx context.Context, tx *sql.Tx, record Reco
 	record.Execution.StopRequested = current.Execution.StopRequested
 	record.Execution.Notified = current.Execution.Notified
 	if expectedRun != "" && record.Execution.Receipt.RunID != expectedRun {
+		previous, err := json.Marshal(current)
+		if err != nil {
+			return false, err
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO task_run_history(assistant_id,task_id,run_id,body) VALUES(?,?,?,?) ON CONFLICT(assistant_id,task_id,run_id) DO NOTHING", current.AssistantID, current.Info.ID, current.RunID, string(previous)); err != nil {
+			return false, err
+		}
 		record.Execution.Notified = false
 		record.Execution.StopRequested = false
 		record.Info.Archived = false
@@ -121,7 +129,13 @@ func (s *Service) UpdateExecutionTx(ctx context.Context, tx *sql.Tx, record Reco
 			kind = "cancelled"
 		}
 		record.Result = &Terminal{Text: record.Execution.Receipt.Result, Outcome: core.Outcome{Kind: kind, Error: record.Error}}
-		record.Outcome = &protocol.TaskResultEvent{TaskID: record.Info.ID, RunID: record.RunID, Title: record.Info.Title, Phase: record.Info.Phase, Text: record.Execution.Receipt.Result, Error: record.Error, Origin: record.Origin}
+		evidence, artifacts, artifactsError := []string(nil), []string(nil), ""
+		if record.Outcome != nil && record.Outcome.TaskID == record.Info.ID && record.Outcome.RunID == record.RunID && record.Outcome.Phase == record.Info.Phase {
+			evidence = record.Outcome.Evidence
+			artifacts = record.Outcome.Artifacts
+			artifactsError = record.Outcome.ArtifactsError
+		}
+		record.Outcome = &protocol.TaskResultEvent{TaskID: record.Info.ID, RunID: record.RunID, Title: record.Info.Title, Phase: record.Info.Phase, Text: record.Execution.Receipt.Result, Error: record.Error, Origin: record.Origin, Evidence: evidence, Artifacts: artifacts, ArtifactsError: artifactsError}
 	}
 	if err := write(ctx, tx, &record); err != nil {
 		return false, err
@@ -129,13 +143,27 @@ func (s *Service) UpdateExecutionTx(ctx context.Context, tx *sql.Tx, record Reco
 	return true, nil
 }
 func (s *Service) StopExecution(ctx context.Context, owner, id string) error {
-	return s.change(ctx, owner, id, func(_ *sql.Tx, r *Record) error {
-		if r.Execution == nil {
-			return fmt.Errorf("Task has no Agent Link execution")
-		}
-		r.Execution.StopRequested = true
+	err := storage.Transaction(ctx, s.db, func(tx *sql.Tx) error { return s.StopExecutionTx(ctx, tx, owner, id) })
+	if err == nil {
+		s.Notify()
+	}
+	return err
+}
+
+// StopExecutionTx records cancellation intent without fabricating a terminal run.
+func (s *Service) StopExecutionTx(ctx context.Context, tx *sql.Tx, owner, id string) error {
+	record, err := read(ctx, tx, owner, id)
+	if err != nil {
+		return err
+	}
+	if record == nil || record.Execution == nil {
+		return fmt.Errorf("Task has no Agent Link execution")
+	}
+	if record.Execution.StopRequested {
 		return nil
-	})
+	}
+	record.Execution.StopRequested = true
+	return write(ctx, tx, record)
 }
 func (s *Service) NotifyExecution(ctx context.Context, owner, id, run string) error {
 	return s.change(ctx, owner, id, func(_ *sql.Tx, r *Record) error {
@@ -175,4 +203,23 @@ func (s *Service) AwaitExecution(ctx context.Context, owner, id, run string) err
 		}
 		return nil
 	})
+}
+
+// RejectExecutionTx records receiver admission rejection in the existing
+// catalogue. There is no admitted run and no terminal execution event to invent.
+func (s *Service) RejectExecutionTx(ctx context.Context, tx *sql.Tx, owner, id, code string) error {
+	record, err := read(ctx, tx, owner, id)
+	if err != nil {
+		return err
+	}
+	if record == nil || record.Execution == nil || record.RunID != "" || record.Execution.Receipt.RunID != "" {
+		return agentlink.ErrFenced
+	}
+	record.Info.Phase = protocol.TaskFailed
+	record.Info.UpdatedAtMS = time.Now().UnixMilli()
+	record.Info.FinishedAtMS = record.Info.UpdatedAtMS
+	record.Error = code
+	record.Execution.Receipt.State = string(protocol.TaskFailed)
+	record.Execution.Receipt.Error = code
+	return write(ctx, tx, record)
 }

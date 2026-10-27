@@ -23,6 +23,6 @@ async function start(){
  }
  const connections=await api('/oauth/connections');
  if(!connections.length)root.append(element('p',t('mcpAccess.empty')));
- for(const item of connections){const row=element('section');row.append(element('h2',item.client_name||t('mcpAccess.client')),element('p',t(item.revoked_at?'mcpAccess.revoked':'mcpAccess.connected')));if(item.receiver_node)row.append(element('code',item.receiver_node));if(!item.revoked_at)row.append(button('mcpAccess.revoke',async()=>{await api('/oauth/connections',{connection_id:item.connection_id});await start();}));root.append(row);}
+ for(const item of connections){const row=element('section');row.append(element('h2',item.client_name||t('mcpAccess.client')),element('p',t(item.revoked_at?'mcpAccess.revoked':!item.expires_at?'mcpAccess.pending':item.expires_at*1000<=Date.now()?'mcpAccess.expired':'mcpAccess.connected')));if(item.expires_at)row.append(element('p',t('mcpAccess.expires').replace('{time}',new Intl.DateTimeFormat(locale,{dateStyle:'medium',timeStyle:'short'}).format(new Date(item.expires_at*1000)))));if(item.receiver_node)row.append(element('code',item.receiver_node));if(!item.revoked_at)row.append(button('mcpAccess.revoke',async()=>{await api('/oauth/connections',{connection_id:item.connection_id});await start();}));root.append(row);}
 }
 start().catch(()=>root.replaceChildren(element('p',t('mcpAccess.failed'))));

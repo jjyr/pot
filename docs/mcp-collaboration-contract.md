@@ -251,3 +251,42 @@ admitted-run/result projections enter the existing Task catalogue through
 and event receipts. The gateway retains the dispatch Task address while the
 catalogue execution receipt keeps the real execution Task/run. Host acceptance,
 launch, cleanup and recovery remain with the existing receiver backend.
+
+`Service.NewMCPAccess` supplies the existing local Pot collaboration backend.
+Its directory intersects the peer description with the implemented message and
+Task tools. It never wraps the local owner operation Port. `pot_message_send`
+accepts a request ID and the existing sender-free `SendMail`; `pot_message_read`
+reads only the conversation accepted under that exact connection and actor.
+Mailbox acceptance and the immutable message receipt share a Tasks transaction
+through `Mailbox.SendTx`. Messages retain conversation, reply and hop causation;
+they do not carry owner guidance or human approval authority.
+
+Local Pot submission crosses the Control and Tasks pools. A saved pending intent
+therefore precedes dispatch. After uncertainty, retries only read the existing
+backend receipt; they never call submission again. `pot_task_receipt` reads an
+owned submit/input/cancel mutation and its receiver ack where available. It also
+reports local pending mutations as `outcome_unknown`. Rejected controls preserve
+the current execution. Rejected initial work becomes a failed admission in the
+existing catalogue without inventing a run or terminal execution event.
+`StopExpectedRun` fences local cancellation in the existing writer path.
+
+Continuation preserves the previous execution record in `task_run_history`.
+Terminal projections retain evidence and artifact references alongside the
+original execution Task/run mapping. They do not fetch bytes or authorize remote
+path reads. Only implemented task submit/read/cancel/input/events capabilities may
+currently be registered at this service boundary.
+
+The native callback exception is limited to an IP-literal loopback HTTP port
+change (RFC 8252); scheme, host IP, path and query remain exact. Token exchange
+matches the exact redirect selected for that authorization request. Successful
+reauthorization rotates the bearer and invalidates the previous token while
+retaining connection identity and accepted claims. A new owner-confirmed receiver
+connection may replace a revoked directory endpoint for future work. Old accepted
+deliveries retain their original connection and are never reassigned.
+
+This service does not yet authenticate a native execution bridge as a node actor,
+forward native reverse model tools, or transfer human approval requests/decisions
+through the receiver queue. Those integrations must bind the authenticated node,
+stored claim/admission, live execution Task/run and existing review ledger before
+cutover. Ordinary OAuth remains user-kind. Keeping the old transport in the tree
+does not establish equivalence for those capabilities on MCP.
