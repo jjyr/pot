@@ -10,7 +10,7 @@ import (
 func mcpContractSchema(value any) map[string]any { return mcpSchemaType(reflect.TypeOf(value)) }
 func mcpSchemaType(t reflect.Type) map[string]any {
 	if t.Kind() == reflect.Pointer {
-		return mcpSchemaType(t.Elem())
+		return map[string]any{"anyOf": []any{mcpSchemaType(t.Elem()), map[string]any{"type": "null"}}}
 	}
 	if t == reflect.TypeFor[json.RawMessage]() {
 		return map[string]any{"type": "object"}

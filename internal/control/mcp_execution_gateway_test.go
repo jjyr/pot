@@ -270,6 +270,14 @@ func TestMCPReceiverOfflineAdmissionDoesNotEraseAcceptedRetry(t *testing.T) {
 func TestMCPNodeMailPreservesOriginalUserReplyAndDedup(t *testing.T) {
 	g := gatewayFixtureFor(t, true)
 	ctx := context.Background()
+	// A new node message has a real nullable ReplyTo field in the wire
+	// Envelope. Validate the actual SDK transport, not just the Go handler.
+	root := agentlink.MCPNodeMail{Message: protocol.Envelope{ID: "node-root-mail", Kind: "message", From: g.execution.Binding.Actor, To: agentlink.AssistantTarget(g.f.queue.NodeID, "main"), ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: "root reference"}}
+	var rootAccepted MCPAccessMessageAcceptance
+	fixtureCall(t, g.receiver, "pot_receiver_node_mail", root, &rootAccepted)
+	if rootAccepted.Message.Message.ReplyTo != nil || rootAccepted.Message.Message.Hops != 0 {
+		t.Fatal("root mail invented a parent", rootAccepted)
+	}
 	var parentRaw string
 	if e := g.f.queue.DB.QueryRow("SELECT envelope FROM agent_messages WHERE direction='out' LIMIT 1").Scan(&parentRaw); e != nil {
 		t.Fatal(e)
