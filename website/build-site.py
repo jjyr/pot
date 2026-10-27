@@ -85,6 +85,7 @@ BRANDS = {
     "KEYCHAIN / 0600",
     "TRANSIENT SCOPE",
     "ON-DEMAND DECRYPT",
+    "IN-MEMORY USE",
     "Protected",
     "Trusted",
     "Blocked",

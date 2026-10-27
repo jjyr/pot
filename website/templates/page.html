@@ -25,15 +25,15 @@
 <!-- ==================== VIEW 1: OVERVIEW ==================== -->
 <div id="view-overview" class="site-view active" data-view-panel="overview">
 <section class="hero wrap" aria-labelledby="hero-title">
-<div class="hero-copy"><div class="eyebrow"><i></i> PERSISTENT AI ASSISTANT · BACKGROUND TASKS · AGENT LINK</div>
-<h1 id="hero-title">让持久助手管理后台任务，<br>通过 Agent Link<br><span>连接你的各个 Agent。</span></h1>
-<p class="hero-description">单次会话窗口要求你盯着每一次工具调用。Pot 提供长期在线的助手会话，<br>把目标拆解为独立后台 Task，并通过 Agent Link<br class="desktop-break">跨设备调度 Codex 等 Agent 协同完成。</p>
+<div class="hero-copy"><div class="eyebrow"><i></i> AI ASSISTANT · BACKGROUND TASKS · AGENT LINK</div>
+<h1 id="hero-title">长期在线的 AI 助手，<br>自动管理后台任务，<br><span>连接你的各个 Agent。</span></h1>
+<p class="hero-description">你只需在对话中交代目标。Pot 会保留长期上下文，<br>把耗时工作拆解为独立后台 Task，并通过 Agent Link<br class="desktop-break">跨设备连接 Codex 等外部 Agent 协同完成。</p>
 <div class="actions"><a class="button primary" href="#start" data-switch-view="install">立即安装 Pot <span>→</span></a><a class="text-link" href="#agent-link">查看 Agent Link <span>↓</span></a></div>
 <div class="philosophy-banner">
 <span class="tiny-pot">📖</span>
 <div>
-<b>设计背景：为什么直接使用 Coding Agent 很累？</b>
-<p>频繁切换上下文与手动盯屏消耗了主要精力。了解如何用持久助手接管任务编排。</p>
+<b>为什么直接使用 Coding Agent 容易心累？</b>
+<p>减少盯屏与频繁切换上下文，让助手替你跟进任务。</p>
 </div>
 <a class="philosophy-link" href="https://jjylab.com/posts/why-agent-coding-is-exhausting/" target="_blank" rel="noopener">阅读文章 <span>↗</span></a>
 </div>
@@ -50,30 +50,30 @@
 
 <!-- 01: MODEL CONFIGURATION -->
 <section id="models" class="section wrap models-section" aria-labelledby="models-title">
-<div class="section-top"><span class="section-number">01 / 模型接入与配置</span><span class="small-label">内置协议解码器与模型目录同步</span></div>
-<div class="section-heading"><h2 id="models-title">接入常用模型与自定义网关。</h2><p>内置 OpenAI Responses、Chat Completions、Anthropic Messages 与 Google Gemini 协议栈，自动同步 models.dev 目录的上下文窗口与能力参数。每个助手或后台任务可独立绑定模型。</p></div>
+<div class="section-top"><span class="section-number">01 / 模型接入与配置</span><span class="small-label">统一配置 API，按助手或任务灵活选用模型</span></div>
+<div class="section-heading"><h2 id="models-title">接入常用模型，<br>即配即用。</h2><p>直接填入官方 API Key 或自定义网关地址，自动同步可用模型列表与上下文窗口。你可以为不同的助手或后台任务分别指定合适的模型。</p></div>
 
 <div class="models-grid">
 <div class="provider-mock-card">
-<div class="mock-card-header"><span>Node Provider Setup</span><span class="mock-badge">AES-256-GCM 加密存储</span></div>
+<div class="mock-card-header"><span>模型服务配置</span><span class="mock-badge">AES-256-GCM 加密保存</span></div>
 <div class="mock-form">
-<div class="mock-field"><label>协议栈 (Built-in Codecs)</label><div class="mock-pills"><span class="active">OpenAI Responses</span><span>Chat Completions</span><span>Anthropic Messages</span><span>Google Gemini</span></div></div>
-<div class="mock-field"><label>API Endpoint &amp; 自动发现</label><div class="mock-input">https://api.openai.com/v1 <span class="mock-ok">✓ 已探测 28 个可用模型</span></div></div>
+<div class="mock-field"><label>支持的接口协议</label><div class="mock-pills"><span class="active">OpenAI Responses</span><span>Chat Completions</span><span>Anthropic Messages</span><span>Google Gemini</span></div></div>
+<div class="mock-field"><label>API 地址 &amp; 模型同步</label><div class="mock-input">https://api.openai.com/v1 <span class="mock-ok">✓ 已同步可用模型列表</span></div></div>
 <div class="mock-field-row">
-<div class="mock-field"><span>默认 Context 上限</span><b>200,000 tokens</b></div>
-<div class="mock-field"><span>Prompt 缓存寿命预压缩</span><b>15 min (90% 自动触发)</b></div>
+<div class="mock-field"><span>目录同步</span><b>models.dev 自动更新</b></div>
+<div class="mock-field"><span>凭据存储</span><b>Keychain / 0600 密钥加密</b></div>
 </div>
 <div class="mock-steps">
-<span><b>1. 添加连接</b><small>支持官方 API 或本地 Ollama / vLLM 网关</small></span>
-<span><b>2. 自动发现</b><small>同步上下文限制、多模态与工具调用能力</small></span>
-<span><b>3. 创建助手</b><small>各助手独立绑定模型与推理强度参数</small></span>
+<span><b>1. 填入 API Key</b><small>支持官方接口或本地 Ollama / vLLM</small></span>
+<span><b>2. 自动获取列表</b><small>同步上下文窗口与工具调用支持</small></span>
+<span><b>3. 按需分配模型</b><small>每个助手可独立设置默认模型</small></span>
 </div>
 </div>
 </div>
 
 <div class="provider-wall">
-<h3>支持的模型供应商与接口</h3>
-<p>直接通过内置协议连接官方 API、聚合网关或本地推理服务：</p>
+<h3>支持的模型供应商</h3>
+<p>内置主流模型协议，无需额外部署代理即可直连：</p>
 <ul class="provider-logos-grid" aria-label="支持的模型供应商">
 <li><img src="assets/claude.svg" alt="" aria-hidden="true"><div><b>Anthropic</b><small>Claude Opus / Sonnet / Haiku</small></div></li>
 <li><img src="assets/openai.svg" alt="" aria-hidden="true"><div><b>OpenAI</b><small>GPT-5 / o3 / Responses</small></div></li>
@@ -98,8 +98,8 @@
 
 <!-- 02: ASSISTANT & TASK MANAGEMENT -->
 <section id="assistant" class="section wrap assistant-section" aria-labelledby="assistant-title">
-<div class="section-top"><span class="section-number">02 / 助手与后台任务管理</span><span class="small-label">长期会话记忆与异步后台 Task</span></div>
-<div class="section-heading"><h2 id="assistant-title">持久助手会话，<br>自动拆解并追踪后台 Task。</h2><p>每个助手维护独立的长期会话与工作目录。收到目标后，助手可创建异步后台 Task 在独立工作区执行，完成后将结果回传至主会话。</p></div>
+<div class="section-top"><span class="section-number">02 / 助手与后台任务管理</span><span class="small-label">长期对话上下文，后台异步执行耗时任务</span></div>
+<div class="section-heading"><h2 id="assistant-title">交代目标，<br>助手拆解并跟进后台任务。</h2><p>每个助手维护独立的长期对话。收到复杂任务时，助手会在后台创建异步 Task 独立推进，完成后将结果带回对话，不阻塞你的日常交流。</p></div>
 
 <div class="product-showcase-split">
 <div class="showcase-screenshot-card">
@@ -133,8 +133,8 @@
 
 <!-- 03: AGENT LINK -->
 <section id="agent-link" class="link-section" aria-labelledby="link-title"><div class="wrap">
-<div class="section-top"><span class="section-number">03 / AGENT LINK</span><span class="small-label">跨设备连接外部 Agent，统一委派与回收结果</span></div>
-<div class="section-heading"><h2 id="link-title">连接不同设备上的 Agent，<br>从 Pot 统一调度。</h2><p>可在服务器上运行 Pot 并通过浏览器访问，同时通过 Agent Link 连接本地 Mac 上的 Codex 执行开发任务。<br><span class="subtle">各节点维护独立的模型配置、工作目录与本地审批规则，通过加密通道通信。</span></p></div>
+<div class="section-top"><span class="section-number">03 / AGENT LINK</span><span class="small-label">连接外部 Agent，在 Pot 侧统一对话与委派</span></div>
+<div class="section-heading"><h2 id="link-title">连接不同设备上的 Agent，<br>在 Pot 中统一协作。</h2><p>你可以在服务器上运行 Pot，并通过 Agent Link 连接 Mac 上的 Codex。无论是直接对话还是由 Pot 自动委派任务，结果都会回到同一处。<br><span class="subtle">各节点保留各自的工作目录与本地权限控制，通过加密连接通信。</span></p></div>
 
 <div class="link-playground"><div class="network"><div class="network-caption">选择一个 Agent，看看如何协作 <span>↘</span></div><div class="network-map"><div class="pot-node"><img src="assets/pot.png" alt="Pot"><b>你的 Pot</b><small>理解目标 · 组织协作</small></div><svg class="network-lines" viewBox="0 0 480 320" aria-hidden="true" preserveAspectRatio="none"><path d="M136 160 H230 M230 50 V270 M230 50 H310 M230 123 H310 M230 197 H310 M230 270 H310"/></svg><div class="agent-nodes" role="group" aria-label="选择连接的 Agent"><button data-agent="codex" class="active" aria-pressed="true"><span class="agent-icon codex" aria-hidden="true"><img src="assets/codex.png" alt=""></span><span>Codex<small>代码与构建</small></span><i>↗</i></button><button data-agent="claude" aria-pressed="false"><span class="agent-icon claude" aria-hidden="true"><img src="assets/claude.svg" alt=""></span><span>Claude<small>分析与写作</small></span><i>↗</i></button><button data-agent="grok" aria-pressed="false"><span class="agent-icon grok" aria-hidden="true"><img src="assets/grok.svg" alt=""></span><span>Grok bot<small>观点与探索</small></span><i>↗</i></button><button data-agent="devin" aria-pressed="false"><span class="agent-icon devin" aria-hidden="true"><img src="assets/devin.png" alt=""></span><span>Devin<small>工程与交付</small></span><i>↗</i></button></div><span class="map-link-label">Agent Link</span></div><p class="network-note" id="network-note">Pot ↔ Codex：已核实支持连接、对话与任务委派。</p></div>
 <div class="agent-preview"><div class="preview-top"><div><span id="preview-icon" class="agent-icon codex" aria-hidden="true"><img src="assets/codex.png" alt=""></span><span><b id="preview-name">Codex</b><small id="preview-support">Agent Link · 已支持</small></span></div><span class="local-label">交互示意</span></div><div class="mode-tabs" role="group" aria-label="协作模式"><button class="active" data-mode="direct" aria-pressed="true">直接对话</button><button data-mode="delegate" aria-pressed="false">让 Pot 委派</button></div><div id="agent-conversation" class="agent-conversation" aria-live="polite"></div><div class="preview-input"><span>这段协作，从你的下一个想法开始</span><span>↑</span></div></div></div>
@@ -168,8 +168,8 @@
 <section class="overview-cards-nav wrap" aria-label="深入了解 Pot">
 <div class="nav-feature-card">
 <span class="section-number">SECURITY &amp; SANDBOX</span>
-<h3>沙箱隔离、精确命令审批与密钥加密</h3>
-<p>基于 SRT 原生沙箱（macOS Seatbelt / Linux bubblewrap）、无通配符命令审批，以及 AES-256-GCM 密钥存储与按需内存解密。</p>
+<h3>系统沙箱隔离与密钥加密保管</h3>
+<p>了解 macOS Seatbelt / Linux bubblewrap 原生沙箱边界、宿主机命令确认机制，以及 AES-256-GCM 密钥加密与按需内存解密。</p>
 <a class="button primary" href="#view-security" data-switch-view="security">查看安全与权限 <span>→</span></a>
 </div>
 <div class="nav-feature-card">
@@ -190,27 +190,27 @@
 <!-- ==================== VIEW 2: SECURITY ==================== -->
 <div id="view-security" class="site-view" data-view-panel="security">
 <section class="section wrap security-hero" aria-labelledby="security-title">
-<div class="section-top"><span class="section-number">SECURITY &amp; PERMISSIONS</span><span class="small-label">原生系统沙箱、精确命令审批与按需内存解密</span></div>
+<div class="section-top"><span class="section-number">SECURITY &amp; PERMISSIONS</span><span class="small-label">系统沙箱隔离、宿主机执行确认与密钥加密存储</span></div>
 <div class="section-heading">
-<h2 id="security-title">沙箱隔离、精确命令审批<br>与密钥加密机制。</h2>
-<p>后台自动执行任务需要明确的权限边界与凭据隔离。Pot 在控制层通过系统沙箱限制文件与网络访问，对宿主机命令实施精确匹配审批，并将所有密钥加密存储、仅在调用时于内存中解密。</p>
+<h2 id="security-title">沙箱运行边界<br>与密钥安全保管。</h2>
+<p>为了让助手能够安全地自动推进任务，Pot 默认在系统沙箱中运行命令，对需要访问宿主机的操作要求人工确认，并将所有 API 密钥加密存储、仅在调用时于内存中解密。</p>
 </div>
 
 <!-- Security 01: Sandbox -->
 <div class="sec-block">
-<div class="sec-block-head"><span class="section-number">01 / MACHINE POLICY &amp; SRT SANDBOX</span><h3>机器执行策略与 SRT 原生沙箱</h3></div>
+<div class="sec-block-head"><span class="section-number">01 / SYSTEM SANDBOX &amp; POLICY</span><h3>默认在系统沙箱中隔离运行</h3></div>
 <div class="policy-tiers">
 <div class="policy-card active-policy">
-<div class="policy-card-top"><b>🛡️ Protected（受保护 · 默认）</b><span class="pill">新节点默认</span></div>
-<p>命令默认在 SRT 原生沙箱（macOS Seatbelt 或 Linux bubblewrap / seccomp）内运行。仅当前任务工作区可写，系统工具链只读，屏蔽用户隐私目录、运行时控制配置与无关套接字。</p>
+<div class="policy-card-top"><b>🛡️ Protected（沙箱保护 · 默认）</b><span class="pill">新节点默认</span></div>
+<p>命令默认在原生系统沙箱（macOS Seatbelt 或 Linux bubblewrap / seccomp）中运行。仅当前任务的工作区目录可写，系统工具链只读，隔离个人目录与无关系统配置。</p>
 </div>
 <div class="policy-card">
-<div class="policy-card-top"><b>⚡ Trusted（信任宿主机）</b><span>显式开启</span></div>
-<p>由节点所有者显式切换后，允许命令跳过沙箱直接在宿主机执行。但显式配置的 deny_host 拒绝规则始终优先并拦截匹配命令。</p>
+<div class="policy-card-top"><b>⚡ Trusted（宿主机直连）</b><span>显式开启</span></div>
+<p>由节点所有者手动开启后，允许命令跳过沙箱直接在宿主机运行；但显式配置的拒绝规则（deny_host）依然优先并拦截匹配命令。</p>
 </div>
 <div class="policy-card">
-<div class="policy-card-top"><b>🚫 Blocked（全面封锁）</b><span>紧急熔断</span></div>
-<p>禁止该机器启动任何新命令或文件修改操作，覆盖已有授权规则，仅允许读取已运行进程的输出与执行清理。</p>
+<div class="policy-card-top"><b>🚫 Blocked（暂停执行）</b><span>紧急熔断</span></div>
+<p>立即禁止该节点启动任何新命令或修改文件，仅保留对已运行进程的输出查看与清理。</p>
 </div>
 </div>
 </div>
@@ -218,13 +218,13 @@
 <!-- Security 02: Command Approval -->
 <div class="sec-block sec-split">
 <div class="sec-copy">
-<span class="section-number">02 / ZERO-WILDCARD APPROVALS</span>
-<h3>无通配符命令审批</h3>
-<p>当任务需要跳出沙箱执行（request_unsandboxed: true）时，需说明原因并等待人工审批。权限规则不支持前缀匹配或通配符：</p>
+<span class="section-number">02 / HOST EXECUTION APPROVAL</span>
+<h3>跳出沙箱时，在对话中由你确认</h3>
+<p>当后台任务确实需要访问宿主机环境（例如调用本机 SSH 推送代码）时，助手会说明原因并发起权限申请，确认后才会执行：</p>
 <ul class="sec-list">
-<li><b>完整上下文绑定</b><span>永久授权规则同时绑定完整命令字符串、规范化工作目录 (cwd)、Shell、交互模式与凭据引用。npm test、npm install 与 npm test &amp;&amp; curl 均视为不同命令，必须分别审批。</span></li>
-<li><b>三种审批范围</b><span>支持 allow_always（本机记住该精确命令组合）、allow_task（仅当前任务有效，任务结束即失效）与 deny（拒绝执行）。</span></li>
-<li><b>跨节点权限隔离</b><span>Agent Link 连接不会向远端授予本机执行权；委派给远端 Codex 的任务若触发审批，请求会回传至当前对话由你确认。</span></li>
+<li><b>按具体命令与目录授权</b><span>授权记录绑定具体的命令内容与工作目录（例如 npm test 与 npm install 会分别确认），避免一次授权被其他命令复用。</span></li>
+<li><b>灵活选择授权范围</b><span>可选择「仅本次任务允许」（任务结束后自动失效）、「始终允许此命令」，或直接拒绝执行。</span></li>
+<li><b>跨设备权限各自独立</b><span>通过 Agent Link 连接外部节点时，不会共享本机执行权限；远端 Codex 触发的确认请求会回传到当前对话中处理。</span></li>
 </ul>
 </div>
 <div class="sec-mock-approval">
@@ -248,22 +248,22 @@
 
 <!-- Security 03: Encrypted Secrets -->
 <div class="sec-block">
-<div class="sec-block-head"><span class="section-number">03 / ENCRYPTED SECRETS &amp; ON-DEMAND DECRYPTION</span><h3>加密保管与仅使用时内存解密</h3></div>
+<div class="sec-block-head"><span class="section-number">03 / SECRET ENCRYPTION &amp; IN-MEMORY DECRYPTION</span><h3>密钥加密保存，仅在使用时解密</h3></div>
 <div class="secrets-flow-grid">
 <div class="secret-step">
 <span class="step-num">KEYCHAIN / 0600</span>
-<h4>主密钥与数据库分离</h4>
-<p>加密主密钥不写入数据库。macOS 存储于系统 Keychain（pot.control.secrets）；Linux 存储于权限为 0600 的独立密钥文件或通过 POT_SECRET_KEY_FILE 注入。无法安全获取主密钥时直接报错，不降级为明文。</p>
+<h4>主密钥独立存放</h4>
+<p>用于加解密的主密钥不写入数据库。macOS 保存在系统 Keychain（pot.control.secrets），Linux 保存在权限为 0600 的独立密钥文件或由环境变量指定。</p>
 </div>
 <div class="secret-step">
 <span class="step-num">AES-256-GCM</span>
-<h4>静态加密存储</h4>
-<p>API Key 与 OAuth 令牌在写入 SQLite 前均使用 AES-256-GCM（每次写入生成独立 96-bit Nonce）加密。配置表与管理接口仅保存和返回不可变的 secret_ref 引用，不回传明文。</p>
+<h4>数据库密文存储</h4>
+<p>所有模型 API Key 与第三方令牌均通过 AES-256-GCM 加密后写入 SQLite。业务配置与接口只记录密文引用（secret_ref），不返回明文。</p>
 </div>
 <div class="secret-step">
-<span class="step-num">ON-DEMAND DECRYPT</span>
-<h4>仅在使用瞬间解密注入</h4>
-<p>密钥平时始终以密文存放，不进入 Prompt、聊天记录或日志。仅在发起模型请求，或启动声明了凭据引用的子进程瞬间，控制层才在内存中解密并通过瞬态环境变量注入进程，进程退出后立即释放。</p>
+<span class="step-num">IN-MEMORY USE</span>
+<h4>仅在调用时内存解密</h4>
+<p>密钥平时始终以密文保存，不会进入模型 Prompt、聊天记录或日志。仅在发起模型请求、或启动需要该凭据的子进程时，才在内存中临时解密注入，进程结束后立即释放。</p>
 </div>
 </div>
 </div>
