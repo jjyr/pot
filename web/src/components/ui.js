@@ -330,7 +330,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     changed:()=>{if(!disposed){syncEditor();restoreFailedAttachments();updateControls();}},
   });
   if(client.production){
-    assistantDrafts=createAssistantDrafts({client,state,attachments:attachmentUI,changed:()=>updateControls(),restored:key=>{if(key===editorOwner)syncEditor();},restorePending:(receipt,scope)=>confirmations.restore(receipt,scope)});
+    assistantDrafts=createAssistantDrafts({client,state,attachments:attachmentUI,changed:()=>updateControls(),restored:key=>{if(key===editorOwner){if(!chatPreparing)prepareChat();syncEditor();}},restorePending:(receipt,scope)=>confirmations.restore(receipt,scope)});
     state.draftChanged=key=>assistantDrafts.change(key);
   }
   async function submit() {
@@ -343,6 +343,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if (!receipt) return;
     receipt.scope={...client.scope()};
     if(assistantDrafts)receipt.phase='preparing';
+    // The user's send resumes following before the optimistic row is laid out.
+    // Receipts after the durable draft fence must not replace newer navigation.
+    positionChat({kind:'latest'});
     attachmentUI?.markSubmitted(receipt.key,refs);
     if(refs.length||receipt.request.references?.length)attachmentAttempts.set(receipt.key,{requestID:receipt.request.request_id,cursor:state.snapshot.cursor});
     error = '';
@@ -554,8 +557,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     chatCacheFailed=true;error=t('chatCache.failed');console.error('Chat cache:',reason);updateControls();
     if(!state.snapshot){initialLayout.cancel();chatPreparing=false;initialIntent=null;history.style.visibility='';history.removeAttribute('aria-busy');}
   }
+  // Hydrating text, references and attachments can resize the composer after
+  // cached history arrives. Include that geometry in the hidden first layout.
+  const draftLayoutReady=()=>{const status=assistantDrafts?.status(editorOwner);return !assistantDrafts||assistantDrafts.ready(editorOwner)||!!status?.error&&!status.cleanup;};
   const initialLayout=createInitialChatLayout({history,
-    ready:()=>!disposed&&chatPreparing&&!!state.snapshot&&!historyLoading&&chatShown,
+    ready:()=>!disposed&&chatPreparing&&!!state.snapshot&&!historyLoading&&chatShown&&draftLayoutReady(),
     layout:()=>{editor.resize();renderMessagesNow(true);},
     position:()=>{if(initialIntent)applyChatPosition(initialIntent);},
     fontFallback:()=>root.classList.add('chat-font-fallback'),
@@ -568,7 +574,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     root.classList.remove('chat-font-fallback');
   }
   function revealChat(){
-    if(chatPreparing&&!initialLayout.pending&&state.snapshot&&!historyLoading&&chatShown)initialLayout.start();
+    if(chatPreparing&&!initialLayout.pending&&state.snapshot&&!historyLoading&&chatShown&&draftLayoutReady())initialLayout.start();
   }
   const closeAssistantProfile = () => assistantProfile.hidePopover();
   window.addEventListener('resize', closeAssistantProfile);
