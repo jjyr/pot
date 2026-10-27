@@ -101,25 +101,26 @@ The native driver persists thread identity before effective input, resumes only
 the saved thread and fails on resume rejection/identity mismatch. Terminal
 continuation uses the same thread and a distinct real Pot run. It does not claim
 live steering. Cancellation needs native terminal evidence and supervised process
-cleanup; unknown cleanup remains fenced. Existing local Codex human review remains
-bound to its original Task/run/thread/turn; ordinary messages are not approvals.
-The receiver extension currently exposes submit/read/cancel/terminal input and
-lifecycle events; remote review and assistant-message callback plumbing remain
-unconnected. This is an implementation gap, not removal of those product goals.
-Files in native results are path metadata, not transferred bytes.
+cleanup; unknown cleanup remains fenced. Codex human review reaches the existing
+Pot human control plane through a once-only receiver control bound to the original
+caller/request and actual Task/run. Ordinary messages cannot approve. The same
+receiver path carries configured assistant mail and lifecycle results. Files in
+native results are path metadata, not transferred bytes.
 
 Execution context replaces inherited reserved actor/job/run variables for each
 supervised process while retaining native login configuration. The explicit
 `execution-tools` entry connects only to an already running Host and verifies
-active Task/run on every call. It exposes context only. Ordinary global MCP
-credentials are never converted into an execution binding. Codex thread start/resume
-configuration injects the reserved `mcp_servers.pot_receiver` local context server
-with explicit actor/job/run env and only `pot_execution_context` enabled. The
-server is required, so an unavailable context server cannot silently downgrade to
-ordinary global login. This per-thread override writes no global client config
-and leaves unrelated servers/policies to the native client. Native loading and
-remote callback tools still require integration/live validation before claiming
-bidirectional native model delegation.
+active Task/run on every call. Direct Task workers enable only
+`pot_execution_context`, preserving their no-delegation and local-owner message
+restrictions. Assistant message execution additionally enables typed sender-free
+reverse message and Task tools. Both local Host and service gates enforce this
+role boundary. Ordinary global MCP credentials never become execution identity.
+Codex thread start/resume injects the required `mcp_servers.pot_receiver` service
+with exact actor/job/run environment. This per-thread override writes no global
+client config and leaves unrelated servers/policies to the native client. Actual
+Pot HTTP plus a fake native process verifies the trusted gateway; native client
+loading, effective tool policies, plugin lifecycle and real-model behavior still
+require live Codex validation.
 
 ## Breaking upgrade
 

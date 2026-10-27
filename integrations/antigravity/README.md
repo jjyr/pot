@@ -12,7 +12,7 @@ Antigravity -- independent remote MCP + client OAuth --> Pot
 
 Explicit shared receiver Host --> agy stream-json
   required pot-receiver support: PreToolUse permission hook
-  local execution-tools: active Task/run context only
+  local execution-tools: exact active Task/run and role-gated callbacks
 ```
 
 ## Ordinary setup and lifecycle
@@ -78,10 +78,12 @@ allowed, while shell, writes, edits and subagents are denied. Other native
 execution remains under existing policy. The hook is inert outside supervised
 jobs; it does not disable users' other MCP globally. Trusted execution context
 replaces inherited reserved actor/job/run variables per process. The local
-`pot_receiver` context tool checks the current active Task/run and provides no
-owner page, credentials, approval or legacy TCP fallback. It does not provide
-remote message/Task callback tools. Those remain an integration gap requiring a
-trusted execution-binding gateway; ordinary OAuth cannot substitute for it.
+`pot_receiver` service checks the current active Task/run. Task workers expose
+only execution context and cannot delegate or message remote agents. Assistant
+message executions additionally expose typed sender-free reverse message and
+Task callbacks through the authenticated receiver gateway. The local hook and
+service gate preserve the role boundary. Ordinary OAuth cannot substitute for
+execution identity or supply human approval.
 
 The driver persists conversation identity before writing input, resumes the exact
 saved conversation and rejects mismatches without opening a replacement. It has
@@ -95,13 +97,14 @@ is not proof a permission-requiring action ran. No file-byte delivery is adverti
 
 This matrix separates implemented Pot drivers from documented upstream interfaces.
 The remote receiver extension currently wires task submit/read/cancel/terminal
-input and lifecycle snapshots only for Codex/Antigravity. It does not yet wire
-remote human review or native model message/Task callbacks; those gaps do not
-remove the existing local Codex review/message behavior or the product goals.
+input and lifecycle snapshots for Codex/Antigravity, plus configured assistant
+mail and trusted role-gated callbacks. Codex native pending human requests use
+once-only receiver controls; Antigravity does not advertise headless human review.
+Real native CLI loading and effective configuration still require live checks.
 
 | Agent/surface | Ordinary MCP configuration | Execution interface and current Pot boundary |
 | --- | --- | --- |
-| Codex CLI/Desktop/IDE | Independent HTTP server + client OAuth; optional onboarding helper | Existing App Server v2 start/exact thread resume/turn interrupt/terminal events; local Task-bound review retained. New receiver callbacks/review not yet connected; files are metadata only. |
+| Codex CLI/Desktop/IDE | Independent HTTP server + client OAuth; optional onboarding helper | Existing App Server v2 start/exact thread resume/turn interrupt/terminal events; Task/run-bound human review and assistant callbacks connected through the receiver extension; files are metadata only; real native client loading remains unverified. |
 | Antigravity CLI/App | Independent `serverUrl` + client OAuth; optional helper | Existing stream-json init/result, exact conversation resume and process supervision; separate enforced execution hook required. No headless remote approval or file bytes. |
 | Claude Code | Documented `claude mcp add --transport http NAME URL`, scoped config and `/mcp` OAuth | Official Agent SDK/headless interfaces exist. No Pot driver or verified Pot session/cancel/approval mapping. |
 | Grok API / Build CLI / web | API remote-MCP tool configuration; Build CLI documented MCP management; web custom connector uses reachable URL | API tool calling does not prove control of an existing Grok Agent. Build documents session/headless/resume candidates. No Pot driver, verified cancellation, run binding or approval mapping. |

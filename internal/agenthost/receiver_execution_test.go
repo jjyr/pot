@@ -153,6 +153,15 @@ func TestReceiverApprovalDecisionIsBoundAndNeverReplayed(t *testing.T) {
 			t.Fatal("bad decision consumed native channel")
 		}
 	}
+	if e = p.backend.update(ctx, taskID, func(j *job) error { j.Task.State = "cancelled"; return nil }); e != nil {
+		t.Fatal(e)
+	}
+	if e = p.applyApproval(ctx, &saved); !errors.Is(e, agentlink.ErrFenced) || pending.resolved {
+		t.Fatal("terminal native request consumed a decision", e)
+	}
+	if e = p.backend.update(ctx, taskID, func(j *job) error { j.Task.State = "waiting_approval"; return nil }); e != nil {
+		t.Fatal(e)
+	}
 	if e = p.applyApproval(ctx, &saved); e != nil {
 		t.Fatal(e)
 	}
@@ -161,5 +170,33 @@ func TestReceiverApprovalDecisionIsBoundAndNeverReplayed(t *testing.T) {
 	}
 	if e = p.applyApproval(ctx, &saved); !errors.Is(e, agentlink.ErrFenced) {
 		t.Fatal("native decision replayed", e)
+	}
+}
+
+type invalidatedApprovalRemote struct{ receiverRemote }
+
+func (invalidatedApprovalRemote) ApprovalPending(context.Context, agentlink.MCPApprovalPending) error {
+	return agentlink.MCPError{Code: agentlink.MCPFenced}
+}
+func TestReceiverInvalidatedHumanRequestFailsClosedWithoutApproving(t *testing.T) {
+	p, remote, delivery := receiverFixture(t)
+	p.epoch = "epoch"
+	receiverMustStep(t, p)
+	receiverMustStep(t, p)
+	record := receiverRecordFixture(t, p, delivery)
+	j, e := p.backend.read(context.Background(), record.Work.Request.From, record.Admission.Binding.Task.AgentID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	pending := &pendingReview{value: agentlink.ExecutionApproval{ID: "invalidated", JobID: j.Task.ID}, job: j, done: make(chan string, 1), ctx: context.Background()}
+	p.backend.reviews[pending.value.ID] = pending
+	var stopped bool
+	p.backend.active[j.Task.ID] = func() { stopped = true }
+	p.remote = invalidatedApprovalRemote{remote}
+	if e = p.reportApprovals(context.Background(), &record); e != nil {
+		t.Fatal(e)
+	}
+	if !stopped || pending.resolved || len(pending.done) != 0 {
+		t.Fatal("invalidated request approved or restored")
 	}
 }

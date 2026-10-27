@@ -143,7 +143,7 @@ func TestMCPExecutionGatewayHTTPReverseTaskMessageAndSpoofing(t *testing.T) {
 func TestMCPHumanApprovalHTTPAndOwnerPortAreOneShotAndFenced(t *testing.T) {
 	g := newGatewayFixture(t)
 	ctx := context.Background()
-	pending := agentlink.MCPApprovalPending{Context: g.execution, Epoch: "native-epoch", RequestID: "origin", Approval: agentlink.ExecutionApproval{ID: "approval", JobID: g.binding.Task.AgentID, Method: "command", Params: json.RawMessage(`{"command":"fixture only"}`)}}
+	pending := agentlink.MCPApprovalPending{Context: g.execution, Epoch: "native-epoch", RequestID: "origin", Approval: agentlink.ExecutionApproval{ID: "approval", JobID: g.binding.Task.AgentID, Method: "command", Params: json.RawMessage(`{"command":"legacy", "reason":"legacy", "cmd":"fixture only", "justification":"preserve"}`)}}
 	var saved agentlink.MCPApprovalPending
 	fixtureCall(t, g.receiver, "pot_receiver_approval_pending", pending, &saved)
 	fixtureCall(t, g.receiver, "pot_receiver_approval_pending", pending, &saved)
@@ -170,6 +170,10 @@ func TestMCPHumanApprovalHTTPAndOwnerPortAreOneShotAndFenced(t *testing.T) {
 	view := s.reviewView(ctx, "main", nil, nil)
 	if len(view["pending"].([]any)) != 1 {
 		t.Fatal("owner review UI not wired", view)
+	}
+	args := view["pending"].([]any)[0].(map[string]any)["request"].(map[string]any)["args"].(map[string]any)
+	if args["cmd"] != "fixture only" || args["justification"] != "preserve" {
+		t.Fatal("actual Pot approval arguments overwritten", args)
 	}
 	if e = s.decideLinkedApproval(ctx, "main", mcpHumanApprovalID(reviews[0]), "allow_once"); e != nil {
 		t.Fatal(e)

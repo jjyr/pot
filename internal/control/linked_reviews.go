@@ -124,8 +124,12 @@ func (s *Service) reviewView(ctx context.Context, owner string, policy any, pend
 			if args == nil {
 				args = map[string]any{}
 			}
-			args["cmd"] = args["command"]
-			args["justification"] = args["reason"]
+			if _, present := args["cmd"]; !present {
+				args["cmd"] = args["command"]
+			}
+			if _, present := args["justification"]; !present {
+				args["justification"] = args["reason"]
+			}
 			pending = append(pending, map[string]any{"id": mcpHumanApprovalID(item), "once_only": true, "source": item.Pending.Context.Binding.Task.NodeID, "details": p.Params, "request": map[string]any{"owner": owner, "task": item.Task, "tool": p.Method, "args": args, "call_id": p.ID, "turn": item.Pending.Context.Binding.RunID, "machine_id": item.Pending.Context.Binding.Task.NodeID}})
 		}
 	}
@@ -145,8 +149,12 @@ func (s *Service) reviewView(ctx context.Context, owner string, policy any, pend
 			if args == nil {
 				args = map[string]any{}
 			}
-			args["cmd"] = args["command"]
-			args["justification"] = args["reason"]
+			if _, present := args["cmd"]; !present {
+				args["cmd"] = args["command"]
+			}
+			if _, present := args["justification"]; !present {
+				args["justification"] = args["reason"]
+			}
 			pending = append(pending, map[string]any{"id": linkedApprovalID(item, p.ID), "once_only": true, "source": item.Name, "details": p.Params, "request": map[string]any{"owner": owner, "task": task, "tool": p.Method, "args": args, "call_id": p.ID, "turn": p.JobID, "machine_id": item.Name}})
 		}
 	}

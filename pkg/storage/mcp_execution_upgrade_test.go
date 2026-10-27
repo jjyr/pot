@@ -71,3 +71,54 @@ func TestMCPExecutionGatewayUpgrade(t *testing.T) {
 		})
 	}
 }
+
+func TestMCPNodeExecutionUpgradeFromPreviousVersion(t *testing.T) {
+	db, e := OpenSQLite(filepath.Join(t.TempDir(), "node-execution-upgrade.sqlite"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer db.Close()
+	previous := fstest.MapFS{}
+	entries, e := fs.ReadDir(migrationFiles, "migrations/tasks")
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, entry := range entries {
+		if entry.Name() >= "0009" {
+			continue
+		}
+		name := "migrations/tasks/" + entry.Name()
+		raw, e := fs.ReadFile(migrationFiles, name)
+		if e != nil {
+			t.Fatal(e)
+		}
+		previous[name] = &fstest.MapFile{Data: raw}
+	}
+	if e = migrateDatabase(context.Background(), db, TasksDatabase, previous); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = db.Exec(`INSERT INTO mcp_receiver_journal VALUES('c','d','claim',17,'{"schema_version":2,"outbox":{"result":"unknown-keep"}}','real-task','real-run')`); e != nil {
+		t.Fatal(e)
+	}
+	if e = Migrate(context.Background(), db, TasksDatabase); e != nil {
+		t.Fatal(e)
+	}
+	var body string
+	var revision int
+	if e = db.QueryRow("SELECT body,revision FROM mcp_receiver_journal").Scan(&body, &revision); e != nil || body != `{"schema_version":2,"outbox":{"result":"unknown-keep"}}` || revision != 17 {
+		t.Fatal("node attestation migration changed accepted work", body, revision, e)
+	}
+	if _, e = db.Exec(`INSERT INTO mcp_node_executions VALUES('c','task','execution','{"actor":"same","run":"real"}','',1)`); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = db.Exec(`UPDATE mcp_node_executions SET active=2`); e == nil {
+		t.Fatal("invalid execution liveness accepted")
+	}
+	if e = Migrate(context.Background(), db, TasksDatabase); e != nil {
+		t.Fatal(e)
+	}
+	var binding string
+	if e = db.QueryRow("SELECT binding FROM mcp_node_executions").Scan(&binding); e != nil || binding != `{"actor":"same","run":"real"}` {
+		t.Fatal("attestation changed on reentry", binding, e)
+	}
+}

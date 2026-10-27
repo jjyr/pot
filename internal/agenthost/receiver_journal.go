@@ -35,6 +35,12 @@ func (p *receiverPump) accept(ctx context.Context, d receiverDelivery) error {
 	if err != nil {
 		return err
 	}
+	// Human-channel validation uses the same lock order as native Review and
+	// decision application: pending-map lock, then the Tasks transaction.
+	if r.Control != nil && r.Control.Approval != nil {
+		p.backend.mu.Lock()
+		defer p.backend.mu.Unlock()
+	}
 	return storage.Transaction(ctx, p.backend.db, func(tx *sql.Tx) error {
 		old, err := readReceiverRecord(ctx, tx, r.Claim.ConnectionID, r.Claim.DeliveryID)
 		if err == nil {
@@ -115,10 +121,8 @@ func (p *receiverPump) validateControl(ctx context.Context, tx *sql.Tx, c *agent
 		if c.Approval.Epoch != p.epoch || current.Task.State != "waiting_approval" {
 			return agentlink.ErrFenced
 		}
-		p.backend.mu.Lock()
 		pending := p.backend.reviews[c.Approval.ApprovalID]
 		valid := pending != nil && !pending.resolved && pending.ctx.Err() == nil && pending.job.Task.RunID == c.Binding.RunID && pending.job.Task.ID == c.Binding.Task.AgentID && pending.job.Request.From == c.Caller && p.backend.active[c.Binding.Task.AgentID] != nil
-		p.backend.mu.Unlock()
 		if !valid {
 			return agentlink.ErrFenced
 		}

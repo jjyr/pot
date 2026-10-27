@@ -69,8 +69,8 @@ func (r MCPReceiverRegistration) ValidateAgainst(ctx MCPReceiver, actual Descrip
 }
 
 // This is the existing peer/caller collaboration boundary, not a configurable
-// grant/ACL system. Owner configuration, approvals and execution launch APIs
-// cannot be added by a receiver advertisement.
+// grant/ACL system. Owner configuration and execution launch remain excluded.
+// Approvals describes a wired human channel, never receiver/model decision authority.
 func mcpCollaborationOperation(op Operation) bool {
 	return slices.Contains(PeerOperations(), op) || op == TaskInput || op == TaskEvents || op == TaskFiles || op == Approvals
 }
@@ -135,7 +135,8 @@ func (d MCPWorkDelivery) Validate() error {
 }
 
 // MCPControlDelivery has exactly one typed control. It cannot carry arbitrary
-// operations, approvals, launch parameters or caller-selected owner metadata.
+// operations, launch parameters or caller-selected owner metadata. Approval
+// controls originate only at the existing authenticated human control plane.
 type MCPControlDelivery struct {
 	Version    int                  `json:"version" required:"true"`
 	DeliveryID string               `json:"delivery_id" required:"true"`

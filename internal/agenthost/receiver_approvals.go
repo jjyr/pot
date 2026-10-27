@@ -2,7 +2,11 @@ package agenthost
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"github.com/jjyr/pot/pkg/agentlink"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 type receiverApprovalRemote interface {
@@ -27,6 +31,19 @@ func (p *receiverPump) reportApprovals(ctx context.Context, r *receiverRecord) e
 	p.backend.mu.Unlock()
 	for _, request := range pending {
 		if err := remote.ApprovalPending(ctx, request); err != nil {
+			var problem agentlink.MCPError
+			if errors.Is(err, agentlink.ErrFenced) || errors.As(err, &problem) && problem.Code == agentlink.MCPFenced {
+				// The service explicitly invalidated this pending native channel
+				// (for example after restart). Fail the waiting turn closed;
+				// transport loss/disconnect alone never takes this path.
+				p.backend.mu.Lock()
+				cancel := p.backend.active[request.Context.Binding.Task.AgentID]
+				p.backend.mu.Unlock()
+				if cancel != nil {
+					cancel()
+				}
+				continue
+			}
 			return err
 		}
 	}
@@ -58,10 +75,6 @@ func (p *receiverPump) applyApproval(ctx context.Context, r *receiverRecord) err
 	if pending == nil || p.backend.active[control.Binding.Task.AgentID] == nil || pending.resolved || pending.ctx.Err() != nil || pending.job.Request.From != control.Caller || pending.job.Task.ID != control.Binding.Task.AgentID || pending.job.Task.RunID != control.Binding.RunID {
 		return agentlink.ErrFenced
 	}
-	current, err := p.backend.read(ctx, control.Caller, control.Binding.Task.AgentID)
-	if err != nil || current.Task.RunID != control.Binding.RunID || current.Task.State != "waiting_approval" {
-		return agentlink.ErrFenced
-	}
 	if decision.RequestID != p.originalRequestID(ctx, r) {
 		return agentlink.ErrUnauthorized
 	}
@@ -70,8 +83,19 @@ func (p *receiverPump) applyApproval(ctx context.Context, r *receiverRecord) err
 	}
 	// Save intent before touching an in-memory channel. After an uncertain save
 	// or process exit this one-time decision is not replayed into a native request.
-	r.ControlApplied = true
-	if err = p.save(ctx, r); err != nil {
+	err := storage.Transaction(ctx, p.backend.db, func(tx *sql.Tx) error {
+		var raw string
+		if err := tx.QueryRowContext(ctx, "SELECT data FROM agent_adapter_jobs WHERE id=? AND caller=?", control.Binding.Task.AgentID, callerKey(control.Caller)).Scan(&raw); err != nil {
+			return agentlink.ErrFenced
+		}
+		var current job
+		if json.Unmarshal([]byte(raw), &current) != nil || current.Task.RunID != control.Binding.RunID || current.Task.State != "waiting_approval" {
+			return agentlink.ErrFenced
+		}
+		r.ControlApplied = true
+		return saveReceiverRecord(ctx, tx, r)
+	})
+	if err != nil {
 		return err
 	}
 	pending.resolved = true
