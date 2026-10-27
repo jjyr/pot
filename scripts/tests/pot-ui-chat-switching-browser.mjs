@@ -220,8 +220,15 @@ async function navigationFrames({root,client,select,snapshot,historyReads,emit})
   check(!disclosure.open,'User disclosure changes supersede the restored nested reading anchor');
   row('parent-tool').querySelector('.tool-failure').click();await settle();
   check(!!row('child-tool-25')&&disclosure.open,'Tool failure navigation uses the cursor to mount a recycled child');
+  const split=structuredClone(nested);split.cursor='91';
+  split.messages.splice(split.messages.findIndex(message=>message.id==='child-tool-20'),0,{id:'work-boundary',role:'assistant',text:'Prose separates these work records.',status:'complete'});
+  split.messages.forEach((message,i)=>message.sequence=String(i+1));
+  root.querySelector('.latest-button').click();emit(split);await settle();
+  root.querySelector('.message-reference-open').click();await settle();
+  const splitTarget=row('child-tool-25'),splitGroup=splitTarget?.closest('.work-record-group');
+  check(!!splitTarget&&splitGroup?.querySelector('.work-records').open&&!splitGroup.querySelector('[data-message-id="parent-tool"]'),'Reference mounts and opens the target work group across a prose boundary');
   root.querySelector('.latest-button').click();await settle();
-  const original=snapshot(client.scope().owner);original.cursor='91';emit(original);await settle();
+  const original=snapshot(client.scope().owner);original.cursor='92';emit(original);await settle();
   check(historyReads.length===0,'Cached navigation and loaded references do not fetch history');
   // A delayed locate completing after an explicit Latest action cannot pull back.
   const read=client.history;let release;

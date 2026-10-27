@@ -4,13 +4,25 @@ import {activeTool} from './tool-calls.mjs';
 
 const callKey=tool=>JSON.stringify([tool?.turn_id||'',tool?.id]);
 export const failedWork=tool=>!!tool&&(!!tool.failurePhase||['failed','denied'].includes(tool.phase));
+// Virtual rows index groups; references and failure links still name original
+// records. Keep logical ancestry inside a group and connect each root to its
+// mounted group. A child separated from its parent by prose owns its own group.
+export function workRecordParents(rows,logical=new Map()){
+  const groups=new Map(rows.flatMap(row=>(row.members||[]).map(member=>[member.id,row.id]))),parents=new Map(logical);
+  for(const [id,group]of groups){
+    const seen=new Set([id]);let parent=logical.get(id);
+    while(groups.get(parent)===group&&!seen.has(parent)){seen.add(parent);parent=logical.get(parent);}
+    if(groups.get(logical.get(id))!==group||seen.has(parent))parents.set(id,group);
+  }
+  return parents;
+}
 // An aggregate exec can be waiting on a child. Only the actual approval is a
 // boundary; its wrapper must not create another approval or hide that child.
 export function processRecord(message,blocked=()=>false){
   if(message.error||message.tool&&blocked(message))return false;
   if(message.compaction)return !['failed','error'].includes(message.compaction.state);
   const tool=message.role==='tool'&&message.tool;
-  const phase=tool?.script?.calls[0]?.phase||tool?.phase;
+  const phase=tool?.script?.calls?.[0]?.phase||tool?.phase;
   return !!tool&&!['unknown','stopped'].includes(tool.phase)&&phase!=='waiting_approval';
 }
 export function mailIdentity(mail){

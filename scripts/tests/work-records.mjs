@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {createWorkRecordProjection,workRecordSummary} from '../../web/src/state/work-records.mjs';
+import {createWorkRecordProjection,workRecordSummary,workRecordParents} from '../../web/src/state/work-records.mjs';
 import {projectScriptRuns} from '../../web/src/state/script-runs.mjs';
 import {communication} from '../../web/src/state/communication.mjs';
 const actor={node_id:'local',kind:'assistant',agent_id:'owner'},peer={...actor,agent_id:'peer'},task={node_id:'remote',kind:'task',agent_id:'abcd-long'};
@@ -37,6 +37,15 @@ const interleaved=[first,child,{id:'body',role:'assistant',text:'Body'},tool('la
 rows=createWorkRecordProjection()(projectScriptRuns(interleaved),{actor});
 assert.deepEqual(rows.flatMap(r=>r.members||[r]).map(r=>r.id),interleaved.map(r=>r.id));
 assert.equal(rows[0].work.tools,1);assert.equal(rows[2].work.tools,1);
+const logical=new Map([['child','exec'],['late-child','exec']]),navigation=workRecordParents(rows,logical);
+assert.equal(navigation.get('exec'),rows[0].id,'Root records connect to their virtual group');
+assert.equal(navigation.get('child'),'exec','Same-group logical ancestry remains revealable');
+assert.equal(navigation.get('late-child'),rows[2].id,'A reference across prose mounts the target group');
+assert.equal(logical.has('exec'),false,'Projection does not mutate caller ancestry');
+const cyclic=workRecordParents(rows,new Map([['exec','child'],['child','exec']]));
+assert.equal(cyclic.get('exec'),rows[0].id);assert.equal(cyclic.get('child'),rows[0].id,'Malformed ancestry cannot trap navigation outside the group root');
+assert.equal(workRecordParents(rows,new Map([['exec','missing']])).get('exec'),rows[0].id,'Missing parents do not override the mounted group');
+assert.equal(createWorkRecordProjection()([tool('diagnostic','fixture_tool',{script:{failureID:'child'}})],{actor})[0].members[0].id,'diagnostic','Failure-only script metadata remains navigable without a calls array');
 assert.equal(workRecordSummary([create],{actor}).participants.length,0,'Task creation is not peer communication');
 assert.equal(createWorkRecordProjection()([tool('cmd'),tool('input','write_stdin',{parent_id:'cmd',args:{chars:'yes'}})],{actor})[0].work.tools,2,'A command and its real input action are both operations, not an orchestration wrapper');
 
