@@ -116,7 +116,7 @@ class InstallTests(unittest.TestCase):
         original_home = os.environ.get("HOME")
 
         def run(args, **kwargs):
-            captured.append(kwargs["env"])
+            captured.append({key: kwargs["env"].get(key) for key in ("HOME", "CODEX_HOME")})
             output = '{"installed":[{"pluginId":"pot@personal","enabled":true}]}'
             return installer.subprocess.CompletedProcess(args, 0, output)
 

@@ -56,7 +56,7 @@ func TestReceiverDriverCapabilitiesAreConservative(t *testing.T) {
 }
 
 func TestNativeEnvironmentDoesNotMutateParent(t *testing.T) {
-	parent := os.Environ()
+	parent := []string{"HOME=/native/home", "PATH=/native/bin", "POT_AGENT_JOB_ID=old"}
 	before := strings.Join(parent, "\n")
 	_ = nativeEnvironment(parent, Session{JobID: "task", RunID: "run"})
 	if strings.Join(parent, "\n") != before {
