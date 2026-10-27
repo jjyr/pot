@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/jjyr/pot/internal/tasks"
@@ -18,6 +19,10 @@ import (
 // MCPAccessQueue owns receiver transport receipts. It never launches execution.
 // DB is the caller-owned, migrated tasks database; Close remains with its owner.
 type MCPAccessQueue struct {
+	messageResult   func(context.Context, *sql.Tx, agentlink.MCPWorkDelivery, agentlink.MCPExecutionEvent) error
+	liveMu          sync.Mutex
+	live            map[string]time.Time
+	dispatchMu      sync.Mutex
 	DB              *sql.DB
 	Tasks           *tasks.Service
 	NodeID          string
@@ -42,14 +47,17 @@ func (q *MCPAccessQueue) Register(ctx context.Context, receiver agentlink.MCPRec
 		}
 	}
 	for _, op := range registration.Capabilities.Operations {
-		if op != agentlink.TaskSubmit && op != agentlink.TaskRead && op != agentlink.TaskCancel && op != agentlink.TaskInput && op != agentlink.TaskEvents {
+		if op != agentlink.TaskSubmit && op != agentlink.TaskRead && op != agentlink.TaskCancel && op != agentlink.TaskInput && op != agentlink.TaskEvents && op != agentlink.ChatSend && op != agentlink.ChatRead && op != agentlink.ChatReceipt && op != agentlink.Approvals {
 			return agentlink.ErrUnsupported
 		}
 	}
 	if err := registration.ValidateAgainst(receiver, actual); err != nil {
 		return err
 	}
-	return storage.Transaction(ctx, q.DB, func(tx *sql.Tx) error {
+	err := storage.Transaction(ctx, q.DB, func(tx *sql.Tx) error {
+		if _, e := tx.ExecContext(ctx, "UPDATE mcp_remote_approvals SET state='invalidated' WHERE connection_id=? AND epoch!=? AND state='pending'", receiver.ConnectionID(), registration.Epoch); e != nil {
+			return e
+		}
 		address := mcpJSON(registration.Receiver.Address)
 		var connection string
 		err := tx.QueryRowContext(ctx, "SELECT connection_id FROM mcp_receiver_endpoints WHERE address=?", address).Scan(&connection)
@@ -70,6 +78,10 @@ func (q *MCPAccessQueue) Register(ctx context.Context, receiver agentlink.MCPRec
 		_, err = tx.ExecContext(ctx, `INSERT INTO mcp_receiver_endpoints(connection_id,address,registration) VALUES(?,?,?) ON CONFLICT(connection_id,address) DO UPDATE SET registration=excluded.registration`, receiver.ConnectionID(), address, mcpJSON(registration))
 		return err
 	})
+	if err == nil {
+		q.receiverSeen(receiver.ConnectionID())
+	}
+	return err
 }
 
 func (q *MCPAccessQueue) Directory(ctx context.Context) (agentlink.Directory, error) {
@@ -161,6 +173,9 @@ func (q *MCPAccessQueue) Submit(ctx context.Context, c agentlink.MCPCaller, in a
 			if e = q.CheckConnection(ctx, connection); e != nil {
 				return agentlink.ErrUnavailable
 			}
+		}
+		if !q.ReceiverOnline(connection) {
+			return agentlink.ErrUnavailable
 		}
 		var r agentlink.MCPReceiverRegistration
 		if e = mcpRead(raw, &r); e != nil {
@@ -331,6 +346,7 @@ func (q *MCPAccessQueue) Claim(ctx context.Context, r agentlink.MCPReceiver, req
 	if !core.Identifier(requestID) || wait < 0 || wait > 30*time.Second {
 		return nil, agentlink.ErrInvalid
 	}
+	q.receiverSeen(r.ConnectionID())
 	deadline := time.Now().Add(wait)
 	for {
 		if check, ok := ctx.Value(mcpAdmissionCheckKey{}).(func() error); ok {
@@ -489,6 +505,8 @@ func acceptedMCPDelivery(d mcpSavedDelivery) bool {
 	return d.ack != "" && mcpRead(d.ack, &ack) == nil && ack.Accepted
 }
 func (q *MCPAccessQueue) Admit(ctx context.Context, r agentlink.MCPReceiver, a agentlink.MCPRunAdmission) (err error) {
+	q.dispatchMu.Lock()
+	defer q.dispatchMu.Unlock()
 	if q.CheckConnection != nil {
 		if e := q.CheckConnection(ctx, r.ConnectionID()); e != nil {
 			return e
@@ -566,6 +584,8 @@ func (q *MCPAccessQueue) Admit(ctx context.Context, r agentlink.MCPReceiver, a a
 	})
 }
 func (q *MCPAccessQueue) Event(ctx context.Context, r agentlink.MCPReceiver, event agentlink.MCPExecutionEvent) (receipt agentlink.MCPEventReceipt, err error) {
+	q.dispatchMu.Lock()
+	defer q.dispatchMu.Unlock()
 	if q.CheckConnection != nil {
 		if e := q.CheckConnection(ctx, r.ConnectionID()); e != nil {
 			return receipt, e
@@ -629,7 +649,23 @@ func (q *MCPAccessQueue) Event(ctx context.Context, r agentlink.MCPReceiver, eve
 		task.State = string(event.Phase)
 		task.UpdatedAt = time.Now().UTC()
 		terminal := event.Result != nil
+		if terminal && q.messageResult != nil {
+			var workRaw string
+			var work agentlink.MCPWorkDelivery
+			if e = tx.QueryRowContext(ctx, "SELECT work FROM mcp_service_deliveries WHERE task_id=? AND work!='' ORDER BY rowid LIMIT 1", task.ID).Scan(&workRaw); e != nil {
+				return e
+			}
+			if e = mcpRead(workRaw, &work); e != nil {
+				return e
+			}
+			if e = q.messageResult(ctx, tx, work, event); e != nil {
+				return e
+			}
+		}
 		if terminal {
+			if _, e = tx.ExecContext(ctx, "UPDATE mcp_remote_approvals SET state='invalidated' WHERE task_id=? AND run_id=? AND state='pending'", task.ID, binding.RunID); e != nil {
+				return e
+			}
 			task.Result = event.Result.Text
 			task.Error = event.Result.Error
 		}

@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -51,6 +52,7 @@ type Options struct {
 	IntegrationAdapters []integrations.Adapter
 }
 type Service struct {
+	mcpAccess           atomic.Pointer[MCPAccess]
 	linkMu              sync.Mutex
 	chatRecoveryMu      sync.Mutex
 	agentLinks          *agentLinkHost

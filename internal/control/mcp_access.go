@@ -37,9 +37,28 @@ func NewMCPAccess(o MCPAccessOptions) (*MCPAccess, error) {
 	if o.OAuth == nil || o.Queue == nil || o.Queue.DB == nil || o.Queue.Tasks == nil || o.Queue.Tasks.DB() != o.Queue.DB || o.Queue.NodeID != o.OAuth.options.NodeID {
 		return nil, agentlink.ErrInvalid
 	}
+	if o.Local != nil {
+		if o.Local.mcpAccess.Load() != nil {
+			return nil, agentlink.ErrConflict
+		}
+	}
+	// Pending native channels cannot be reconstructed by a service restart.
+	if _, e := o.Queue.DB.Exec("UPDATE mcp_remote_approvals SET state='invalidated' WHERE state='pending'"); e != nil {
+		return nil, e
+	}
 	o.Queue.CheckConnection = o.OAuth.CheckConnection
 	a := &MCPAccess{options: o, sdk: mcp.NewServer(&mcp.Implementation{Name: "pot", Version: "1"}, nil), receiverSDK: mcp.NewServer(&mcp.Implementation{Name: "pot", Version: "1"}, nil)}
+	if o.Local != nil {
+		o.Local.mcpAccess.Store(a)
+	}
+	o.Queue.messageResult = a.messageResultTx
 	a.tools()
+	a.executionTools()
+	a.approvalTools()
+	a.nodeMailTool()
+	a.nodeExecutionTools()
+	a.nodeSubmitTool()
+	a.nodeTaskTools()
 	transport := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		info := mcp.TokenInfoFromContext(r.Context())
 		if info != nil {
@@ -69,6 +88,9 @@ func (a *MCPAccess) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	a.handler.ServeHTTP(w, r)
 }
 func (a *MCPAccess) Close() {
+	if a.options.Local != nil && a.options.Local.mcpAccess.Load() == a {
+		a.options.Local.mcpAccess.CompareAndSwap(a, nil)
+	}
 	for session := range a.sdk.Sessions() {
 		_ = session.Close()
 	}
@@ -169,6 +191,10 @@ func (a *MCPAccess) tool(name string, schema any, fn func(context.Context, *mcp.
 			}
 			return nil
 		})
+		if strings.HasPrefix(name, "pot_receiver_task_") || name == "pot_receiver_message" || name == "pot_receiver_execution_admit" || name == "pot_receiver_execution_end" || name == "pot_receiver_approval_pending" {
+			a.options.Queue.dispatchMu.Lock()
+			defer a.options.Queue.dispatchMu.Unlock()
+		}
 		value, e := fn(ctx, request, raw)
 		if e != nil {
 			return mcpToolError(e), nil, nil

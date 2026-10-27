@@ -154,8 +154,21 @@ func (m *Mailbox) Send(ctx context.Context, id string, from protocol.AgentRef, s
 // while allowing an authenticated gateway receipt to share its transaction.
 // Callers notify Changes only after their transaction commits.
 func (m *Mailbox) SendTx(ctx context.Context, tx *sql.Tx, id string, from protocol.AgentRef, send protocol.SendMail, parent *protocol.Envelope) (message protocol.Envelope, err error) {
-	if from.NodeID != m.nodeID || from == send.To {
-		return protocol.Envelope{}, errors.New("invalid sender or self-message")
+	return m.sendTx(ctx, tx, id, from, send, parent, false)
+}
+
+// ReceiveExecutionTx accepts only a gateway-authenticated remote execution. The
+// gateway verifies its persisted current claim/run; this method preserves the
+// Mailbox transaction, causal parent, immutable envelope and duplicate fence.
+func (m *Mailbox) ReceiveExecutionTx(ctx context.Context, tx *sql.Tx, id string, from protocol.AgentRef, send protocol.SendMail, parent *protocol.Envelope) (protocol.Envelope, error) {
+	if from.NodeID == m.nodeID || (from.Kind != "assistant" && from.Kind != "task") || (send.To.Kind != "assistant" && !(send.To.Kind == "user" && from.Kind == "assistant" && parent != nil && parent.From == send.To)) {
+		return protocol.Envelope{}, errors.New("invalid remote execution delivery")
+	}
+	return m.sendTx(ctx, tx, id, from, send, parent, true)
+}
+func (m *Mailbox) sendTx(ctx context.Context, tx *sql.Tx, id string, from protocol.AgentRef, send protocol.SendMail, parent *protocol.Envelope, supervised bool) (message protocol.Envelope, err error) {
+	if (!supervised && from.NodeID != m.nodeID) || from == send.To {
+		return message, errors.New("invalid sender or self-message")
 	}
 	err = func() error {
 		var replyTo *string
@@ -184,7 +197,7 @@ func (m *Mailbox) SendTx(ctx context.Context, tx *sql.Tx, id string, from protoc
 			if stored == nil || !sameEnvelope(*stored, *parent) || parent.To != from {
 				return errors.New("invalid processing parent binding")
 			}
-			if from.Kind == "assistant" {
+			if from.Kind == "assistant" && !supervised {
 				// Fence and enqueue share the writer transaction. Completion cannot
 				// retire this parent between the check and durable acceptance.
 				var state, direction string
@@ -231,54 +244,63 @@ func (m *Mailbox) DeliverChat(ctx context.Context, message protocol.Envelope) (p
 }
 
 func (m *Mailbox) deliver(ctx context.Context, message protocol.Envelope, state string) (protocol.Receipt, error) {
-	if err := message.Validate(); err != nil {
-		return protocol.Receipt{}, err
-	}
-	assistantDelivery := message.To.Kind == "assistant" && (message.From.Kind == "assistant" || message.From.Kind == "user")
-	userReply := state == "processed" && message.To.Kind == "user" && message.From.Kind == "assistant" && message.ReplyTo != nil
-	if message.Kind != "message" || !(assistantDelivery || userReply) || message.To.NodeID != m.nodeID || message.From.NodeID == m.nodeID {
-		return protocol.Receipt{}, errors.New("invalid remote delivery")
-	}
-	err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
-		old, err := findMail(ctx, tx, message.ID)
-		if err != nil {
-			return err
-		}
-		if old != nil {
-			if !sameEnvelope(*old, message) {
-				return errors.New("conflicting delivery")
-			}
-			return nil
-		}
-		if state == "queued" && m.options.OwnerAvailable != nil {
-			if err := m.options.OwnerAvailable(ctx, message.To.AgentID); err != nil {
-				return err
-			}
-		}
-		if message.ReplyTo != nil {
-			parent, err := findMail(ctx, tx, *message.ReplyTo)
-			if err != nil {
-				return err
-			}
-			if parent == nil || parent.From != message.To || parent.To != message.From || parent.ConversationID != message.ConversationID || message.Hops <= parent.Hops {
-				return errors.New("invalid reply binding")
-			}
-		} else {
-			var exists bool
-			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_messages WHERE conversation=?)", message.ConversationID).Scan(&exists); err != nil {
-				return err
-			}
-			if exists {
-				return errors.New("conversation already exists")
-			}
-		}
-		return inbox.EnqueueTx(ctx, tx, message, "in", state)
-	})
+	err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error { return m.deliverTx(ctx, tx, message, state) })
 	if err == nil {
 		m.Changes.Notify("assistant-mail")
 	}
 	return protocol.Receipt{Message: message}, err
 }
+
+// DeliverTx keeps authenticated node mail and its transport receipt in the same
+// Tasks transaction. It retains the existing remote reply and mailbox fences.
+func (m *Mailbox) DeliverTx(ctx context.Context, tx *sql.Tx, message protocol.Envelope) error {
+	return m.deliverTx(ctx, tx, message, "queued")
+}
+func (m *Mailbox) deliverTx(ctx context.Context, tx *sql.Tx, message protocol.Envelope, state string) error {
+	if err := message.Validate(); err != nil {
+		return err
+	}
+	assistantDelivery := message.To.Kind == "assistant" && (message.From.Kind == "assistant" || message.From.Kind == "user")
+	userReply := state == "processed" && message.To.Kind == "user" && message.From.Kind == "assistant" && message.ReplyTo != nil
+	if message.Kind != "message" || !(assistantDelivery || userReply) || message.To.NodeID != m.nodeID || message.From.NodeID == m.nodeID {
+		return errors.New("invalid remote delivery")
+	}
+
+	old, err := findMail(ctx, tx, message.ID)
+	if err != nil {
+		return err
+	}
+	if old != nil {
+		if !sameEnvelope(*old, message) {
+			return errors.New("conflicting delivery")
+		}
+		return nil
+	}
+	if state == "queued" && m.options.OwnerAvailable != nil {
+		if err := m.options.OwnerAvailable(ctx, message.To.AgentID); err != nil {
+			return err
+		}
+	}
+	if message.ReplyTo != nil {
+		parent, err := findMail(ctx, tx, *message.ReplyTo)
+		if err != nil {
+			return err
+		}
+		if parent == nil || parent.From != message.To || parent.To != message.From || parent.ConversationID != message.ConversationID || message.Hops <= parent.Hops {
+			return errors.New("invalid reply binding")
+		}
+	} else {
+		var exists bool
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_messages WHERE conversation=?)", message.ConversationID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			return errors.New("conversation already exists")
+		}
+	}
+	return inbox.EnqueueTx(ctx, tx, message, "in", state)
+}
+
 func (m *Mailbox) Pending(ctx context.Context, target string) ([]protocol.Envelope, error) {
 	return m.envelopes(ctx, "SELECT envelope FROM agent_messages WHERE direction='out' AND state='queued' AND json_extract(envelope,'$.to.node_id')=? ORDER BY sequence LIMIT ?", target, protocol.MailPageSize)
 }

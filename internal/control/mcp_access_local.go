@@ -199,10 +199,7 @@ func (a *MCPAccess) localMutation(ctx context.Context, c agentlink.MCPCaller, op
 	return
 }
 
-type MCPAccessMessageInput struct {
-	RequestID string            `json:"request_id" required:"true"`
-	Message   protocol.SendMail `json:"message" required:"true"`
-}
+type MCPAccessMessageInput = agentlink.MCPMessageInput
 type MCPAccessMessageAcceptance struct {
 	Receipt agentlink.MCPMutationReceipt `json:"receipt"`
 	Message protocol.Receipt             `json:"message"`
@@ -212,12 +209,16 @@ func (a *MCPAccess) message(ctx context.Context, c agentlink.MCPCaller, input MC
 	if a.options.Local == nil {
 		return acceptance, agentlink.ErrUnsupported
 	}
-	if !core.Identifier(input.RequestID) || !input.Message.To.Valid() || input.Message.To.Kind != "assistant" || input.Message.To.NodeID != a.options.Queue.NodeID {
+	if !core.Identifier(input.RequestID) || !input.Message.To.Valid() || (input.Message.To.Kind != "assistant" && input.Message.To.Kind != "user") {
 		return acceptance, agentlink.ErrInvalid
 	}
 	// Processing parents are trusted execution context, never model input. Ordinary
 	// OAuth callers have no processing parent and cannot fabricate reply authority.
 	var parent *protocol.Envelope
+	authority, supervised := ctx.Value(mcpExecutionKey{}).(mcpExecutionAuthority)
+	if supervised {
+		parent = authority.parent
+	}
 	digest, e := core.HashJSON(struct {
 		Version    int                            `json:"version"`
 		Connection string                         `json:"connection_id"`
@@ -266,13 +267,26 @@ func (a *MCPAccess) message(ctx context.Context, c agentlink.MCPCaller, input MC
 		if !errors.Is(e, sql.ErrNoRows) {
 			return e
 		}
-		if !directory.Capabilities(input.Message.To).Supports(agentlink.ChatSend) {
+		if input.Message.To.Kind != "user" && !directory.Capabilities(input.Message.To).Supports(agentlink.ChatSend) {
 			return agentlink.ErrUnsupported
 		}
 		id, _ := core.HashJSON([]string{c.ConnectionID(), mcpJSON(c.Actor()), input.RequestID})
-		envelope, e := a.options.Local.Mailbox.SendTx(ctx, tx, id, c.Actor(), input.Message, parent)
+		var envelope protocol.Envelope
+		if c.Actor().NodeID != a.options.Queue.NodeID {
+			if !supervised {
+				return agentlink.ErrUnauthorized
+			}
+			envelope, e = a.options.Local.Mailbox.ReceiveExecutionTx(ctx, tx, id, c.Actor(), input.Message, parent)
+		} else {
+			envelope, e = a.options.Local.Mailbox.SendTx(ctx, tx, id, c.Actor(), input.Message, parent)
+		}
 		if e != nil {
 			return agentlink.ErrInvalid
+		}
+		if envelope.To.NodeID != a.options.Queue.NodeID {
+			if e = a.options.Queue.enqueueMessageTx(ctx, tx, c, input, envelope, digest); e != nil {
+				return e
+			}
 		}
 		acceptance = MCPAccessMessageAcceptance{Receipt: agentlink.MCPMutationReceipt{RequestID: input.RequestID, Digest: digest}, Message: protocol.Receipt{Message: envelope}}
 		_, e = tx.ExecContext(ctx, "INSERT INTO mcp_local_mutations VALUES(?,?,?,?,?,?,'accepted',?)", c.ConnectionID(), mcpJSON(c.Actor()), agentlink.ChatSend, input.RequestID, digest, mcpJSON(input), mcpJSON(acceptance))

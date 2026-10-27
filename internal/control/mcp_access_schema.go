@@ -1,6 +1,7 @@
 package control
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"time"
@@ -10,6 +11,9 @@ func mcpContractSchema(value any) map[string]any { return mcpSchemaType(reflect.
 func mcpSchemaType(t reflect.Type) map[string]any {
 	if t.Kind() == reflect.Pointer {
 		return mcpSchemaType(t.Elem())
+	}
+	if t == reflect.TypeFor[json.RawMessage]() {
+		return map[string]any{"type": "object"}
 	}
 	if t == reflect.TypeFor[time.Time]() {
 		return map[string]any{"type": "string", "format": "date-time"}

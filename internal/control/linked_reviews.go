@@ -81,6 +81,17 @@ func (s *Service) decideLinkedApproval(ctx context.Context, owner, id, action st
 	if action != "allow_once" && action != "deny" {
 		return agentlink.ErrInvalid
 	}
+	if access := s.mcpAccess.Load(); access != nil {
+		for _, item := range access.humanReviews(ctx, owner) {
+			if mcpHumanApprovalID(item) == id {
+				user := s.reviewUser(item.Connection)
+				if item.Caller.Kind == "user" {
+					user = item.Caller
+				}
+				return access.decideHumanApproval(ctx, item, user, action)
+			}
+		}
+	}
 	for _, item := range s.linkedReviews(ctx, owner) {
 		for _, p := range item.Pending {
 			if linkedApprovalID(item, p.ID) != id {
@@ -94,6 +105,19 @@ func (s *Service) decideLinkedApproval(ctx context.Context, owner, id, action st
 }
 
 func (s *Service) reviewView(ctx context.Context, owner string, policy any, pending []any) map[string]any {
+	if access := s.mcpAccess.Load(); access != nil {
+		for _, item := range access.humanReviews(ctx, owner) {
+			p := item.Pending.Approval
+			var args map[string]any
+			_ = json.Unmarshal(p.Params, &args)
+			if args == nil {
+				args = map[string]any{}
+			}
+			args["cmd"] = args["command"]
+			args["justification"] = args["reason"]
+			pending = append(pending, map[string]any{"id": mcpHumanApprovalID(item), "once_only": true, "source": item.Pending.Context.Binding.Task.NodeID, "details": p.Params, "request": map[string]any{"owner": owner, "task": item.Task, "tool": p.Method, "args": args, "call_id": p.ID, "turn": item.Pending.Context.Binding.RunID, "machine_id": item.Pending.Context.Binding.Task.NodeID}})
+		}
+	}
 	linked := s.linkedReviews(ctx, owner)
 	for _, item := range linked {
 		for _, p := range item.Pending {
