@@ -1,7 +1,7 @@
 // Behavior groups shared by selection, listing and the runner contract.
 export const groups = {
   scroll: ['controller', 'continuity', 'task-continuity', 'scroll-components'],
-  nav: ['directory', 'switching', 'chat-initial-layout.html'],
+  nav: ['directory', 'switching', 'chat-initial-layout.html', 'work-record-navigation.html'],
   history: ['task-history', 'task-history-edges'],
   domain: ['domain-repositories.html','query-resource-commits'],
   management: ['assistant-start-phone','first-connection-codex','first-connection-antigravity','settings-phone','machines'],
@@ -12,6 +12,7 @@ export const groups = {
   storage: ['chat-cache-read-volume.html', 'chat-cache.html', 'projection-store.html', 'chat-cache-ui.html', 'cached-loading.html','assistant-drafts-storage.html'],
 };
 export const fixtures = {
+  'work-record-navigation.html':'ALL CHECKS PASSED',
   'assistant-drafts-storage.html':'DONE assistant draft storage',
   'chat-initial-layout.html': 'DONE initial Chat layout',
   'domain-repositories.html': 'DONE conversation actions authority contract',

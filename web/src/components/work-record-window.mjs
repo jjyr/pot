@@ -1,6 +1,6 @@
 import {moveConversationNode as place} from './conversation-dom.mjs';
 import {createMessageWindow} from './message-window.mjs';
-import {createWorkRecordProjection} from '../state/work-records.mjs';
+import {createWorkRecordProjection,workRecordParents} from '../state/work-records.mjs';
 import {presentationLabel} from '../state/tool-presentation.mjs';
 import {communicationParticipant} from './communication-participant.mjs';
 import {reconcile} from './reconcile.mjs';
@@ -93,7 +93,7 @@ export function createWorkRecordWindow({locale=()=> 'en',actor=()=>undefined,res
       current=project(messages,{actor:currentActor,blocked,anchor});source=messages;actorSignature=nextActorSignature;
       owners=new Map(current.flatMap(message=>(message.members||[message]).map(member=>[member.viewKey,message.viewKey])));
     }
-    window.setMessages(current,settings);
+    window.setMessages(current,{...settings,parents:workRecordParents(current,settings.parents)});
     for(const [key,entry]of records)if(!owners.has(key)){options.dispose(entry.record);records.delete(key);}
   }
   return Object.assign(Object.create(window),{setMessages:layout,close(){owners.clear();window.close();for(const {record}of records.values())options.dispose(record);records.clear();}});
