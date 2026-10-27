@@ -29,10 +29,12 @@ try{
     const t=key=>translate(locale,key),context=await browser.newContext({viewport:{width,height:844},serviceWorkers:'block'});
     const page=await context.newPage();page.setDefaultTimeout(20000);page.on('pageerror',error=>report.errors.push(error.message));
     try{
-      await config({phase:'offline',hold:['configuration','rules'],release:'all',failSave:false,name:'Synthetic Assistant',model:'synthetic-original',revision:1,configRevision:0,revoked:false});
+      await config({phase:'ready',historyCount:48,hold:['configuration','rules','snapshot'],release:'all',failSave:false,name:'Synthetic Assistant',model:'synthetic-original',revision:1,configRevision:0,revoked:false});
       const callStart=(await config()).calls.length;
       await page.goto(origin+'/?assistant_id=alpha&locale='+locale);
       await page.waitForFunction(()=>!!document.querySelector('#pot-composer')&&!document.querySelector('#pot-composer').disabled);
+      await page.waitForFunction(()=>document.querySelector('.connection-status.is-connected'));
+      await context.setOffline(true);
       const send=async text=>{await page.locator('#pot-composer').fill(text);await page.locator('.send-button').click();};
       await send('First fixed submission '+width);
       await waitForOutbox(page,([rows])=>rows.length===1&&rows[0].state==='queued');
@@ -41,17 +43,28 @@ try{
       const identities=queued.rows.map(row=>({target:row.target,request:row.request,sequence:row.sequence}));
       await page.locator('#pot-composer').fill('Ordinary unsent draft '+width);
       await waitForOutbox(page,([rows,drafts])=>drafts.some(row=>row.text.startsWith('Ordinary unsent draft')));
+      const history=page.locator('.workspace > .history');await history.waitFor();
+      await page.waitForFunction(()=>{const h=document.querySelector('.workspace > .history');return h&&!h.hasAttribute('aria-busy')&&h.scrollHeight>h.clientHeight;});
+      const box=await history.boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.wheel(0,-350);
+      await page.waitForFunction(()=>{const h=document.querySelector('.workspace > .history');return h&&h.scrollTop+h.clientHeight<h.scrollHeight-100;});
+      const reading=await history.evaluate(h=>{const edge=h.getBoundingClientRect().top;const row=[...h.querySelectorAll('article[data-message-id]')].find(row=>row.getBoundingClientRect().top>=edge);return {id:row.dataset.messageId,top:row.getBoundingClientRect().top-edge};});
       await page.getByRole('button',{name:t('assistantSettings'),exact:true}).click();
       const name=page.getByLabel(locale==='en'?'Name':'名称',{exact:true});await name.waitFor();
-      check(!await name.isDisabled()&&!await page.locator('.page-host').evaluate(node=>node.inert),'offline assistant settings editable while outbox waits '+width);
+      check(!await name.isDisabled()&&!await page.locator('.page-host').evaluate(node=>node.inert),'offline settings editable while outbox waits '+width);
       check(await page.getByLabel(locale==='en'?'Model':'模型',{exact:true}).isDisabled(),'slow settings section alone is disabled '+width);
       await name.fill('Submitted settings '+width);
       await page.evaluate(()=>{window.combinedNameNode=document.querySelector('.editor-form input[aria-label]');});
-      await config({hold:['configuration','rules','save']});
       const save=page.getByRole('button',{name:locale==='en'?'Save':'保存',exact:true});await save.click();
+      await page.waitForFunction(()=>{const status=document.querySelector('.editor-actions + .inline-error,[role="alert"][data-error-key]');return status&&status.textContent.trim();});
+      check(await name.inputValue()==='Submitted settings '+width,'offline save retains form without queuing configuration '+width);
+      await config({hold:['configuration','rules','snapshot','save']});await context.setOffline(false);
+      // Failed sections retain explicit retries; a successful connection does
+      // not replace the name control or discard its edits.
+      for(const retry of await page.locator('[data-section-state="error"] button').all())await retry.click();
+      await save.click();
       await name.fill('Newer settings edit '+width);
       check(!await name.isDisabled()&&await save.isDisabled(),'pending save permits new editing and deduplicates '+width);
-      await config({release:'save',hold:['configuration','rules']});
+      await config({release:'save',hold:['configuration','rules','snapshot']});
       await page.getByText(t('settings.savedDraftRemaining'),{exact:true}).waitFor();
       check((await config()).state.name==='Submitted settings '+width&&await name.inputValue()==='Newer settings edit '+width,'save acknowledges only captured settings snapshot '+width);
       check(await page.evaluate(()=>window.combinedNameNode===document.querySelector('.editor-form input[aria-label]')),'settings keeps original native field '+width);
@@ -66,6 +79,8 @@ try{
       // remain usable. The queued payloads must not acquire settings fields.
       await page.waitForFunction(()=>document.querySelector('#pot-composer')?.value.startsWith('Ordinary unsent draft'));
       check(await page.locator('#pot-composer').inputValue()==='Ordinary unsent draft '+width,'returning from settings preserves ordinary draft '+width);
+      await page.waitForFunction(reading=>{const h=document.querySelector('.workspace > .history'),row=h&&[...h.querySelectorAll('article[data-message-id]')].find(row=>row.dataset.messageId===reading.id);return row&&Math.abs(row.getBoundingClientRect().top-h.getBoundingClientRect().top-reading.top)<=24;},reading);
+      check(true,'settings return preserves the latest reading anchor within 24px '+width);
       const unchanged=await waitForOutbox(page,([rows])=>rows.length===2);
       assert.deepEqual(unchanged.rows.map(row=>({target:row.target,request:row.request,sequence:row.sequence})),identities);
       check(!saved.calls.slice(callStart).some(call=>call.method==='POST'&&['/api/v1/messages','/api/v1/turn/steer'].includes(call.path)),'held snapshot prevents POST but preserves queue identity/order '+width);
