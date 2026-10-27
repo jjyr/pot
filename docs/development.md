@@ -345,6 +345,19 @@ selects an extracted source tree. Pass `--baseline` directly to
 `node scripts/tests/chat-scroll-http-browser.mjs` to record the known send and
 draft-layout regressions in that tree while retaining the other assertions.
 
+`mise run test:ui-chat-activity` uses the same isolated browser prerequisites to
+check lifecycle activity through reconnects, empty model/tool rounds, long
+output, parallel inputs and terminal outcomes. It samples row/status identity,
+nonterminal frames, Latest visibility and historical reading anchors against
+synthetic HTTP/SSE and committed IndexedDB state. Its history diagnostic runner
+also checks paged failed/cancelled messages without receiver lifecycles and
+cached paging after reload. `POT_HISTORY_OUTPUT` and `POT_HISTORY_SOURCE`
+select that runner's evidence directory and source tree; it accepts `--baseline`.
+`POT_ACTIVITY_OUTPUT` selects
+the untracked evidence directory; `POT_ACTIVITY_SOURCE` selects an extracted
+source tree. Pass `--baseline` directly to `node scripts/tests/chat-activity-browser.mjs`
+to record that tree without enforcing the new activity contract.
+
 On the same loopback server, `/scripts/tests/fixtures/chat-cache.html` exercises
 the actual IndexedDB schema, reopening, atomic rollback, history reads, version
 fencing, multiple writers and retired boots. `/scripts/tests/fixtures/chat-cache-ui.html?conversation=alpha&locale=en`
