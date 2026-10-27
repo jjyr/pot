@@ -218,6 +218,17 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     for(const job of flight.regions.values()){job.wait.cancel();job.surface.close();}
     flight=null;host.removeAttribute('aria-busy');
   }
+  function refreshRegions(current){
+    let changed=false,valid=true;
+    current.options.regions=(current.options.regions||[]).map(region=>{
+      if(!region.current||region.current())return region;
+      const latest=region.latest?.()||(requestedOptions.regions||[]).find(item=>item.key===region.key);
+      if(!latest||latest===region||latest.host!==region.host||latest.current&&!latest.current()){valid=false;requestRender?.();return region;}
+      const job=current.regions.get(region.key);if(job){job.wait.cancel();job.surface.close();current.regions.delete(region.key);}
+      changed=true;return latest;
+    });
+    return {changed,valid};
+  }
   function selectedPreparation(next){
     const indexes=new Set(),critical=new Set(),byKey=new Map(next.map((message,index)=>[message.viewKey,index]));
     for(const item of virtualizer.getVirtualItems()){const index=byKey.get(item.key);if(index!==undefined)indexes.add(index);}
@@ -296,6 +307,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       flight={rows:structuredClone(requested),revision:requestedRevision,options:{...requestedOptions,renderContext},jobs:new Map(),sizes:new Map(),regions:new Map(),epoch:layoutEpoch,reframe:layoutReframe};
     }
     const current=flight,indexes=selectedPreparation(current.rows),selected=new Set(indexes.map(index=>current.rows[index].viewKey));let waiting=false;
+    if(!refreshRegions(current).valid){invalidate();return;}
     // Reader movement can retire an offscreen candidate while a slow preview
     // waits. Its identity deadline survives; its DOM/resources do not accumulate.
     for(const [key,job]of current.jobs)if(!selected.has(key)){job.wait.cancel();dispose(job.record);job.surface.close();current.jobs.delete(key);}
@@ -329,6 +341,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       if(!job.measurement)waiting=true;
     }
     if(waiting)return;
+    const regions=refreshRegions(current);if(!regions.valid||regions.changed){invalidate();return;}
     // Replacing a native touch target can prevent its touchend from reaching
     // the scroller. Keep that live tree until contact is released. During the
     // native tail, a shorter canvas must also wait if it would clamp scrollTop
@@ -345,7 +358,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     for(const [key,size]of current.sizes)heights.set(key,size);
     while(heights.size>1280)heights.delete(heights.keys().next().value);
     current.rows.forEach((message,index)=>{const job=current.jobs.get(message.viewKey);if(job?.measurement){committing.set(message.viewKey,job);heights.set(message.viewKey,job.measurement.size);}});
-    current.options.beforeCommit?.();owner?.beforeLayout();
+    current.options.beforeCommit?.();const finalRegions=refreshRegions(current);if(!finalRegions.valid||finalRegions.changed){committing=null;invalidate();return;}owner?.beforeLayout();
     for(const job of current.regions.values()){
       for(const [element,clone]of job.context.frames){const box=clone.getBoundingClientRect();framePreparedElement(element,box.height,element.matches('pot-message-file[data-block="false"]')?box.width:undefined);}
       job.context.phase='commit';withPreparedRender(job.context,job.region.key,()=>job.region.render(job.region.host));job.context.phase='live';

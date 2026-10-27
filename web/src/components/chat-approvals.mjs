@@ -8,10 +8,11 @@ export function createChatApprovals({host,locale,visible,deferred=false}) {
   announcer.setAttribute('role','status');announcer.setAttribute('aria-live','polite');announcer.setAttribute('aria-atomic','true');
   host.append(notice,cards,announcer);host.hidden=true;
   const observed=new Map();
-  let pending={context:'',entries:[]};
+  let pending={context:'',entries:[]},generation=0;
+  const revision=value=>JSON.stringify([value.context,locale(),value.entries.map(entry=>[entry.id,entry.revision])]);
   function update(context,entries) {
-    if(deferred){pending={context,entries};return;}
-    commit(context,entries);
+    const next={context,entries};if(revision(next)!==revision(pending))generation++;pending=next;
+    if(!deferred)commit(context,entries);
   }
   function commit(context,entries) {
     host.hidden=!entries.length;
@@ -32,13 +33,14 @@ export function createChatApprovals({host,locale,visible,deferred=false}) {
     }
     if(!entries.length)announcer.textContent='';
   }
-  return {update,region(){
-    const {context,entries}=pending;
-    return {key:'chat-approvals',host,revision:JSON.stringify([context,locale(),entries.map(entry=>[entry.id,entry.revision])]),render:target=>{
+  function region(){
+    const {context,entries}=pending,stamp=revision(pending),epoch=generation;
+    return {key:'chat-approvals',host,revision:JSON.stringify([epoch,stamp]),current:()=>generation===epoch&&revision(pending)===stamp,latest:region,render:target=>{
       if(target===host){commit(context,entries.map(entry=>({id:entry.id,element:entry.commit()})));return;}
       target.hidden=!entries.length;target.setAttribute('aria-label',translate(locale(),'tool.pendingApprovals'));
       const label=n('p','approval-notice',translate(locale(),'tool.pendingApprovalCount').replace('{count}',String(entries.length))),list=n('div','approval-list');
       for(const entry of entries)list.append(entry.prepare());target.replaceChildren(label,list,n('span','visually-hidden'));
     }};
-  }};
+  }
+  return {update,region};
 }

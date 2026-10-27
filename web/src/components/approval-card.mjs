@@ -35,5 +35,5 @@ export function createApprovalCard({locale,machineLabel=()=>translate(locale(),'
     }
     for(const [name,button] of buttons)if(!names.includes(name)){button.remove();buttons.delete(name);}
   }
-  return {element,update};
+  return {element,update,invalidate(){fresh=false;signature='';buttons.forEach(button=>button.disabled=true);}};
 }

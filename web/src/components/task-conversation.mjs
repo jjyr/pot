@@ -47,7 +47,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   root.classList.add('task-conversation');root.append(stage,history,composerArea);
   const dialog=n('dialog','preferences product-actions task-actions');dialog.setAttribute('aria-label',tr('Task actions','任务操作'));root.append(dialog);
   let fresh=false,record=initial,state,inputs=[],approvals=[],unavailable=false,connectionError='',storageError=false,busy=false,historyBusy=false,disposed=false,frame=0,menuMode='actions',menuSignature='',draftVersion=0;
-  let forest,projection,downloadFailure,historyFailure,historyAbort,historyAttempt='',historyRun='',historyFrame=0,unmatchedApprovals=[],cacheTruncated=false;
+  let forest,projection,downloadFailure,historyFailure,historyAbort,historyAttempt='',historyRun='',historyFrame=0,unmatchedApprovals=[],approvalGeneration=0,cacheTruncated=false;
   function renderDownloadFailure(target,failure){
     const open=downloadNotice.querySelector('details')?.open||false;target.hidden=!failure;target.replaceChildren();
     if(!failure)return;
@@ -156,13 +156,20 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
       }
       return entry;
   }
+  function approvalRegion(){
+    const entries=unmatchedApprovals,epoch=approvalGeneration,language=locale();
+    return {key:'task-approvals',host:approvalHost,revision:JSON.stringify([epoch,language,entries.map(entry=>[entry.id,entry.revision])]),current:()=>!disposed&&approvalGeneration===epoch&&locale()===language,latest:approvalRegion,render:target=>{
+      const nodes=entries.map(entry=>target===approvalHost?entry.commit():entry.prepare());
+      for(const node of [...target.childNodes])if(!nodes.includes(node))node.remove();
+      nodes.forEach((node,index)=>{if(target.childNodes[index]!==node)target.insertBefore(node,target.childNodes[index]||null);});
+    }};
+  }
   function renderTranscript(){
     if(!state)return;
     if(!projection){const rows=projectScriptRuns(projectTaskMessages(state,inputs,record,{offline:unavailable||!!connectionError}),{activeTurn:active()?[...state.tools.values()].at(-1)?.tool.turn_id:null});projection={rows,forest:toolForest(rows)};}
     const {rows}=projection;forest=projection.forest;
     const parents=new Map(rows.flatMap(message=>{const parent=message.tool?.parent_id&&forest.byID.get(message.tool.turn_id+':'+message.tool.parent_id)?.message;return parent?[[message.id,parent.id]]:[];}));
     const goalText=record.request?.text||initial.request?.text||'',expanded=goalOpen;
-    const preparedApprovals=unmatchedApprovals;
     const attachments=record.outcome?.artifacts?.map(path=>({path}))||record.files||[],artifactError=record.outcome?.artifacts_error||'',failure=downloadFailure,loading=historyBusy,historyError=historyFailure;
     const truncated=cacheTruncated;
     const regions=[{key:'task-cache-notice',host:historyNotice,revision:JSON.stringify([truncated,locale()]),render:target=>{target.hidden=!truncated;target.textContent=t('tasks.cachedOutputBounded');}},
@@ -173,11 +180,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
       const open=files.querySelector('details')?.open||false;target.replaceChildren();
       for(const file of attachments)target.append(action(file.name||file.path,()=>downloadFile({task:task.id,path:file.path})));
       if(artifactError){const warning=n('div','task-artifacts-error');warning.append(n('p','hint',t('tasks.artifactsError')));const details=n('details');details.open=open;details.append(n('summary','',t('tasks.artifactsErrorDetails')),n('pre','',artifactError));warning.append(details);target.append(warning);}
-    }},{key:'task-approvals',host:approvalHost,revision:JSON.stringify([locale(),preparedApprovals.map(entry=>[entry.id,entry.revision])]),render:target=>{
-      const nodes=preparedApprovals.map(entry=>target===approvalHost?entry.commit():entry.prepare());
-      for(const node of [...target.childNodes])if(!nodes.includes(node))node.remove();
-      nodes.forEach((node,index)=>{if(target.childNodes[index]!==node)target.insertBefore(node,target.childNodes[index]||null);});
-    }},{key:'task-goal',host:goal,revision:JSON.stringify([goalText,expanded,locale()]),render:target=>{
+    }},approvalRegion(),{key:'task-goal',host:goal,revision:JSON.stringify([goalText,expanded,locale()]),render:target=>{
       if(!target.firstChild){target.append(staticPreparationClone(goalSummary),n('div','message-body task-goal-body'));}
       target.open=expanded;target.querySelector('.task-goal-preview').textContent=goalText.replace(/\s+/g,' ');
       if(expanded)updateMarkdown(target.querySelector('.task-goal-body'),goalText,{downloadFile,acquireFileImage,renderSlot:'task-goal'});
@@ -210,7 +213,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   updateIdentity();updateComposer();renderStage();
   return {
     transcript,history,input,approvalHost,
-    setApprovals(entries){const changed=JSON.stringify(entries.map(entry=>[entry.id,entry.revision]))!==JSON.stringify(unmatchedApprovals.map(entry=>[entry.id,entry.revision]));unmatchedApprovals=entries;if(changed)scheduleFollow();},
+    setApprovals(entries){const changed=JSON.stringify(entries.map(entry=>[entry.id,entry.revision]))!==JSON.stringify(unmatchedApprovals.map(entry=>[entry.id,entry.revision]));unmatchedApprovals=entries;if(changed){approvalGeneration++;scheduleFollow();}},
     update(next){
       if(disposed)return;
       projection=null;

@@ -1049,7 +1049,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
   const approvalContext=()=>JSON.stringify([approvalScope(),taskView?.task.id||'']);
   function renderApprovals() {
     const chatContext=JSON.stringify(scope());
-    if(disposed||approvalOwner!==approvalContext()){approvalHost.replaceChildren();chatApprovals.update(chatContext,[]);taskView?.ui.setApprovals([]);return;}
+    if(disposed||approvalOwner!==approvalContext()){for(const card of approvalCards.values())card.invalidate();approvalHost.replaceChildren();chatApprovals.update(chatContext,[]);taskView?.ui.setApprovals([]);return;}
     const entries=[],retained=new Set();
     for(const approval of pendingApprovals) {
       const toolRoot=taskView?.state?.messages.some(message=>message.tool?.id===approval.request.call_id&&message.tool.turn_id===approval.request.turn);
@@ -1062,7 +1062,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
           await decideApproval(original,decision);
         }}));
       }
-      const card=approvalCards.get(key),value={...structuredClone(approval),fresh:approvalFresh},options={taskTitle:taskNames.get(taskNameKey(approvalScope(),approval.request.task))};
+      const card=approvalCards.get(key),value={...structuredClone(approval),fresh:approvalFresh},options={taskTitle:taskNames.get(taskNameKey(approvalScope(),approval.request.task))};if(!approvalFresh)card.invalidate();
       {
         const capturedKey=approvalOwner,capturedScope={...approvalScope()};
         entries.push({id:approval.id,revision:JSON.stringify([value,options]),
@@ -1072,16 +1072,16 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       }
     }
     chatApprovals.update(chatContext,taskView?[]:entries);taskView?.ui.setApprovals(entries);
-    for(const key of approvalCards.keys())if(!retained.has(key))approvalCards.delete(key);
+    for(const key of approvalCards.keys())if(!retained.has(key)){approvalCards.get(key).invalidate();approvalCards.delete(key);}
     approvalHost.replaceChildren();
   }
   let approvalQueue=null,approvalQueueKey='';
   function permissions(){
     const captured={...approvalScope()},key=approvalContext();
-    if(!captured.owner||disposed||!supportsCapability((client.assistants||[]).find(item=>item.id===captured.owner&&item.space_id===captured.space),'approvals.manage')){approvalQueue?.close();approvalQueue=null;approvalQueueKey='';approvalGate.close();approvalFresh=false;pendingApprovals=[];approvalOwner='';approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);onApprovalsChanged();return Promise.resolve();}
+    if(!captured.owner||disposed||!supportsCapability((client.assistants||[]).find(item=>item.id===captured.owner&&item.space_id===captured.space),'approvals.manage')){approvalQueue?.close();approvalQueue=null;approvalQueueKey='';approvalGate.close();approvalFresh=false;pendingApprovals=[];approvalOwner='';for(const card of approvalCards.values())card.invalidate();approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);taskView?.ui.setApprovals([]);onApprovalsChanged();return Promise.resolve();}
     if(!approvalQueue||approvalQueueKey!==key){
       approvalQueue?.close();approvalQueueKey=key;const token=approvalGate.next(),current=()=>!disposed&&approvalGate.current(token)&&approvalQueueKey===key&&approvalContext()===key;
-      approvalFresh=false;pendingApprovals=[];approvalOwner='';approvalCards.clear();approvalHost.replaceChildren();
+      approvalFresh=false;pendingApprovals=[];approvalOwner='';for(const card of approvalCards.values())card.invalidate();approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);taskView?.ui.setApprovals([]);onApprovalsChanged();
       approvalQueue=createRefreshQueue(async()=>{
         const [value]=await Promise.all([request('/api/v1/permissions',{...captured,signal:token.signal}),machineInfo.load({...captured,signal:token.signal})]);if(!current())return;
         approvalFresh=true;pendingApprovals=(value.pending||[]).filter(item=>item.request?.owner===captured.owner&&(!taskView||item.request.task===taskView.task.id));approvalOwner=key;
@@ -1090,7 +1090,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
           const nameKey=taskNameKey(captured,id);if(taskNames.has(nameKey))return;
           try{const record=await taskDomain.metadata({id},captured,{signal:token.signal});if(current())taskNames.set(nameKey,record.info?.title||record.request?.text||id);}catch{/* Retain the exact Task ID when its title is unavailable. */}
         }));if(current())renderApprovals();
-      },{active:current,onError:reason=>{approvalFresh=false;renderApprovals();if(taskView)renderTaskTranscript(taskView);notify(reason.message);}});
+      },{active:current,onError:reason=>{approvalFresh=false;renderApprovals();if(taskView)renderTaskTranscript(taskView);onApprovalsChanged();notify(reason.message);}});
     }return approvalQueue.run();
   }
   // Linked approval requests arrive independently of the local conversation.
@@ -1120,7 +1120,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
   const beforeUnload=event=>{if([...(editor?[editor.session]:[]),...editorParents.map(value=>value.session),...machineDrafts.values()].some(session=>session.dirty||session.pending)){event.preventDefault();event.returnValue='';}};
   const preference=()=>{if(assistantLoad){renderAssistantLoad();return;}if(extensionUI){heading(translate(locale(),'extensions.title'));return;}if(editor){editor.lifecycle.locale?.();for(const status of editor.root.querySelectorAll('[data-error-key]')){const span=status.querySelector(':scope>span');if(span)span.textContent=translate(locale(),status.dataset.errorKey);const summary=status.querySelector('details>summary');if(summary)summary.textContent=translate(locale(),'agentLinks.diagnostics');}return;}if(route==='add-assistant'&&assistantStartRefresh){assistantStartRefresh().catch(()=>notify(translate(locale(),'assistantStart.refreshFailed')));return;}if(route==='settings'&&filter.settingsTab==='integrations'&&!editor){heading(translate(locale(),'settings'));for(const node of host.querySelectorAll('[data-settings-i18n]'))node.textContent=translate(locale(),node.dataset.settingsI18n);return;}if(taskView){taskDetail(taskView.task,{recordHistory:false,returnTo:taskView.returnTo});return;}if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner,force:true});};
   window.addEventListener('beforeunload',beforeUnload);window.addEventListener('pot:locale',preference);
-  return {get authorityReady(){return editorAuthorityReady();},get title(){return title;},get editing(){return !!editor;},get approvalSpace(){return approvalScope().space;},get notificationContext(){return taskView?{space:taskView.scope.space,owner:taskView.scope.owner,task:taskView.task.id}:null;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!assistantLoad||!!editor||detailParent||!!usageOwner||route==='add-assistant'&&!host.hidden;},show,assistant,setupAI,leave,back,permissions,syncApprovals:renderApprovals,taskMenu(){taskView?.ui.openMenu();},handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalQueue?.close();approvalQueue=null;approvalQueueKey='';approvalGate.close();approvalOwner='';approvalFresh=false;pendingApprovals=[];approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);},approvalFor,decideApproval,taskNeedsApproval,rememberTasks,renderApprovals,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,options={}){route='tasks';return taskDetail(task,options);},
+  return {get authorityReady(){return editorAuthorityReady();},get title(){return title;},get editing(){return !!editor;},get approvalSpace(){return approvalScope().space;},get notificationContext(){return taskView?{space:taskView.scope.space,owner:taskView.scope.owner,task:taskView.task.id}:null;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!assistantLoad||!!editor||detailParent||!!usageOwner||route==='add-assistant'&&!host.hidden;},show,assistant,setupAI,leave,back,permissions,syncApprovals:renderApprovals,taskMenu(){taskView?.ui.openMenu();},handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalQueue?.close();approvalQueue=null;approvalQueueKey='';approvalGate.close();approvalOwner='';approvalFresh=false;pendingApprovals=[];for(const card of approvalCards.values())card.invalidate();approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);taskView?.ui.setApprovals([]);onApprovalsChanged();},approvalFor,decideApproval,taskNeedsApproval,rememberTasks,renderApprovals,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,options={}){route='tasks';return taskDetail(task,options);},
     approvalRegion:()=>chatApprovals.region(),
     showProviders(){filter.settingsTab='providers';return show('settings');},
     refresh(topics=[],source={}){

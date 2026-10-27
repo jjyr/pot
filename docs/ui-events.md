@@ -33,6 +33,11 @@ version baseline. Usage-only updates do not reload the assistant directory. Perm
 refresh catalogue `pending_approvals` counts for every assistant independently of
 reply identity and unread baselines. They also refresh the selected owner's
 transient Chat approval region; duplicate request IDs do not repeat its notice.
+Approval regions carry an in-memory generation. A pending message preparation
+refreshes and measures an invalidated region before committing it, while retaining
+its body candidates. Stale, removed and cleared approvals disable their old live
+actions immediately; an older region cannot republish enabled actions after its
+generation has retired. Decision handlers also revalidate current approval context.
 Mutations publish after persistence; no-op reads do not produce invalidations.
 Task journal `text_delta` and `tool_output` commits publish `runner` only. They
 advance the same durable transcript cursor without invalidating the assistant
