@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Native image preview fixture</title>
+<link rel="stylesheet" href="../../../web/src/styles.css">
+<style>
+  html, body { height: auto; margin: 0; overflow: auto; }
+  main { max-width: 920px; margin: 32px auto; padding: 0 20px 400px; }
+  .fixture-intro { color: var(--muted); font-size: 14px; }
+  #results { white-space: pre-wrap; }
+</style>
+<body>
+<main>
+  <h1>Image previews</h1>
+  <p class="fixture-intro">Synthetic images in the production resource, attachment and Markdown components. No service or business writes.</p>
+  <button id="verify" type="button">Run component checks</button>
+  <pre id="results" role="status">Loading originals…</pre>
+  <section id="resource"></section>
+  <section id="attachment"></section>
+  <section id="markdown" class="message-body"></section>
+</main>
+<script type="module">
+import {createResourceView} from '../../../web/src/components/resource-view.mjs';
+import {createFileImage} from '../../../web/src/components/file-image.mjs';
+import {renderMessageAttachments} from '../../../web/src/components/attachments.mjs';
+const query=new URLSearchParams(location.search);
+document.documentElement.lang=query.get('locale')||'en';
+document.documentElement.dataset.theme=query.get('theme')||'light';
+const canvas=document.createElement('canvas');canvas.width=960;canvas.height=3200;
+const ctx=canvas.getContext('2d');
+for(let i=0;i<8;i++){
+  ctx.fillStyle=['#dcebf0','#ebeed9','#edd9cd','#d4e4da'][i%4];ctx.fillRect(0,i*400,960,400);
+  ctx.fillStyle='#294e53';ctx.font='bold 44px sans-serif';ctx.fillText(`${String(i+1).padStart(2,'0')}   FIELD NOTES`,60,i*400+90);
+  ctx.font='26px sans-serif';ctx.fillText(i===0?'A long image · start reading at the top':'Original pixels · scroll to continue',60,i*400+145);
+  ctx.strokeStyle='#709897';ctx.lineWidth=3;
+  for(let row=0;row<3;row++){ctx.beginPath();ctx.moveTo(60,i*400+210+row*50);ctx.lineTo(880-row*90,i*400+210+row*50);ctx.stroke();}
+}
+const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png')),url=URL.createObjectURL(blob);
+let retained=0,released=0,downloads=0,downloadFailure=false;
+const acquire=()=>{retained++;let active=true;return {url:()=>Promise.resolve(url),release:()=>{if(active){active=false;released++;}}};};
+const download=async()=>{downloads++;if(downloadFailure)throw Error('Synthetic download failure');};
+const resource={id:'fixture-long-image',name:'field-notes.png',entry:'field-notes.png',mime_type:'image/png',size:blob.size,files:[{path:'field-notes.png',size:blob.size}],download:{path:'field-notes.png'}};
+const mountResource=()=>{const card=createResourceView({resource,mode:'preview'},{acquireResource:acquire,downloadResource:download});document.querySelector('#resource').replaceChildren(card);return card;};
+let card=mountResource();
+document.querySelector('#attachment').append(renderMessageAttachments([{id:'fixture-attachment',name:'uploaded-notes.png',mime_type:'image/png',size:blob.size}],{
+  client:{retainAttachment:()=>{retained++;return ()=>{released++;};},attachmentURL:()=>Promise.resolve(url),downloadAttachment:download},scope:{owner:'fixture',space:'fixture'},locale:()=>document.documentElement.lang,
+}));
+document.querySelector('#markdown').append(createFileImage({task:'fixture',path:'field-notes.png'},'Markdown original',{
+  acquireFileImage:()=>{const lease=acquire();return {url:lease.url(),release:lease.release};},downloadFile:download,
+}));
+const wait=async predicate=>{for(let i=0;i<120;i++){if(predicate())return;await new Promise(requestAnimationFrame);}throw Error('Timed out waiting for component');};
+await wait(()=>document.querySelectorAll('[data-state="ready"]').length===3);
+window.imageViewerFixture={ready:true,resource:card,url,get downloads(){return downloads;},get leases(){return {retained,released};}};
+document.querySelector('#results').textContent='Originals ready. Click an image to open its preview.';
+const assert=(condition,message)=>{if(!condition)throw Error(message);};
+const tick=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+const dialog=()=>document.querySelector('dialog[open]');
+const open=async trigger=>{trigger.focus({preventScroll:true});trigger.click();await tick();assert(dialog(),'Preview opens');await Promise.all(dialog().getAnimations().map(animation=>animation.finished));return dialog();};
+const close=async()=>{dialog().querySelector('.file-image-close').click();await tick();assert(!dialog(),'Close button removes dialog');};
+window.verifyImageViewer=async()=>{
+  const results=[];
+  const check=message=>results.push(message);
+  const trigger=card.querySelector('img');
+  assert(card.classList.contains('is-expanded'),'Resource image defaults expanded');
+  window.scrollTo(0,180);const scroll=window.scrollY,overflow=document.documentElement.style.overflow;
+  let d=await open(trigger),v=d.querySelector('.image-viewer-viewport'),full=d.querySelector('.image-viewer-plane img');
+  assert(Math.abs(full.getBoundingClientRect().width-v.clientWidth)<1,'Default image fits available width');
+  assert(v.scrollTop===0&&full.naturalHeight===3200&&full.src===url,'Long original starts at top');
+  assert(document.documentElement.style.overflow==='hidden','Page scroll is locked');check('Expanded inline → width-fit original at top');
+  const initialWidth=full.getBoundingClientRect().width;
+  d.querySelector('.image-viewer-zoom-in').click();assert(full.getBoundingClientRect().width>initialWidth,'Zoom in works');
+  const larger=full.getBoundingClientRect().width;d.querySelector('.image-viewer-zoom-out').click();assert(full.getBoundingClientRect().width<larger,'Zoom out works');
+  d.querySelector('.image-viewer-zoom-in').click();
+  v.scrollTop=600;v.scrollLeft=50;const before=full.getBoundingClientRect(),rect=v.getBoundingClientRect(),x=120,y=140;
+  const anchor=[(rect.left+x-before.left)/before.width,(rect.top+y-before.top)/before.height];
+  v.dispatchEvent(new WheelEvent('wheel',{ctrlKey:true,deltaY:-100,clientX:rect.left+x,clientY:rect.top+y,bubbles:true,cancelable:true}));
+  const after=full.getBoundingClientRect();assert(Math.abs((rect.left+x-after.left)/after.width-anchor[0])<.003&&Math.abs((rect.top+y-after.top)/after.height-anchor[1])<.003,'Pointer-centered zoom');
+  assert(window.scrollY===scroll,'Zoom does not move underlying page');check('Buttons and pointer-centered Ctrl+wheel zoom');
+  // Native input and pointer capture are exercised by the capture runner too.
+  const plain=new WheelEvent('wheel',{deltaY:100,bubbles:true,cancelable:true});v.dispatchEvent(plain);assert(!plain.defaultPrevented,'Ordinary wheel retains native scrolling');
+  full.click();assert(d.open,'Image click cannot dismiss preview');
+  d.dispatchEvent(new MouseEvent('click',{bubbles:true}));assert(d.open,'Surface click cannot dismiss preview');
+  const modes=d.querySelector('select');
+  for(const value of ['window','original','width']){modes.value=value;modes.dispatchEvent(new Event('change'));if(value==='window')assert(full.getBoundingClientRect().height<=v.clientHeight+1,'Fit window fits height');if(value==='original')assert(full.getBoundingClientRect().width===960,'Original size uses original pixels');assert(v.scrollTop===0,'Mode starts at top');}
+  check('Fit window, original size and width; no accidental dismissal');
+  downloadFailure=true;await d.querySelector('.file-image-download').click();await tick();assert(!d.querySelector('.image-viewer-error').hidden,'Download failure stays in preview');
+  downloadFailure=false;d.querySelector('.file-image-download').click();await tick();assert(d.querySelector('.image-viewer-error').hidden&&downloads===2,'Download retries existing original API');
+  document.documentElement.lang=document.documentElement.lang==='en'?'zh-CN':'en';window.dispatchEvent(new Event('pot:locale'));assert(d.querySelector('select').options[0].textContent===(document.documentElement.lang==='en'?'Fit width':'适应宽度'),'Live locale refresh');check('Download retry and live locale switch');
+  await close();assert(window.scrollY===scroll&&document.activeElement===trigger,'Closing restores page scroll and focus');assert(document.documentElement.style.overflow===overflow,'Closing restores scroll style');
+  const detachedWidth=full.style.width;v.dispatchEvent(new WheelEvent('wheel',{ctrlKey:true,deltaY:-200,cancelable:true}));assert(full.style.width===detachedWidth&&!full.hasAttribute('src'),'Closed listeners and image source released');check('Button closes, focus/scroll restored, listeners/source cleaned');
+  await open(trigger);await close();check('Preview reopens');
+  for(const selector of ['#attachment .resource-image','#markdown .file-image-preview']){await open(document.querySelector(selector));await close();}check('Uploaded attachment and Markdown use shared preview');
+  const prior=released;await open(trigger);card.remove();await tick();assert(!dialog()&&released===prior+1,'Unmount closes dialog and releases lease');card=mountResource();await wait(()=>card.dataset.state==='ready');window.imageViewerFixture.resource=card;check('Unmount closes and releases original lease');
+  const gifURL='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  const gif=createResourceView({resource:{...resource,mime_type:'image/gif'},mode:'preview'},{acquireResource:()=>({url:()=>Promise.resolve(gifURL),release:()=>{}}),downloadResource:download});
+  document.querySelector('#resource').append(gif);await wait(()=>gif.dataset.state==='ready');
+  if(!gif.querySelector('canvas'))gif.querySelector('.resource-actions button').click();
+  const still=gif.querySelector('canvas');assert(still,'GIF retains its pause control');
+  await open(still);assert(dialog().querySelector('img').src===gifURL,'Paused GIF still opens the authorized original');await close();assert(document.activeElement===still,'GIF still regains focus');gif.remove();check('Paused GIF still shares original preview and focus return');
+  window.scrollTo(0,0);document.querySelector('#results').textContent=results.map(x=>'PASS '+x).join('\n');
+  return {passed:true,results};
+};
+document.querySelector('#verify').onclick=async()=>{try{await window.verifyImageViewer();}catch(error){document.querySelector('#results').textContent='FAIL '+error.message;throw error;}};
+</script>
+</body>
+</html>
