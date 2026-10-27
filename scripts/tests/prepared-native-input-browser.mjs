@@ -10,15 +10,16 @@ export async function preparedNativeInputReady(browser,origin){
     try{
       await page.addInitScript(()=>{
         if(window!==top){
-          for(const type of ['pointerdown','pointerup','click'])addEventListener(type,event=>parent.postMessage({type:'fixture-input-return',event:type,trusted:event.isTrusted,target:event.target.id,token:new URL(location.href).searchParams.get('token'),epoch:performance.timeOrigin+performance.now()},'*'),true);
+          function geometry(){const button=document.querySelector('#inside');if(button){const box=button.getBoundingClientRect();parent.postMessage({type:'fixture-input-geometry',x:box.x+box.width/2,y:box.y+box.height/2,width:innerWidth,height:innerHeight,token:new URL(location.href).searchParams.get('token'),epoch:performance.timeOrigin+performance.now()},'*');}requestAnimationFrame(geometry);}requestAnimationFrame(geometry);
+          for(const type of ['pointerdown','pointerup','click'])addEventListener(type,event=>parent.postMessage({type:'fixture-input-return',event:type,viewport:{width:innerWidth,height:innerHeight},trusted:event.isTrusted,target:event.target.id,token:new URL(location.href).searchParams.get('token'),epoch:performance.timeOrigin+performance.now()},'*'),true);
           return;
         }
-        let frame=0;const evidence=window.nativeInputReturn={inputs:[],frames:[]};
+        let frame=0;const evidence=window.nativeInputReturn={inputs:[],frames:[],points:[]};
         const snapshot=window.nativeInputSnapshot=()=>{
           const iframe=document.querySelector('.history:not([data-preparation-surface]) iframe'),box=iframe?.getBoundingClientRect();
-          return {epoch:performance.timeOrigin+performance.now(),frame,stage:!!iframe?.nativePreparation,presenting:!!iframe?.nativePresentation,ready:window.nativeCase?.ready,surfaces:document.querySelectorAll('[data-preparation-surface]').length,holds:document.querySelectorAll('[data-native-preparation-placeholder]').length,focus:document.activeElement===iframe,active:document.activeElement.id||document.activeElement.localName,token:iframe?.src&&new URL(iframe.src).searchParams.get('token'),rect:box&&{x:box.x,y:box.y,width:box.width,height:box.height},clientWidth:iframe?.clientWidth};
+          return {epoch:performance.timeOrigin+performance.now(),frame,stage:!!iframe?.nativePreparation,presenting:!!iframe?.nativePresentation,ready:window.nativeCase?.ready,surfaces:document.querySelectorAll('[data-preparation-surface]').length,holds:document.querySelectorAll('[data-native-preparation-placeholder]').length,focus:document.activeElement===iframe,active:document.activeElement.id||document.activeElement.localName,token:iframe?.src&&new URL(iframe.src).searchParams.get('token'),rect:box&&{x:box.x,y:box.y,width:box.width,height:box.height},clientWidth:iframe?.clientWidth,clientHeight:iframe?.clientHeight};
         };
-        addEventListener('message',event=>{if(event.data?.type==='fixture-input-return')evidence.inputs.push({...event.data,live:event.source===document.querySelector('.history:not([data-preparation-surface]) iframe')?.contentWindow,parent:snapshot()});});
+        addEventListener('message',event=>{const live=event.source===document.querySelector('.history:not([data-preparation-surface]) iframe')?.contentWindow;if(event.data?.type==='fixture-input-geometry'&&live)evidence.points.push({...event.data,received:performance.timeOrigin+performance.now()});if(event.data?.type==='fixture-input-return')evidence.inputs.push({...event.data,live,parent:snapshot()});});
         for(const type of ['pointerdown','pointerup','click'])addEventListener(type,event=>evidence.inputs.push({type:'host',event:type,target:event.target.id||event.target.localName,trusted:event.isTrusted,...snapshot()}),true);
         function tick(){frame++;evidence.frames.push(snapshot());requestAnimationFrame(tick);}requestAnimationFrame(tick);
       });
@@ -31,12 +32,14 @@ export async function preparedNativeInputReady(browser,origin){
       await page.evaluate(()=>{
         let sawStage=false,done=false,resolve;window.nativeInputReturned=new Promise(ready=>resolve=ready);
         const observer=new MutationObserver(()=>queueMicrotask(check));
-        function check(){const state=nativeInputSnapshot();sawStage||=state.stage;if(!done&&sawStage&&!state.stage&&state.ready){done=true;observer.disconnect();nativeInputReturn.boundary=state;resolve(state);}}
-        observer.observe(document,{subtree:true,childList:true,attributes:true});nativeCase.start();check();
+        function check(){const state=nativeInputSnapshot();sawStage||=state.stage;if(!done&&sawStage&&!state.stage&&state.ready){done=true;observer.disconnect();nativeInputReturn.boundary=state;nativeInputReturn.readyPoint=nativeInputReturn.points.findLast(point=>point.epoch>=nativeInputReturn.started&&point.width===state.clientWidth&&point.height===state.clientHeight&&point.token===state.token&&point.received<=state.epoch);resolve(state);}}
+        observer.observe(document,{subtree:true,childList:true,attributes:true});nativeInputReturn.started=performance.timeOrigin+performance.now();nativeCase.start();check();
       });
-      await page.waitForFunction(()=>!!document.querySelector('.history:not([data-preparation-surface]) iframe')?.nativePreparation);
-      const point=await child.getByRole('button',{name:'Inside next'}).evaluate(element=>{const box=element.getBoundingClientRect();return {x:box.x+box.width/2,y:box.y+box.height/2,width:innerWidth};});
-      const boundary=await page.evaluate(()=>nativeInputReturned);
+      // An early stage may still expose an intermediate child viewport. Use
+      // geometry already observed before first ready; never wait afterward for
+      // an ACK, RAF or a point to arrive, and never refocus the returning host.
+      const {boundary,point}=await page.evaluate(async()=>{const boundary=await nativeInputReturned;return {boundary,point:nativeInputReturn.readyPoint};});
+      assert(point&&point.epoch<=boundary.epoch&&point.received<=boundary.epoch,'A matching actual child point must exist before first ready');
       assert(boundary.ready&&!boundary.stage&&boundary.surfaces===0);assert.equal(boundary.clientWidth,point.width);assert.equal(boundary.focus,focused);
       assert(!boundary.presenting&&boundary.holds===0,'Ready cannot precede native presentation or leave its loading hold');
       assert(boundary.rect.y+point.y>=0&&boundary.rect.y+point.y<900);
@@ -45,6 +48,9 @@ export async function preparedNativeInputReady(browser,origin){
       const evidence=await page.evaluate(()=>nativeInputReturn),click=evidence.inputs.findLast(event=>event.type==='fixture-input-return'&&event.event==='click'&&event.target==='inside'),nextFrame=evidence.frames.find(frame=>frame.epoch>boundary.epoch);
       assert(click?.trusted&&click.live,'First returned trusted click must reach the original child');assert.equal(click.token,boundary.token);
       assert(!nextFrame||click.epoch<nextFrame.epoch,'Input must reach the child before the first RAF after readiness');
+      const first=evidence.inputs.filter(event=>event.type==='fixture-input-return'&&event.epoch>=boundary.epoch).slice(0,3);
+      assert.deepEqual(first.map(event=>event.event),['pointerdown','pointerup','click']);
+      assert(first.every(event=>event.trusted&&event.live&&event.target==='inside'&&event.viewport.width===boundary.clientWidth&&event.viewport.height===boundary.clientHeight&&(!nextFrame||event.epoch<nextFrame.epoch)),'Every first trusted event reaches the current child viewport before next RAF');
       assert.equal(evidence.inputs.filter(event=>event.type==='host'&&event.target==='iframe'&&event.epoch>=boundary.epoch).length,0);
       await page.evaluate(()=>nativeCase.probe('after-input-return'));await page.waitForFunction(()=>nativeCase.messages.some(message=>message.label==='after-input-return'));
       const probe=await page.evaluate(()=>nativeCase.messages.findLast(message=>message.label==='after-input-return'));
