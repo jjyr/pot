@@ -10,12 +10,22 @@ import (
 // Authentication, persisted admission and current-run liveness must all be
 // checked before constructing a node caller. Shape validation grants no trust.
 type MCPExecutionContext struct {
-	Claim   MCPClaim            `json:"claim" required:"true"`
-	Binding MCPExecutionBinding `json:"binding" required:"true"`
+	Claim           MCPClaim            `json:"claim,omitempty,omitzero"`
+	NodeExecutionID string              `json:"node_execution_id,omitempty"`
+	Binding         MCPExecutionBinding `json:"binding" required:"true"`
 }
 
 func (c MCPExecutionContext) Validate() error {
-	if c.Claim.Validate() != nil || c.Binding.Validate() != nil || c.Binding.Task.NodeID != c.Claim.Binding.Receiver.NodeID {
+	if c.Binding.Validate() != nil {
+		return ErrUnauthorized
+	}
+	if c.NodeExecutionID != "" {
+		if !core.Identifier(c.NodeExecutionID) || c.Claim != (MCPClaim{}) {
+			return ErrUnauthorized
+		}
+		return nil
+	}
+	if c.Claim.Validate() != nil || c.Binding.Task.NodeID != c.Claim.Binding.Receiver.NodeID {
 		return ErrUnauthorized
 	}
 	return nil
@@ -84,4 +94,18 @@ func (d MCPApprovalDecision) Validate() error {
 type MCPNodeMail struct {
 	Message            protocol.Envelope `json:"message" required:"true"`
 	ProcessingParentID string            `json:"processing_parent_id,omitempty"`
+}
+
+// MCPNodeExecutionAdmission is an owning node's attestation of its actual local
+// active execution, outside remotely claimed Work. It uses the same receiver
+// credential. ExecutionID is correlation, never a credential or launch request.
+type MCPNodeExecutionAdmission struct {
+	ExecutionID   string              `json:"execution_id" required:"true"`
+	Binding       MCPExecutionBinding `json:"binding" required:"true"`
+	PreviousRunID string              `json:"previous_run_id,omitempty"`
+	ParentID      string              `json:"parent_id,omitempty"`
+}
+type MCPNodeExecutionEnd struct {
+	ExecutionID string              `json:"execution_id" required:"true"`
+	Binding     MCPExecutionBinding `json:"binding" required:"true"`
 }
