@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 export async function referenceCancellation(page,origin){
   const phone=page.viewportSize().width<600;
   await page.goto(origin+'/scripts/tests/fixtures/reference-cancel.html?conversation=alpha&locale='+(phone?'zh-CN':'en'));
-  await page.waitForSelector('[data-reference-source]');
+  await page.waitForSelector('.history [data-reference-source]');
   const input=page.locator('.composer-input'),remove=page.locator('.composer-references .message-reference-remove');
   const state=()=>page.evaluate(()=>({cards:document.querySelectorAll('.composer-references .message-reference').length,selection:getSelection().toString(),text:document.querySelector('.composer-input').value,attachments:document.querySelectorAll('.composer-attachments .attachment-card').length}));
   const select=()=>page.evaluate(()=>referenceFixture.select());

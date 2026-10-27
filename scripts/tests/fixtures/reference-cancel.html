@@ -25,7 +25,7 @@ const client={production:!params.has('volatile'),chatCacheName:'reference-cancel
 };
 mountApp(document.querySelector('#app'),client);
 window.referenceFixture={calls,accept(){pending.shift()?.({message_id:'captured-only',duplicate:false});},select(){
-  const source=document.querySelector('[data-reference-source]'),range=document.createRange();range.selectNodeContents(source);
+  const source=document.querySelector('.history [data-reference-source]'),range=document.createRange();range.selectNodeContents(source);
   getSelection().removeAllRanges();getSelection().addRange(range);
   source.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));source.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));
 }};

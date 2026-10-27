@@ -23,7 +23,7 @@ export async function composerContinuationBrowser(browser,{sourceOrigin,baseline
    const input=page.locator('#pot-composer'),main=page.locator('.send-button');
    const ready=()=>page.waitForFunction(()=>document.querySelector('.connection-status')?.classList.contains('is-connected'));
    const play=async()=>{await page.waitForFunction(()=>document.querySelector('.send-button')?.getAttribute('aria-label')==='Continue task'&&!document.querySelector('.send-button').disabled);assert(await main.isEnabled());};
-   const select=()=>page.evaluate(()=>{const source=document.querySelector('[data-reference-source]'),range=document.createRange();range.selectNodeContents(source);getSelection().removeAllRanges();getSelection().addRange(range);source.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));source.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));});
+   const select=async()=>{await page.waitForFunction(()=>{const h=document.querySelector('.history');return h&&getComputedStyle(h).visibility==='visible'&&h.querySelector('[data-reference-source]');});await page.evaluate(()=>{const source=document.querySelector('.history [data-reference-source]'),range=document.createRange();range.selectNodeContents(source);getSelection().removeAllRanges();getSelection().addRange(range);source.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));source.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));});await page.waitForFunction(()=>document.querySelectorAll('.composer-references .message-reference').length===1);};
    try{
     await control({continuation,messages:[source]});
     await page.goto(fixture.origin+'/?locale=en&assistant_id=alpha');await ready();
