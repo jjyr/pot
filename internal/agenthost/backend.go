@@ -532,7 +532,7 @@ func (b *backend) execute(ctx context.Context, selected job) {
 func (b *backend) executeSession(ctx context.Context, selected job, session Session, text string, bind func(string) error) {
 	var launch bool
 	err := b.update(ctx, selected.Task.ID, func(j *job) error {
-		if j.Task.State == "queued" {
+		if j.Task.State == "queued" && j.Task.RunID == selected.Task.RunID {
 			j.Task.State = "running"
 			launch = true
 		}
@@ -552,10 +552,17 @@ func (b *backend) executeSession(ctx context.Context, selected job, session Sess
 	}
 	session.Adapter = b.runtime().Kind
 	session.HostRoot = b.root
+	session.RunID = selected.Task.RunID
 	result := runNativeTurn(turnCtx, session, text, turnEvents{
 		Thread: bind,
 		Started: func(turn string) error {
-			return b.update(context.Background(), selected.Task.ID, func(j *job) error { j.TurnID = turn; return nil })
+			return b.update(context.Background(), selected.Task.ID, func(j *job) error {
+				if j.Task.RunID != selected.Task.RunID {
+					return agentlink.ErrFenced
+				}
+				j.TurnID = turn
+				return nil
+			})
 		},
 		Review: func(ctx context.Context, method string, params json.RawMessage) (string, error) {
 			if selected.Message != nil {
@@ -565,6 +572,9 @@ func (b *backend) executeSession(ctx context.Context, selected job, session Sess
 		},
 	})
 	_ = b.update(context.Background(), selected.Task.ID, func(j *job) error {
+		if j.Task.RunID != selected.Task.RunID {
+			return agentlink.ErrFenced
+		}
 		j.Task.State = result.Status
 		j.Task.Result = result.Text
 		j.Task.Error = result.Error

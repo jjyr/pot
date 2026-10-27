@@ -196,6 +196,47 @@ func (h *agentHost) handler() http.Handler {
 			fail(w, 403, "cross_origin_denied")
 			return
 		}
+		if r.URL.Path == "/api/v1/agent-host/receiver/authorization" && r.Method == "GET" {
+			result, err := h.receiverAuthorization(r.Context(), r.URL.Query().Get("connection_id"))
+			if handleError(w, err) {
+				return
+			}
+			writeJSON(w, 200, result)
+			return
+		}
+		if r.URL.Path == "/api/v1/agent-host/receiver/grant" && r.Method == "POST" {
+			var grant receiverGrant
+			if !body(w, r, &grant) {
+				return
+			}
+			if handleError(w, h.saveReceiverGrant(r.Context(), grant)) {
+				return
+			}
+			writeJSON(w, 200, map[string]bool{"saved": true})
+			return
+		}
+		if r.URL.Path == "/api/v1/agent-host/receiver/disconnect" && r.Method == "POST" {
+			var input struct {
+				ConnectionID string `json:"connection_id"`
+			}
+			if !body(w, r, &input) {
+				return
+			}
+			result, err := h.db.ExecContext(r.Context(), "UPDATE mcp_receiver_connections SET state='disconnected',revision=revision+1 WHERE id=?", input.ConnectionID)
+			if handleError(w, err) {
+				return
+			}
+			n, err := result.RowsAffected()
+			if handleError(w, err) {
+				return
+			}
+			if n != 1 {
+				fail(w, 404, "not_found")
+				return
+			}
+			writeJSON(w, 200, map[string]bool{"disconnected": true})
+			return
+		}
 		if r.URL.Path == "/api/v1/agent-host/browser" && r.Method == "POST" {
 			writeJSON(w, 200, h.browserPage())
 			return

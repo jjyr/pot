@@ -43,7 +43,7 @@ func (b *backend) awaitReview(ctx context.Context, j job, method string, params 
 		b.mu.Unlock()
 		if !remaining {
 			_ = b.update(context.Background(), j.Task.ID, func(current *job) error {
-				if current.Task.State == "waiting_approval" {
+				if current.Task.RunID == j.Task.RunID && current.Task.State == "waiting_approval" {
 					current.Task.State = "running"
 				}
 				return nil
@@ -51,6 +51,9 @@ func (b *backend) awaitReview(ctx context.Context, j job, method string, params 
 		}
 	}()
 	if err := b.update(ctx, j.Task.ID, func(current *job) error {
+		if current.Task.RunID != j.Task.RunID {
+			return agentlink.ErrFenced
+		}
 		if current.Task.State == "cancelling" {
 			return context.Canceled
 		}
@@ -88,7 +91,7 @@ func (b *backend) Review(ctx context.Context, r agentlink.ReviewRequest) (agentl
 			return result, agentlink.ErrNotFound
 		}
 		current, err := b.read(ctx, r.Caller, p.job.Task.ID)
-		if err != nil || current.Task.State != "waiting_approval" {
+		if err != nil || current.Task.RunID != p.job.Task.RunID || current.Task.State != "waiting_approval" {
 			return result, agentlink.ErrConflict
 		}
 		// Mark consumed while retaining other concurrent requests for this job.

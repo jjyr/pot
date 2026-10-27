@@ -20,10 +20,13 @@ func MainRuntime(adapter Runtime, args []string, in io.Reader, out io.Writer) er
 	}
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		fmt.Fprintln(out, "usage: pot-"+adapter.Kind+"-agent host|connections --root PRIVATE_DIRECTORY; assistant --root PRIVATE_DIRECTORY --id ID --workspace DIRECTORY [--name NAME] [--model MODEL] [--effort LEVEL] [--mode read-only|workspace-write] [--default]; executor --root PRIVATE_DIRECTORY --workspace DIRECTORY [--mode read-only|workspace-write]")
+		fmt.Fprintln(out, "receiver-connect --root PRIVATE_DIRECTORY --url POT_MCP_URL [--connection ID]; receiver-serve|receiver-disconnect --root PRIVATE_DIRECTORY --connection ID")
 		return nil
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	potURL := flags.String("url", "", "Pot MCP resource URL")
+	connection := flags.String("connection", "", "receiver connection ID")
 	root := flags.String("root", "", "private native agent host directory")
 	id := flags.String("id", "", "virtual assistant ID")
 	name := flags.String("name", "", "assistant display name")
@@ -42,6 +45,14 @@ func MainRuntime(adapter Runtime, args []string, in io.Reader, out io.Writer) er
 		return errors.New("host_root_required")
 	}
 	switch args[0] {
+	case "execution-tools":
+		return executionTools(in, out, *root, adapter)
+	case "receiver-connect":
+		return receiverConnect(*root, *potURL, *connection, adapter, out)
+	case "receiver-serve":
+		return receiverServe(*root, *connection, adapter)
+	case "receiver-disconnect":
+		return receiverDisconnect(*root, *connection, adapter)
 	case "executor":
 		client, err := ensureAgentHost(*root, adapter)
 		if err != nil {

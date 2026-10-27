@@ -14,6 +14,7 @@ import (
 
 type hostToolInput struct {
 	JobID           string  `json:"job_id,omitempty"`
+	RunID           string  `json:"run_id,omitempty"`
 	Operation       string  `json:"operation"`
 	ConnectionID    string  `json:"connection_id,omitempty"`
 	RequestID       string  `json:"request_id,omitempty"`
@@ -28,6 +29,8 @@ type hostToolInput struct {
 
 func (h *agentHost) tool(ctx context.Context, in hostToolInput) (any, error) {
 	switch in.Operation {
+	case "execution_context":
+		return h.executionContext(ctx, in)
 	case "connections":
 		return h.links.List(ctx)
 	case "assistants":
