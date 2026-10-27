@@ -1,7 +1,7 @@
 # Pot website
 
-A standalone product website with equal emphasis on assistant tasks and Agent Link,
-including the verified Codex integration, a website-design conversation and four installation paths. It uses static HTML, CSS and JavaScript;
+A standalone product website organized into four top-level views (`Overview`, `Security`, `Install`, and `Changelog`),
+covering model provider setup, persistent assistant task management, Agent Link orchestration (including the verified Codex integration), sandbox and secret security architecture, four installation paths, and release history. It uses static HTML, CSS and JavaScript;
 Python's standard library generates all six language entries and an offline preview.
 No product runtime, Node dependencies or build framework are required.
 
@@ -63,16 +63,22 @@ server. Regenerate them whenever a source changes. The larger self-contained
 pages, catalogs, styles, scripts and brand images, supports offline language
 switching and requires no network subresources.
 
-## Assistant section
+## View structure and Assistant section
 
-Section 01 is a local website-design conversation with Pot and Designer Tony,
-followed by a design-result preview. It has no playback, stage navigation or
-product screenshot gallery. User messages have no identity row; assistant
+The header navigation switches between four views (`Overview`, `Security`, `Install`, and `Changelog`) while keeping all four views rendered in the DOM for progressive enhancement and no-JavaScript fallback:
+
+- **Overview (`#view-overview`)**: Hero with philosophy link (`https://jjylab.com/posts/why-agent-coding-is-exhausting/`), Section 01 Model Directory & Setup (`#models`), Section 02 Assistant & Task Management (`#assistant`), Section 03 Agent Link Hub (`#agent-link`), Section 04 End-to-End Workflow (`#workflow`), and entry cards to the other tabs.
+- **Security (`#view-security`)**: Three-tier machine policy (`Protected`, `Trusted`, `Blocked`) with SRT native sandboxing, zero-wildcard context-bound command approvals (`allow_always`, `allow_task`, `deny`), and `AES-256-GCM` secret encryption with transient credential injection.
+- **Install (`#view-install`)**: Four installation paths (`Agent`, `macOS`, `Linux`, `Web UI`).
+- **Changelog (`#view-changelog`)**: Release history (`v0.0.1`–`v0.0.4`) and open-source extension specifications (`Plugins & Skills`, `MCP Servers`, `GitHub Notifications`, `Scheduled Tasks`).
+
+In Section 02 (`#assistant`), a real product screenshot (`assets/product-work.png`) is paired with a local website-design conversation between Pot and Designer Tony,
+followed by a design-result preview. User messages have no identity row; assistant
 messages keep their name and avatar. Tony uses a generic avatar.
 Native `details` provide the communication disclosures and nested call details;
 one short incoming message starts expanded. A native dialog provides the local
 design-result preview, including Escape dismissal and focus restoration.
-Language switching preserves communication disclosures and the open preview,
+Language switching preserves the active view tab, communication disclosures and the open preview,
 alongside the other section states.
 
 The Pot/Tony story and design preview are HTML layout and interaction
