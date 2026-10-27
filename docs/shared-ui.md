@@ -245,6 +245,11 @@ scrolling, leases and diagram instances. Surfaces retire after the actual nodes
 have transferred. Atomic DOM moves are preferred; the fallback restores focus
 and selection and defers disconnect cleanup to distinguish a move from removal.
 Real removal retires the component generation and releases its resources.
+Virtual range commits keep the root containing the current focus in place and
+order its measured neighbors around it. Moving that focused root can make the
+browser scroll it into view even during an atomic DOM move; it must not override
+the conversation controller's newer reading destination. Focus and the physical
+root order remain intact without another scroll writer.
 
 One conversation controller chooses the geometry correction for the entire
 batch; nested adapters never write the native scroller. Its context snapshots

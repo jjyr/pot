@@ -180,14 +180,27 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       virtualizer.observer.unobserve(record.row);virtualizer.elementsCache.delete(key);
       mounted.delete(key);retireDeadlines(record,retainedMembers);dispose(record);
     }
-    let index=0;
+    const elements=[];
     for(const part of layout){
       let element;
       if(part.gap){element=spacers[spacerIndex];if(!element){element=document.createElement('div');element.className='message-window-spacer';element.setAttribute('aria-hidden','true');spacers[spacerIndex]=element;}spacerIndex++;element.style.height=`${Math.max(0,part.gap)}px`;element.style.marginTop=`${Math.min(0,part.gap)}px`;}
       else{element=part.record.row;mounted.set(element.dataset.windowKey,part.record);}
-      if(host.children[index]!==element)moveConversationNode(host,element,host.children[index]||null);index++;
+      elements.push(element);
     }
-    while(host.children.length>index)host.lastElementChild.remove();
+    const focused=elements.find(element=>element.contains(document.activeElement));
+    if(focused){
+      // Atomic moves can synchronously scroll a focused row into view. Keep
+      // that original row in place and arrange its neighbors around it; the
+      // conversation controller remains the only geometry scroll writer.
+      const retained=new Set(elements);
+      for(const element of [...host.children])if(!retained.has(element))element.remove();
+      let before=null;
+      for(let index=elements.length-1;index>=0;index--){const element=elements[index];if(element!==focused&&(element.parentNode!==host||element.nextSibling!==before))moveConversationNode(host,element,before);before=element;}
+    }else{
+      let index=0;
+      for(const element of elements){if(host.children[index]!==element)moveConversationNode(host,element,host.children[index]||null);index++;}
+      while(host.children.length>index)host.lastElementChild.remove();
+    }
   }
   // All sizes enter through a prepared transaction. Live ResizeObserver entries
   // must never replace the geometry of an unprepared content revision.
