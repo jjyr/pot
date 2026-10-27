@@ -417,11 +417,16 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 		result.Error = "codex_absolute_workspace_required"
 		return
 	}
+	executionConfig, err := codexExecutionConfig(s)
+	if err != nil {
+		result.Error = err.Error()
+		return
+	}
 	binary := s.Binary
 	if binary == "" {
 		binary = "codex"
 	}
-	binary, err := exec.LookPath(binary)
+	binary, err = exec.LookPath(binary)
 	if err != nil {
 		result.Error = "codex_unavailable"
 		return
@@ -525,6 +530,9 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 	// Preserve the receiving Codex configuration, including its automatic
 	// reviewer. Only server requests for a human decision enter Agent Link.
 	params := map[string]any{"cwd": s.Workspace, "sandbox": s.Mode}
+	if executionConfig != nil {
+		params["config"] = executionConfig
+	}
 	if s.Model != "" {
 		params["model"] = s.Model
 	}

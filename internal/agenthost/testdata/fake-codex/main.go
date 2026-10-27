@@ -48,6 +48,7 @@ func main() {
 				Capabilities struct {
 					OptOut []string `json:"optOutNotificationMethods"`
 				} `json:"capabilities"`
+				Config       map[string]any                `json:"config"`
 				Model        string                        `json:"model"`
 				Effort       string                        `json:"effort"`
 				Cwd          string                        `json:"cwd"`
@@ -98,6 +99,13 @@ func main() {
 			if m.Params.ThreadID == "missing-thread" || filepath.Base(m.Params.Cwd) == "reject-thread-start" {
 				send(map[string]any{"id": m.ID, "error": map[string]any{"code": -32600, "message": "fixture thread unavailable"}})
 				continue
+			}
+			if m.Params.Model == "execution-config-fixture" {
+				observation := map[string]any{"method": m.Method, "config": m.Params.Config, "job": os.Getenv("POT_AGENT_JOB_ID"), "run": os.Getenv("POT_AGENT_RUN_ID"), "assistant": os.Getenv("POT_AGENT_ASSISTANT_ID")}
+				raw, _ := json.Marshal(observation)
+				if os.WriteFile(filepath.Join(m.Params.Cwd, "execution-config.json"), raw, 0600) != nil {
+					os.Exit(26)
+				}
 			}
 			state = 3
 			workspace = m.Params.Cwd

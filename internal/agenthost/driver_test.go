@@ -1,8 +1,11 @@
 package agenthost
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -55,5 +58,64 @@ func TestNativeEnvironmentDoesNotMutateParent(t *testing.T) {
 	_ = nativeEnvironment(parent, Session{JobID: "task", RunID: "run"})
 	if strings.Join(parent, "\n") != before {
 		t.Fatal("parent mutated")
+	}
+}
+
+func TestCodexStartAndResumeReplaceOnlyExecutionContextConfiguration(t *testing.T) {
+	worker, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, workspace := t.TempDir(), t.TempDir()
+	t.Setenv("POT_AGENT_JOB_ID", "parent-job")
+	t.Setenv("POT_AGENT_RUN_ID", "parent-run")
+	t.Setenv("POT_AGENT_ASSISTANT_ID", "parent-actor")
+	thread := ""
+	for i, run := range []string{"first-run", "next-run"} {
+		s := Session{Binary: fakeBinary, Workspace: workspace, Mode: "read-only", Model: "execution-config-fixture", JobID: "task", RunID: run, HostRoot: root, ThreadID: thread, Worker: []string{worker}}
+		result := runTurn(context.Background(), s, "configuration probe", turnEvents{})
+		if result.Status != "completed" {
+			t.Fatal(result)
+		}
+		if thread != "" && result.ThreadID != thread {
+			t.Fatal("resume replaced thread")
+		}
+		thread = result.ThreadID
+		raw, err := os.ReadFile(filepath.Join(workspace, "execution-config.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Method, Job, Run, Assistant string
+			Config                      map[string]struct {
+				Command  string
+				Args     []string
+				Env      map[string]string
+				Required bool
+				Tools    []string `json:"enabled_tools"`
+			}
+		}
+		if err = json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		method := "thread/start"
+		if i > 0 {
+			method = "thread/resume"
+		}
+		local := got.Config["mcp_servers.pot_receiver"]
+		if got.Method != method || got.Job != "task" || got.Run != run || got.Assistant != "" || len(got.Config) != 1 || local.Command != worker || strings.Join(local.Args, "|") != "execution-tools|--root|"+root || !local.Required || strings.Join(local.Tools, ",") != "pot_execution_context" {
+			t.Fatalf("incorrect child configuration: %s", raw)
+		}
+		if local.Env["POT_AGENT_JOB_ID"] != "task" || local.Env["POT_AGENT_RUN_ID"] != run || local.Env["POT_AGENT_ASSISTANT_ID"] != "" || len(local.Env) != 5 {
+			t.Fatal("wrong execution identity", local.Env)
+		}
+	}
+}
+
+func TestCodexExecutionContextRejectsIncompleteBinding(t *testing.T) {
+	for _, s := range []Session{{RunID: "run"}, {RunID: "run", JobID: "task", HostRoot: "relative"}} {
+		if _, err := codexExecutionConfig(s); err == nil {
+			t.Fatal("partial binding accepted")
+		}
 	}
 }
