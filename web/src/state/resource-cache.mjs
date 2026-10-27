@@ -81,7 +81,7 @@ export function createResourceCache({now=Date.now,limit=256,onChange=()=>{}}={})
 const resources={
   '@permissions-policy':['permissions','machines'],
   '/api/v1/spaces':['spaces'],
-  '/api/v1/assistants':['assistants','conversation','assistant-mail','permissions','tasks','runner'],
+  '/api/v1/assistants':['assistants','conversation','assistant-mail','permissions','tasks'],
   '/api/v1/providers':['providers','extensions'],
   '/api/v1/agent/routing':['settings','providers'],
   '/api/v1/usage/providers':['usage','providers'],
@@ -108,7 +108,7 @@ export function createResourceReads(client,{storage=client.production?createProj
     const scope={...client.scope(),...options},space=(client.spaces||[]).find(item=>item.id===scope.space);
     const base=path.split('?')[0];
     const topics=resources[base]||(/^\/api\/v1\/usage\/(summary|models|requests|tools|compactions|providers)$/.test(base)?['usage']:
-      base==='/api/v1/tasks/catalog'?['tasks','runner','assistants']:base==='/api/v1/tasks/query'?['tasks','runner']:base==='/api/v1/schedules'?['schedules','tasks']:/^\/api\/v1\/tasks\/[^/]+(?:\/messages)?$/.test(base)?['tasks','runner']:null);
+      base==='/api/v1/tasks/catalog'?['tasks','assistants']:base==='/api/v1/tasks/query'?['tasks']:base==='/api/v1/schedules'?['schedules','tasks']:/^\/api\/v1\/tasks\/[^/]+(?:\/messages)?$/.test(base)?['tasks']:null);
     return {path,space:scope.space||'',owner:base==='/api/v1/providers'?'':scope.owner||'',
       control:space?.control_id||client.runtime.runtime_id||client.runtime.id,
       boot:boots.get(scope.space)||boots.get('')||client.runtime.boot_id||'',topics};

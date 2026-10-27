@@ -66,6 +66,28 @@ for(const path of ['/api/v1/assistants','/api/v1/agent-links','/api/v1/runtime']
 }
 console.log('Domain queries: shared first read, consumer disposal, committed publication, freshness, scope isolation, force/requery batching and waiting, failure recovery, reentrant ownership; commands: shared intent and retry identity; Provider scope normalization passed');
 {
+  const registry=createQueryRegistry(resources);let directoryReads=0,activeReads=0,detailReads=0,otherReads=0;
+  const directory=registry.define('resource-scoped-directory',async()=>({data:++directoryReads}),{topics:['tasks','assistants','permissions','spaces','runtime','agent-links'],paths:['/api/v1/assistants','/api/v1/spaces','/api/v1/runtime','/api/v1/agent-links']});
+  const active=registry.define('resource-scoped-active',async()=>({data:++activeReads}),{topics:['tasks'],paths:['/api/v1/tasks/query'],space:'one',owner:'a'});
+  const detail=registry.define('resource-scoped-detail',async()=>({data:++detailReads}),{topics:['tasks','runner'],paths:['/api/v1/tasks/worker'],space:'one',owner:'a'});
+  const other=registry.define('resource-scoped-other-owner',async()=>({data:++otherReads}),{topics:['tasks'],paths:['/api/v1/tasks/query'],space:'one',owner:'b'});
+  const stops=[directory,active,detail,other].map(query=>query.watch(()=>{}));await tick();
+  const commit=async meta=>{for(const listener of changes)listener(meta);await tick();};
+  await commit({path:'/api/v1/tasks/worker',topics:['tasks'],space:'one',owner:'a'});
+  assert.equal(detailReads,2,'A concrete detail commit refreshes its own consumer');assert.equal(directoryReads,1,'Only sharing a topic cannot requery directory');assert.equal(activeReads,1,'Detail commits cannot requery active cards');
+  await commit({path:'/api/v1/tasks/worker',topics:['tasks'],space:'other',owner:'a'});assert.equal(detailReads,2,'Same resource path in another Space cannot cross scope');
+  await commit({path:'/api/v1/tasks/worker',topics:['tasks'],space:'one',owner:'b'});assert.equal(detailReads,2,'Same resource path under another owner cannot cross scope');
+  await commit({path:'/api/v1/tasks/query?scope=active&offset=50',topics:['tasks'],space:'one',owner:'a'});
+  assert.equal(activeReads,2,'A later collection page commit reassembles its query');assert.equal(otherReads,1,'A later page under another owner does not refresh this scope');
+  await commit({path:'/api/v1/tasks/query?scope=active',topics:['tasks'],space:'one',owner:'b'});assert.equal(activeReads,2);assert.equal(otherReads,2,'A newly selected owner consumes its own resource commits');
+  for(const path of ['/api/v1/assistants','/api/v1/spaces','/api/v1/runtime','/api/v1/agent-links'])await commit({path,topics:['tasks'],space:'one',owner:''});
+  assert.equal(directoryReads,5,'Every concrete directory dependency still refreshes consumers, including remote commits');
+  await registry.notify(['tasks'],{space:'one'});assert.equal(directoryReads,6);assert.equal(activeReads,3);assert.equal(detailReads,3,'Task state invalidation retains its topic fanout');
+  await registry.notify(['permissions'],{space:'one'});assert.equal(directoryReads,7,'Real permission invalidations still refresh directory');
+  await directory.refresh(true);assert.equal(directoryReads,8,'Explicit force is independent of commit path matching');
+  for(const stop of stops)stop();registry.dispose();console.log('Concrete resource commit paths, pages, Space/owner scope and explicit force remain independent of business topic invalidation');
+}
+{
   let freshness='fresh',executing=true,control='control-one';
   const client={onlineReady:true,connectionGeneration:0};
   const read=async path=>path==='/api/v1/spaces'?{items:[{id:'same-space',control_id:control,connected:true}]}:path==='/api/v1/assistants'?[{id:'same-owner',executing,capabilities:{version:1,operations:['chat.send']}}]:{items:[]};

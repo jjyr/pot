@@ -242,6 +242,9 @@ func (j *Journal) change(ctx context.Context, control, task, run string, fn func
 	return j.changeTx(ctx, control, task, run, func(_ *sql.Tx, value *Run) error { return fn(value) })
 }
 func (j *Journal) changeTx(ctx context.Context, control, task, run string, fn func(*sql.Tx, *Run) error) error {
+	return j.changeTxTopic(ctx, control, task, run, "runs", fn)
+}
+func (j *Journal) changeTxTopic(ctx context.Context, control, task, run, topic string, fn func(*sql.Tx, *Run) error) error {
 	changed := false
 	err := storage.Transaction(ctx, j.db, func(tx *sql.Tx) error {
 		value, err := readRun(ctx, tx, control, task, run)
@@ -263,7 +266,7 @@ func (j *Journal) changeTx(ctx context.Context, control, task, run string, fn fu
 		return writeRun(ctx, tx, *value)
 	})
 	if err == nil && changed {
-		j.changes.Notify("runs")
+		j.changes.Notify(topic)
 	}
 	return err
 }

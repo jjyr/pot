@@ -7,6 +7,50 @@ import (
 	"testing"
 )
 
+func TestTranscriptOutputDoesNotInvalidateRunLifecycle(t *testing.T) {
+	ctx := t.Context()
+	journal, err := openJournal(t, filepath.Join(t.TempDir(), "tasks.sqlite"), "runtime", "boot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.db.Close()
+	launch := launchFixture(t)
+	if _, err = journal.Accept(ctx, launch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = journal.Claim(ctx, "runtime", "task", "run"); err != nil {
+		t.Fatal(err)
+	}
+	sub := journal.Subscribe()
+	defer sub.Close()
+	previous, err := sub.Next(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, kind := range []string{"text_delta", "tool_output", "tool_state", "turn_finished", "future_state_event"} {
+		event := core.AgentEvent{Generation: 1, TurnID: "run", Seq: uint64(i + 1), Update: core.Update{Type: kind, Text: "synthetic", Phase: "waiting_approval"}}
+		if err = journal.AppendEvent(ctx, "runtime", "task", "run", event); err != nil {
+			t.Fatal(err)
+		}
+		next, err := sub.Next(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kind == "text_delta" || kind == "tool_output" {
+			if next["runs"] != previous["runs"] || next["runner"] <= previous["runner"] {
+				t.Fatalf("output changed lifecycle: %v -> %v", previous, next)
+			}
+		} else if next["runs"] <= previous["runs"] {
+			t.Fatalf("state event %q lost lifecycle invalidation", kind)
+		}
+		previous = next
+	}
+	page, err := journal.Events(ctx, "runtime", "task", "run", 0, 100)
+	if err != nil || page.Cursor != 5 || len(page.Events) != 5 {
+		t.Fatalf("event persistence changed: %+v %v", page, err)
+	}
+}
+
 func TestRunnerTranscriptIsOrderedPagedAndSurvivesRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")

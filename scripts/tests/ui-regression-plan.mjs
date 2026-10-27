@@ -3,7 +3,7 @@ export const groups = {
   scroll: ['controller', 'continuity', 'task-continuity', 'scroll-components'],
   nav: ['directory', 'switching', 'chat-initial-layout.html'],
   history: ['task-history', 'task-history-edges'],
-  domain: ['domain-repositories.html'],
+  domain: ['domain-repositories.html','query-resource-commits'],
   management: ['assistant-start-phone','first-connection-codex','first-connection-antigravity','settings-phone','machines'],
   composer: ['composer-phone','composer-enter','reference-cancel','attachment-picker','composer-continuation','composer-continuation-drafts','assistant-drafts'],
   connection: ['chat-stream-recovery','chat-directory-activity'],

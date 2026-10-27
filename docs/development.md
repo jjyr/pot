@@ -232,6 +232,23 @@ the shared DOM against synthetic messages and a deterministic loopback provider;
 attachment bytes are synthetic local blobs. Stop it with `POST /fixture/stop` at
 that private origin. This opt-in fixture adds no product data or native notifications.
 
+For Task output invalidation and live transcript checks, set
+`POT_DIRECTORY_FREQUENCY_URL_FILE` to a private temporary filename and run
+`go test ./internal/transport -run '^TestDirectoryFrequencyBrowserFixture$'
+-count=1 -v -timeout=13m`. With the same URL-file variable and the existing
+Playwright/Chromium overrides, run either
+`node scripts/tests/directory-frequency-browser.mjs` or
+`node scripts/tests/task-output-live-browser.mjs`. Each runner owns shutdown of
+its fixture; start a new fixture for the other runner. `--keep-fixture` leaves it
+available for inspection until `POST /fixture/stop` or its 12-minute limit.
+The fixture uses temporary state, local deterministic model output and an
+authenticated synthetic browser session. The frequency runner records HTTP,
+SSE, IndexedDB and composer frames in `POT_DIRECTORY_FREQUENCY_OUTPUT`, compares
+pure output with lifecycle/permission invalidation, and captures review images.
+`--baseline` checks a fixture built from source before output invalidation was
+separated. The live runner creates a real Task, reads its incremental transcript
+past the resource TTL and cancels through the UI.
+
 `mise run test:pwa-cold-start` covers local startup and reconnect authority with
 isolated production HTTP/SSE, IndexedDB and Service Worker fixtures. Its reconnect
 checks hold directory or session responses, revoke capabilities and release
