@@ -127,8 +127,6 @@ func (d MCPWorkDelivery) Validate() error {
 		if d.Message.Validate() != nil || d.Message.Kind != "message" || d.Message.From != d.Request.From || d.Message.To != d.Request.Target || d.Message.Text != d.Request.Text || d.Message.To.Kind != "assistant" {
 			return ErrInvalid
 		}
-	} else if d.Binding.Receiver.Kind != "node" {
-		return ErrUnsupported
 	}
 	if d.Request.Configuration != nil || d.Request.Workspace != "" {
 		return ErrUnsupported
