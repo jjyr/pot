@@ -186,8 +186,12 @@ width or height into the new generation. The fixed deadline frame belongs to an
 unresolved component's lifetime and remains distinct from this ready-media reflow.
 
 Tool candidates inherit the live tool's one-time approval auto-open state and
-never write shared disclosure intent. A first pending approval can still open
+its actual open/raw disclosure when no explicit reading memory overrides it;
+they never write shared disclosure intent. A first pending approval can still open
 its tool; later explicit close/open actions remain authoritative at commit.
+An unexpected preparation/commit exception retires unfinished candidates and
+releases transient layout holds before propagating the error. A failed transaction
+does not report a prepared layout or reuse slots already consumed by that commit.
 
 At the deadline an unresolved block receives a fixed, scrollable outer frame of
 at least 240 pixels; an inline reference keeps its measured link box. Binding,

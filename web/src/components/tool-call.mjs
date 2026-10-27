@@ -37,7 +37,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
   sections.append(contentView.element);
   // Ordinary communication starts collapsed; only explicit reading/navigation or
   // the existing approval path opens it. Updates never reapply a default.
-  root.open=memory.get(key)?.open||false;raw.open=memory.get(key)?.raw||false;
+  root.open=memory.get(key)?.open??previousTool?.open??false;raw.open=memory.get(key)?.raw??previousTool?.querySelector(':scope > .tool-body > .tool-raw')?.open??false;
   function messageTitle(tool){
     const model=communication(tool,messageActor());
     if(model?.kind==='delegate'){const target=communicationView.taskTarget(model);preparedText(title,'tool-call:title',target.named?t('delegateTaskTo').replace('{name}','@'+target.label):t('delegateTask'));title.title=title.textContent;return true;}

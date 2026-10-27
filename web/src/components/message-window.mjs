@@ -219,8 +219,8 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
   function releaseLayout(){for(const element of layoutHosts)releasePreparedLayout(element);}
   function discardPreparation(){
     if(!flight)return;
-    for(const job of flight.jobs.values()){job.wait?.cancel();dispose(job.record);job.surface.close();}
-    for(const job of flight.regions.values()){job.wait.cancel();job.surface.close();}
+    for(const job of flight.jobs.values()){job.wait?.cancel();if(job.record)dispose(job.record);job.surface.close();}
+    for(const job of flight.regions.values()){job.wait?.cancel();job.surface.close();}
     flight=null;delete host.dataset.preparedPending;host.removeAttribute('aria-busy');
   }
   function refreshRegions(current){
@@ -313,7 +313,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       (requestedOptions.regions||[]).every(region=>regionRevisions.get(region.key)===layoutEpoch+':'+region.revision)){
       requestedOptions.beforeCommit?.();updateMeasured(rows,requestedOptions);requestedOptions.afterCommit?.();return;
     }
-    if(!requested.length&&!requestedOptions.regions?.length){releaseLayout();releaseHold();discardPreparation();heights.clear();geometry.clear();requestedOptions.beforeCommit?.();updateMeasured(requested,requestedOptions);committedRevision=requestedRevision;requestedOptions.afterCommit?.();return;}
+    if(!requested.length&&!requestedOptions.regions?.length){releaseLayout();releaseHold();discardPreparation();heights.clear();geometry.clear();requestedOptions.beforeCommit?.();updateMeasured(requested,requestedOptions);committedRevision=requestedRevision;layoutReframe=false;requestedOptions.afterCommit?.();return;}
     if(!flight){
       for(const region of requestedOptions.regions||[])layoutHosts.add(region.host);
       for(const element of layoutHosts)freezePreparedLayout(element);
@@ -407,6 +407,9 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     for(const key of geometry.keys()){if(geometry.size<=loaded.size+1280)break;if(!loaded.has(key))geometry.delete(key);}
     committing=null;flight=null;delete host.dataset.preparedPending;layoutHosts.clear();layoutHosts.add(host);for(const region of current.options.regions||[])layoutHosts.add(region.host);for(const record of mounted.values())layoutHosts.add(record.row);for(const element of layoutHosts)rememberPreparedLayout(element);committedRevision=current.revision;layoutReframe=false;host.removeAttribute('aria-busy');current.options.afterCommit?.();
     if(requestedRevision!==current.revision||JSON.stringify(requestedOptions.regions?.map(region=>[region.key,region.revision]))!==JSON.stringify(current.options.regions?.map(region=>[region.key,region.revision])))invalidate();
+    }catch(reason){
+      committing=null;discardPreparation();releaseHold();releaseLayout();layoutReframe=true;
+      throw reason;
     }finally{queueUpdating=false;}
   }
   function updateMeasured(next=rows,options={}) {
@@ -437,7 +440,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     const environment=currentPreparedRender();if(!environment)return;measuredOptions.beforeCommit?.();
     for(const message of rows){const record=mounted.get(message.viewKey);if(record){withPreparedRender(environment.context,message.id,()=>record.commit?.());record.preparing=false;}}
     measuredOptions.afterCommit?.();
-  },reset(){releaseLayout();releaseHold();lastReadable=[];discardPreparation();deadlines.clear();geometry.clear();rowRevisions.clear();revealedRows.clear();requested=[];requestedRevision='[]';committedRevision=null;requestedOptions={};regionRevisions.clear();controller?.reset();},get prepared(){return !flight&&requestedRevision===committedRevision&&(requestedOptions.regions||[]).every(region=>regionRevisions.get(region.key)===layoutEpoch+':'+region.revision);},suspend(){
+  },reset(){releaseLayout();releaseHold();lastReadable=[];discardPreparation();deadlines.clear();geometry.clear();rowRevisions.clear();revealedRows.clear();requested=[];requestedRevision='[]';committedRevision=null;requestedOptions={};regionRevisions.clear();controller?.reset();},get prepared(){return !layoutReframe&&!flight&&requestedRevision===committedRevision&&(requestedOptions.regions||[]).every(region=>regionRevisions.get(region.key)===layoutEpoch+':'+region.revision);},suspend(){
     releaseLayout();releaseHold();lastReadable=[];discardPreparation();
     cancelAnimationFrame(frame);frame=0;
     owner?.suspend();

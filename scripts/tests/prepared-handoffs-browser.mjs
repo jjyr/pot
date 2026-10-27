@@ -33,11 +33,13 @@ export async function preparedRevisionTransfers(page,origin){
    approval={...approval,fresh:false};ui.refreshApprovals();const staleDisabled=[...second.querySelectorAll('button')].every(button=>button.disabled);
    await wait(()=>ready()&&ui.history.querySelector('.approval-card')!==second);const stale=ui.history.querySelector('.approval-card');
    const stalePrepared=witnessed(stale),staleFinal=[...stale.querySelectorAll('button')].every(button=>button.disabled);
+   memory.clear();approval={...approval,fresh:true};ui.update({record,state,fresh:true,approvals:[approval]});await wait(()=>ready()&&ui.history.querySelector('.approval-card button')&&!ui.history.querySelector('.approval-card button').disabled);
+   const recoveredOpen=ui.history.querySelector('details.tool-call').open;
    state.messages.push({id:'configuration-error',sequence:5,role:'system',text:'HTTP 401 synthetic configuration error'});
    record.capabilities={...record.capabilities,operations:[...record.capabilities.operations,'assistant.configure']};ui.update({record,state,fresh:true,approvals:[approval]});await wait(()=>ready()&&ui.history.querySelector('.reply-action'));
    const settingsPrepared=witnessed(ui.history.querySelector('.reply-action'));
    record.capabilities={...record.capabilities,operations:record.capabilities.operations.filter(value=>value!=='assistant.configure')};ui.update({record,state,fresh:true,approvals:[approval]});await wait(()=>ready()&&!ui.history.querySelector('.reply-action'));
-   return {rawPrepared,disabledBeforeCommit,revisedPrepared,staleDisabled,stalePrepared,staleFinal,settingsPrepared,removedSettings:!ui.history.querySelector('.reply-action')};
+   return {rawPrepared,disabledBeforeCommit,revisedPrepared,staleDisabled,stalePrepared,staleFinal,recoveredOpen,settingsPrepared,removedSettings:!ui.history.querySelector('.reply-action')};
   }finally{observer.disconnect();ui.dispose();}
  });
  for(const [name,passed]of Object.entries(result))assert(passed,name);
