@@ -39,6 +39,7 @@ import {bindTaskClock} from './task-time.mjs';
 import {createBackgroundTasks} from './background-tasks.mjs';
 import {bindResumeRecovery} from '../state/resume.mjs';
 import {bindViewport} from './viewport.mjs';
+import {createSettingsAccess,configurationRoute} from '../state/settings-access.mjs';
 import {settleMotion,copyFeedback} from './motion.mjs';
 
 function el(tag, className = '', text) {
@@ -239,6 +240,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const stopViewport = bindViewport(document.documentElement, {onWidthChange: () => editor.resize()});
   const restoredAttachmentFailures=new Set(),attachmentAttempts=new Map();
   const can=(operation,item=selectedAssistant)=>!client.production||client.operationsReady!==false&&client.operationScopeReady?.({space:item?.space_id,owner:item?.id})!==false&&!directoryStorageFailed&&supportsCapability(client.assistants?.find(current=>current.id===item?.id&&current.space_id===item?.space_id&&current.control_id===item?.control_id),operation);
+  const settingsAccess=createSettingsAccess(client);
+  const canOpenSettings=(operation,item=selectedAssistant)=>settingsAccess(operation,item,client.assistants);
   const attachmentUI=client.production?createAttachmentComposer({client,form,input,getKey:()=>editorOwner,getCaps:()=>state.snapshot?.agent?.attachments,canSelect:()=>route==='chat'&&!!editorOwner&&!!assistantDrafts?.ready(editorOwner),canUpload:()=>can('chat.attachments')&&route==='chat'&&!!state.snapshot&&editorOwner===ownerKey(state.snapshot)&&connection==='connected'&&!selectedAssistant?.offline,changed:()=>updateControls(),draftChanged:key=>assistantDrafts?.change(key,true),locale:()=>locale}):null;
   if(attachmentUI){form.classList.add('has-attachments');attachmentUI.toolbar.append(send);}
   const referenceDraftHost=el('div','composer-references');form.prepend(referenceDraftHost);
@@ -475,7 +478,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function saveNavigation(next,replace=false){const value={potRoute:next,potScope:client.scope?.()||{},potDirectory:directoryOpen};window.history[replace?'replaceState':'pushState'](value,'',location.href);}
   async function navigate(next,{replace=false,record=true}={}) {
-    if(client.operationsReady===false&&next!=='chat')return;
+    if(client.operationsReady===false&&next!=='chat'&&!configurationRoute(next))return;
     if (pages && !await pages.leave()) return;
     route = next;
     menuOpen = false;
@@ -493,8 +496,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (inMenu) item.append(el('span', '', t(name === 'chat' ? 'assistants' : name)));
       item.classList.toggle('is-selected', route === name);
       if (route === name) item.setAttribute('aria-current', 'page');
-      item.disabled=client.operationsReady===false&&name!=='chat';
-      item.onclick = () => {if(client.operationsReady===false&&name!=='chat')return;navigate(name);};
+      item.disabled=client.operationsReady===false&&name!=='chat'&&!configurationRoute(name);
+      item.onclick = () => navigate(name);
       fragment.append(item);
     }
     return fragment;
@@ -510,12 +513,12 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       // fresh capability removal and storage/offline failures still remove them.
       // Reconciliation may remove a button or replace its handler. A retained
       // node/callback must still validate authority and its original destination.
-      const current=()=>!disposed&&receivedEpoch===epoch&&selection===selectionGeneration&&linkGeneration===connectionGeneration&&boot===client.runtime.boot_id&&JSON.stringify(captured)===JSON.stringify(client.scope())&&captured.owner===selectedAssistant?.id&&captured.space===selectedAssistant?.space_id&&identity===JSON.stringify([selectedAssistant?.space_id,selectedAssistant?.id,controlOf(selectedAssistant)])&&!selectedAssistant?.offline;
+      const current=(configuration=false)=>!disposed&&receivedEpoch===epoch&&selection===selectionGeneration&&linkGeneration===connectionGeneration&&boot===client.runtime.boot_id&&JSON.stringify(captured)===JSON.stringify(client.scope())&&captured.owner===selectedAssistant?.id&&captured.space===selectedAssistant?.space_id&&identity===JSON.stringify([selectedAssistant?.space_id,selectedAssistant?.id,controlOf(selectedAssistant)])&&(configuration||!selectedAssistant?.offline);
       const retaining=preferences.open&&assistant?.retained&&!directoryStorageFailed&&context===preferenceContext&&current();
       const visible=(key,allowed)=>allowed||retaining&&!!preferences.querySelector('[data-view-key="'+key+'"]');
       preferences.classList.add('product-actions');const projection=preferences.cloneNode(false),close=button('close',t('close'));close.dataset.viewKey='close';close.onclick=()=>preferences.close();projection.append(close);
       const action=(key,label,run,valid=()=>true)=>{const choice=el('button','menu-destination',label);choice.type='button';choice.dataset.viewKey=key;if(!valid()){if(retaining)choice.setAttribute('aria-disabled','true');else choice.disabled=true;}choice.onclick=event=>{if(disposed||event.currentTarget.getAttribute('aria-disabled')==='true'||!valid())return;preferences.close();run();};projection.append(choice);};
-      if(selectedAssistant&&visible('assistant-settings',can('assistant.configure')||can('assistant.profile')))action('assistant-settings',t('assistantSettings'),()=>{route='settings';pages.assistant(selectedAssistant);renderShell();},()=>current()&&(can('assistant.configure')||can('assistant.profile')));
+      if(selectedAssistant&&visible('assistant-settings',canOpenSettings('assistant.configure')||canOpenSettings('assistant.profile')))action('assistant-settings',t('assistantSettings'),openAssistantSettings,()=>current(true)&&(canOpenSettings('assistant.configure')||canOpenSettings('assistant.profile')));
       if(selectedAssistant&&visible('usage',can('assistant.usage')))action('usage',t('usage'),()=>{route='usage';pages.conversationUsage(selectedAssistant.name);renderShell();},()=>current()&&can('assistant.usage'));
       if(state.snapshot?.running&&visible('turn-control',can('chat.control'))){
         const snapshot=state.snapshot,target=snapshot.turn_id,paused=!!snapshot.turn?.paused;
@@ -620,14 +623,16 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function openAssistantSettings() {
     assistantProfile.hidePopover();
-    route = 'settings'; pages.assistant(selectedAssistant); renderShell();
+    const item=client.assistants?.find(item=>item.id===selectedAssistant?.id&&item.space_id===selectedAssistant?.space_id&&item.control_id===selectedAssistant?.control_id);
+    if(!item||!(canOpenSettings('assistant.configure')||canOpenSettings('assistant.profile')))return;
+    route = 'settings'; pages.assistant(settingsAccess.definition(item,client.assistants)); renderShell();
   }
   assistantProfile.addEventListener('toggle', event => {
     root.querySelector('.assistant-profile-trigger')?.setAttribute('aria-expanded', String(event.newState === 'open'));
   });
   function renderShell() {
     root.classList.toggle('is-local-startup',client.operationsReady===false);
-    unavailable.inert=client.operationScopeReady?.()===false||pages?.authorityReady===false;approvals.inert=client.operationScopeReady?.()===false;
+    unavailable.inert=!configurationRoute(route)&&!pages?.editing&&(client.operationScopeReady?.()===false||pages?.authorityReady===false);approvals.inert=client.operationScopeReady?.()===false;
     root.classList.toggle('is-background',document.visibilityState==='hidden');
     const showingChat=route==='chat'&&!(media.matches&&directoryOpen);
     if(chatShown&&!showingChat){rememberChatPosition();cancelChatPosition();initialLayout.cancel();messageWindow.suspend();}
@@ -694,7 +699,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         heading.append(assistantAvatar(selectedAssistant, 40), info);
         const settings = button('sliders', t('assistantSettings'), 'assistant-profile-settings');
         settings.append(el('span', '', t('assistantSettings'))); settings.onclick = openAssistantSettings;
-        projection.append(heading);if(can('assistant.configure')||can('assistant.profile'))projection.append(settings);reconcile(assistantProfile, projection);
+        projection.append(heading);if(canOpenSettings('assistant.configure')||canOpenSettings('assistant.profile'))projection.append(settings);reconcile(assistantProfile, projection);
       }
       title.append(identity,connectionStatus());
     } else title.append(el('span', '', titleText));
@@ -705,7 +710,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       open.onclick = async () => { try { await client.openMain(); } catch (reason) { error = reason.message; updateControls(); } };
       titlebar.append(open);
     }
-    if (client.production && route === 'chat' && selectedAssistant && (can('assistant.configure')||can('assistant.profile'))) { const settings = button('sliders', t('assistantSettings')); settings.dataset.viewKey='assistant-settings';settings.onclick = openAssistantSettings; titlebar.append(settings); }
+    if (client.production && route === 'chat' && selectedAssistant && (canOpenSettings('assistant.configure')||canOpenSettings('assistant.profile'))) { const settings = button('sliders', t('assistantSettings')); settings.dataset.viewKey='assistant-settings';settings.onclick = openAssistantSettings; titlebar.append(settings); }
     if(!client.production){const cloud=el('span','icon-button');cloud.title=t('remote');cloud.append(icon('cloud'));titlebar.append(cloud);}
     const more = button('more', t(client.production ? 'chat.actions' : 'more'));more.dataset.viewKey='conversation-actions';
     more.setAttribute('aria-haspopup', 'dialog');

@@ -56,6 +56,15 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	if err != nil || u.IsAbs() || u.Host != "" {
 		return nil, protocol.APIError{Code: "invalid_path", Message: "invalid application path"}
 	}
+	// Configuration forms bind to the serving Control and boot, independently of
+	// assistant activity. Recheck at dispatch so a late old form cannot mutate a
+	// replacement Control even before its directory change reaches the browser.
+	query := u.Query()
+	if query.Has("configuration_control_id") || query.Has("configuration_boot_id") {
+		if query.Get("configuration_control_id") != a.RuntimeID || query.Get("configuration_boot_id") != a.BootID {
+			return nil, protocol.APIError{Code: "identity_changed", Message: "Configuration identity changed"}
+		}
+	}
 	method := strings.ToUpper(r.Method)
 	if method != "GET" && method != "POST" && !(method == "DELETE" && strings.HasPrefix(u.Path, "/api/v1/integrations/")) {
 		return nil, protocol.APIError{Code: "method_not_allowed", Message: "method not allowed"}

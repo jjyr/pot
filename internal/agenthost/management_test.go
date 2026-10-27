@@ -209,7 +209,7 @@ func TestManagementContractAcrossRuntimes(t *testing.T) {
 					t.Fatal(e)
 				}
 			}
-			// Inbox admission makes execution-affecting edits busy; presentation remains safe.
+			// Inbox admission retains work while configuration saves for the next execution.
 			envelope := protocol.Envelope{ID: "busy", Kind: "message", From: r.From, To: result.Assistant.Address, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: "queued"}
 			mailbox := hostMailbox{db: b.db, backend: b, local: envelope.To}
 			if _, e = mailbox.Deliver(t.Context(), envelope); e != nil {
@@ -227,14 +227,15 @@ func TestManagementContractAcrossRuntimes(t *testing.T) {
 			update.RequestID = "busy-model"
 			update.Revision = renamed.Assistant.Revision
 			update.Model = managementValue("model-two")
-			if _, e = b.ManageAssistant(t.Context(), update); !errors.Is(e, agentlink.ErrAssistantBusy) {
-				t.Fatal(e)
+			saved, e := b.ManageAssistant(t.Context(), update)
+			if e != nil || saved.Assistant.Model != "model-two" {
+				t.Fatal(saved, e)
 			}
-			if e = b.DeleteAssistant(t.Context(), agentlink.DeleteAssistantRequest{From: r.From, AssistantID: r.ID, Revision: renamed.Assistant.Revision}); !errors.Is(e, agentlink.ErrAssistantBusy) {
+			if e = b.DeleteAssistant(t.Context(), agentlink.DeleteAssistantRequest{From: r.From, AssistantID: r.ID, Revision: saved.Assistant.Revision}); !errors.Is(e, agentlink.ErrAssistantBusy) {
 				t.Fatal(e)
 			}
 			b.db.Exec("UPDATE agent_messages SET state='processed' WHERE id='busy'")
-			saved, e := b.ManageAssistant(t.Context(), update)
+			saved, e = b.ManageAssistant(t.Context(), update)
 			if e != nil || saved.Assistant.Revision <= renamed.Assistant.Revision {
 				t.Fatal(saved, e)
 			}

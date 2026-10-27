@@ -6,6 +6,7 @@ import {createEventStream} from '../state/event-stream.mjs';
 import {validSnapshot} from '../state/conversation.mjs';
 import {createFileImages} from '../state/file-images.mjs';
 import {createDisplayResources} from '../state/display-resources.mjs';
+import {configurationIdentityCurrent} from '../state/settings-access.mjs';
 // Shared product transport. Every operation captures its Space/owner before IO.
 export class APIError extends Error {
   constructor(status, value) { super(value?.message || (typeof value?.error === 'string' && value.error) || `HTTP ${status}`); this.status = status; this.code = value?.code || 'http_error'; this.uiKey=agentFailureKey(this.code); }
@@ -20,11 +21,12 @@ export function decodeDesktopResponse(raw) {
       &&typeof value.error.code==='string'&&typeof value.error.message==='string')throw new APIError(value.status,value.error);
   return value;
 }
-export function scopedPath(path, {owner = '', space = ''} = {}) {
+export function scopedPath(path, {owner = '', space = '',configuration=false,control_id,configurationBoot} = {}) {
   const [base, query = ''] = path.split('?');
   const params = new URLSearchParams(query);
   if (owner) params.set('assistant_id', owner);
   if (space) params.set('space_id', space);
+  if(configuration){params.set('configuration_control_id',control_id);params.set('configuration_boot_id',configurationBoot);}
   return `${base}${params.size ? `?${params}` : ''}`;
 }
 export function normalizeSnapshot(frame, runtime, owner, space = '') {
@@ -113,10 +115,11 @@ export async function createProductionClient({desktop = false, base = '', resour
   }
   async function request(path, options = {}) {
     let {method = 'GET', body, signal} = options;
+    if(options.configuration&&!configurationIdentityCurrent(client,options))throw localized(Object.assign(new APIError(409,{code:'configuration_identity_changed'}),{uiKey:'identityChanged'}));
     if(client?.onlineReady===false)throw localized(Object.assign(new APIError(503,{code:'startup_unconfirmed'}),{uiKey:'startup.local'}));
     if(method!=='GET'&&client?.operationScopeReady?.(options)===false)throw localized(Object.assign(new APIError(503,{code:'authority_unconfirmed'}),{uiKey:'startup.local'}));
     if(client?.startup&&options.session&&!client.sessionReady(options))throw localized(Object.assign(new APIError(503,{code:'session_unconfirmed'}),{uiKey:'startup.local'}));
-    if(client?.startup&&options.requiredCapabilities?.length&&!options.requiredCapabilities.some(operation=>client.supports(operation,options)))throw localized(Object.assign(new APIError(403,{code:'agent_link_capability_unsupported'}),{uiKey:'agentLinks.capabilityUnavailable'}));
+    if((client?.startup||options.configuration)&&options.requiredCapabilities?.length&&!options.requiredCapabilities.some(operation=>client.supports(operation,options)))throw localized(Object.assign(new APIError(403,{code:'agent_link_capability_unsupported'}),{uiKey:'agentLinks.capabilityUnavailable'}));
     const generation=client?.connectionGeneration;
     if(method==='GET')signal=signal?AbortSignal.any([signal,connectionAbort.signal]):connectionAbort.signal;
     const capturedScope={...context,...options};
@@ -124,7 +127,10 @@ export async function createProductionClient({desktop = false, base = '', resour
     // destination and authorization on the host; presentation IDs never choose
     // an HTTP proxy or a local execution fallback.
     const fullPath = scopedPath(path, capturedScope);
-    const signature=method==='GET'?null:JSON.stringify([fullPath,method,body]);
+    const signature=method==='GET'?null:JSON.stringify([fullPath,method,body,...(options.configuration?[options.control_id,options.configurationBoot,options.configurationRuntime]:[])]);
+    const configurationResult=()=>{
+      if(options.configuration&&(generation!==client.connectionGeneration||!configurationIdentityCurrent(client,options)))throw localized(Object.assign(new APIError(409,{code:'configuration_identity_changed'}),{uiKey:'identityChanged',accepted:method!=='GET'}));
+    };
     if(signature&&acceptedCommands.has(signature))return completeCommand(path,method,body,acceptedCommands.get(signature).value,capturedScope,signature,options.submission);
     if (signal?.aborted) throw signal.reason;
     if (desktop) {
@@ -134,7 +140,7 @@ export async function createProductionClient({desktop = false, base = '', resour
       try {
         const raw = await pending;
         if (signal?.aborted) throw signal.reason;
-        let value;try{value=decodeDesktopResponse(raw);}catch(error){throw localized(error);}if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);return value;
+        let value;try{value=decodeDesktopResponse(raw);}catch(error){throw localized(error);}configurationResult();if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);return value;
       } finally { signal?.removeEventListener('abort', abort); }
     }
     const response = await fetch(`${base}${fullPath}`, {method, signal, credentials: 'same-origin',
@@ -143,6 +149,7 @@ export async function createProductionClient({desktop = false, base = '', resour
     const value = response.status === 204 ? null : await response.json().catch(() => null);
     if(method==='GET'&&generation!==client?.connectionGeneration)throw new DOMException('Connection retired','AbortError');
     if (!response.ok) throw localized(new APIError(response.status, value));
+    configurationResult();
     if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);
     return value;
   }
@@ -153,6 +160,13 @@ export async function createProductionClient({desktop = false, base = '', resour
   const attachmentKey=(attachment,options)=>{const scope={...context,...options};return JSON.stringify([scope.space,scope.owner,attachment.id]);};
   const onlineWaiters=new Set();
   const whenOnline=handler=>{onlineWaiters.add(handler);return()=>onlineWaiters.delete(handler);};
+  async function resourceRequest(path,options={}){
+    if(options.configuration&&!configurationIdentityCurrent(client,options))throw localized(Object.assign(new APIError(409,{code:'configuration_identity_changed'}),{uiKey:'identityChanged'}));
+    if((options.method||'GET')!=='GET')return request(path,options);
+    const generation=client.connectionGeneration,value=await client.resources.read(path,options);
+    if(options.configuration&&(generation!==client.connectionGeneration||!configurationIdentityCurrent(client,options)))throw localized(Object.assign(new APIError(409,{code:'configuration_identity_changed'}),{uiKey:'identityChanged'}));
+    return value;
+  }
   client = {production: true, desktop, runtime, startup:startupIdentity,onlineReady:!startupIdentity,
     connectionGeneration:0,directoryGeneration:startupIdentity?-1:0,directorySpaces:new Set(),
     get operationsReady(){return client.onlineReady&&client.directoryGeneration===client.connectionGeneration;},
@@ -163,7 +177,7 @@ export async function createProductionClient({desktop = false, base = '', resour
       if(scope.space&&!client.directorySpaces.has(scope.space))return false;
       if(!scope.owner)return true;
       const item=client.assistants?.find(item=>item.id===scope.owner&&item.space_id===scope.space);
-      return !!item&&!item.retained&&!item.offline;
+      return !!item&&!item.retained&&(scope.configuration||!item.offline);
     },
     sessionReady(options={}){return !client.startup||confirmedSessions.get(sessionKey({...context,...options}))===client.connectionGeneration;},
     confirmSession(scope,generation){if(client.onlineReady&&generation===client.connectionGeneration)confirmedSessions.set(sessionKey(scope),generation);},
@@ -174,7 +188,7 @@ export async function createProductionClient({desktop = false, base = '', resour
       client.onlineReady=false;client.connectionGeneration++;client.directoryGeneration=-1;client.directorySpaces.clear();confirmedSessions.clear();
       connectionAbort.abort();connectionAbort=new AbortController();client.resources.resetConnection();
     },
-    confirmStartup(value){if((value.runtime_id||value.id)!==runtime.runtime_id)throw Error('Startup identity changed');Object.assign(runtime,value);client.onlineReady=true;for(const handler of [...onlineWaiters])handler();onlineWaiters.clear();}, transport:request,request:(path,options={})=>(options.method||'GET')==='GET'?client.resources.read(path,options):request(path,options),readBaselines,
+    confirmStartup(value){if((value.runtime_id||value.id)!==runtime.runtime_id)throw Error('Startup identity changed');Object.assign(runtime,value);client.onlineReady=true;for(const handler of [...onlineWaiters])handler();onlineWaiters.clear();}, transport:request,request:resourceRequest,readBaselines,
     messageFiles(message,options={}){return request(`/api/v1/message-files/${encodeURIComponent(message)}?${new URLSearchParams({task_id:options.task||''})}`,options);},
     retryMessageFile(message,ref,options={}){return request(`/api/v1/message-files/${encodeURIComponent(message)}/${encodeURIComponent(ref)}?${new URLSearchParams({task_id:options.task||''})}`,{...options,method:'POST'});},
     acquireResource:createDisplayResources(request,()=>context,(resource,path,scope,operation='content',token='')=>desktop?`/pot-resource-content?${new URLSearchParams({id:resource.id,path,assistant_id:scope.owner,space_id:scope.space,render:operation==='render'?'1':'0',token})}`:`${base}${scopedPath(`/api/v1/resources/${encodeURIComponent(resource.id)}/${operation}?${new URLSearchParams({path,token})}`,scope)}`),

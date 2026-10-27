@@ -478,6 +478,27 @@ guard. Pending saves block leaving while their result is handled. Browser histor
 contains only route/session markers, never credentials or form values. Reload
 recovery is outside this memory-only editor contract.
 
+Settings navigation, reading and editing are independent of assistant execution,
+conversation snapshots and conversation-stream recovery. General preferences use
+local state. Configuration locations and assistant editors retain their captured
+Control, Space and owner; an offline selected conversation never disables another
+configuration location. Known assistant profile fields remain editable while model
+configuration and instructions load separately. Loading failures retain the form
+and expose a retry for the affected section.
+
+Saving confirms current configuration authority independently of the conversation
+session. Directory revalidation may delay that request; unavailable Control,
+revoked capabilities and changed boot or Control identity produce an actionable
+error without discarding input. Cached capabilities only keep settings discoverable
+and never authorize writes. A pending save prevents duplicate submission while
+fields stay editable; edits made after submission remain dirty after acknowledgement.
+Configuration drafts and credentials stay in memory and are not automatically
+queued for later delivery. Saving does not stop, restart or await assistant work.
+Configuration resource requests carry `configuration_control_id` and
+`configuration_boot_id` preconditions through both browser and native transports.
+The serving application checks both before dispatch, so an old form cannot write
+to a replacement Control or boot even before its directory update reaches the UI.
+
 Nested Provider setup suspends the actual assistant form, including draft fields,
 expanded disclosures, focus and scroll. Save refreshes Provider choices and
 restores that form. Cancel returns through the same guard. Global navigation

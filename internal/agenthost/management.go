@@ -247,15 +247,8 @@ func (b *backend) ManageAssistant(ctx context.Context, r agentlink.AssistantMana
 				return agentlink.ErrConflict
 			}
 		case "update":
-			if effectiveModel != current.Model || effectiveEffort != current.Effort {
-				var busy bool
-				if e := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_adapter_jobs WHERE assistant_id=? AND (json_extract(data,'$.task.state') NOT IN ('completed','failed','cancelled') OR json_extract(data,'$.cleanup_uncertain')=1)) OR EXISTS(SELECT 1 FROM agent_messages WHERE direction='incoming' AND state IN ('queued','read') AND json_extract(envelope,'$.to.agent_id')=?)`, r.ID, r.ID).Scan(&busy); e != nil {
-					return e
-				}
-				if busy {
-					return agentlink.ErrAssistantBusy
-				}
-			}
+			// Each execution captures its Session before launch. Save the next
+			// execution's model/effort without waiting for or changing that Session.
 			res, e := tx.ExecContext(ctx, "UPDATE agent_adapter_assistants SET name=?,model=?,effort=?,revision=revision+1 WHERE id=? AND revision=? AND deleted=0", effectiveName, effectiveModel, effectiveEffort, r.ID, r.Revision)
 			if e != nil {
 				return e
