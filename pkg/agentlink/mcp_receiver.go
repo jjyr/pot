@@ -36,6 +36,7 @@ type MCPReceiverRegistration struct {
 	Version      int         `json:"version" required:"true"`
 	Receiver     Identity    `json:"receiver" required:"true"`
 	Capabilities Description `json:"capabilities" required:"true"`
+	Epoch        string      `json:"epoch,omitempty"`
 }
 
 // ValidateAgainst requires the driver's actual effective capabilities. A remote
@@ -71,7 +72,7 @@ func (r MCPReceiverRegistration) ValidateAgainst(ctx MCPReceiver, actual Descrip
 // grant/ACL system. Owner configuration, approvals and execution launch APIs
 // cannot be added by a receiver advertisement.
 func mcpCollaborationOperation(op Operation) bool {
-	return slices.Contains(PeerOperations(), op) || op == TaskInput || op == TaskEvents || op == TaskFiles
+	return slices.Contains(PeerOperations(), op) || op == TaskInput || op == TaskEvents || op == TaskFiles || op == Approvals
 }
 
 // MCPDispatchBinding identifies stable caller-side work before the execution
@@ -112,6 +113,7 @@ type MCPWorkDelivery struct {
 	DeliveryID string             `json:"delivery_id" required:"true"`
 	Binding    MCPDispatchBinding `json:"binding" required:"true"`
 	Request    TaskRequest        `json:"request" required:"true"`
+	Message    *protocol.Envelope `json:"message,omitempty"`
 }
 
 func (d MCPWorkDelivery) Validate() error {
@@ -120,6 +122,13 @@ func (d MCPWorkDelivery) Validate() error {
 	}
 	if !core.Identifier(d.DeliveryID) || d.Binding.Validate() != nil || !taskCaller(d.Request.From) || d.Request.Target != d.Binding.Receiver || !core.Identifier(d.Request.RequestID) || !mcpText(d.Request.Text, MCPMaxTextBytes) {
 		return ErrInvalid
+	}
+	if d.Message != nil {
+		if d.Message.Validate() != nil || d.Message.Kind != "message" || d.Message.From != d.Request.From || d.Message.To != d.Request.Target || d.Message.Text != d.Request.Text || d.Message.To.Kind != "assistant" {
+			return ErrInvalid
+		}
+	} else if d.Binding.Receiver.Kind != "node" {
+		return ErrUnsupported
 	}
 	if d.Request.Configuration != nil || d.Request.Workspace != "" {
 		return ErrUnsupported
@@ -130,20 +139,21 @@ func (d MCPWorkDelivery) Validate() error {
 // MCPControlDelivery has exactly one typed control. It cannot carry arbitrary
 // operations, approvals, launch parameters or caller-selected owner metadata.
 type MCPControlDelivery struct {
-	Version    int                `json:"version" required:"true"`
-	DeliveryID string             `json:"delivery_id" required:"true"`
-	Dispatch   MCPDispatchBinding `json:"dispatch" required:"true"`
-	Binding    MCPRunBinding      `json:"binding" required:"true"`
-	Caller     protocol.AgentRef  `json:"caller" required:"true"`
-	Input      *MCPTaskInput      `json:"input,omitempty"`
-	Cancel     *MCPCancelInput    `json:"cancel,omitempty"`
+	Version    int                  `json:"version" required:"true"`
+	DeliveryID string               `json:"delivery_id" required:"true"`
+	Dispatch   MCPDispatchBinding   `json:"dispatch" required:"true"`
+	Binding    MCPRunBinding        `json:"binding" required:"true"`
+	Caller     protocol.AgentRef    `json:"caller" required:"true"`
+	Input      *MCPTaskInput        `json:"input,omitempty"`
+	Cancel     *MCPCancelInput      `json:"cancel,omitempty"`
+	Approval   *MCPApprovalDecision `json:"approval,omitempty"`
 }
 
 func (d MCPControlDelivery) Validate() error {
 	if d.Version != MCPContractVersion {
 		return ErrUnsupported
 	}
-	if !core.Identifier(d.DeliveryID) || d.Dispatch.Validate() != nil || d.Binding.Validate() != nil || d.Dispatch.Receiver != d.Binding.Receiver || !taskCaller(d.Caller) || (d.Input == nil) == (d.Cancel == nil) {
+	if !core.Identifier(d.DeliveryID) || d.Dispatch.Validate() != nil || d.Binding.Validate() != nil || d.Dispatch.Receiver != d.Binding.Receiver || !taskCaller(d.Caller) || controlCount(d.Input, d.Cancel, d.Approval) != 1 {
 		return ErrInvalid
 	}
 	if d.Input != nil {
@@ -153,13 +163,15 @@ func (d MCPControlDelivery) Validate() error {
 		if d.Input.TaskID != d.Dispatch.Task.AgentID || d.Input.RunID != d.Binding.RunID {
 			return ErrFenced
 		}
-	} else {
+	} else if d.Cancel != nil {
 		if err := d.Cancel.Validate(); err != nil {
 			return err
 		}
 		if d.Cancel.TaskID != d.Dispatch.Task.AgentID || d.Cancel.RunID != d.Binding.RunID {
 			return ErrFenced
 		}
+	} else if d.Approval.Validate() != nil {
+		return ErrInvalid
 	}
 	return nil
 }
@@ -353,4 +365,18 @@ func DecodeMCPContract(data []byte, destination any) error {
 		return ErrInvalid
 	}
 	return protocol.DecodeStrict(data, destination)
+}
+
+func controlCount(input *MCPTaskInput, cancel *MCPCancelInput, approval *MCPApprovalDecision) int {
+	n := 0
+	if input != nil {
+		n++
+	}
+	if cancel != nil {
+		n++
+	}
+	if approval != nil {
+		n++
+	}
+	return n
 }

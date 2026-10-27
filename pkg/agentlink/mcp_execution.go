@@ -1,0 +1,79 @@
+package agentlink
+
+import (
+	"encoding/json"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
+)
+
+// MCPExecutionContext is receiver-to-service metadata, never model arguments.
+// Authentication, persisted admission and current-run liveness must all be
+// checked before constructing a node caller. Shape validation grants no trust.
+type MCPExecutionContext struct {
+	Claim   MCPClaim            `json:"claim" required:"true"`
+	Binding MCPExecutionBinding `json:"binding" required:"true"`
+}
+
+func (c MCPExecutionContext) Validate() error {
+	if c.Claim.Validate() != nil || c.Binding.Validate() != nil || c.Binding.Task.NodeID != c.Claim.Binding.Receiver.NodeID {
+		return ErrUnauthorized
+	}
+	return nil
+}
+
+type MCPMessageInput struct {
+	RequestID string            `json:"request_id" required:"true"`
+	Message   protocol.SendMail `json:"message" required:"true"`
+}
+type MCPExecutionSubmit struct {
+	Context MCPExecutionContext `json:"context" required:"true"`
+	Input   MCPSubmitInput      `json:"input" required:"true"`
+}
+type MCPExecutionInput struct {
+	Context MCPExecutionContext `json:"context" required:"true"`
+	Input   MCPTaskInput        `json:"input" required:"true"`
+}
+type MCPExecutionCancel struct {
+	Context MCPExecutionContext `json:"context" required:"true"`
+	Input   MCPCancelInput      `json:"input" required:"true"`
+}
+type MCPExecutionMessage struct {
+	Context MCPExecutionContext `json:"context" required:"true"`
+	Input   MCPMessageInput     `json:"input" required:"true"`
+}
+type MCPExecutionRead struct {
+	Context MCPExecutionContext `json:"context" required:"true"`
+	TaskID  string              `json:"task_id" required:"true"`
+}
+
+// Pending approvals are native requests, not model decisions or policy grants.
+// Epoch identifies the operated receiver process; restarting invalidates pending
+// requests rather than reconstructing the native in-memory done channel.
+type MCPApprovalPending struct {
+	Context   MCPExecutionContext `json:"context" required:"true"`
+	Epoch     string              `json:"epoch" required:"true"`
+	RequestID string              `json:"request_id" required:"true"`
+	Approval  ExecutionApproval   `json:"approval" required:"true"`
+}
+
+func (p MCPApprovalPending) Validate() error {
+	if p.Context.Validate() != nil || !core.Identifier(p.Epoch) || !core.Identifier(p.RequestID) || !core.Identifier(p.Approval.ID) || p.Approval.JobID != p.Context.Binding.Task.AgentID || p.Approval.Method == "" || len(p.Approval.Method) > 128 || len(p.Approval.Params) > MCPMaxInputBytes || !json.Valid(p.Approval.Params) {
+		return ErrInvalid
+	}
+	return nil
+}
+
+type MCPApprovalDecision struct {
+	ApprovalID string            `json:"approval_id" required:"true"`
+	Epoch      string            `json:"epoch" required:"true"`
+	RequestID  string            `json:"request_id" required:"true"`
+	User       protocol.AgentRef `json:"user" required:"true"`
+	Action     string            `json:"action" required:"true"`
+}
+
+func (d MCPApprovalDecision) Validate() error {
+	if !core.Identifier(d.ApprovalID) || !core.Identifier(d.Epoch) || !core.Identifier(d.RequestID) || !d.User.Valid() || d.User.Kind != "user" || (d.Action != "allow_once" && d.Action != "deny") {
+		return ErrInvalid
+	}
+	return nil
+}
