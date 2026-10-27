@@ -7,6 +7,7 @@ export function outboxTarget(client,scope,snapshot){
   return {...target,key:JSON.stringify(Object.values(target))};
 }
 export const outboxTerminal=value=>['accepted','cancelled'].includes(value.state);
+const sameSubmission=(value,expected)=>value.request.request_id===expected.request.request_id&&['key','host','control','space','owner','conversation'].every(key=>value.target[key]===expected.target[key]);
 
 // Used by the draft writer in its serialized lane. The transaction transfers
 // ownership of originals and clears only the submitted editor versions.
@@ -47,17 +48,17 @@ export function createChatOutboxStore(options={}){
       });
     },
     update(sequence,token,patch){return mutate(sequence,value=>{if(value.claim?.token!==token)return false;Object.assign(value,patch);return true;});},
-    edit(sequence,revision,text){return mutate(sequence,value=>{if(value.started||value.claim||value.revision!==revision||!['queued','failed'].includes(value.state)||(!text.trim()&&!value.request.attachments?.length)||new TextEncoder().encode(text).byteLength>65536)return false;value.request={...value.request,text};value.state='queued';value.problem=null;return true;});},
-    retry(sequence,revision){return mutate(sequence,value=>{if(value.claim||value.state!=='failed'||value.revision!==revision)return false;value.state=value.started?'uncertain':'queued';value.problem=null;return true;});},
-    cancel(sequence,revision){return db.transaction(['chatOutbox','chatOutboxFiles'],'readwrite',async tx=>{
-      const store=tx.objectStore('chatOutbox'),value=await idbRequest(store.get(sequence));
-      if(!value||value.started||value.claim||value.revision!==revision||outboxTerminal(value))return null;
+    edit(expected,text){return mutate(expected.sequence,value=>{if(!sameSubmission(value,expected)||value.started||value.claim||value.revision!==expected.revision||!['queued','failed'].includes(value.state)||(!text.trim()&&!value.request.attachments?.length)||new TextEncoder().encode(text).byteLength>65536)return false;value.request={...value.request,text};value.state='queued';value.problem=null;return true;});},
+    retry(expected){return mutate(expected.sequence,value=>{if(!sameSubmission(value,expected)||value.claim||value.state!=='failed'||value.revision!==expected.revision)return false;value.state=value.started?'uncertain':'queued';value.problem=null;return true;});},
+    cancel(expected){return db.transaction(['chatOutbox','chatOutboxFiles'],'readwrite',async tx=>{
+      const store=tx.objectStore('chatOutbox'),value=await idbRequest(store.get(expected.sequence));
+      if(!value||!sameSubmission(value,expected)||value.started||value.claim||value.revision!==expected.revision||outboxTerminal(value))return null;
       value.state='cancelled';value.revision++;store.put(value);
       const files=tx.objectStore('chatOutboxFiles'),keys=await idbRequest(files.index('request').getAllKeys([value.target.key,value.request.request_id]));for(const key of keys)files.delete(key);return value;
     });},
-    releaseFiles(sequence){return db.transaction(['chatOutbox','chatOutboxFiles'],'readwrite',async tx=>{
-      const entries=tx.objectStore('chatOutbox'),value=await idbRequest(entries.get(sequence));
-      if(!value||value.state!=='accepted')return null;
+    releaseFiles(expected){return db.transaction(['chatOutbox','chatOutboxFiles'],'readwrite',async tx=>{
+      const entries=tx.objectStore('chatOutbox'),value=await idbRequest(entries.get(expected.sequence));
+      if(!value||!sameSubmission(value,expected)||value.state!=='accepted')return null;
       const files=tx.objectStore('chatOutboxFiles'),keys=await idbRequest(files.index('request').getAllKeys([value.target.key,value.request.request_id]));for(const key of keys)files.delete(key);
       value.projection_pending=false;value.revision++;entries.put(value);return value;
     });},

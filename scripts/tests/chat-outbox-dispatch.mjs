@@ -20,7 +20,7 @@ function fixture(){
     async sendReceipt(request,scope){trace.push({kind:'receipt',request:clone(request)});return {...request,runtime_id:'control',owner_id:scope.owner,state:accepted.has(JSON.stringify([scope.space,scope.owner,request.request_id]))?'accepted':'unconfirmed',message_id:request.request_id};},
   };
   const storage={
-    async list(){return clone(rows);},async files(){return [];},async releaseFiles(sequence){const value=rows.find(row=>row.sequence===sequence);if(value?.state==='accepted'){value.projection_pending=false;value.revision++;return clone(value);}return null;},
+    async list(){return clone(rows);},async files(){return [];},async releaseFiles(expected){const value=rows.find(row=>row.sequence===expected.sequence);if(value?.state==='accepted'&&value.target.key===expected.target.key&&value.request.request_id===expected.request.request_id){value.projection_pending=false;value.revision++;return clone(value);}return null;},
     async claim(sequence,token,now,lease){const value=rows.find(row=>row.sequence===sequence);if(!value||['failed','accepted','cancelled'].includes(value.state)||value.claim?.until>now||rows.some(row=>row.target.key===value.target.key&&row.sequence<sequence&&!['accepted','cancelled'].includes(row.state)))return null;value.claim={token,until:now+lease};value.state=value.started?'uncertain':'delivering';value.revision++;return clone(value);},
     async update(sequence,token,patch){const value=rows.find(row=>row.sequence===sequence);if(value?.claim?.token!==token)return null;Object.assign(value,clone(patch));value.revision++;return clone(value);},close(){},
   };

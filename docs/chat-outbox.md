@@ -113,3 +113,7 @@ exposes a local Retry; reopening can reconstruct that same accepted projection
 without another POST. Local preview URLs have resource leases and are revoked
 when their last mounted view releases them. Once local originals are released,
 previews use the existing owner-bound Control attachment read.
+Edit, Retry, Cancel and terminal cleanup bind the full captured target and request
+identity, not only a local sequence. Projection work uses that same identity, so
+a late callback cannot mutate or release another submission if a recreated browser
+database reuses its sequence.
