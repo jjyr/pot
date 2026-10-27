@@ -43,6 +43,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
   const machineInfo=machinePresentation(client);
   const gate = createRequestGate(), approvalGate = createRequestGate();
   let assistantStartRefresh=null,assistantLoad=null,assistantCatalogLoad=null;
+  const catalogAuthority=new WeakMap();
   let route = '', title = '', editor = null, disposed = false, pageVersion = 0, configurationSpace = '',taskView=null,taskOrigin=null,taskListView=null,scheduleView=null,detailParent=false,usageOwner=null;
   let filter = {taskScope:'active', taskQuery:'', taskPhase:'', listOwner:'', scheduleQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageScope:'all', usageSpace:'all',usageRange:usageRange(),usageYear:Number(usageToday().slice(0,4)),settingsTab:'general'};
   let pendingApprovals=[],approvalFresh=false,notificationSettings=null;
@@ -825,15 +826,18 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     const control=client.spaces.find(item=>item.id===context.space)?.control_id,initiatingScope=JSON.stringify(scope()),abort=new AbortController();
     for(const node of root?.querySelectorAll('.assistant-catalog-state')||[])node.remove();
     const loading=n('section','assistant-catalog-state'),label=n('p','hint');loading.setAttribute('aria-live','polite');loading.append(label);root?.append(loading);
-    const buttons=[...root?.querySelectorAll('.assistant-runtime-choice,.assistant-connect-new')||[]];
-    for(const button of buttons){button.disabled=true;if(button.closest('[data-runtime-id]')?.dataset.runtimeId===runtimeID)button.setAttribute('aria-busy','true');}
+    const leased=new Set();
     const current=()=>!disposed&&host.firstElementChild===root&&editor===initiatingEditor&&JSON.stringify(scope())===initiatingScope&&client.runtime.boot_id===boot&&client.connectionGeneration===generation&&client.operationScopeReady?.(context)!==false&&client.spaces.find(item=>item.id===context.space)?.connected!==false&&client.spaces.find(item=>item.id===context.space)?.control_id===control&&valid();
     const operation={runtimeID,signal:abort.signal,current:()=>assistantCatalogLoad===operation&&current(),
+      lock(){if(assistantCatalogLoad!==operation)return;for(const button of root?.querySelectorAll('.assistant-runtime-choice,.assistant-connect-new')||[]){leased.add(button);setPending(button,true);if(button.closest('[data-runtime-id]')?.dataset.runtimeId===runtimeID)button.setAttribute('aria-busy','true');}},
       locale(){label.textContent=translate(locale(),'loading.pending');},
-      close(){const valid=operation.current();abort.abort();loading.remove();if(assistantCatalogLoad!==operation)return;for(const button of root?.querySelectorAll('.assistant-runtime-choice,.assistant-connect-new')||[]){button.disabled=!valid;button.removeAttribute('aria-busy');}assistantCatalogLoad=null;},
+      // Release this operation's pending state against the latest rendered
+      // authority. An old result cannot overwrite a recovered generation, and
+      // an old projection cannot acquire authority by losing its pending state.
+      close(){abort.abort();loading.remove();if(assistantCatalogLoad!==operation)return;assistantCatalogLoad=null;for(const button of leased){if(button.matches('.assistant-runtime-choice,.assistant-connect-new'))setDisabled(button,catalogAuthority.get(button)?.()!==true);setPending(button,false);button.removeAttribute('aria-busy');}},
       failed(reason){if(!operation.current()){operation.close();return;}operation.close();const message=n('p','inline-error'),retryButton=action('',()=>{if(current()){loading.remove();retry();}});message.dataset.assistantCatalogI18n='agentLinks.'+managementError(reason);retryButton.dataset.assistantCatalogI18n='retry';loading.replaceChildren(message,retryButton);if(reason?.message){const diagnostics=n('details','detail-disclosure'),summary=n('summary');summary.dataset.assistantCatalogI18n='agentLinks.diagnostics';diagnostics.append(summary,n('pre','',reason.message));loading.append(diagnostics);}for(const node of loading.querySelectorAll('[data-assistant-catalog-i18n]'))node.textContent=translate(locale(),node.dataset.assistantCatalogI18n);root.append(loading);},
     };
-    assistantCatalogLoad=operation;operation.locale();return operation;
+    assistantCatalogLoad=operation;operation.lock();operation.locale();return operation;
   }
   function createdChatLifetime(form,context){
     const boot=client.runtime.boot_id,generation=client.connectionGeneration,control=client.spaces.find(item=>item.id===context.space)?.control_id,initiatingScope=JSON.stringify(scope());
@@ -915,20 +919,20 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     heading(t('title'));root.classList.add('assistant-start');
     const intro=n('div','assistant-start-intro');intro.append(n('h1','',t('title')),n('p','hint',t('description')));root.append(intro);
     const options=n('div','assistant-runtime-list'),status=n('p','inline-error');status.setAttribute('role','alert');root.append(options,status);
-    let projection=options.cloneNode(false),snapshot={items:[]};
+    let projection=options.cloneNode(false),snapshot={items:[]},authorityByRuntime=new Map();
     function runtimeRow({id="local",name,kind,description,status:state,select,manage,valid=()=>true}) {
       const row=n('div','assistant-runtime-row'),content=n('span','assistant-runtime-info'),title=n('strong','',name),detail=n('span','hint',description),label=n('span','assistant-runtime-status',state);
       row.dataset.runtimeId=id;row.dataset.viewKey=id;content.append(title,detail);
       const boot=client.runtime.boot_id,generation=client.connectionGeneration,control=client.spaces.find(item=>item.id===captured.space)?.control_id,initiatingScope=JSON.stringify(scope());
       const current=()=>!disposed&&gate.current(token)&&host.firstElementChild===root&&JSON.stringify(scope())===initiatingScope&&client.runtime.boot_id===boot&&client.connectionGeneration===generation&&client.operationScopeReady?.(captured)!==false&&client.spaces.find(item=>item.id===captured.space)?.connected!==false&&client.spaces.find(item=>item.id===captured.space)?.control_id===control&&valid();
+      if(select)authorityByRuntime.set(id,current);
       if(select){const button=action('',()=>{if(current()&&!assistantCatalogLoad)select();});button.disabled=!current();button.classList.add('assistant-runtime-choice');if(id!=='local')button.setAttribute('aria-label',t('runtimeLabel').replace('{brand}',(['pot','codex','antigravity'].includes(kind)?translate(locale(),'agentLinks.'+(kind==='antigravity'?'sourceAntigravity':kind==='codex'?'sourceCodex':'sourcePot')):t('otherRuntime'))).replace('{name}',name).replace('{description}',description).replace('{status}',state));button.append(connectionBrand(kind),content,label,icon('chevron-right'));row.append(button);}
       else {const button=action(t('manage'),manage);button.setAttribute('aria-label',t('manageConnection').replace('{name}',name));row.append(connectionBrand(kind),content,label,button);}
-      const choice=row.querySelector('button');if(select&&assistantCatalogLoad){choice.disabled=true;if(id===assistantCatalogLoad.runtimeID)choice.setAttribute('aria-busy','true');}
       projection.append(row);
     }
     const connect=action(t('connectNew'),()=>connection());connect.classList.add('assistant-connect-new');root.append(connect);
     function render(){
-        projection=options.cloneNode(false);heading(t('title'));intro.querySelector('h1').textContent=t('title');intro.querySelector('p').textContent=t('description');connect.textContent=t('connectNew');connect.disabled=!!assistantCatalogLoad;
+        projection=options.cloneNode(false);authorityByRuntime=new Map();heading(t('title'));intro.querySelector('h1').textContent=t('title');intro.querySelector('p').textContent=t('description');connect.textContent=t('connectNew');
         runtimeRow({name:t('localTitle'),kind:'pot',description:t('localDescription'),status:t('available'),select:localAssistantEditor});
         for(const link of snapshot.items||[]) {
           const targets=link.directory?.targets||[],node=targets.find(item=>item.address?.kind==='node'),supported=node?.capabilities?.operations?.includes('assistant.management'),online=link.status==='connected',count=targets.filter(item=>item.address?.kind==='assistant').length;
@@ -936,7 +940,9 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
           const valid=()=>{const current=snapshot.items?.find(item=>item.id===link.id);return current?.peer?.node_id===link.peer?.node_id&&current.status==='connected'&&current.directory?.targets?.some(item=>item.address?.kind==='node'&&item.capabilities?.operations?.includes('assistant.management'));};
           const name=[linkDisplayName(link),linkHostLabel(link)].filter((value,index,all)=>value&&all.indexOf(value)===index).join(' / ');runtimeRow({id:'connection:'+link.id,name,kind:link.peer?.kind||'pot',description,status:t(online?'online':'offline'),select:online&&supported?()=>linkedAssistantEditor(link.id,captured.space,'',name,link.peer?.kind,valid):null,valid,manage:()=>show('machines')});
         }
-        reconcile(options,projection);assistantCatalogLoad?.locale();for(const node of root.querySelectorAll('[data-assistant-catalog-i18n]'))node.textContent=translate(locale(),node.dataset.assistantCatalogI18n);
+        reconcile(options,projection);for(const button of options.querySelectorAll('.assistant-runtime-choice'))catalogAuthority.set(button,authorityByRuntime.get(button.closest('[data-runtime-id]').dataset.runtimeId));
+        const canConnect=authorityByRuntime.get('local');catalogAuthority.set(connect,canConnect);setDisabled(connect,!canConnect());connect.onclick=()=>{if(canConnect())connection();};
+        assistantCatalogLoad?.lock();assistantCatalogLoad?.locale();for(const node of root.querySelectorAll('[data-assistant-catalog-i18n]'))node.textContent=translate(locale(),node.dataset.assistantCatalogI18n);
     }
     render();assistantStartRefresh=async()=>{if(gate.current(token))render();};
     async function refresh(){

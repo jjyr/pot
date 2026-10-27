@@ -12,21 +12,48 @@ try{for(const locale of ['en','zh-CN']){
   const fixture=await assistantCreateHTTPFixture(source.origin),context=await phoneContext(fixture.origin),page=await context.newPage(),errors=[];
   page.setDefaultTimeout(8000);page.on('console',m=>{if(m.type()==='error')console.error(m.text());});page.on('response',r=>{if(r.status()>=400)console.error(r.status(),r.url());});page.on('pageerror',e=>errors.push(e.message));
   await context.addInitScript(()=>{
-    window.creationEvidence={touch:[],history:[],idb:[],frames:[]};
+    window.creationEvidence={touch:[],history:[],idb:[],frames:[],draftWaits:[]};
     let previous;const sample=()=>{const root=document.querySelector('#app'),history=document.querySelector('.history'),value={route:root?.dataset.route,directory:root?.classList.contains('show-directory'),owner:document.querySelector('.assistant-row.is-selected')?.dataset.viewKey,chatVisible:!!history&&!history.hidden&&getComputedStyle(history).visibility==='visible'};const key=JSON.stringify(value);if(key!==previous){creationEvidence.frames.push({at:Date.now(),...value});previous=key;}requestAnimationFrame(sample);};requestAnimationFrame(sample);
     for(const type of ['pointerdown','pointerup','pointercancel','click'])document.addEventListener(type,e=>{creationEvidence.touch.push({at:Date.now(),type,trusted:e.isTrusted,pointerType:e.pointerType,target:e.target.closest('button')?.className});},true);
     for(const method of ['pushState','replaceState']){const original=history[method];history[method]=function(state,...args){creationEvidence.history.push({at:Date.now(),method,state});return original.call(this,state,...args);};}
     addEventListener('popstate',e=>creationEvidence.history.push({at:Date.now(),method:'popstate',state:e.state}));
-    const tx=IDBDatabase.prototype.transaction;IDBDatabase.prototype.transaction=function(...args){const transaction=tx.apply(this,args);transaction.addEventListener('complete',()=>creationEvidence.idb.push({at:Date.now(),mode:transaction.mode,stores:[...transaction.objectStoreNames]}));return transaction;};
+    const tx=IDBDatabase.prototype.transaction;IDBDatabase.prototype.transaction=function(...args){const transaction=tx.apply(this,args);transaction.addEventListener('complete',()=>creationEvidence.idb.push({at:Date.now(),mode:transaction.mode,stores:[...transaction.objectStoreNames],...(transaction.objectStoreNames.contains('composerDrafts')?{selected:document.querySelector('.assistant-row.is-selected')?.dataset.viewKey,text:document.querySelector('#pot-composer')?.value}:{})}));return transaction;};
   });
   const control=async data=>assert((await context.request.post(fixture.origin+'/fixture/control',{data})).ok());
   const count=path=>fixture.trace.filter(row=>row.kind==='request'&&row.path===path).length;
   const tap=selector=>page.locator(selector).tap();
-  const draftSaved=(owner,text)=>page.waitForFunction(async({owner,text})=>{const {createIndexedStore,idbRequest}=await import('/state/indexed-store.mjs'),store=createIndexedStore();try{const rows=await store.transaction('composerDrafts','readonly',tx=>idbRequest(tx.objectStore('composerDrafts').getAll()));return rows.some(row=>row.key===JSON.stringify(['creation-control','local',owner])&&row.text===text);}finally{store.close();}},{owner,text});
+  // Playwright's async waitForFunction predicates can treat the Promise itself
+  // as truthy. Keep the deadline, completed IDB reads and frame polling inside
+  // one evaluate call, and match the full expected identity rather than the UI.
+  const draftSaved=(owner,text,{timeout=8000}={})=>page.evaluate(async expected=>{
+    const started=performance.now(),deadline=started+expected.timeout;
+    const {createIndexedStore,idbRequest}=await import('/state/indexed-store.mjs'),store=createIndexedStore();
+    const ownerID=JSON.stringify([expected.space,expected.owner]),key=JSON.stringify([expected.control,expected.space,expected.owner]),stateKey=JSON.stringify([expected.control,ownerID,expected.conversation]);
+    let checks=0,last;
+    try{
+      while(performance.now()<deadline){
+        const selected=document.querySelector('.assistant-row.is-selected'),input=document.querySelector('#pot-composer');
+        const [row,chats,startup]=await store.transaction(['composerDrafts','conversations','startup'],'readonly',tx=>Promise.all([idbRequest(tx.objectStore('composerDrafts').get(key)),idbRequest(tx.objectStore('conversations').getAll()),idbRequest(tx.objectStore('startup').get('last'))]));
+        // transaction() resolves only on tx.oncomplete, after the returned row
+        // is durably visible. A request's onsuccess alone cannot pass this wait.
+        const transactionCompletedAt=Date.now(),snapshot=chats.find(chat=>chat.projection.runtime_id===expected.control&&chat.projection.owner_id===ownerID&&chat.projection.conversation_id===expected.conversation)?.projection;
+        checks++;last={selected:selected?.dataset.viewKey,startupControl:startup?.runtime_id,snapshotBoot:snapshot?.boot_id,rowKey:row?.key,stateKey:row?.state_key,conversation:row?.conversation_id,text:row?.text,pending:!!row?.pending};
+        if(startup?.runtime_id===expected.control&&startup.boot_id===expected.boot&&snapshot?.boot_id===expected.boot&&row?.key===key&&row.state_key===stateKey&&row.conversation_id===expected.conversation&&row.text===expected.text&&!!row.pending===expected.pending&&selected?.isConnected&&selected===document.querySelector('.assistant-row.is-selected')&&selected.dataset.viewKey===ownerID&&input?.isConnected&&input===document.querySelector('#pot-composer')&&!input.disabled&&input.value===expected.text&&!document.querySelector('.draft-storage-status.inline-error')){
+          const proof={kind:'matched',at:Date.now(),transactionCompletedAt,checks,elapsedMS:performance.now()-started,...expected,key,stateKey};creationEvidence.draftWaits.push(proof);return proof;
+        }
+        await new Promise(requestAnimationFrame);
+      }
+      creationEvidence.draftWaits.push({kind:'deadline',at:Date.now(),checks,elapsedMS:performance.now()-started,...expected,last});
+      throw Error('Creation draft deadline expired: '+JSON.stringify({expected,last,checks}));
+    }finally{store.close();}
+  },{owner,text,control:'creation-control',space:'local',boot:'creation-boot',conversation:owner+'-conversation',pending:false,timeout});
   try{
     await page.goto(fixture.origin+'/?locale='+locale+'&theme=light');await page.locator('.show-directory .assistant-row').waitFor();
     const notNow=page.getByRole('button',{name:locale==='en'?'Not now':'暂不',exact:true});if(await notNow.count())await notNow.tap();
-    await tap('.assistant-row');await page.locator('#pot-composer').fill('Original draft '+locale);await draftSaved('original','Original draft '+locale);await tap('.titlebar .narrow-navigation');
+    await tap('.assistant-row');await page.locator('#pot-composer').fill('Original draft '+locale);await draftSaved('original','Original draft '+locale);
+    await assert.rejects(draftSaved('original','Impossible uncommitted draft '+locale,{timeout:250}),/Creation draft deadline expired/);
+    const negative=await page.evaluate(()=>creationEvidence.draftWaits.at(-1));assert.equal(negative.kind,'deadline');assert(negative.elapsedMS>=negative.timeout);assert(negative.checks>1);results.push({locale,impossibleDraftRejected:true,deadlineMS:negative.timeout,elapsedMS:negative.elapsedMS,checks:negative.checks});
+    await tap('.titlebar .narrow-navigation');
     await control({hold:['links']});const linksBefore=count('/api/v1/agent-links'),addStarted=Date.now();await tap('.directory-heading button:last-child');await page.locator('.assistant-runtime-choice').first().waitFor();const localReadyMS=Date.now()-addStarted;
     // A directory update between touch down/up must retain the selected node.
     const remote=page.locator('[data-runtime-id="connection:fixture-peer"] button');await page.waitForTimeout(150);const remoteReadyWhileLinksHeld=await remote.count()>0;await control({release:['links']});await remote.waitFor();results.push({locale,localReadyMS,remoteReadyWhileLinksHeld,addReadyMS:Date.now()-addStarted,addLinkRequests:count('/api/v1/agent-links')-linksBefore});if(!baseline)assert(remoteReadyWhileLinksHeld,'The already confirmed connection catalog needs no duplicate read');
@@ -70,11 +97,19 @@ try{for(const locale of ['en','zh-CN']){
     await page.screenshot({path:output+`/back-${locale}-${baseline?'before':'after'}.png`});
     results.push({locale,gestureDirectory,browserDirectory,history:await page.evaluate(()=>history.state)});
     if(!baseline){assert(gestureDirectory,'Touch edge Back opens the assistant directory');assert(browserDirectory,'Browser Back cannot reopen the completed creation page');}
-    if(!baseline){await page.locator('.assistant-row').filter({hasText:'Original fixture'}).tap();await page.waitForFunction(locale=>document.querySelector('#pot-composer')?.value==='Original draft '+locale,locale);await tap('.titlebar .narrow-navigation');await page.locator('.assistant-row').filter({hasText:'Created fixture'}).tap();await page.waitForFunction(locale=>document.querySelector('#pot-composer')?.value==='Created draft '+locale,locale);results.push({locale,independentDrafts:true});}
+    if(!baseline){await page.locator('.assistant-row').filter({hasText:'Original fixture'}).tap();await page.waitForFunction(locale=>document.querySelector('#pot-composer')?.value==='Original draft '+locale,locale);await draftSaved('original','Original draft '+locale);await tap('.titlebar .narrow-navigation');await page.locator('.assistant-row').filter({hasText:'Created fixture'}).tap();await page.waitForFunction(locale=>document.querySelector('#pot-composer')?.value==='Created draft '+locale,locale);await draftSaved('created-1','Created draft '+locale);results.push({locale,independentDrafts:true});}
     const state=await (await context.request.get(fixture.origin+'/fixture/state')).json();assert.equal(state.created,1);assert.equal(state.trace.filter(row=>row.path==='/api/v1/assistants'&&row.method==='POST').length,2,'One failed attempt and one successful retry; no duplicate touch mutation');
     assert.deepEqual(errors,[]);const evidence=await page.evaluate(()=>creationEvidence);assert(evidence.idb.some(row=>row.mode==='readwrite'),'Real IndexedDB commits were observed');
+    const draftNavigation=['original','created-1'].map(owner=>{
+      const proof=evidence.draftWaits.find(row=>row.kind==='matched'&&row.owner===owner),selected=JSON.stringify(['local',owner]);
+      const commit=evidence.idb.findLast(row=>row.mode==='readwrite'&&row.stores.includes('composerDrafts')&&row.selected===selected&&row.text===proof.text&&row.at<=proof.transactionCompletedAt);
+      const navigationTouch=evidence.touch.find(row=>row.at>=proof.transactionCompletedAt&&row.type==='pointerdown'&&row.trusted&&row.pointerType==='touch');
+      const navigation=evidence.history.find(row=>row.at>=proof.transactionCompletedAt&&row.state?.potRoute==='chat'&&row.state.potScope?.space==='local'&&row.state.potScope.owner===owner&&row.state.potDirectory===true);
+      assert(commit,'A real draft write committed before the full-identity read');assert(navigationTouch,'Trusted navigation input follows the completed draft transaction');if(!baseline||owner==='original')assert(navigation,'Directory navigation follows the completed draft transaction');
+      return {owner,control:proof.control,space:proof.space,conversation:proof.conversation,key:proof.key,stateKey:proof.stateKey,text:proof.text,pending:proof.pending,writeCommittedAt:commit.at,readCompletedAt:proof.transactionCompletedAt,navigationTouchAt:navigationTouch.at,directoryEntryAt:navigation?.at};
+    });results.push({locale,draftNavigation});
     const acceptedAt=fixture.trace.find(row=>row.kind==='created').at,chatAt=evidence.frames.find(row=>row.at>=acceptedAt&&row.route==='chat'&&!row.directory&&row.chatVisible&&row.owner===JSON.stringify(['local','created-1']))?.at;assert(chatAt);results.push({locale,acceptedToVisibleChatMS:chatAt-acceptedAt});
-    await writeFile(output+`/evidence-${locale}-${baseline?'before':'after'}.json`,JSON.stringify({results:results.filter(row=>row.locale===locale),trace:fixture.trace,evidence,errors},null,2));
+    await writeFile(output+`/evidence-${locale}-${baseline?'before':'after'}.json`,JSON.stringify({results:results.filter(row=>row.locale===locale),trace:fixture.trace,evidence,draftNavigation,errors},null,2));
   }catch(error){console.error(JSON.stringify({errors,trace:fixture.trace.slice(-12),body:(await page.locator('body').innerText()).slice(-1600)}));await writeFile(output+'/failure-evidence.json',JSON.stringify(await page.evaluate(()=>creationEvidence),null,2));await page.screenshot({path:output+'/failure.png'});throw error;}finally{await context.close();await fixture.close();}
 }
   {
@@ -97,7 +132,33 @@ try{for(const locale of ['en','zh-CN']){
       await page.evaluate(()=>releaseCatalog());await page.waitForTimeout(150);
       assert.equal(await page.locator('.assistant-management-form').count(),0,'A retired '+fault+' catalog cannot open an editor');
       await page.evaluate(()=>oldClick());await page.waitForTimeout(80);assert.equal(await page.evaluate(()=>heldCatalogs),1,'An old '+fault+' row handler cannot issue a second catalog request');
+      if(['scope','boot','connection','control'].includes(fault))assert(await page.locator('.assistant-runtime-choice').evaluateAll(buttons=>buttons.every(button=>button.disabled)),'An unrefreshed '+fault+' projection cannot acquire authority when its pending operation ends');
       results.push({fault,retiredCatalogRejected:true,oldHandlerRejected:true});
+    }finally{await context.close();}
+  }
+  if(!baseline)for(const order of ['ready-before-completion','completion-before-ready']){
+    const context=await phoneContext(source.origin),page=await context.newPage(),errors=[];page.setDefaultTimeout(8000);page.on('pageerror',error=>errors.push(error.message));
+    try{
+      await page.goto(source.origin+'/scripts/tests/fixtures/assistant-start.html?capture=1&locale=en');await page.waitForFunction(()=>window.assistantStartResults?.passed);
+      // This isolated client models the production online/directory generation
+      // contract. Product row rendering, pending leases and touch stay real.
+      await page.evaluate(()=>{const f=managementFixture,request=f.client.request;f.client.onlineReady=true;f.client.connectionGeneration=0;f.client.directoryGeneration=0;f.client.operationScopeReady=()=>f.client.onlineReady&&f.client.directoryGeneration===f.client.connectionGeneration;
+        window.catalogCalls=0;f.client.request=async(path,options={})=>{if(path==='/api/v1/agent-links/assistants'&&options.body?.action==='catalog'){catalogCalls++;if(catalogCalls===1)await new Promise(resolve=>window.releaseOldCatalog=resolve);}return request(path,options);};
+        dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:'en'}}));window.catalogRoot=document.querySelector('.assistant-start');window.retiredClick=document.querySelectorAll('.assistant-runtime-choice')[1].onclick;
+      });
+      await page.locator('.assistant-runtime-choice').nth(1).tap();await page.waitForFunction(()=>!!window.releaseOldCatalog);
+      const sample=()=>page.evaluate(()=>({generation:managementFixture.client.connectionGeneration,directoryGeneration:managementFixture.client.directoryGeneration,ready:managementFixture.client.operationScopeReady(),sameRoot:catalogRoot===document.querySelector('.assistant-start'),catalogCalls,editors:document.querySelectorAll('.assistant-management-form').length,buttons:[...document.querySelectorAll('.assistant-runtime-choice,.assistant-connect-new')].map(button=>({text:button.textContent,disabled:button.disabled,busy:button.getAttribute('aria-busy'),pending:button.dataset.pending}))}));
+      const pending=await sample();
+      await page.evaluate(()=>{const client=managementFixture.client;client.onlineReady=false;client.connectionGeneration=1;client.directoryGeneration=-1;dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:'zh-CN'}}));retiredClick();});
+      const offline=await sample();assert(offline.buttons.every(button=>button.disabled));assert.equal(offline.catalogCalls,1);
+      const recover=()=>page.evaluate(()=>{const client=managementFixture.client;client.onlineReady=true;client.directoryGeneration=client.connectionGeneration;dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:'en'}}));retiredClick();});
+      if(order==='ready-before-completion')await recover();
+      await page.evaluate(()=>releaseOldCatalog());await page.waitForFunction(()=>!document.querySelector('.assistant-catalog-state'));
+      const settled=await sample();assert(settled.sameRoot);assert.equal(settled.editors,0);assert.equal(settled.catalogCalls,1);assert(settled.buttons.every(button=>button.disabled===!settled.ready&&button.busy===null));
+      if(order==='completion-before-ready')await recover();
+      const ready=await sample();assert(ready.ready&&ready.sameRoot);assert(ready.buttons.every(button=>!button.disabled));assert.equal(ready.catalogCalls,1,'The retired callback cannot borrow the recovered generation');
+      await page.locator('.assistant-runtime-choice').nth(1).tap();await page.locator('.assistant-management-form input').first().waitFor();assert.equal(await page.evaluate(()=>catalogCalls),2);assert.deepEqual(errors,[]);
+      const result={order,pending,offline,settled,ready,freshTouchOpenedCatalog:true,errors};await writeFile(output+`/catalog-recovery-${order}.json`,JSON.stringify(result,null,2));results.push({order,recoveredChoiceResponds:true,retiredHandlerRejected:true,unreadyChoiceLocked:true});
     }finally{await context.close();}
   }
   if(!baseline)for(const fault of ['scope','boot','connection']){

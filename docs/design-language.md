@@ -291,6 +291,9 @@ Runtime choices retain their button identity during directory refreshes. Selecti
 a runtime shows loading progress and permits one configuration lookup at a time;
 language changes preserve that lookup. Leaving the page or retiring its Space,
 Control, boot or connection prevents a late lookup from opening a form.
+After the current connection is confirmed again, runtime choices recover in
+place. Finishing an old lookup releases its pending state without replacing the
+current choices' authority.
 Configuration steps share one Add assistant history entry. Successful creation
 replaces it with the returned assistant's conversation; browser Back and the
 narrow conversation Back gesture return to the assistant directory.
