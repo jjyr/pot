@@ -27,7 +27,7 @@ try{
   browser=await launchBrowser();
   for(const [width,locale]of [[1280,'en'],[390,'zh-CN']]){
     const t=key=>translate(locale,key),context=await browser.newContext({viewport:{width,height:844},serviceWorkers:'block'});
-    const page=await context.newPage();page.setDefaultTimeout(20000);page.on('pageerror',error=>report.errors.push(error.message));
+    const page=await context.newPage();page.setDefaultTimeout(20000);page.on('pageerror',error=>report.errors.push({message:error.message,stack:error.stack}));
     try{
       await config({phase:'ready',historyCount:48,hold:['configuration','rules'],release:'all',failSave:false,name:'Synthetic Assistant',model:'synthetic-original',revision:1,configRevision:0,revoked:false});
       const callStart=(await config()).calls.length;
