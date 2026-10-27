@@ -26,6 +26,7 @@ Code defines actual behavior.
 | Native cross-machine transport, identities and session recovery | [Peer protocol](peer-protocol.md) |
 | Extension management UI, independent MCP servers and icons | [Extensions](extensions.md) |
 | MCP protocol component and SDK assets | [MCP](mcp.md) |
+| Shared MCP caller and receiver types, correlation and retry rules | [MCP collaboration contract C0](mcp-collaboration-contract.md) |
 | Plugins, tools, approvals and browser execution | [Plugin packages](plugins.md), [composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |
 | Antigravity plugin, models and persistent assistants | [Antigravity Agent Link](../integrations/antigravity/README.md) |
 | Agent-assisted Codex connection | [Connect with an agent](connect-with-agent.md) |

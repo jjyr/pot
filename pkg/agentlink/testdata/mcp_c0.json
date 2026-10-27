@@ -1,0 +1,193 @@
+{
+  "submit": {
+    "request_id": "request-1",
+    "target": {
+      "node_id": "receiver-node",
+      "kind": "assistant",
+      "agent_id": "assistant"
+    },
+    "text": "Review the patch."
+  },
+  "input": {
+    "request_id": "input-1",
+    "task_id": "task-1",
+    "run_id": "run-1",
+    "text": "Continue with the second patch."
+  },
+  "cancel": {
+    "request_id": "cancel-1",
+    "task_id": "task-1",
+    "run_id": "run-1"
+  },
+  "registration": {
+    "version": 1,
+    "receiver": {
+      "address": {
+        "node_id": "receiver-node",
+        "kind": "assistant",
+        "agent_id": "assistant"
+      },
+      "name": "Receiver",
+      "adapter": "codex"
+    },
+    "capabilities": {
+      "version": 1,
+      "scope": "peer",
+      "operations": [
+        "task.submit",
+        "task.read",
+        "task.cancel",
+        "task.input"
+      ]
+    }
+  },
+  "work": {
+    "version": 1,
+    "delivery_id": "delivery-1",
+    "binding": {
+      "task": {
+        "node_id": "origin-node",
+        "kind": "task",
+        "agent_id": "task-1"
+      },
+      "receiver": {
+        "node_id": "receiver-node",
+        "kind": "assistant",
+        "agent_id": "assistant"
+      }
+    },
+    "request": {
+      "request_id": "request-1",
+      "target": {
+        "node_id": "receiver-node",
+        "kind": "assistant",
+        "agent_id": "assistant"
+      },
+      "text": "Review the patch.",
+      "from": {
+        "node_id": "caller-node",
+        "kind": "user",
+        "agent_id": "caller"
+      }
+    }
+  },
+  "claim": {
+    "connection_id": "connection-1",
+    "delivery_id": "delivery-1",
+    "claim_id": "claim-1",
+    "binding": {
+      "task": {
+        "node_id": "origin-node",
+        "kind": "task",
+        "agent_id": "task-1"
+      },
+      "receiver": {
+        "node_id": "receiver-node",
+        "kind": "assistant",
+        "agent_id": "assistant"
+      }
+    }
+  },
+  "ack": {
+    "claim": {
+      "connection_id": "connection-1",
+      "delivery_id": "delivery-1",
+      "claim_id": "claim-1",
+      "binding": {
+        "task": {
+          "node_id": "origin-node",
+          "kind": "task",
+          "agent_id": "task-1"
+        },
+        "receiver": {
+          "node_id": "receiver-node",
+          "kind": "assistant",
+          "agent_id": "assistant"
+        }
+      }
+    },
+    "accepted": true
+  },
+  "event": {
+    "claim": {
+      "connection_id": "connection-1",
+      "delivery_id": "delivery-1",
+      "claim_id": "claim-1",
+      "binding": {
+        "task": {
+          "node_id": "origin-node",
+          "kind": "task",
+          "agent_id": "task-1"
+        },
+        "receiver": {
+          "node_id": "receiver-node",
+          "kind": "assistant",
+          "agent_id": "assistant"
+        }
+      }
+    },
+    "sequence": 2,
+    "phase": "complete",
+    "thread_id": "native-thread-1",
+    "result": {
+      "task_id": "execution-task-1",
+      "run_id": "run-1",
+      "title": "Patch reviewed",
+      "phase": "complete",
+      "text": "Review completed.",
+      "origin": {
+        "kind": "manual"
+      },
+      "artifacts": [
+        "review.txt"
+      ]
+    },
+    "binding": {
+      "task": {
+        "node_id": "receiver-node",
+        "kind": "task",
+        "agent_id": "execution-task-1"
+      },
+      "run_id": "run-1",
+      "receiver": {
+        "node_id": "receiver-node",
+        "kind": "assistant",
+        "agent_id": "assistant"
+      }
+    }
+  },
+  "submit_canonical": "{\"actor\":{\"agent_id\":\"caller\",\"kind\":\"user\",\"node_id\":\"caller-node\"},\"connection_id\":\"connection-1\",\"execution\":null,\"input\":{\"request_id\":\"request-1\",\"target\":{\"agent_id\":\"assistant\",\"kind\":\"assistant\",\"node_id\":\"receiver-node\"},\"text\":\"Review the patch.\"},\"operation\":\"task.submit\",\"version\":1}",
+  "submit_digest": "5b2d750605f4a2f9331b845fab23fe02f2cb75badd1beecb5b5735d3c93c3f6e",
+  "admission": {
+    "claim": {
+      "connection_id": "connection-1",
+      "delivery_id": "delivery-1",
+      "claim_id": "claim-1",
+      "binding": {
+        "task": {
+          "node_id": "origin-node",
+          "kind": "task",
+          "agent_id": "task-1"
+        },
+        "receiver": {
+          "node_id": "receiver-node",
+          "kind": "assistant",
+          "agent_id": "assistant"
+        }
+      }
+    },
+    "binding": {
+      "task": {
+        "node_id": "receiver-node",
+        "kind": "task",
+        "agent_id": "execution-task-1"
+      },
+      "run_id": "run-1",
+      "receiver": {
+        "node_id": "receiver-node",
+        "kind": "assistant",
+        "agent_id": "assistant"
+      }
+    }
+  }
+}
