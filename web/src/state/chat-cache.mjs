@@ -121,6 +121,7 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
       let window=view?.boot_id===meta.projection.boot_id?view.window:meta.window;
       let snapshot=await projection(tx,key,meta,window);
       if(snapshot.messages.length!==(window?.length||0)){window=meta.window;snapshot=await projection(tx,key,meta,window);}
+      if(snapshot.messages.length!==(window?.length||0))throw Error('chat_cache_incomplete');
       if(view?.position?.mode==='latest'&&snapshot.history.has_newer){
         const selected=await indexedRows(tx.objectStore('messages').index('sequence'),bounds(key),{direction:'prev',accept:row=>row.normal});
         const messages=await dependencies(tx,key,selected.reverse());
@@ -157,12 +158,19 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
     // The transaction's projection becomes query-visible only after complete.
     return committed(key,result);
   }
-  async function writePage(key,page,{anchor,around=false,surface,window,position}={}){
+  async function writePage(key,page,options={}){
     const result=await transaction('readwrite',async tx=>{
+      options.validate?.();
       let meta=await request(tx.objectStore('conversations').get(key));if(!meta||meta.projection.boot_id!==page.boot_id||meta.projection.conversation_id!==page.conversation_id)return null;
       if(BigInt(meta.projection.cursor)-BigInt(page.cursor)>256n||BigInt(page.cursor)<BigInt(meta.history_floor||0))throw Error('history_gap');
+      const {window}=options.context?.()||options;
       const previous=await projection(tx,key,meta,window||meta.window),messages=await upsert(tx,key,meta,page.messages);
-      const snapshot=mergeHistoryPage(previous,{...page,messages},anchor,{around});meta.ranges=ranges([...(meta.ranges||[]),{before:page.history?.before,after:page.history?.after}]);
+      options.validate?.();
+      // A page can wait behind another IDB transaction. Capture the reader's
+      // latest intent inside this transaction, after that wait, not at HTTP
+      // completion or before the write was admitted.
+      const {anchor,surface,position}={...options,...options.context?.()};
+      const snapshot=mergeHistoryPage(previous,{...page,messages},anchor,{around:!!options.around&&(options.currentPosition?.()??true)});meta.ranges=ranges([...(meta.ranges||[]),{before:page.history?.before,after:page.history?.after}]);
       meta=await save(tx,key,meta,snapshot);await saveWindow(tx,key,surface,snapshot,position);return {meta,snapshot};
     });return committed(key,result);
   }

@@ -308,6 +308,20 @@ main/tray windows and browser tabs have independent positions. Returning to Chat
 reads its target window from disk while the subscription refreshes it. A reset
 while reading an older message reloads that message's window. References resolve
 by ID, without traversing intervening pages.
+Local browsing and historical network reads advance independently. A cached
+window completes its normal hidden preparation, measurement and positioning
+before reveal, without waiting for access verification, directory confirmation,
+an initial stream frame or a missing history page. A missing saved anchor can
+backfill asynchronously while an available measured local anchor remains readable.
+The history notice belongs to that gap; it does not hide or disable the current
+transcript. Cached pages and local references remain available during another
+page's network request or durable write. Unknown history creates no estimated
+canvas space. Returned pages commit under the captured session and conversation
+before entering the same preparation pipeline. A superseded around request may
+fill the cache, but cannot replace the reader's current window or restore an old
+position after input. Cached output never confirms command or session authority.
+An incomplete committed cache window reports a storage failure instead of
+presenting an empty conversation.
 All Chat entry paths share a scoped positioning intent: restore the saved reading
 position, locate an explicit message, or follow Latest. Page returns, assistant
 switches and browser history prepare the composer, mount the destination window,

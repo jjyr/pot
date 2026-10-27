@@ -265,6 +265,16 @@ isolated production HTTP/SSE, IndexedDB and Service Worker fixtures. Its reconne
 checks hold directory or session responses, revoke capabilities and release
 retired connection/Control responses; no command is submitted.
 
+`node scripts/tests/pot-ui-cache-entry-browser.mjs` independently checks cached
+Chat entry and local browsing while production bootstrap, SSE and history HTTP
+responses are held. It seeds and verifies real committed IndexedDB identities,
+uses desktop and phone viewports, and exercises offline reopening, assistant
+switches, cached references and a pending page transaction. Use
+`POT_PLAYWRIGHT_MODULE` and `POT_CHROMIUM_EXECUTABLE` for an existing installation;
+`POT_CACHE_ENTRY_OUTPUT` selects the evidence directory and
+`POT_CACHE_ENTRY_SOURCE` selects the source tree under test. The fixture owns and
+closes its synthetic loopback server and temporary browser profile.
+
 For chat stream lifecycle checks, `node scripts/tests/ui-regressions.mjs --group
 connection` runs the production browser adapter and shared UI with real
 EventSource, IndexedDB and a controlling Service Worker against synthetic HTTP

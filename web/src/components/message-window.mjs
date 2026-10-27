@@ -35,6 +35,10 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     const id=controller?.destination?.id||controller?.anchor?.id;
     let index=indexesByID.get(id)??indexesByKey.get(id);
     if(index===undefined)for(const parent of controller?.visibilityPath.keys()||[])if(indexesByID.has(parent)){index=indexesByID.get(parent);break;}
+    // A saved primary anchor may have been evicted while another captured
+    // anchor is still cached. Mount that known local row for initial positioning
+    // instead of leaving the prepared viewport at the previous chat's offset.
+    if(index===undefined)for(const anchor of controller?.position?.anchors||[]){const key=anchor.key.startsWith('message:')?anchor.key.slice(8):anchor.key;if(indexesByKey.has(key)){index=indexesByKey.get(key);break;}}
     return index??-1;
   }
   function invalidate(){if(!closed&&!suspended&&!frame)frame=scroller.ownerDocument.defaultView.requestAnimationFrame(()=>{frame=0;update();});}
