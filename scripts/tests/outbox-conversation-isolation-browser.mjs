@@ -33,9 +33,11 @@ try{
       if(version==='before'){
         await history.locator('article.message').filter({hasText:'Queued original conversation'}).waitFor();
         assert.equal(await oldVisible(),2);report.checks.push('exact555 negative: both accepted optimistic and queued old rows appear in replacement chat');
+        await page.screenshot({path:resolve(output,'before.png')});
       }else{
         await page.waitForFunction(()=>!document.querySelector('.workspace > .history')?.textContent.includes('original conversation'));
         assert.equal(await oldVisible(),0);report.checks.push('complete target isolates queued and accepted optimistic rows from replacement chat');
+        await page.screenshot({path:resolve(output,'after.png')});
         await send('New replacement conversation submission');
         const current=await waitForOutbox(page,([rows])=>rows.length===3&&rows[2].target.conversation==='replacement'&&rows[2].state==='accepted'&&!rows[2].projection_pending);
         await history.locator('article.message').filter({hasText:'New replacement conversation submission'}).waitFor();
@@ -48,7 +50,7 @@ try{
       const retired=page.locator('.outbox-dialog article.message').filter({hasText:'Queued original conversation'});await retired.waitFor();
       assert.match(await retired.innerText(),/conversation/);
       assert.equal(original.rows[1].target.conversation,'main');
-      await page.screenshot({path:resolve(output,version+'.png')});
+      await page.screenshot({path:resolve(output,'saved-'+version+'.png')});
       report.checks.push(version+': retired content and concrete problem remain in Saved messages with zero retargeted POST');
       report[version]={root,rows:original.rows,posts};
     }finally{await context.close();await fixture.close();await source.close();}

@@ -40,6 +40,10 @@ try{
       await waitForOutbox(page,([rows])=>rows.length===1&&rows[0].state==='queued');
       await send('Second fixed submission '+width);
       const queued=await waitForOutbox(page,([rows])=>rows.length===2&&rows.every(row=>row.state==='queued'));
+      const target={host:'settings-control',control:'settings-control',space:'local',owner:'alpha',conversation:'synthetic-conversation'};
+      for(const row of queued.rows){assert.deepEqual(row.target,{...target,key:JSON.stringify(Object.values(target))});assert.equal(row.request.conversation_id,target.conversation);}
+      assert.equal(new Set(queued.rows.map(row=>row.request.request_id)).size,2);
+      check(true,'local queue captures complete immutable target and distinct request IDs '+width);
       const identities=queued.rows.map(row=>({target:row.target,request:row.request,sequence:row.sequence}));
       await page.locator('#pot-composer').fill('Ordinary unsent draft '+width);
       await waitForOutbox(page,([rows,drafts])=>drafts.some(row=>row.text.startsWith('Ordinary unsent draft')));
