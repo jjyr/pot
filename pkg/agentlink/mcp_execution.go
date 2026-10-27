@@ -77,3 +77,11 @@ func (d MCPApprovalDecision) Validate() error {
 	}
 	return nil
 }
+
+// MCPNodeMail forwards an immutable mailbox envelope from a registered node's
+// own assistant outside supervised execution. It is receiver metadata and must
+// never be exposed as a model tool; task actors always require a live binding.
+type MCPNodeMail struct {
+	Message            protocol.Envelope `json:"message" required:"true"`
+	ProcessingParentID string            `json:"processing_parent_id,omitempty"`
+}
