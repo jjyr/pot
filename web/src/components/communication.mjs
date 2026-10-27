@@ -1,7 +1,6 @@
 import {translate} from '../locales/messages.mjs';
 import {communicationKey} from '../state/communication.mjs';
 import {renderMarkdown} from './markdown.mjs';
-import {connectionBrand} from './connection-visuals.mjs';
 import {avatar} from './avatar.mjs';
 import {icon} from './icons.mjs';
 import {taskIdentities} from '../state/task-identity.mjs';
@@ -17,15 +16,14 @@ export function createCommunication({locale,resolveIdentity,downloadFile,acquire
   const t=key=>translate(locale(),'tool.'+key);
   let summarySignature='',summaryProfiles=[];
   const displayName=(address,profile,fallback='messageRecipientUnavailable')=>profile?.name||t(address?.kind==='task'?'messageTask':address?.kind==='user'?'messageUser':address?.kind==='assistant'?'messageAssistantUnavailable':fallback);
-  function endpoint(address,{label,brand,fallback='messageRecipientUnavailable'}={}){
+  function endpoint(address,{label,fallback='messageRecipientUnavailable'}={}){
     const profile=resolveIdentity(address),task=address?.kind==='task'?taskIdentities.resolve(address):undefined;
     const box=n(task&&onOpenTask?'button':'span','communication-endpoint'),mark=address?.kind==='task'?taskIdentityMark(address):n('span','communication-mark');
     if(address?.kind==='task'){
       mark.classList.add('communication-mark');
     }
     else if(profile?.avatar?.startsWith('data:image/png;base64,'))mark.append(avatar(23,profile.avatar));
-    else if(['pot','codex','antigravity'].includes(profile?.brand||brand))mark.append(connectionBrand(profile?.brand||brand));
-    else mark.append(icon(address?.kind==='task'?'tasks':'topology'));
+    else mark.append(icon('person'));
     const name=address?.kind==='task'?displayName(address,profile):label||displayName(address,profile,fallback);
     box.append(mark);
     if(address?.kind==='task'){box.classList.add('communication-task-endpoint');const short=taskIdentityShort(address,t('messageTaskIDMissing'));short.classList.add('communication-short');box.append(short);}
@@ -38,17 +36,17 @@ export function createCommunication({locale,resolveIdentity,downloadFile,acquire
     if(profile?.offline){const state=n('span','communication-offline',t('endpointOffline'));box.append(state);}
     return box;
   }
-  function flow(mail,{fromLabel,toLabel,toBrand}={}){
+  function flow(mail,{fromLabel,toLabel}={}){
     const graph=n('div','communication-flow'),wire=n('span','communication-wire');
     wire.setAttribute('aria-hidden','true');
-    graph.append(endpoint(mail.from,{label:fromLabel,fallback:'messageSenderUnavailable'}),wire,endpoint(mail.to,{label:toLabel,brand:toBrand}));return graph;
+    graph.append(endpoint(mail.from,{label:fromLabel,fallback:'messageSenderUnavailable'}),wire,endpoint(mail.to,{label:toLabel}));return graph;
   }
   function taskTarget(model){
     const task=model.task,source=task?.agent_link;
     const name=resolveIdentity(model.messages[0]?.to)?.name||(['pot','codex','antigravity'].includes(source?.kind||task?.executor_icon)?translate(locale(),'agentLinks.source'+((source?.kind||task?.executor_icon)==='antigravity'?'Antigravity':(source?.kind||task?.executor_icon)==='pot'?'Pot':'Codex')):null);
-    return {label:name||t('messageTask'),named:!!name,brand:source?.kind||task?.executor_icon};
+    return {label:name||t('messageTask'),named:!!name};
   }
-  function update(model,{expanded=false,preparing=false,summaryOnly=false}={}){
+  function update(model,{expanded=false,preparing=false,summaryOnly=false,compact=false}={}){
     summary.hidden=!model||expanded;body.hidden=!model;if(!model)return;
     const profiles=model.messages.map(mail=>[resolveIdentity(mail.from),resolveIdentity(mail.to)]),target=taskTarget(model);
     const signature=JSON.stringify([model.kind,model.messages.map(mail=>[mail.from,mail.to,...[mail.from,mail.to].map(address=>address?.kind==='task'?taskIdentities.short(address):'')]),model.count,target,locale()]),profileRefs=profiles.flat();
@@ -58,7 +56,7 @@ export function createCommunication({locale,resolveIdentity,downloadFile,acquire
       const mail=model.messages[0]||{};
       if(model.messages.some(mail=>[mail.from,mail.to].some(address=>address?.kind==='task'))){
         const seen=new Set();for(const mail of model.messages){const key=JSON.stringify([mail.from,mail.to]);if(!seen.has(key)){flows.push(flow(mail));seen.add(key);}}
-      }else flows.push(flow({...mail,from:multiple?undefined:mail.from,to:toKeys.size>1?undefined:mail.to},{fromLabel:multiple?t('messageSources').replace('{count}',model.sources.length.toLocaleString(locale())):undefined,toLabel:toKeys.size>1?t('messageRecipients'):model.kind==='delegate'?target.label:undefined,toBrand:model.kind==='delegate'?target.brand:undefined}));
+      }else flows.push(flow({...mail,from:multiple?undefined:mail.from,to:toKeys.size>1?undefined:mail.to},{fromLabel:multiple?t('messageSources').replace('{count}',model.sources.length.toLocaleString(locale())):undefined,toLabel:toKeys.size>1?t('messageRecipients'):model.kind==='delegate'?target.label:undefined}));
       project(summary,flows);
     }
     if(!expanded||summaryOnly)return;
@@ -66,7 +64,7 @@ export function createCommunication({locale,resolveIdentity,downloadFile,acquire
     for(const [index,mail] of model.messages.entries()){
       let entry=entries.get(index);
       if(!entry){const box=n('section','communication-entry'),relation=n('div','communication-identity'),content=n('div','message-body communication-text'),fallback=n('p','communication-fallback');box.append(relation,content,fallback);entry={box,relation,content,fallback};entries.set(index,entry);body.append(box);}
-      entry.box.hidden=false;
+      entry.box.hidden=false;entry.relation.hidden=compact&&model.messages.length===1&&![mail.from,mail.to].some(address=>address?.kind==='task');
       const relationSignature=JSON.stringify([mail.from,mail.to,...[mail.from,mail.to].map(address=>address?.kind==='task'?taskIdentities.short(address):''),locale()]);
       if(entry.relationSignature!==relationSignature||entry.fromProfile!==profiles[index][0]||entry.toProfile!==profiles[index][1]){
         entry.relationSignature=relationSignature;[entry.fromProfile,entry.toProfile]=profiles[index];

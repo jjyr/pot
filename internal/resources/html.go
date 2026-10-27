@@ -2,6 +2,7 @@ package resources
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,9 @@ import (
 const HTMLPolicy = "default-src 'none'; script-src 'unsafe-inline' data:; style-src 'unsafe-inline' data:; img-src data:; media-src data:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts"
 
 var cssURL = regexp.MustCompile(`url\(\s*['"]?([^'"\)]+)['"]?\s*\)`)
+
+//go:embed html_scroll.js
+var htmlScrollBoundary string
 
 func RenderHTML(resource Resource, read func(string) ([]byte, error), token string) ([]byte, error) {
 	if resource.MIMEType != "text/html" || resource.Size > BundleLimit || len(resource.Files) > 64 || len(token) > 128 {
@@ -148,8 +152,14 @@ func RenderHTML(resource Resource, read func(string) ([]byte, error), token stri
 	encoded, _ := json.Marshal(token)
 	script := &html.Node{Type: html.ElementNode, Data: "script"}
 	script.AppendChild(&html.Node{Type: html.TextNode, Data: `document.addEventListener('securitypolicyviolation',()=>parent.postMessage({type:'pot-resource',token:` + string(encoded) + `,action:'dependency_error'},'*'));Object.defineProperty(window,'pot',{value:Object.freeze({resize:value=>parent.postMessage({type:'pot-resource',token:` + string(encoded) + `,action:'resize',value},'*'),result:value=>parent.postMessage({type:'pot-resource',token:` + string(encoded) + `,action:'result',value},'*')})});parent.postMessage({type:'pot-resource',token:` + string(encoded) + `,action:'ready'},'*');`})
+	// Keyboard events do not bubble across the opaque-origin frame. Forward only
+	// an unhandled real Escape; the host can close this frame's own modal viewer.
+	script.AppendChild(&html.Node{Type: html.TextNode, Data: `document.addEventListener('keydown',event=>{if(event.key==='Escape'&&event.isTrusted)setTimeout(()=>{if(!event.defaultPrevented)parent.postMessage({type:'pot-resource',token:` + string(encoded) + `,action:'escape'},'*');});});`})
 	if head != nil {
 		head.InsertBefore(script, head.FirstChild)
+		boundary := &html.Node{Type: html.ElementNode, Data: "script"}
+		boundary.AppendChild(&html.Node{Type: html.TextNode, Data: htmlScrollBoundary})
+		head.InsertBefore(boundary, script)
 	}
 	var out bytes.Buffer
 	if err := html.Render(&out, document); err != nil {

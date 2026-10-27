@@ -1,5 +1,6 @@
 import {translate} from '../locales/messages.mjs';
 import {renderMarkdown} from './markdown.mjs';
+import {openImageViewer} from './image-viewer.mjs';
 
 const node=(tag,cls='',text)=>{const element=document.createElement(tag);element.className=cls;if(text!==undefined)element.textContent=text;return element;};
 function sourceText(pre,text,line){
@@ -24,6 +25,7 @@ function register(){
       const generation=++this.generation,{resource,mode,caption}=this.presentation,preview=resourcePreviewKind(resource),kind=this.line&&preview==='html'?'text':preview;
       const t=key=>translate(document.documentElement.lang,`resource.${key}`);
       this.dataset.kind=kind;this.dataset.mode=mode;
+      if(kind==='image')this.classList.add('is-expanded');
       const head=node('div','resource-heading'),identity=node('div','resource-identity'),badge=node('span','resource-type'),title=node('strong','resource-name',caption||resource.name),details=node('span','resource-details');
       const actions=node('div','resource-actions'),download=node('button','resource-action'),expand=node('button','resource-action'),status=node('p','resource-status'),saveStatus=node('p','resource-status resource-download-error'),body=node('div','resource-body'),notice=node('p','resource-status');
       download.type=expand.type='button';status.setAttribute('role','status');saveStatus.setAttribute('role','alert');saveStatus.hidden=true;identity.append(title,details);head.append(badge,identity,actions);actions.append(expand,download);notice.hidden=!this.noticeKey;this.replaceChildren(head,status,saveStatus,body,notice);
@@ -31,7 +33,7 @@ function register(){
       let error=false;
       const current=()=>this.isConnected&&generation===this.generation;
       const setURL=(element,url)=>Promise.resolve(url).then(value=>{if(current())element.src=value;}).catch(fail);
-      const refresh=()=>{const size=resource.size,unit=size<1024?'byte':size<1024*1024?'kilobyte':'megabyte',divisor=size<1024?1:size<1024*1024?1024:1024*1024;details.textContent=`${resource.name} · ${new Intl.NumberFormat(document.documentElement.lang,{style:'unit',unit,unitDisplay:'narrow',maximumFractionDigits:1}).format(size/divisor)}`;badge.textContent=t(mode==='download'?'file':kind);download.textContent=t(resource.files.length>1?'downloadBundle':'download');download.setAttribute('aria-label',t('downloadName').replace('{name}',resource.download?.path.split('/').at(-1)||resource.name));expand.textContent=t(this.classList.contains('is-expanded')?'collapse':'expand');status.textContent=t(error?'unavailable':'loading');saveStatus.textContent=t('downloadFailed');if(this.noticeKey)notice.textContent=translate(document.documentElement.lang,this.noticeKey);const resultTitle=this.querySelector('.resource-result-title');if(resultTitle)resultTitle.textContent=t('result');};
+      const refresh=()=>{const size=resource.size,unit=size<1024?'byte':size<1024*1024?'kilobyte':'megabyte',divisor=size<1024?1:size<1024*1024?1024:1024*1024;details.textContent=`${resource.name} · ${new Intl.NumberFormat(document.documentElement.lang,{style:'unit',unit,unitDisplay:'narrow',maximumFractionDigits:1}).format(size/divisor)}`;badge.textContent=t(mode==='download'?'file':kind);download.textContent=t(resource.files.length>1?'downloadBundle':'download');download.setAttribute('aria-label',t('downloadName').replace('{name}',resource.download?.path.split('/').at(-1)||resource.name));expand.textContent=kind==='image'?translate(document.documentElement.lang,'markdown.imagePreview'):t(this.classList.contains('is-expanded')?'collapse':'expand');status.textContent=t(error?'unavailable':'loading');saveStatus.textContent=t('downloadFailed');if(this.noticeKey)notice.textContent=translate(document.documentElement.lang,this.noticeKey);const resultTitle=this.querySelector('.resource-result-title');if(resultTitle)resultTitle.textContent=t('result');};
       const fail=()=>{if(!current())return;error=true;this.dataset.state='error';status.hidden=false;refresh();};
       const ready=()=>{if(!current())return;this.dataset.state='ready';status.hidden=true;};
       refresh();window.addEventListener('pot:locale',refresh);this.stopLocale=()=>window.removeEventListener('pot:locale',refresh);
@@ -43,10 +45,14 @@ function register(){
       this.dataset.state='loading';
       if(kind==='image'){
         const image=node('img','resource-image');image.alt=caption||resource.name;image.loading='eager';image.decoding='async';image.hidden=true;image.onload=async()=>{try{await image.decode();if(current()){image.hidden=false;ready();}}catch{fail();}};image.onerror=fail;setURL(image,lease.url(resource.entry));body.append(image);
-        image.onclick=()=>expand.click();image.tabIndex=0;image.setAttribute('role','button');image.onkeydown=event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();expand.click();}};
+        expand.disabled=true;
+        expand.setAttribute('aria-haspopup','dialog');image.setAttribute('aria-haspopup','dialog');
+        const loaded=image.onload;image.onload=async()=>{await loaded();if(current())expand.disabled=this.dataset.state!=='ready';};
+        const open=trigger=>{if(this.viewer||this.dataset.state!=='ready')return;this.viewer=openImageViewer({image,label:caption||resource.name,trigger,download:()=>this.downloadResource(resource),onClose:()=>{this.viewer=null;}});};
+        expand.onclick=()=>open(expand);image.onclick=()=>open(image);image.tabIndex=0;image.setAttribute('role','button');image.onkeydown=event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();open(image);}};
         if(resource.mime_type==='image/gif'){
           const pause=node('button','resource-action');pause.type='button';pause.disabled=true;actions.prepend(pause);let paused=false;
-          const toggle=()=>{paused=!paused;if(paused&&image.complete){const canvas=node('canvas');canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;canvas.getContext('2d').drawImage(image,0,0);canvas.className='resource-image resource-gif-still';body.prepend(canvas);image.hidden=true;}else{body.querySelector('canvas')?.remove();image.hidden=false;}pause.textContent=t(paused?'resume':'pause');};
+          const toggle=()=>{paused=!paused;if(paused&&image.complete){const canvas=node('canvas');canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;canvas.getContext('2d').drawImage(image,0,0);canvas.className='resource-image resource-gif-still';canvas.tabIndex=0;canvas.setAttribute('role','button');canvas.setAttribute('aria-label',caption||resource.name);canvas.setAttribute('aria-haspopup','dialog');canvas.onclick=()=>open(canvas);canvas.onkeydown=event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();open(canvas);}};body.prepend(canvas);image.hidden=true;}else{body.querySelector('canvas')?.remove();image.hidden=false;}pause.textContent=t(paused?'resume':'pause');};
           pause.textContent=t('pause');pause.onclick=toggle;const prior=image.onload;image.onload=async()=>{if(!current())return;await prior();if(!current()||this.dataset.state!=='ready')return;pause.disabled=false;if(matchMedia('(prefers-reduced-motion: reduce)').matches&&!paused)toggle();};
           const oldRefresh=refresh;const updatePause=()=>{oldRefresh();pause.textContent=t(paused?'resume':'pause');};window.addEventListener('pot:locale',updatePause);const stop=this.stopLocale;this.stopLocale=()=>{stop();window.removeEventListener('pot:locale',updatePause);};
         }
@@ -74,6 +80,7 @@ function register(){
         const onMessage=event=>{
           if(!current()||event.source!==frame.contentWindow||event.data?.type!=='pot-resource'||event.data.token!==token)return;
           if(event.data.action==='ready')ready();
+          if(event.data.action==='escape')this.closest('dialog')?.close();
           if(event.data.action==='dependency_error'){this.noticeKey='fileReference.unsupported_dependency';notice.hidden=false;refresh();}
           if(event.data.action==='resize'&&Number.isFinite(event.data.value))frame.style.setProperty('--resource-height',`${Math.min(960,Math.max(180,event.data.value))}px`);
           if(event.data.action==='result'){
@@ -86,7 +93,7 @@ function register(){
       }
     }
     disconnectedCallback(){
-      ++this.generation;this.stopLocale?.();this.stopMessages?.();clearTimeout(this.loadTimer);
+      ++this.generation;this.viewer?.close();this.stopLocale?.();this.stopMessages?.();clearTimeout(this.loadTimer);
       for(const media of this.querySelectorAll('audio,video')){media.pause();media.removeAttribute('src');media.load();}
       for(const image of this.querySelectorAll('img'))image.removeAttribute('src');
       for(const frame of this.querySelectorAll('iframe')){frame.removeAttribute('src');frame.srcdoc='';}

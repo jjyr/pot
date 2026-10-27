@@ -1,3 +1,4 @@
+import {waitForDraftSaved} from './draft-persistence-browser.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
@@ -14,7 +15,7 @@ export async function assistantDraftsBrowser(browser,{sourceOrigin,captureDir,ba
   const control=async data=>{const response=await context.request.post(fixture.origin+'/fixture/control',{data});assert(response.ok());};
   const server=async()=>await(await context.request.get(fixture.origin+'/fixture/state')).json();
   const ready=()=>page.waitForFunction(()=>document.querySelector('.connection-status')?.classList.contains('is-connected')&&!document.querySelector('#pot-composer')?.disabled);
-  const saved=()=>page.waitForFunction(()=>document.querySelector('.draft-storage-status')?.textContent==='Draft saved on this device');
+  const saved=options=>waitForDraftSaved(page,options);
   const choose=async(name='synthetic.png')=>{await page.getByRole('button',{name:'Add attachment',exact:true}).click();const chooser=page.waitForEvent('filechooser');await page.getByRole('menuitem',{name:'Images',exact:true}).click();await(await chooser).setFiles({...file,name});};
   const uploaded=()=>page.waitForFunction(()=>document.querySelector('.attachment-card')&&!document.querySelector('.attachment-card progress,.attachment-card .attachment-error'));
   const switchOwner=async owner=>{await page.locator('.titlebar .narrow-navigation').click();await page.getByRole('button',{name:'Synthetic '+owner,exact:true}).click();await ready();};
@@ -56,26 +57,26 @@ export async function assistantDraftsBrowser(browser,{sourceOrigin,captureDir,ba
   });
   await scenario('accepted-new-edits',async({page,control,saved,choose,uploaded,server,disk,ready,reference})=>{
    await page.locator('#pot-composer').fill('Submitted text');await reference();await choose();await uploaded();await saved();await control({holdSend:true});await page.getByRole('button',{name:'Send',exact:true}).click();
-   await page.waitForFunction(()=>document.querySelector('.connection-status')?.textContent.includes('Confirming'));await page.locator('#pot-composer').fill('Text written during submit');await page.locator('.message-reference-remove').click();await reference();await page.waitForFunction(()=>document.querySelector('.composer-references .message-reference'));await choose('new.png');await uploaded();await saved();
+   await page.waitForFunction(()=>document.querySelector('.connection-status')?.textContent.includes('Confirming'));await page.locator('#pot-composer').fill('Text written during submit');await page.locator('.message-reference-remove').click();await reference();await page.waitForFunction(()=>document.querySelector('.composer-references .message-reference'));await choose('new.png');await uploaded();await saved({pending:true});
    const first=(await server()).trace.find(row=>row.kind==='post');assert(first);assert.equal((await server()).trace.filter(row=>row.kind==='receipt').length,0,'Normal pending POST has no receipt reads');
    await control({holdSend:false,releaseSends:true});await ready();await saved();assert.equal(await page.locator('#pot-composer').inputValue(),'Text written during submit');assert.equal(await page.locator('.composer-references .message-reference').count(),1);assert.equal(await page.locator('.attachment-card').count(),1);assert.equal((await disk()).files.length,1);assert.equal((await disk()).drafts[0].pending,null);
    await page.reload();await ready();await saved();await uploaded();assert.equal(await page.locator('#pot-composer').inputValue(),'Text written during submit');assert.equal(await page.locator('.attachment-name').innerText(),'new.png');assert.equal((await server()).trace.filter(row=>row.kind==='post').length,1);
   });
   await scenario('reload-pending-accepted',async({page,control,saved,choose,uploaded,server,disk,ready})=>{
-   await page.locator('#pot-composer').fill('Accepted before reload');await choose();await uploaded();await control({holdSend:true});await page.getByRole('button',{name:'Send',exact:true}).click();await page.waitForTimeout(100);await saved();const prior=await disk();assert(prior.drafts[0].pending);assert.equal((await server()).trace.filter(row=>row.kind==='post').length,1);
+   await page.locator('#pot-composer').fill('Accepted before reload');await choose();await uploaded();await control({holdSend:true});await page.getByRole('button',{name:'Send',exact:true}).click();await page.waitForTimeout(100);await saved({pending:true});const prior=await disk();assert(prior.drafts[0].pending);assert.equal((await server()).trace.filter(row=>row.kind==='post').length,1);
    await control({receipt:true});await page.reload();await ready();await saved();assert.equal(await page.locator('#pot-composer').inputValue(),'');assert.equal(await page.locator('.attachment-card').count(),0);assert.equal((await disk()).files.length,0);const evidence=await server();assert.equal(evidence.trace.filter(row=>row.kind==='post').length,1);assert(evidence.trace.filter(row=>row.kind==='receipt').every(row=>row.query.request_id===prior.drafts[0].pending.request.request_id));
   });
   await scenario('rejected-and-unknown',async({page,control,saved,server,disk,ready})=>{
    await page.locator('#pot-composer').fill('Keep on rejection');await control({rejectSend:true});await page.getByRole('button',{name:'Send',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.connection-status')?.textContent.includes('not accepted'));await saved();assert.equal(await page.locator('#pot-composer').inputValue(),'Keep on rejection');assert.equal((await disk()).drafts[0].pending,null);
-   await control({rejectSend:false,holdSend:true,acceptSend:false});await page.getByRole('button',{name:'Send',exact:true}).click();await page.waitForTimeout(100);await saved();const id=(await disk()).drafts[0].pending.request.request_id;
-   await page.reload();await saved();await page.waitForFunction(()=>document.querySelector('.connection-status')?.textContent.includes('Confirming')||document.querySelector('.connection-status')?.textContent.includes('may have been accepted'));assert.equal(await page.locator('#pot-composer').inputValue(),'Keep on rejection');assert((await disk()).drafts[0].pending);const evidence=await server();assert.equal(evidence.trace.filter(row=>row.kind==='post').length,2);assert(evidence.trace.filter(row=>row.kind==='receipt').every(row=>row.query.request_id===id));
+   await control({rejectSend:false,holdSend:true,acceptSend:false});await page.getByRole('button',{name:'Send',exact:true}).click();await page.waitForTimeout(100);await saved({pending:true});const id=(await disk()).drafts[0].pending.request.request_id;
+   await page.reload();await saved({pending:true});await page.waitForFunction(()=>document.querySelector('.connection-status')?.textContent.includes('Confirming')||document.querySelector('.connection-status')?.textContent.includes('may have been accepted'));assert.equal(await page.locator('#pot-composer').inputValue(),'Keep on rejection');assert((await disk()).drafts[0].pending);const evidence=await server();assert.equal(evidence.trace.filter(row=>row.kind==='post').length,2);assert(evidence.trace.filter(row=>row.kind==='receipt').every(row=>row.query.request_id===id));
   });
   await scenario('quota-retry-and-accept-cleanup',async({page,control,saved,server,disk,ready})=>{
    await page.evaluate(()=>{const put=IDBObjectStore.prototype.put;window.draftPut=put;IDBObjectStore.prototype.put=function(...args){if(this.name==='composerDrafts'&&window.failDraftWrites)throw new DOMException('Synthetic draft quota','QuotaExceededError');return put.apply(this,args);};window.failDraftWrites=true;});
    await page.locator('#pot-composer').fill('Never pretend saved');await page.locator('.draft-storage-status.inline-error').waitFor();assert.match(await page.locator('.draft-storage-status').innerText(),/not saved/);await page.getByRole('button',{name:'Send',exact:true}).click();await page.waitForTimeout(100);assert.equal((await server()).trace.filter(row=>row.kind==='post').length,0);
    await page.evaluate(()=>dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:'zh-CN'}})));assert.match(await page.locator('.draft-storage-status').innerText(),/草稿未保存/);assert.equal(await page.locator('.draft-storage-status').getByRole('button',{name:'重试',exact:true}).count(),1);await page.evaluate(()=>dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:'en'}})));
    await page.locator('#pot-composer').fill('Latest after failed save');await page.evaluate(()=>window.failDraftWrites=false);await page.locator('.draft-storage-status').getByRole('button',{name:'Retry',exact:true}).click();await saved();assert.equal((await disk()).drafts[0].text,'Latest after failed save');
-   await control({holdSend:true});await page.getByRole('button',{name:'Send',exact:true}).click();await page.waitForTimeout(100);await saved();await page.evaluate(()=>window.failDraftWrites=true);await control({releaseSends:true});await page.locator('.draft-storage-status.inline-error').waitFor();assert((await disk()).drafts[0].pending,'Disk retains a safe request fence when cleanup fails');
+   await control({holdSend:true});await page.getByRole('button',{name:'Send',exact:true}).click();await page.waitForTimeout(100);await saved({pending:true});await page.evaluate(()=>window.failDraftWrites=true);await control({releaseSends:true});await page.locator('.draft-storage-status.inline-error').waitFor();assert((await disk()).drafts[0].pending,'Disk retains a safe request fence when cleanup fails');
    await page.locator('#pot-composer').fill('New input after accepted cleanup failure');await page.evaluate(()=>window.failDraftWrites=false);await page.locator('.draft-storage-status').getByRole('button',{name:'Retry',exact:true}).click();await saved();assert.equal((await disk()).drafts[0].text,'New input after accepted cleanup failure');assert.equal((await disk()).drafts[0].pending,null);
    await page.reload();await ready();await saved();assert.equal(await page.locator('#pot-composer').inputValue(),'New input after accepted cleanup failure');assert.equal((await server()).trace.filter(row=>row.kind==='post').length,1);
   });
@@ -113,12 +114,12 @@ export async function assistantDraftsBrowser(browser,{sourceOrigin,captureDir,ba
     IDBObjectStore.prototype.put=function(value,...args){if(this.name==='composerDrafts'&&value.pending)this.transaction.__holdPending=true;return put.call(this,value,...args);};
    });
    await page.getByRole('button',{name:'Send',exact:true}).click();
-   if(committedPost){await page.waitForFunction(()=>document.querySelector('.connection-status')?.textContent.includes('Confirming'));await saved();}
+   if(committedPost){await page.waitForFunction(()=>document.querySelector('.connection-status')?.textContent.includes('Confirming'));await saved({pending:true});}
    else await page.waitForFunction(()=>window.pendingCommitted);
    const original=(await disk()).drafts[0].pending.request;
    assert.equal((await server()).trace.filter(row=>row.kind==='post').length,committedPost?1:0,'Snapshot committed before transport starts');
-   await page.reload();await saved();await uploaded();
-   await page.locator('#pot-composer').fill('New editor contents after reload');await page.locator('.message-reference-remove').click();await reference();await choose('new-after-reload.png');await uploaded();await saved();
+   await page.reload();await saved({pending:true});await uploaded();
+   await page.locator('#pot-composer').fill('New editor contents after reload');await page.locator('.message-reference-remove').click();await reference();await choose('new-after-reload.png');await uploaded();await saved({pending:true});
    const retry=page.getByRole('button',{name:'Check and retry',exact:true});await retry.waitFor({timeout:30000});
    const bounds=await retry.boundingBox();assert(bounds.x>=0&&bounds.x+bounds.width<=390,'Recovery action remains fully visible on a phone');
    assert.equal((await server()).trace.filter(row=>row.kind==='post').length,committedPost?1:0,'Reload and automatic receipt checks never POST');

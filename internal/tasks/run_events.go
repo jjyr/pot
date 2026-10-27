@@ -20,7 +20,13 @@ type EventPage struct {
 }
 
 func (j *Journal) AppendEvent(ctx context.Context, control, task, run string, event core.AgentEvent) error {
-	return j.changeTx(ctx, control, task, run, func(tx *sql.Tx, r *Run) error {
+	topic := "runs"
+	// Output bytes change the transcript cursor, not execution or permissions.
+	// State-bearing and unknown events keep the lifecycle invalidation path.
+	if event.Update.Type == "text_delta" || event.Update.Type == "tool_output" {
+		topic = "runner"
+	}
+	return j.changeTxTopic(ctx, control, task, run, topic, func(tx *sql.Tx, r *Run) error {
 		if r.Phase != Running || r.BootID != j.BootID || event.Generation != r.Launch.Generation || event.TurnID != r.Launch.RunID || event.Seq == 0 {
 			return errors.New("stale task transcript event")
 		}

@@ -74,6 +74,17 @@ performed. Non-SQL persisted-format changes must change the marker. See [Updates
 
 ## Checks and isolated previews
 
+For native image preview checks, serve the repository on loopback and open
+`/scripts/tests/fixtures/image-viewer.html`. It mounts the real saved-resource,
+uploaded-attachment and Markdown image components with synthetic originals and
+no backend writes. Use **Run component checks** for its in-page assertions.
+`scripts/tests/pot-ui-image-viewer-capture.mjs` accepts the origin, an optional
+before-tree URL prefix and an output directory. With the existing Playwright
+module and Chromium configured through `POT_PLAYWRIGHT_MODULE` and
+`POT_CHROMIUM_EXECUTABLE`, it exercises native mouse/wheel/keyboard input at
+1280, 390 and 320 pixels in both locales/themes and exports paired screenshots.
+Touch scrolling and native desktop WebViews still require device testing.
+
 ```sh
 mise run lint
 mise run check:go
@@ -232,6 +243,23 @@ the shared DOM against synthetic messages and a deterministic loopback provider;
 attachment bytes are synthetic local blobs. Stop it with `POST /fixture/stop` at
 that private origin. This opt-in fixture adds no product data or native notifications.
 
+For Task output invalidation and live transcript checks, set
+`POT_DIRECTORY_FREQUENCY_URL_FILE` to a private temporary filename and run
+`go test ./internal/transport -run '^TestDirectoryFrequencyBrowserFixture$'
+-count=1 -v -timeout=13m`. With the same URL-file variable and the existing
+Playwright/Chromium overrides, run either
+`node scripts/tests/directory-frequency-browser.mjs` or
+`node scripts/tests/task-output-live-browser.mjs`. Each runner owns shutdown of
+its fixture; start a new fixture for the other runner. `--keep-fixture` leaves it
+available for inspection until `POST /fixture/stop` or its 12-minute limit.
+The fixture uses temporary state, local deterministic model output and an
+authenticated synthetic browser session. The frequency runner records HTTP,
+SSE, IndexedDB and composer frames in `POT_DIRECTORY_FREQUENCY_OUTPUT`, compares
+pure output with lifecycle/permission invalidation, and captures review images.
+`--baseline` checks a fixture built from source before output invalidation was
+separated. The live runner creates a real Task, reads its incremental transcript
+past the resource TTL and cancels through the UI.
+
 `mise run test:pwa-cold-start` covers local startup and reconnect authority with
 isolated production HTTP/SSE, IndexedDB and Service Worker fixtures. Its reconnect
 checks hold directory or session responses, revoke capabilities and release
@@ -306,6 +334,30 @@ at desktop and phone widths; `locale=zh-CN&theme=dark` exercises the other local
 and theme. Add `capture-navigation=1` to pause at the multiline-draft return
 scenario; `window.navigationCaptureContinue()` resumes the checks.
 
+`mise run test:ui-chat-position` checks send positioning and assistant switches
+using the production UI, HTTP adapter, SSE and IndexedDB with synthetic loopback
+history. It samples visible and hidden frames at desktop and phone widths,
+including delayed draft hydration, acceptance, fonts and images, history beyond
+the data window, reconnects and the five-second preview slot fallback. Set
+`POT_PLAYWRIGHT_MODULE` and `POT_CHROMIUM_EXECUTABLE` to existing installations.
+`POT_CHAT_OUTPUT` selects the untracked evidence directory; `POT_CHAT_SOURCE`
+selects an extracted source tree. Pass `--baseline` directly to
+`node scripts/tests/chat-scroll-http-browser.mjs` to record the known send and
+draft-layout regressions in that tree while retaining the other assertions.
+
+`mise run test:ui-chat-activity` uses the same isolated browser prerequisites to
+check lifecycle activity through reconnects, empty model/tool rounds, long
+output, parallel inputs and terminal outcomes. It samples row/status identity,
+nonterminal frames, Latest visibility and historical reading anchors against
+synthetic HTTP/SSE and committed IndexedDB state. Its history diagnostic runner
+also checks paged failed/cancelled messages without receiver lifecycles and
+cached paging after reload. `POT_HISTORY_OUTPUT` and `POT_HISTORY_SOURCE`
+select that runner's evidence directory and source tree; it accepts `--baseline`.
+`POT_ACTIVITY_OUTPUT` selects
+the untracked evidence directory; `POT_ACTIVITY_SOURCE` selects an extracted
+source tree. Pass `--baseline` directly to `node scripts/tests/chat-activity-browser.mjs`
+to record that tree without enforcing the new activity contract.
+
 On the same loopback server, `/scripts/tests/fixtures/chat-cache.html` exercises
 the actual IndexedDB schema, reopening, atomic rollback, history reads, version
 fencing, multiple writers and retired boots. `/scripts/tests/fixtures/chat-cache-ui.html?conversation=alpha&locale=en`
@@ -366,8 +418,9 @@ At phone widths, select Pot from the assistant list first. Repeat with
 `locale=zh-CN`; `before=1` shows the previous private-correspondence presentation
 for comparison. This fixture uses production Chat components and synthetic data.
 
-For adjacent Task communication, run `mise run test:task-communication`, serve the
-repository on loopback and open `/scripts/tests/fixtures/task-communication.html`.
+For compact work records, run `mise run test:work-records`, serve the
+repository on loopback and open `/scripts/tests/fixtures/work-records.html`.
+The separate `/scripts/tests/fixtures/task-communication.html` fixture covers Task identities.
 Add `?identity=1` for the matching communication/background identity fixture,
 including linked addresses, missing mappings and normal UUID-shaped IDs.
 Add `edge=1` separately for repeated prefixes and equal IDs across nodes; both
@@ -379,7 +432,7 @@ The fixture mounts production Chat with synthetic records and rejects writes.
 shared presentation. With a disposable Playwright installation, run
 `scripts/tests/task-communication-browser.mjs` against that origin using
 `POT_PLAYWRIGHT_MODULE` and optional `POT_CHROMIUM_EXECUTABLE`. It covers grouping,
-batch counts, identity, native keyboard disclosure, append/prepend, retained text
+tool/message counts, identity, native keyboard disclosure, append/prepend, retained text
 selection, failures and virtual recycling. No real Task or model is started.
 
 For background Task elapsed-time checks, serve the repository on loopback and open
@@ -472,6 +525,17 @@ and a deterministic local provider that invokes the real resource tools.
 `scripts/tests/pot-ui-display-resources-browser.js` can be run with the cached
 Playwright CLI's `run-code --filename` option against that origin. Stop the
 fixture with `POST /fixture/stop`. No product data or paid model calls are used.
+
+Set `POT_HTML_SCROLL_FIXTURE=1` on that fixture command for long, nested-list and
+short HTML resources. Open `/scripts/tests/fixtures/html-scroll.html` to exercise
+the real reply renderer, historical presentation and file-reference modal with
+live scroll coordinates. The focused native-scroll regression runs with
+`node scripts/tests/pot-ui-html-scroll-browser.mjs ORIGIN [BASELINE_ORIGIN]
+[CAPTURE_DIRECTORY]`, using the existing `POT_PLAYWRIGHT_MODULE` and
+`POT_CHROMIUM_EXECUTABLE` overrides. An optional independently running baseline
+origin enables matched before/after captures; it must serve the same synthetic
+fixture with the baseline production sources. Wheel input in Chromium does not
+establish physical touchpad inertia, touchscreen or native WebView behavior.
 
 For semantic tool activity, serve the repository root on loopback and open
 `/scripts/tests/fixtures/tool-content.html?locale=en&theme=light`. The shared Chat/Task

@@ -28,9 +28,10 @@ try{
       const data=await page.evaluate(()=>JSON.stringify([window.taskCommunication.messages,window.taskCommunication.catalogue]));
       if(sourceData)assert.equal(data,sourceData,'pair uses identical transcript and catalogue');else sourceData=data;
       assert.deepEqual(errors,[]);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-      assert.match(await page.locator('.communication-stack-title').innerText(),/6 records.*7 messages.*3 tasks/);
+      if(await page.locator('.work-records').count())assert.match(await page.locator('.work-record-counts').innerText(),/7/);
+      else assert.match(await page.locator('.communication-stack-title').innerText(),/6 records.*7 messages.*3 tasks/);
       assert.equal(await page.locator('.background-task').count(),scenario==='expanded'?7:3);
-      assert.equal(await page.locator('.communication-stack').evaluate(node=>node.open),scenario==='expanded');
+      assert.equal(await page.locator('.work-records,.communication-stack').evaluate(node=>node.open),scenario==='expanded');
       assert.equal(await page.locator('.background-task').last().isVisible(),true);
       await page.screenshot({path:resolve(directory,`${name}-${version}.png`)});
       console.log(`${name}-${version}.png: identical 6 records / 7 messages / 3 communication Tasks / 7 background Tasks`);

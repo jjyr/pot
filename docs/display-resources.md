@@ -34,6 +34,25 @@ adapter. Undeclared relative images and links remain literal text and do not
 fetch local or remote files. The existing bundle contract only permits HTML
 bundles; Markdown does not add an asset-bundle contract or bypass path limits.
 
+## Image previews
+
+Saved resource images and uploaded chat image attachments start in the expanded
+inline presentation. Clicking the image or its Enlarge image action opens the
+shared native modal preview. Raster Markdown file references use the same modal.
+The preview uses the caller's authorized original URL and existing lease, with
+the same original-file download operation; it does not fetch a thumbnail or add
+another resource API.
+
+Each opening fits the available width and starts at the top of a long image.
+The size selector also offers Fit window and Original size. Zoom buttons, `+` /
+`-` keys and Ctrl + wheel zoom around the pointer (the viewport center for
+buttons/keys). An ordinary wheel scrolls the image; mouse/pen dragging pans it.
+Touch uses native scrolling; no custom two-finger gesture is installed. Scroll
+chaining to the underlying chat is contained. The native modal traps focus;
+Close preview and Escape return focus to the opener without scrolling it.
+Closing removes the preview image, observer and event handlers. Removing the
+owning component also closes its preview before releasing the original lease.
+
 ## Message file references
 
 Assistants deliver files using explicit Markdown links or images, for example
@@ -204,3 +223,20 @@ invoke a model or execute a tool. The frame also reports CSP dependency violatio
 verifies the frame's window, a fresh per-mount token and the allowed message
 action. Reloading a component cannot
 replay a privileged action because no privileged action exists on this bridge.
+
+The render document contains its native viewport scroll chain while that axis
+has scrollable content. Read-only layout observers recognize nested scroll
+surfaces before input, and passive input observers recognize scrollable target
+ancestors, so reaching either edge stays inside the preview. They do not cancel
+input or change author event handlers. Short documents without scrollable
+content retain ordinary browser scroll handoff.
+Moving the pointer outside the frame immediately allows chat scrolling. This
+does not rewrite arbitrary third-party scroll widgets, closed shadow trees or
+author-managed gestures; nested frames remain prohibited by CSP.
+
+File-reference modal viewers lock the launching chat's scroll ancestors and the
+document until they close, then restore their offsets, original overflow styles
+and opener focus. An unhandled trusted Escape inside the frame sends a
+source/token-checked close notice for its containing viewer; inline previews
+have no modal to close. This adds no method to the public `window.pot` API and
+does not cancel or synthesize the original key event.

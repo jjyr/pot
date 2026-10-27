@@ -6,6 +6,7 @@ import {replyFailureKind} from '../state/chat-replies.mjs';
 import {createResourceView} from './resource-view.mjs';
 
 const node=(tag,className='',text)=>{const value=document.createElement(tag);value.className=className;if(text!==undefined)value.textContent=text;return value;};
+const activePhases=new Set(['sending','thinking','streaming','awaiting','queued','cancelling','tools','approval','waiting','paused','reconnecting']);
 
 // Keep the outer bubble and its content nodes alive while status changes. All
 // failed replies use one presentation, including failures after partial output.
@@ -14,6 +15,9 @@ export function createReplyBubble(host) {
   status.setAttribute('aria-live','polite');
   host.classList.add('reply-bubble');host.append(content,status);
   const markdown=createMarkdownView(content);
+  const activityLine=node('div','reply-status-title'),activityIcon=node('span','reply-activity-icon'),activityLabel=node('span');
+  const dots=node('span','waiting-dots'),dot=node('span','activity-dot'),clock=icon('clock');
+  dots.setAttribute('aria-hidden','true');dots.append(node('i'),node('i'),node('i'));activityIcon.setAttribute('aria-hidden','true');activityIcon.append(dots,dot,clock);activityLine.append(activityIcon,activityLabel);
   let text,signature,resourceKey,resourceNode;const previewClaims=new Map();
   return {
     update(message,{messageFiles,retryMessageFile,t,downloadFile,acquireFileImage,acquireResource,downloadResource,onSettings,onRetrySend,canRetrySend}){
@@ -27,8 +31,18 @@ export function createReplyBubble(host) {
       const nextResource=JSON.stringify(message.presentation||null);
       if(resourceKey!==nextResource){resourceNode?.remove();resourceNode=null;resourceKey=nextResource;if(message.presentation){resourceNode=createResourceView(message.presentation,{acquireResource,downloadResource});content.append(resourceNode);}}
       content.hidden=!message.text&&!message.presentation;
-      const next=JSON.stringify([message.phase,message.error,t('replyFailed'),message.local,canRetrySend]);
+      const next=JSON.stringify([message.phase,message.error,t('replyFailed'),message.local,canRetrySend,message.activity]);
       if(signature===next)return;signature=next;
+      const active=message.activity!==false&&activePhases.has(message.phase);
+      host.classList.toggle('has-active-status',active);
+      if(message.activity===false){status.hidden=true;host.classList.remove('is-waiting','is-streaming','is-failed');return;}
+      if(active){
+        status.removeAttribute('role');status.hidden=false;host.classList.remove('is-failed');host.classList.toggle('is-streaming',message.phase==='streaming');host.classList.toggle('is-waiting',message.phase!=='streaming');
+        if(activityLine.parentNode!==status)status.replaceChildren(activityLine);
+        dots.hidden=['approval','streaming','reconnecting','waiting','paused'].includes(message.phase);dot.hidden=message.phase!=='streaming';clock.toggleAttribute('hidden',!dots.hidden||!dot.hidden);
+        activityLabel.textContent=t(({sending:'sending',streaming:'replyStreaming',tools:'tool.executing',approval:'tool.awaitingApproval',awaiting:'replyAwaiting',queued:'replyQueued',cancelling:'replyCancelling',waiting:'replyWaiting',paused:'replyPaused',reconnecting:'tool.reconnecting'})[message.phase]||'working');
+        return;
+      }
       const expanded=!!status.querySelector('details')?.open;
       status.replaceChildren();host.classList.toggle('is-failed',message.phase==='failed');
       host.classList.toggle('is-waiting',['sending','thinking','awaiting','queued','cancelling','tools','approval'].includes(message.phase));
@@ -44,15 +58,7 @@ export function createReplyBubble(host) {
         else if(kind==='configuration'&&onSettings)status.append(action(t('checkAISettings'),onSettings));
       }else{
         status.removeAttribute('role');
-        if(['sending','thinking','awaiting','queued','cancelling','tools','approval'].includes(message.phase)){
-          const line=node('div','reply-status-title');
-          if(message.phase!=='approval'){const dots=node('span','waiting-dots');dots.setAttribute('aria-hidden','true');dots.append(node('i'),node('i'),node('i'));line.append(dots);}
-          else line.append(icon('clock'));
-          line.append(node('span','',t(({sending:'sending',tools:'tool.executing',approval:'tool.awaitingApproval',awaiting:'replyAwaiting',queued:'replyQueued',cancelling:'replyCancelling'})[message.phase]||'working')));status.append(line);
-        }else if(message.phase==='streaming'){const dot=node('span','activity-dot');dot.setAttribute('aria-label',t('working'));status.append(dot);}
-        else if(message.phase==='stopped')status.append(node('span','',t('replyStopped')));
-        else if(message.phase==='paused')status.append(node('span','',t('replyPaused')));
-        else if(message.phase==='waiting')status.append(node('span','',t('replyWaiting')));
+        if(message.phase==='stopped')status.append(node('span','',t('replyStopped')));
         else if(message.phase==='unknown'){
           status.append(node('span','',t('replyUnknown')));
           if(message.error){const details=node('details','reply-error-details');details.open=expanded;details.append(node('summary','',t('errorDetails')),node('pre','',message.error));status.append(details);}

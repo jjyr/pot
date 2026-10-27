@@ -1,3 +1,4 @@
+import {waitForDraftSaved} from './draft-persistence-browser.mjs';
 import assert from 'node:assert/strict';
 import {writeFile} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
@@ -32,7 +33,7 @@ export async function composerContinuationDraftsBrowser(browser,{sourceOrigin}={
    const control=async data=>{assert((await context.request.post(fixture.origin+'/fixture/control',{data})).ok());};
    const evidence=async()=>await(await context.request.get(fixture.origin+'/fixture/state')).json();
    const input=page.locator('#pot-composer'),main=page.locator('.send-button');
-   const saved=()=>page.waitForFunction(()=>document.querySelector('.draft-storage-status')?.textContent==='Draft saved on this device');
+   const saved=options=>waitForDraftSaved(page,options);
    const play=()=>page.waitForFunction(()=>document.querySelector('.send-button')?.getAttribute('aria-label')==='Continue task'&&!document.querySelector('.send-button').disabled);
    const noCommands=async()=>assert.equal((await evidence()).trace.filter(row=>['post','continue'].includes(row.kind)).length,0);
    const sample=()=>page.evaluate(()=>({label:document.querySelector('.send-button')?.getAttribute('aria-label'),disabled:document.querySelector('.send-button')?.disabled,text:document.querySelector('#pot-composer')?.value,status:document.querySelector('.draft-storage-status')?.textContent,files:[...document.querySelectorAll('.attachment-name')].map(node=>node.textContent),references:document.querySelectorAll('.composer-references .message-reference').length}));
@@ -67,8 +68,8 @@ export async function composerContinuationDraftsBrowser(browser,{sourceOrigin}={
      await page.waitForFunction(async()=> (await(await fetch('/fixture/state')).json()).trace.filter(row=>row.kind==='post').length===1);let posts=(await evidence()).trace.filter(row=>row.kind==='post');assert.equal(posts[0].owner,'alpha');assert.equal(posts[0].path,'/api/v1/messages');assert.equal(posts[0].body.text,'Immutable Alpha submission');assert.equal(posts[0].body.references.length,1);assert.equal(posts[0].body.attachments.length,1);
      assert.equal((await evidence()).trace.filter(row=>row.kind==='receipt').length,0);await control({holdSend:false,releaseSends:true});await saved();assert.equal(await input.inputValue(),'Beta while Alpha flush waits');assert.equal((await evidence()).trace.filter(row=>row.kind==='continue').length,0);marks.push({phase:'captured-send-scope',ui:await sample()});
     }else{
-     await input.fill('Fixed request before reload');await saved();await control({holdSend:true,acceptSend:false});await main.click();await page.waitForFunction(async()=> (await(await fetch('/fixture/state')).json()).trace.filter(row=>row.kind==='post').length===1);await saved();const original=(await evidence()).trace.find(row=>row.kind==='post');
-     await page.reload();await saved();await input.fill('');assert(await main.isDisabled());await page.evaluate(()=>document.querySelector('.send-button').click());assert.equal((await evidence()).trace.filter(row=>row.kind==='continue').length,0);
+     await input.fill('Fixed request before reload');await saved();await control({holdSend:true,acceptSend:false});await main.click();await page.waitForFunction(async()=> (await(await fetch('/fixture/state')).json()).trace.filter(row=>row.kind==='post').length===1);await saved({pending:true});const original=(await evidence()).trace.find(row=>row.kind==='post');
+     await page.reload();await saved({pending:true});await input.fill('');assert(await main.isDisabled());await page.evaluate(()=>document.querySelector('.send-button').click());assert.equal((await evidence()).trace.filter(row=>row.kind==='continue').length,0);
      const retry=page.getByRole('button',{name:'Check and retry',exact:true});await retry.waitFor({timeout:30000});assert.equal((await evidence()).trace.filter(row=>row.kind==='post').length,1);await control({holdSend:false,acceptSend:true});await retry.click();await saved();await play();const posts=(await evidence()).trace.filter(row=>row.kind==='post');assert.equal(posts.length,2);assert.deepEqual(posts[1].body,original.body);assert.equal(posts[1].owner,'alpha');assert.equal((await evidence()).trace.filter(row=>row.kind==='continue').length,0);marks.push({phase:'send-fence-explicit-retry',ui:await sample()});
     }
     assert.deepEqual(errors,[]);results.push({name,viewport,ok:true,marks,server:await evidence()});

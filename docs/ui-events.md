@@ -34,6 +34,15 @@ refresh catalogue `pending_approvals` counts for every assistant independently o
 reply identity and unread baselines. They also refresh the selected owner's
 transient Chat approval region; duplicate request IDs do not repeat its notice.
 Mutations publish after persistence; no-op reads do not produce invalidations.
+Task journal `text_delta` and `tool_output` commits publish `runner` only. They
+advance the same durable transcript cursor without invalidating the assistant
+directory, active Task cards, Task catalogue or permission projections. Open
+Task details consume `runner` to read incremental events. State-bearing events,
+including `tool_state`, `turn_finished` and unknown event types, retain the Task
+lifecycle invalidation path; cancellation, approval and capability changes still
+require current authoritative state. Expiring an empty permission set does not
+publish a permission change; removing an actual pending request, denial or grant
+does.
 The global subscription remains active even when no assistant exists, so an
 assistant created by another client appears without reloading the page.
 
@@ -45,6 +54,17 @@ values. Storage failure retains the prior projection and retries the pending
 invalidation before another refresh.
 
 Shared domain queries serialize reads and coalesce changes into one later read.
+Resource commit notifications and business invalidations have separate matching
+rules. Queries declaring resource dependencies reassemble after commits to those
+concrete paths in their declared Space and owner scope. Path matching strips the
+query string, so a committed collection page wakes the collection consumer.
+Sharing a business topic with another resource does not make its commit a
+dependency. Cross-tab commits follow the same rule after reading committed
+storage. Business invalidations continue matching topics and Space, immediately
+fencing stale projections; explicit refresh bypasses commit matching. The global
+directory declares spaces, assistants, runtime and Agent Links as dependencies
+across its constituent scopes. Active and detail Task queries capture their
+owner and Space when created; switching selection watches the new scoped query.
 Event batches use blocking `authoritative: 'invalidated'` resource reads: they
 wait for each invalidated resource, reusing a committed read that already crossed
 that resource's version fence. The later query still reassembles all resources
@@ -79,6 +99,12 @@ reconcile by their scoped identities. Search inputs, focus, selection, disclosur
 state and scroll positions survive unchanged projections. Shell navigation,
 approval actions and Chat task strips retain their nodes too. Action handlers use
 the current projection; pending mutations stay disabled across refreshes.
+The assistant directory retains its last confirmed execution activity during a
+background revalidation in the same connection and Control scope. A stale read
+does not imply that execution ended. Retained directory entries still lose command
+capabilities until confirmed again; execution activity does not grant authority.
+A confirmed completion replaces that activity, and a cold retained cache or new
+connection cannot establish execution activity from an older connection.
 An open conversation menu keeps existing actions and keyboard focus during a
 retained directory revalidation, marking unavailable actions `aria-disabled` and
 rejecting their execution until fresh capabilities return. This presentation is
@@ -281,6 +307,10 @@ All Chat entry paths share a scoped positioning intent: restore the saved readin
 position, locate an explicit message, or follow Latest. Page returns, assistant
 switches and browser history prepare the composer, mount the destination window,
 measure its rows and restore the viewport before exposing the first Chat frame.
+Composer preparation includes restoring the selected assistant's persisted draft,
+references and attachments. A failed draft read exposes its recovery controls;
+an unrelated assistant's cleanup failure does not complete the selected draft's
+preparation.
 Hidden rows do not overwrite measured heights. The destination remains visually
 hidden through mounting, measurement and position restoration; only the prepared
 viewport is exposed. Persisted height hints are qualified by width, locale, theme
@@ -294,6 +324,12 @@ through the cached projection, stream reset and background-task refresh. Visible
 task rows do not turn following into a saved historical reading position. Only
 paused reading restores a message or task anchor; restoration requests are
 scoped to the originating navigation generation.
+
+Submitting a message explicitly resumes Latest following before its optimistic
+row is rendered, including while the submitted draft is being persisted. A later
+receipt or draft flush does not issue another positioning command. Subsequent
+reading gestures and assistant navigation therefore retain their newer intent;
+ordinary background snapshots preserve historical reading.
 
 Main Chat and Task transcripts share the same conversation-list controller. It
 owns one intent: Latest following, historical reading by stable message/row ID
@@ -446,13 +482,27 @@ and attachments survive late or duplicate confirmation.
 closing/reloading the app and restore it through read-only confirmation.
 Assistant messages bind to their input through `reply_to`; terminal failures retain
 their original diagnostic in the message's `error` field, including preparation
-failures before the first model event. Chat projects a single reply bubble from
-the local send through its receipt and first assistant output. Pending sends are
+failures before the first model event. Chat projects one independent execution
+activity row, keyed by input/request identity, from local send through its receipt
+and all model/tool rounds. Nonempty assistant prose retains chronological message
+order and does not own the activity status. Empty model rounds cannot retire or
+recreate activity while the receiver lifecycle remains active. Current execution
+activity stays at the conversation tail so Latest exposes it after long output;
+queued activity and terminal diagnostics retain their input context. Successful
+completion retires activity without inventing prose. Pending sends are
 scoped by owner, preserve drafts and retain request identity across reconciliation.
 Turn `state` distinguishes allowance waiting from active thinking.
 Connection status and reconnect actions stay in the Chat header, including while
-a reply is running. Reply bubbles retain their available text without a separate
-connection notice; Task conversations use their existing stage status.
+a reply is running. The activity row reports interrupted/uncertain execution
+truthfully and retains its nonterminal outer frame while reconnecting; available
+prose remains visible. Nonterminal labels/icons update in place within a two-line
+frame that responds to the current font and width. Task conversations use the
+shared status frame with their existing stage status. Markdown and asynchronous
+resource rendering retain their existing live rendering behavior.
+Historical pages carry durable message outcomes without necessarily supplying
+their receiver lifecycle. In that case failed/cancelled messages retain their
+own diagnostic/stopped status, including when restored from IndexedDB. Only an
+available receiver lifecycle transfers status ownership to the activity row.
 Subscription errors retain their available diagnostics; a
 frontend rendering exception is reported by the interface error handler rather
 than being classified as a service disconnection.

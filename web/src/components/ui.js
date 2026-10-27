@@ -5,7 +5,7 @@ import {createCompaction} from './compaction.mjs';
 import {projectLinkedAssistants,supportsCapability} from '../state/agent-links.mjs';
 import {agentSource} from './connection-visuals.mjs';
 import {createUpdates} from './updates.mjs';
-import {createCommunicationWindow} from './communication-window.mjs';
+import {createWorkRecordWindow} from './work-record-window.mjs';
 import {createInitialChatLayout} from './initial-chat-layout.mjs';
 import {notificationOnboarding} from './notification-onboarding.mjs';
 import {createSendConfirmation} from '../state/send-confirmation.mjs';
@@ -147,9 +147,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   root.append(rail, titlebar, directory, workspace, menu, preferences, assistantProfile);
   chatApprovals.dataset.scrollAnchor='chat-approvals';
   const messageNodes=new Map(),toolMemory=new Map(),windowHeights=new Map();
-  const messageWindow=createCommunicationWindow({
+  const messageWindow=createWorkRecordWindow({
+    blocked:message=>!!pages?.approvalFor(message.tool),
     scroller:history,host:windowHost,render:(...args)=>renderMessage(...args),dispose:entry=>disposeMessage(entry),heights:windowHeights,
-    onOpenTask:task=>openChatTask(task),locale:()=>locale,actor:()=>messageIdentities(client).actor(client.scope?.()),resolveIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,scope:()=>JSON.stringify(client.scope?.()),
+    locale:()=>locale,actor:()=>messageIdentities(client).actor(client.scope?.()),resolveIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,scope:()=>JSON.stringify(client.scope?.()),
     active:()=>chatShown&&!disposed,
     requestRender:()=>renderMessages(true),
     interact:()=>cancelChatPosition(),
@@ -236,7 +237,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   if(attachmentUI){form.classList.add('has-attachments');attachmentUI.toolbar.append(send);}
   const referenceDraftHost=el('div','composer-references');form.prepend(referenceDraftHost);
   const referenceStatus=el('div','reference-announcement');referenceStatus.setAttribute('role','status');composerArea.append(referenceStatus);
-  const draftStatus=el('div','draft-storage-status');draftStatus.setAttribute('role','status');composerArea.append(draftStatus);
+  const draftStatus=el('div','draft-storage-status');draftStatus.hidden=true;draftStatus.setAttribute('role','status');composerArea.append(draftStatus);
   let draftStatusSignature='';
   let referenceDraftSignature='',referenceNotice='';
   let historyLoading=false,historyFailure='',historyGeneration=0,historyFlight=null,historyRecovery=null,historyAbort=new AbortController();
@@ -330,7 +331,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     changed:()=>{if(!disposed){syncEditor();restoreFailedAttachments();updateControls();}},
   });
   if(client.production){
-    assistantDrafts=createAssistantDrafts({client,state,attachments:attachmentUI,changed:()=>updateControls(),restored:key=>{if(key===editorOwner)syncEditor();},restorePending:(receipt,scope)=>confirmations.restore(receipt,scope)});
+    assistantDrafts=createAssistantDrafts({client,state,attachments:attachmentUI,changed:()=>updateControls(),restored:key=>{if(key===editorOwner){if(!chatPreparing)prepareChat();syncEditor();}},restorePending:(receipt,scope)=>confirmations.restore(receipt,scope)});
     state.draftChanged=key=>assistantDrafts.change(key);
   }
   async function submit() {
@@ -343,6 +344,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if (!receipt) return;
     receipt.scope={...client.scope()};
     if(assistantDrafts)receipt.phase='preparing';
+    // The user's send resumes following before the optimistic row is laid out.
+    // Receipts after the durable draft fence must not replace newer navigation.
+    positionChat({kind:'latest'});
     attachmentUI?.markSubmitted(receipt.key,refs);
     if(refs.length||receipt.request.references?.length)attachmentAttempts.set(receipt.key,{requestID:receipt.request.request_id,cursor:state.snapshot.cursor});
     error = '';
@@ -381,11 +385,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(directoryStorageFailed)error=t('storage.failed');
     const snapshot = state.snapshot;
     const saved=assistantDrafts?.status(editorOwner);
-    const draftSignature=JSON.stringify([!!saved,saved?.cleanup,saved?.error?.message,saved?.loading,saved?.dirty,locale]);
+    const draftSignature=JSON.stringify([saved?.cleanup,saved?.error?.message,locale]);
     if(draftSignature!==draftStatusSignature){
-      draftStatusSignature=draftSignature;draftStatus.hidden=!saved;draftStatus.classList.toggle('inline-error',!!saved?.error);
-      const draftLabel=saved?.cleanup?'drafts.cleanupFailed':saved?.error?'drafts.failed':saved?.loading?'drafts.loading':saved?.dirty?'drafts.saving':'drafts.saved';
-      draftStatus.replaceChildren(el('span','',saved?t(draftLabel):''));
+      draftStatusSignature=draftSignature;draftStatus.hidden=!saved?.error;draftStatus.classList.toggle('inline-error',!!saved?.error);
+      draftStatus.replaceChildren();
+      if(saved?.error)draftStatus.append(el('span','',t(saved.cleanup?'drafts.cleanupFailed':'drafts.failed')));
       if(saved?.error){const retry=el('button','text-button',t('retry'));retry.type='button';retry.onclick=()=>assistantDrafts.retry(editorOwner).catch(()=>{});draftStatus.append(retry);const details=el('details'),summary=el('summary','',t('web.error.details'));details.append(summary,el('span','',saved.error.message||String(saved.error)));draftStatus.append(details);}
     }
     const pending = snapshot && state.pending.get(ownerKey(snapshot));
@@ -554,8 +558,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     chatCacheFailed=true;error=t('chatCache.failed');console.error('Chat cache:',reason);updateControls();
     if(!state.snapshot){initialLayout.cancel();chatPreparing=false;initialIntent=null;history.style.visibility='';history.removeAttribute('aria-busy');}
   }
+  // Hydrating text, references and attachments can resize the composer after
+  // cached history arrives. Include that geometry in the hidden first layout.
+  const draftLayoutReady=()=>{const status=assistantDrafts?.status(editorOwner);return !assistantDrafts||assistantDrafts.ready(editorOwner)||!!status?.error&&!status.cleanup;};
   const initialLayout=createInitialChatLayout({history,
-    ready:()=>!disposed&&chatPreparing&&!!state.snapshot&&!historyLoading&&chatShown,
+    ready:()=>!disposed&&chatPreparing&&!!state.snapshot&&!historyLoading&&chatShown&&draftLayoutReady(),
     layout:()=>{editor.resize();renderMessagesNow(true);},
     position:()=>{if(initialIntent)applyChatPosition(initialIntent);},
     fontFallback:()=>root.classList.add('chat-font-fallback'),
@@ -568,7 +575,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     root.classList.remove('chat-font-fallback');
   }
   function revealChat(){
-    if(chatPreparing&&!initialLayout.pending&&state.snapshot&&!historyLoading&&chatShown)initialLayout.start();
+    if(chatPreparing&&!initialLayout.pending&&state.snapshot&&!historyLoading&&chatShown&&draftLayoutReady())initialLayout.start();
   }
   const closeAssistantProfile = () => assistantProfile.hidePopover();
   window.addEventListener('resize', closeAssistantProfile);
@@ -786,7 +793,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       backgroundTasks={close:stop,run:()=>domains.tasks.active(scope).refresh()};
     }return backgroundTasks.run();
   }
-  const disposeMessage=record=>{record.childrenWindow?.close();record.attachmentNode?.dispose?.();record.row.remove();messageNodes.delete(record.row.dataset.windowKey);};
+  const disposeMessage=record=>{record.attachmentNode?.dispose?.();record.row.remove();messageNodes.delete(record.row.dataset.windowKey);};
   const requestMessageRender=resize=>{
     renderMessages(true);
   };
@@ -810,6 +817,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       messageNodes.set(message.viewKey, record);
     }
     const {row, bubble} = record;
+    row.classList.toggle('is-activity',!!message.activity);
     row.dataset.messageId=message.id;row.dataset.sequence=message.sequence||'';
     row.dataset.scrollAnchor=`message:${message.viewKey}`;
     if(message.compaction){
@@ -818,7 +826,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
  }else if(message.role==='tool'&&message.tool){
       const scope=client.scope?.()||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
       if(!record.tool){record.tool=createToolCall({messageActor:()=>messageIdentities(client).actor(scope),resolveTask:id=>projectedTasks(scope).find(task=>task.id===id),onOpenTask:task=>openChatTask(task,scope),resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key,locale:()=>locale,machineLabel:id=>machinePresentation(client).label(id,scope,locale),onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>messageWindow.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
-      record.tool.update(message,{stacked:message.communicationStacked,offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
+      record.tool.update(message,{offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
     }else if(message.role==='assistant'){
       record.reply ||= createReplyBubble(bubble);
       const scope=client.scope?.();
@@ -834,7 +842,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       record.text = message.text; record.role = message.role;
       row.className = `message role-${message.role}`;
     }
-    if(message.role==='assistant'){
+    if(message.role==='assistant'&&!message.activity){
       const name=selectedAssistant?.name||'Pot',image=selectedAssistant?.avatar;
       if(!record.speaker||record.speakerName!==name||record.speakerImage!==image){
         record.speaker?.remove();record.speakerName=name;record.speakerImage=image;
@@ -842,7 +850,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         record.speaker.append(assistantAvatar(selectedAssistant,25),el('span','',name));
         row.prepend(record.speaker);
       }
-    }
+    }else if(record.speaker){record.speaker.remove();record.speaker=null;}
     const source=message.role==='assistant'?bubble.querySelector('.reply-content'):message.role==='user'?bubble.querySelector('.message-prose'):null;
     if(source&&message.text&&!message.id.startsWith('pending:'))source.dataset.referenceSource=message.id;
     const referenceSignature=JSON.stringify([message.references||[],locale]);
@@ -873,10 +881,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(record.tool){
       const entry=forest.byID.get(message.tool.turn_id+':'+message.tool.id),children=entry?.children.map(child=>child.message)||[];
       if(messageWindow.revealing&&messageWindow.visibilityPath.has(message.id)||messageWindow.destination?.expand&&messageWindow.destination.id===message.id)record.tool.element.open=true;
-      if(children.length||record.childrenWindow){
-        if(!record.childrenWindow){record.childrenWindow=createCommunicationWindow({onOpenTask:openChatTask,locale:()=>locale,actor:()=>messageIdentities(client).actor(client.scope?.()),resolveIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,scope:()=>JSON.stringify(client.scope?.()),scroller:history,host:record.tool.children,nested:true,render:renderMessage,dispose:disposeMessage,requestRender:requestMessageRender,controller:messageWindow,heights:windowHeights});record.tool.element.addEventListener('toggle',()=>renderMessages());}
-        record.childrenWindow.setMessages(record.tool.element.open?children:[]);
-      }
+
     }
     return record;
   };
@@ -892,7 +897,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const offline=connection!=='connected'||disconnected||selectedAssistant?.offline;
     if(!chatProjection||chatProjection.snapshot!==snapshot||chatProjection.sending!==sending||chatProjection.phase!==sending?.phase||chatProjection.detail!==sending?.detail||chatProjection.offline!==offline||chatProjection.activeTurn!==activeTurn){
       const messages=projectScriptRuns(projectChatReplies(snapshot,sending,{offline}),{activeTurn});
-      const forest=toolForest(messages),roots=messages.filter(message=>!message.tool?.parent_id||!forest.byID.has(message.tool.turn_id+':'+message.tool.parent_id));
+      const forest=toolForest(messages),roots=messages;
       const parents=new Map(messages.flatMap(message=>{const parent=message.tool?.parent_id&&forest.byID.get(message.tool.turn_id+':'+message.tool.parent_id)?.message;return parent?[[message.id,parent.id]]:[];}));
       chatProjection={snapshot,sending,phase:sending?.phase,detail:sending?.detail,offline,activeTurn,messages,forest,roots,parents};
     }
@@ -1172,8 +1177,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if(source.boot&&state.snapshot&&(!source.space||source.space===client.scope().space)&&state.snapshot.boot_id!==source.boot)loadSnapshot(true);
       if(source.reset){notifications?.refresh({reset:true,space:source.space});loadDirectory();}
       else if(relevantChange(keys,['task-outcomes','permissions']))notifications?.refresh({topics:keys,space:source.space});
-      if(relevantChange(keys,['spaces','assistants','assistant-mail','agent-links','conversation','runtime','permissions','tasks','runner']))loadDirectory();
-      if(relevantChange(keys,['tasks','runner'],client.scope().space,source))refreshBackgroundTasks();
+      if(relevantChange(keys,['spaces','assistants','assistant-mail','agent-links','conversation','runtime','permissions','tasks']))loadDirectory();
+      if(relevantChange(keys,['tasks'],client.scope().space,source))refreshBackgroundTasks();
       pages.refresh(keys,{...source,domainNotified:true});if(relevantChange(keys,['permissions','spaces','runtime'],pages.approvalSpace,source))pages.permissions();
     },{space:''});
   }

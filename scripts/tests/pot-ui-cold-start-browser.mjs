@@ -1,3 +1,4 @@
+import {waitForDraftSaved} from './draft-persistence-browser.mjs';
 // Isolated production bootstrap + real SW/IndexedDB/SSE. No Control, account,
 // model, product root, Push registration or browser profile is used.
 import assert from 'node:assert/strict';
@@ -83,12 +84,21 @@ else{
  async function record(page,name){const observation=await page.evaluate(async()=>({url:location.href,text:document.body.innerText,editor:document.querySelector('.composer-input')?.innerText||document.querySelector('textarea.composer-input')?.value,sendDisabled:document.querySelector('.send-button')?.disabled,controller:!!navigator.serviceWorker.controller,resources:performance.getEntriesByType('resource').map(entry=>({name:entry.name,workerStart:entry.workerStart,transferSize:entry.transferSize})),caches:await Promise.all((await caches.keys()).map(async name=>({name,assets:(await(await caches.open(name)).keys()).map(request=>request.url)}))),storage:await new Promise((resolve,reject)=>{const op=indexedDB.open('pot-chat-cache');op.onerror=()=>reject(op.error);op.onsuccess=()=>{const db=op.result,tx=db.transaction(['startup','views','composerDrafts'],'readonly'),data={};for(const name of ['startup','views','composerDrafts']){const get=tx.objectStore(name).getAll();get.onsuccess=()=>data[name]=get.result;}tx.oncomplete=()=>{db.close();resolve(data)}}})}));results.push({name,at:Date.now(),observation});await writeFile(resolve(output,'observations.json'),JSON.stringify(results,null,2));return observation;}
  const editor=page=>page.locator('textarea.composer-input').first();
  const waitChat=page=>page.getByText('ALPHA cached message 90.',{exact:false}).first().waitFor();
+ // Draft hydration precedes the hidden layout/position commits. Check the
+ // readable viewport itself while the network gate is still held or offline.
+ const waitCachedChat=(page,anchor)=>page.waitForFunction(anchor=>{
+  const history=document.querySelector('.history');
+  if(!history||history.getAttribute('aria-busy')==='true'||getComputedStyle(history).visibility!=='visible')return false;
+  const box=history.getBoundingClientRect();if(!box.width||!box.height)return false;
+  const visible=[...history.querySelectorAll('article.message')].filter(row=>{const rect=row.getBoundingClientRect();return rect.bottom>box.top&&rect.top<box.bottom;});
+  return visible.some(row=>row.textContent.includes('ALPHA cached message'))&&(!anchor||visible.some(row=>row.dataset.messageId===anchor.id&&Math.abs(row.getBoundingClientRect().top-box.top-anchor.offset)<2));
+ },anchor);
  const config=async values=>{const query=new URLSearchParams(values);await fetch(origin+'/__fixture?'+query);};
  try{
  for(const viewport of [{width:1280,height:800},{width:390,height:844}]){
   hold='';auth=200;authenticated=true;control='synthetic-control';spaceControl='';release='one';failAsset='';
   const context=await browser.newContext({viewport});let page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',error=>errors.push(error.message));
-  await page.goto(origin+'/?locale=en');if(viewport.width<500)await page.getByText('Synthetic Alpha',{exact:true}).first().click();await waitChat(page);await editor(page).fill('Persistent synthetic draft');await page.getByText('Draft saved on this device',{exact:false}).waitFor().catch(()=>{});
+  await page.goto(origin+'/?locale=en');if(viewport.width<500)await page.getByText('Synthetic Alpha',{exact:true}).first().click();await waitChat(page);await editor(page).fill('Persistent synthetic draft');await waitForDraftSaved(page);
   // Cache the second assistant, then return to Alpha without losing its draft.
   if(viewport.width<500)await page.getByRole('button',{name:'Back to Assistants',exact:true}).click();
   await page.getByText('Synthetic Beta',{exact:true}).first().click();await page.getByText('BETA cached message 90.',{exact:false}).first().waitFor();await page.waitForFunction(()=>!document.querySelector('.send-button').disabled);
@@ -100,10 +110,11 @@ else{
   const prepared=await record(page,'prepared-'+viewport.width);assert(prepared.storage.startup[0]?.owner==='alpha');
   const reading=state=>state.storage.views.find(view=>view.key.includes('alpha')&&view.surface===state.storage.startup[0]?.surface)?.position;
   assert.equal(reading(prepared)?.mode,'reading');
-  const anchor=reading(prepared).position.anchor.id;
+  const anchorPosition=reading(prepared).position.anchor,anchor=anchorPosition.id;
   for(const block of ['auth','runtime']){
    await config({hold:block});await page.reload({waitUntil:'domcontentloaded'});
    await editor(page).waitFor();await page.waitForFunction(()=>document.querySelector('textarea.composer-input')?.value==='Persistent synthetic draft');
+   await waitCachedChat(page,anchorPosition);
    assert((await page.locator('.history').innerText()).includes('ALPHA cached message'));
    const state=await record(page,'held-'+block+'-'+viewport.width);assert.equal(reading(state)?.position?.anchor?.id,anchor);assert(state.controller);assert.equal(state.caches.find(cache=>cache.name==='pot-ui-shell-'+original.version)?.assets.length,original.assets.length);assert(!state.text.includes('Could not start'));assert.equal(await page.getByRole('button',{name:'Allow notifications',exact:true}).count(),0);assert(!state.text.split('\n').includes('Connected'),'cached directory must not claim a live connection');if(viewport.width>500)assert(await page.getByRole('button',{name:'Tasks',exact:true}).isDisabled());
    assert(await page.locator('.send-button').isDisabled());
@@ -114,11 +125,13 @@ else{
    await editor(page).fill('Persistent synthetic draft');await page.waitForTimeout(450);
   }
   await context.setOffline(true);await page.close();page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',error=>errors.push(error.message));await page.goto(origin+'/?locale=en',{waitUntil:'domcontentloaded'});await editor(page).waitFor();await page.waitForFunction(()=>document.querySelector('textarea.composer-input')?.value==='Persistent synthetic draft');
+  await waitCachedChat(page,anchorPosition);
   assert((await page.locator('.history').innerText()).includes('ALPHA cached message'));assert(await page.locator('.send-button').isDisabled());
   await editor(page).fill('Offline new draft');await page.waitForTimeout(500);assert.equal(reading(await record(page,'offline-'+viewport.width))?.position?.anchor?.id,anchor);await page.screenshot({path:resolve(output,'offline-'+viewport.width+'.png')});
   if(viewport.width<500)await page.getByRole('button',{name:'Back to Assistants',exact:true}).click();await page.getByText('Synthetic Beta',{exact:true}).first().click();await page.getByText('BETA cached message 90.',{exact:false}).first().waitFor();
   assert(await page.locator('.send-button').isDisabled());assert.equal(await page.locator('.send-button').getAttribute('aria-label'),'Send');
   if(viewport.width<500)await page.getByRole('button',{name:'Back to Assistants',exact:true}).click();await page.getByText('Synthetic Alpha',{exact:true}).first().click();await editor(page).waitFor();await page.waitForFunction(()=>document.querySelector('textarea.composer-input')?.value==='Offline new draft');
+  await waitCachedChat(page,anchorPosition);
   const beforePosts=calls.filter(call=>call.method==='POST'&&/messages|turn|assistants/.test(call.path)).length;
   await config({hold:'runtime'});await context.setOffline(false);await editor(page).fill('New input during reconnect');await page.waitForTimeout(500);assert(await page.locator('.send-button').isDisabled());await record(page,'reconnect-held-'+viewport.width);
   await config({hold:''});await page.getByRole('button',{name:'Retry',exact:true}).last().click();await page.waitForFunction(()=>!document.querySelector('.startup-status'));await page.waitForTimeout(500);
@@ -154,12 +167,13 @@ else{
   await isolated.setOffline(true);await view.reload({waitUntil:'domcontentloaded'});await view.getByText('Could not connect or open saved conversations.',{exact:false}).waitFor();assert.equal(await editor(view).count(),0);
   if(fault==='corrupt')await view.evaluate(async locator=>new Promise(resolve=>{const op=indexedDB.open('pot-chat-cache');op.onsuccess=()=>{const db=op.result,tx=db.transaction('startup','readwrite');tx.objectStore('startup').put(locator);tx.oncomplete=()=>{db.close();resolve()}}}),locator);
   else await view.evaluate(()=>restoreStartupRead());
-  await view.getByRole('button',{name:'Retry',exact:true}).click();await editor(view).waitFor();await view.waitForFunction(()=>document.querySelector('textarea.composer-input')?.value==='Storage recovery draft');assert(await view.locator('.send-button').isDisabled());await record(view,'storage-retry-'+fault);await isolated.close();
+  await view.getByRole('button',{name:'Retry',exact:true}).click();await editor(view).waitFor();await view.waitForFunction(()=>document.querySelector('textarea.composer-input')?.value==='Storage recovery draft');await waitCachedChat(view);assert(await view.locator('.send-button').isDisabled());await record(view,'storage-retry-'+fault);await isolated.close();
  }
 
  // A retained locator cannot fabricate a missing directory; connectivity repairs it.
  hold='';auth=200;authenticated=true;control='synthetic-control';spaceControl='';release='one';
  const missingContext=await browser.newContext(),missing=await missingContext.newPage();missing.setDefaultTimeout(12000);await missing.goto(origin);await waitChat(missing);await editor(missing).fill('Missing directory draft');await missing.waitForTimeout(500);await missing.evaluate(async()=>{await navigator.serviceWorker.ready;await new Promise(resolve=>{const op=indexedDB.open('pot-chat-cache');op.onsuccess=()=>{const db=op.result,tx=db.transaction('projections','readwrite');tx.objectStore('projections').clear();tx.oncomplete=()=>{db.close();resolve()}}})});await missingContext.setOffline(true);await missing.reload({waitUntil:'domcontentloaded'});await missing.getByText('Showing saved conversations.',{exact:false}).first().waitFor();await missing.waitForTimeout(200);assert(await missing.locator('.send-button').isDisabled());await record(missing,'missing-directory-offline');await missingContext.setOffline(false);await editor(missing).waitFor();await missing.waitForFunction(()=>document.querySelector('textarea.composer-input')?.value==='Missing directory draft');await record(missing,'missing-directory-recovered');await missingContext.close();
+ assert.equal(calls.filter(call=>call.method==='POST'&&/messages|turn|assistants/.test(call.path)).length,0,'cache restoration must not submit commands');
  await writeFile(resolve(output,'results.json'),JSON.stringify({passed:true,results,errors,calls,versions:{one:original.version,two:updated.version}},null,2));assert.deepEqual(errors,[]);console.log('PASS local-first cold start desktop/mobile, held auth/runtime, offline reopen/edit/switch, reconnect, no replay, atomic SW update, Control isolation and first-use/access failures');
  }catch(error){await writeFile(resolve(output,'failure.json'),JSON.stringify({error:error.stack,results,errors,calls},null,2));console.error(error);process.exitCode=1;}
  finally{await browser.close();closeStreams();server.closeAllConnections();await new Promise(done=>server.close(done));}

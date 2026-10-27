@@ -11,6 +11,12 @@ scrolls to the original message. Removal remains available while a send awaits
 confirmation: it changes the draft for the next input, while the submitted input
 keeps its captured references.
 
+References and tool failure links retain original record IDs when adjacent work
+is collapsed into a Work records group. Navigation mounts and opens the target's
+group and its logical tool ancestry within that group. A prose boundary gives a
+later child record its own group; navigation reveals that child's group without
+moving records across the prose.
+
 References persist in the [local assistant draft](assistant-drafts.md), scoped by
 Control, Space and assistant and bound to their conversation. Navigation and
 client restart restore them alongside text and local attachment originals. Sent references persist above the user's message

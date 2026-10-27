@@ -23,8 +23,9 @@ try{
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     assert.equal(await page.evaluate(()=>window.taskCommunication.messages.length),8);
     if(version==='after'){
-      assert.match(await page.locator('.communication-stack-title').innerText(),/6 records.*7 messages.*3 tasks/);
-      assert.equal(await page.locator('.communication-stack').evaluate(node=>node.open),scenario!=='collapsed');
+      if(await page.locator('.work-records').count())assert.match(await page.locator('.work-record-counts').innerText(),/7/);
+      else assert.match(await page.locator('.communication-stack-title').innerText(),/6 records.*7 messages.*3 tasks/);
+      assert.equal(await page.locator('.work-records,.communication-stack').evaluate(node=>node.open),scenario!=='collapsed');
       if(scenario!=='collapsed')assert.equal(await page.locator('.communication-entry').count(),7);
     }else assert.equal(await page.locator('.communication-tool').count(),6);
     await page.screenshot({path:resolve(directory,`${name}-${version}.png`)});

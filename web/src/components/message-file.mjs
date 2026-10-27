@@ -1,5 +1,6 @@
 import {translate} from '../locales/messages.mjs';
 import {createResourceView} from './resource-view.mjs';
+import {lockDialogScroll} from './dialog-scroll.mjs';
 
 function register(){
   if(customElements.get('pot-message-file'))return;
@@ -34,13 +35,14 @@ function register(){
     }
     showStatus(){if(!this.status){this.status=document.createElement('span');this.status.className='file-reference-status';this.status.setAttribute('role','status');this.append(this.status);}this.refresh();}
     open(){
-      if(!this.row?.resource)return;this.dialog?.close();
+      if(!this.row?.resource)return;this.dialog?.close();this.releaseDialogScroll?.();
       const dialog=this.dialog=document.createElement('dialog');dialog.className='file-reference-dialog';dialog.setAttribute('aria-label',this.reference.label||this.row.resource.name);
       const close=this.closeButton=document.createElement('button');close.type='button';close.className='resource-action';close.textContent=translate(document.documentElement.lang,'close');close.onclick=()=>dialog.close();
       const line=Number(this.reference.href.match(/:([1-9][0-9]*)$/)?.[1]||0);
-      dialog.append(close,createResourceView({resource:this.row.resource,mode:'preview',caption:this.reference.label},{...this.options,line,noticeKey:'fileReference.savedVersion'}));dialog.addEventListener('close',()=>{dialog.remove();if(this.isConnected)this.link.focus();},{once:true});document.body.append(dialog);dialog.showModal();
+      const release=this.releaseDialogScroll=lockDialogScroll(this.link);
+      dialog.append(close,createResourceView({resource:this.row.resource,mode:'preview',caption:this.reference.label},{...this.options,line,noticeKey:'fileReference.savedVersion'}));dialog.addEventListener('close',()=>{release();dialog.remove();if(this.dialog===dialog){this.dialog=null;this.releaseDialogScroll=null;if(this.isConnected)this.link.focus({preventScroll:true});}},{once:true});document.body.append(dialog);dialog.showModal();
     }
-    disconnectedCallback(){queueMicrotask(()=>{if(this.isConnected)return;clearTimeout(this.timer);this.abort?.abort();window.removeEventListener('pot:locale',this.refresh);this.dialog?.remove();if(this.row&&this.options.previewClaims?.get(this.row.resource?.id)===this)this.options.previewClaims.delete(this.row.resource.id);this.started=false;this.replaceChildren();this.preview=null;this.status=null;this.retry=null;});}
+    disconnectedCallback(){queueMicrotask(()=>{if(this.isConnected)return;clearTimeout(this.timer);this.abort?.abort();window.removeEventListener('pot:locale',this.refresh);this.releaseDialogScroll?.();this.releaseDialogScroll=null;this.dialog?.remove();this.dialog=null;if(this.row&&this.options.previewClaims?.get(this.row.resource?.id)===this)this.options.previewClaims.delete(this.row.resource.id);this.started=false;this.replaceChildren();this.preview=null;this.status=null;this.retry=null;});}
   });
 }
 export function createMessageFile(reference,message,options){register();const element=document.createElement('pot-message-file');element.dataset.block=String(!!reference.block);Object.assign(element,{reference,message,options,identity:JSON.stringify([message,reference.href,reference.block,reference.label])});return element;}
