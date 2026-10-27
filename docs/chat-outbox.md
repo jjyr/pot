@@ -56,12 +56,19 @@ revoked permission and incompatible attachments retain the submission with a
 specific problem; they do not redirect it or repeatedly POST on authorization
 failure. Retry is explicit after such a failure and keeps the same saved request
 identity. Unstarted failed submissions can also be edited or cancelled.
+Chat shows local submissions only in their captured conversation, including
+accepted entries waiting for a transcript update. Entries from a retired
+conversation remain available through Saved messages.
 
 An authoritative running snapshot selects the existing steer operation. A turn
 already captured while submitting guidance stays fixed. Once the first dispatch
 binds a turn, reconnecting cannot steer a successor. The receiver owns whether
 that input steers an active Main turn or joins its existing pending-user lane;
 the browser does not launch another execution or use continuation to submit text.
+Requests carry an `expected_control_id` precondition checked by the serving
+application before dispatch. A replacement Control rejects the old target even
+before its updated directory reaches the browser. This precondition does not
+bind a boot, so the same Control can reconcile durable receipts after restart.
 
 A durable request ID is allocated once. Before the first POST, the selected
 operation and turn are saved. Expired claims and unknown HTTP results query that

@@ -60,6 +60,11 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	// assistant activity. Recheck at dispatch so a late old form cannot mutate a
 	// replacement Control even before its directory change reaches the browser.
 	query := u.Query()
+	// A submitted message survives boots, but never a replacement Control. The
+	// receiver checks this even when its new directory has not reached the sender.
+	if query.Has("expected_control_id") && query.Get("expected_control_id") != a.RuntimeID {
+		return nil, protocol.APIError{Code: "control_changed", Message: "Control identity changed"}
+	}
 	if query.Has("configuration_control_id") || query.Has("configuration_boot_id") {
 		if query.Get("configuration_control_id") != a.RuntimeID || query.Get("configuration_boot_id") != a.BootID {
 			return nil, protocol.APIError{Code: "identity_changed", Message: "Configuration identity changed"}

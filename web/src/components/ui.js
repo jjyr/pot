@@ -979,7 +979,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const anchor=messageWindow.anchor;
     const snapshot=state.snapshot;
     const sending=state.sends.get(editorOwner||(snapshot&&ownerKey(snapshot)));
-    const queued=outbox?.rows().filter(row=>row.state!=='cancelled'&&row.target.host===client.runtime?.runtime_id&&row.target.space===selectedAssistant?.space_id&&row.target.owner===selectedAssistant?.id&&row.target.control===controlOf(selectedAssistant))||[];
+    const queued=outbox?.rows().filter(row=>row.state!=='cancelled'&&row.target.host===client.runtime?.runtime_id&&row.target.space===selectedAssistant?.space_id&&row.target.owner===selectedAssistant?.id&&row.target.control===controlOf(selectedAssistant)&&row.target.conversation===snapshot?.conversation_id)||[];
     const queueSignature=JSON.stringify(queued.map(row=>[row.sequence,row.revision,queueEditors.has(row.sequence)]));
     const activeTurn=snapshot?.running?(snapshot.messages.find(message=>message.id===snapshot.turn_id)?.request_id||snapshot.turn_id):null;
     const offline=connection!=='connected'||disconnected||selectedAssistant?.offline;

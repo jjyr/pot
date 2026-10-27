@@ -37,6 +37,7 @@ export function agentFailureKey(error) {
     original_execution_unavailable:'agentLinks.originalExecutionUnavailable',
     local_node_required:'agentLinks.localNodeRequired',
     identity_changed:'identityChanged',
+    control_changed:'identityChanged',
   }))if(code.includes(value))return key;
   return code.includes('antigravity_')?'agentLinks.antigravitySessionFailed':null;
 }

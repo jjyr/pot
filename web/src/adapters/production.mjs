@@ -21,11 +21,12 @@ export function decodeDesktopResponse(raw) {
       &&typeof value.error.code==='string'&&typeof value.error.message==='string')throw new APIError(value.status,value.error);
   return value;
 }
-export function scopedPath(path, {owner = '', space = '',configuration=false,control_id,configurationBoot} = {}) {
+export function scopedPath(path, {owner = '', space = '',configuration=false,control_id,configurationBoot,expectedControl} = {}) {
   const [base, query = ''] = path.split('?');
   const params = new URLSearchParams(query);
   if (owner) params.set('assistant_id', owner);
   if (space) params.set('space_id', space);
+  if(expectedControl)params.set('expected_control_id',expectedControl);
   if(configuration){params.set('configuration_control_id',control_id);params.set('configuration_boot_id',configurationBoot);}
   return `${base}${params.size ? `?${params}` : ''}`;
 }

@@ -37,6 +37,11 @@ let checks=0;const check=(value,label)=>{assert(value,label);checks++;console.lo
   await w.wake();check(f.trace.filter(row=>row.kind==='send'&&row.scope.owner==='a').map(row=>row.request.request_id).join(',')==='a1,a2','Recovery sends one assistant FIFO');
  }finally{w.close();}
 }
+for(const field of ['runtime_id','owner_id','conversation_id','request_id','user_message_id','retry_user_message_id']){
+ const f=fixture(),row=f.add('receipt-fence');row.started=true;row.state='uncertain';f.client.onlineReady=true;
+ f.client.sendReceipt=async()=>({...row.request,runtime_id:'control',owner_id:'a',state:'accepted',message_id:'receipt-message',[field]:'different-identity'});
+ const w=f.worker();try{await w.wake();check(row.state==='failed'&&row.problem==='identityChanged'&&!f.trace.some(entry=>entry.kind==='send'),'Changed receipt '+field+' cannot accept, release originals or POST');}finally{w.close();}
+}
 for(const mode of ['after','before']){
  const f=fixture();f.add('stable');f.setMode(mode);f.client.onlineReady=true;let w=f.worker();try{
   await w.wake();check(f.rows[0].state==='uncertain','Lost response remains uncertain: '+mode);w.close();w=f.worker();await w.wake();

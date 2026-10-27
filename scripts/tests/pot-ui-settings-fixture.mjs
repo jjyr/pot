@@ -4,11 +4,12 @@ import {resolve,extname} from 'node:path';
 import {readFile} from 'node:fs/promises';
 import {shellAssets} from './pwa-shell.mjs';
 const root=resolve(process.env.POT_SETTINGS_SOURCE||resolve(import.meta.dirname,'../..'));
+const outbox=process.env.POT_SETTINGS_OUTBOX==='1',accepted=new Map();
 const shell=await shellAssets(root),streams=new Map(),held=[],calls=[];
 for(const path of ['/scripts/tests/fixtures/assistant-settings.html','/scripts/tests/pot-ui-assistant-settings-browser.mjs'])shell.files.set(path,await readFile(resolve(import.meta.dirname,'../..'+path)));
 let evidence=[];
 const state={control:'settings-control',boot:'settings-boot',phase:'running',snapshot:true,hold:[],revoked:false,failSave:false,failRead:false,revision:1,configRevision:0,rulesRevision:'rules-1',name:'Synthetic Assistant',model:'synthetic-original',rules:'Synthetic fixture rules',pending:false,cursor:1};
-const caps=()=>({version:1,operations:['chat.read','chat.events','chat.history',...(state.revoked?[]:['assistant.configure','assistant.profile'])]});
+const caps=()=>({version:1,operations:['chat.read','chat.events','chat.history',...(outbox?['chat.send','chat.steer','chat.subscribe','chat.attachments']:[]),...(state.revoked?[]:['assistant.configure','assistant.profile'])]});
 const frame=()=>({kind:'reset',base_cursor:0,view:{state:{api_version:3,cursor:state.cursor,boot_id:state.boot,conversation_id:'synthetic-conversation',turn:state.phase==='running'?{user_message_id:'synthetic-active-turn',paused:false}:null,agent:{phase:state.phase,model:'synthetic-original'}},replies:[],messages:[{sequence:'1',version:state.cursor,message:{id:'synthetic-message',role:'assistant',status:'complete',text:'Synthetic assistant execution continues independently of settings.'}}],history:{before:'1',after:'1',has_more:false,has_newer:false}}});
 const json=(res,value,status=200)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
 const broadcast=(event,value,kind)=>{for(const [res,path]of streams)if(path.endsWith(kind))res.write('event: '+event+'\ndata: '+JSON.stringify(value)+'\n\n');};
@@ -33,13 +34,18 @@ const server=createServer(async(req,res)=>{try{
   const call={path,query:Object.fromEntries(url.searchParams),method:req.method,body};calls.push(call);
   const fail=(code,status)=>{call.status=status;return json(res,{code,message:'Synthetic fixture request failure'},status);};
   const answer=value=>{call.status=200;json(res,value);};
-  const group=path==='/api/v1/spaces'?'spaces':path==='/api/v1/assistants'?'directory':path==='/api/v1/agent'?'configuration':path==='/api/v1/providers'?'providers':path==='/api/v1/instructions'?'rules':req.method==='POST'?'save':'';
+  const group=path==='/api/v1/spaces'?'spaces':path==='/api/v1/assistants'?'directory':path==='/api/v1/agent'?'configuration':path==='/api/v1/providers'?'providers':path==='/api/v1/instructions'?'rules':path==='/api/v1/snapshot'?'snapshot':req.method==='POST'?'save':'';
   const respond=()=>{
+   if(url.searchParams.has('expected_control_id')&&url.searchParams.get('expected_control_id')!==state.control)return fail('control_changed',409);
    if(url.searchParams.has('configuration_control_id')||url.searchParams.has('configuration_boot_id'))if(url.searchParams.get('configuration_control_id')!==state.control||url.searchParams.get('configuration_boot_id')!==state.boot)return fail('identity_changed',409);
    if(req.method==='POST'){
     if(state.failSave)return fail('synthetic_network_failure',503);
     if(state.revoked)return fail('agent_link_capability_unsupported',403);
     if(url.searchParams.get('space_id')!=='local'||url.searchParams.get('assistant_id')!=='alpha')return fail('synthetic_wrong_target',409);
+    if(outbox&&['/api/v1/messages','/api/v1/turn/steer'].includes(path)){
+     const prior=accepted.get(body.request_id);if(prior&&JSON.stringify(prior.body)!==JSON.stringify(body))return fail('request_conflict',409);
+     accepted.set(body.request_id,{path,body});return answer({message_id:body.request_id,duplicate:!!prior});
+    }
     if(path==='/api/v1/assistants/alpha'){
      if(body.revision!==state.revision)return fail('assistant_changed',409);
      state.name=body.name;state.revision++;return answer({id:'alpha',name:state.name,revision:state.revision});
@@ -53,6 +59,7 @@ const server=createServer(async(req,res)=>{try{
    }
    if(state.failRead&&['configuration','providers','rules'].includes(group))return fail('synthetic_read_failure',503);
    if(path==='/api/v1/runtime')return answer({runtime_id:state.control,boot_id:state.boot,host:{hostname:'Synthetic Host'}});
+   if(outbox&&path==='/api/v1/messages/receipt'){const query=Object.fromEntries(url.searchParams),prior=accepted.get(query.request_id);return answer({...query,runtime_id:state.control,owner_id:'alpha',state:prior?'accepted':'unconfirmed',...(prior?{message_id:query.request_id}:{})});}
    if(path==='/api/v1/spaces')return answer({active_space_id:'local',items:[{id:'local',control_id:state.control,name:'Synthetic Space',kind:'local',connected:true}]});
    if(path==='/api/v1/assistants')return answer([{id:'alpha',name:state.name,revision:state.revision,phase:state.phase,executing:state.phase==='running',capabilities:caps()}]);
    if(path==='/api/v1/agent-links')return answer({items:[]});

@@ -3,6 +3,7 @@ package localui
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -23,6 +24,10 @@ func TestNativeScopeCannotForwardToRemoteOwner(t *testing.T) {
 		if strings.Contains(path, "space_id=") {
 			t.Error("UI grouping leaked into business route")
 		}
+		u, err := url.ParseRequestURI(path)
+		if err != nil || u.Query().Get("expected_control_id") != "node" || u.Query().Get("configuration_control_id") != "node" || u.Query().Get("configuration_boot_id") != "boot" {
+			t.Error("native scope stripped configuration or outbox preconditions", path, err)
+		}
 		return json.RawMessage(`{"accepted":true}`), nil
 	}, Events: func(ctx context.Context, path string, receive func(Event) error) error {
 		<-ctx.Done()
@@ -42,7 +47,7 @@ func TestNativeScopeCannotForwardToRemoteOwner(t *testing.T) {
 	if operations.Load() != 0 {
 		t.Fatal("foreign owner request used local backend")
 	}
-	if _, err = m.Call(context.Background(), "node", "POST", "/api/v1/tasks?space_id=node", json.RawMessage(`{}`)); err != nil {
+	if _, err = m.Call(context.Background(), "node", "POST", "/api/v1/tasks?space_id=node&expected_control_id=node&configuration_control_id=node&configuration_boot_id=boot", json.RawMessage(`{}`)); err != nil {
 		t.Fatal(err)
 	}
 	if operations.Load() != 1 {
