@@ -29,25 +29,25 @@ try{
       await context.setOffline(false);
       await waitForOutbox(page,([rows])=>rows.length===2&&rows[1].state==='failed'&&rows[1].problem==='conversationRetired');
       const history=page.locator('.workspace > .history');
-      const oldVisible=()=>history.locator('article.message').filter({hasText:'original conversation'}).count();
+      const oldVisible=()=>history.locator('article.message:visible').filter({hasText:'original conversation'}).count();
       if(version==='before'){
-        await history.locator('article.message').filter({hasText:'Queued original conversation'}).waitFor();
+        await history.locator('article.message:visible').filter({hasText:'Queued original conversation'}).waitFor();
         assert.equal(await oldVisible(),2);report.checks.push('exact555 negative: both accepted optimistic and queued old rows appear in replacement chat');
         await page.screenshot({path:resolve(output,'before.png')});
       }else{
-        await page.waitForFunction(()=>!document.querySelector('.workspace > .history')?.textContent.includes('original conversation'));
+        await page.waitForFunction(()=>![...document.querySelectorAll('.workspace > .history article.message')].some(row=>!row.closest('[data-preparation-surface]')&&getComputedStyle(row).visibility==='visible'&&row.textContent.includes('original conversation')));
         assert.equal(await oldVisible(),0);report.checks.push('complete target isolates queued and accepted optimistic rows from replacement chat');
         await page.screenshot({path:resolve(output,'after.png')});
         await send('New replacement conversation submission');
         const current=await waitForOutbox(page,([rows])=>rows.length===3&&rows[2].target.conversation==='replacement'&&rows[2].state==='accepted'&&!rows[2].projection_pending);
-        await history.locator('article.message').filter({hasText:'New replacement conversation submission'}).waitFor();
+        await history.locator('article.message:visible').filter({hasText:'New replacement conversation submission'}).waitFor();
         assert.equal(current.rows[2].request.conversation_id,'replacement');report.checks.push('replacement conversation can display and deliver its own new submission');
       }
       const server=await state(),posts=server.trace.filter(row=>row.kind==='post');
       assert(!posts.some(row=>row.body.request_id===original.rows[1].request.request_id));
       assert.equal(posts.filter(row=>row.body.request_id===original.rows[0].request.request_id).length,1);
       await page.getByRole('button',{name:'Saved messages',exact:true}).click();
-      const retired=page.locator('.outbox-dialog article.message').filter({hasText:'Queued original conversation'});await retired.waitFor();
+      const retired=page.locator('.outbox-dialog article.message:visible').filter({hasText:'Queued original conversation'});await retired.waitFor();
       assert.match(await retired.innerText(),/conversation/);
       assert.equal(original.rows[1].target.conversation,'main');
       await page.screenshot({path:resolve(output,'saved-'+version+'.png')});

@@ -29,11 +29,12 @@ try{
     const t=key=>translate(locale,key),context=await browser.newContext({viewport:{width,height:844},serviceWorkers:'block'});
     const page=await context.newPage();page.setDefaultTimeout(20000);page.on('pageerror',error=>report.errors.push(error.message));
     try{
-      await config({phase:'ready',historyCount:48,hold:['configuration','rules','snapshot'],release:'all',failSave:false,name:'Synthetic Assistant',model:'synthetic-original',revision:1,configRevision:0,revoked:false});
+      await config({phase:'ready',historyCount:48,hold:['configuration','rules'],release:'all',failSave:false,name:'Synthetic Assistant',model:'synthetic-original',revision:1,configRevision:0,revoked:false});
       const callStart=(await config()).calls.length;
       await page.goto(origin+'/?assistant_id=alpha&locale='+locale);
       await page.waitForFunction(()=>!!document.querySelector('#pot-composer')&&!document.querySelector('#pot-composer').disabled);
       await page.waitForFunction(()=>document.querySelector('.connection-status.is-connected'));
+      await config({hold:['configuration','rules','snapshot']});
       await context.setOffline(true);
       const send=async text=>{await page.locator('#pot-composer').fill(text);await page.locator('.send-button').click();};
       await send('First fixed submission '+width);
@@ -92,7 +93,7 @@ try{
       check(!saved.calls.slice(callStart).some(call=>call.method==='POST'&&['/api/v1/messages','/api/v1/turn/steer'].includes(call.path)),'held snapshot prevents POST but preserves queue identity/order '+width);
       await send('Third submission while network reads held '+width);
       await waitForOutbox(page,([rows])=>rows.length===3);
-      await history.locator('article.message').filter({hasText:'Third submission while network reads held '+width}).waitFor();
+      await history.locator('article.message:visible').filter({hasText:'Third submission while network reads held '+width}).waitFor();
       await page.screenshot({path:resolve(output,'combined-'+width+'.png')});
       await config({hold:[],release:'all'});
       const accepted=await waitForOutbox(page,([rows])=>rows.length===3&&rows.every(row=>row.state==='accepted'&&!row.projection_pending),{timeout:45000});
