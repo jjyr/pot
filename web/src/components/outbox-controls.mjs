@@ -1,9 +1,10 @@
 import {translate} from '../locales/messages.mjs';
+import {outboxIdentityKey} from '../state/chat-outbox-store.mjs';
 const node=(tag,className,text)=>{const value=document.createElement(tag);value.className=className;if(text!==undefined)value.textContent=text;return value;};
 // Construct only inside the owning message window's prepared render. Event
 // handlers change intent and request another measured render, never live layout.
 export function outboxControls(value,{outbox,editors,locale,changed,notify}){
-  const t=key=>translate(locale(),key),key=value.sequence,editing=editors.has(key),host=node('div','outbox-controls');
+  const t=key=>translate(locale(),key),key=outboxIdentityKey(value),editing=editors.has(key),host=node('div','outbox-controls');
   host.setAttribute('role','status');host.append(node('span','outbox-status',t('outbox.'+(value.state==='failed'?value.problem||'rejected':value.state))));
   const action=(label,run)=>{const button=node('button','text-button',t(label));button.type='button';button.onclick=()=>Promise.resolve().then(run).catch(()=>notify(t('outbox.storageFailed')));return button;};
   if(value.state==='failed')host.append(action('retry',()=>outbox.retry(value)));

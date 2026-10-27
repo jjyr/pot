@@ -7,6 +7,7 @@ export function outboxTarget(client,scope,snapshot){
   return {...target,key:JSON.stringify(Object.values(target))};
 }
 export const outboxTerminal=value=>['accepted','cancelled'].includes(value.state);
+export const outboxIdentityKey=value=>JSON.stringify([value.sequence,value.target.key,value.target.host,value.target.control,value.target.space,value.target.owner,value.target.conversation,value.request.request_id]);
 const sameSubmission=(value,expected)=>value.request.request_id===expected.request.request_id&&['key','host','control','space','owner','conversation'].every(key=>value.target[key]===expected.target[key]);
 
 // Used by the draft writer in its serialized lane. The transaction transfers

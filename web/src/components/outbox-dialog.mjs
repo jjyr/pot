@@ -7,6 +7,7 @@ import {renderMessageReferences} from './message-references.mjs';
 import {outboxControls} from './outbox-controls.mjs';
 import {copyFeedback} from './motion.mjs';
 import {translate} from '../locales/messages.mjs';
+import {outboxIdentityKey} from '../state/chat-outbox-store.mjs';
 const node=(tag,className,text)=>{const value=document.createElement(tag);value.className=className;if(text!==undefined)value.textContent=text;return value;};
 
 // Local inspection survives server-side deletion and identity retirement. It is
@@ -19,7 +20,7 @@ export function createOutboxDialog({client,outbox,locale,notify}){
   const messageWindow=createMessageWindow({scroller:history,host,active:()=>root.open&&!closed,requestRender:()=>update(),render(message,existing){
     const value=message.queue,scope={space:value.target.space,owner:value.target.owner};
     const record=existing||{row:node('article','message role-user')};
-    const signature=JSON.stringify([value.revision,locale(),editors.has(value.sequence)]);
+    const signature=JSON.stringify([outboxIdentityKey(value),value.revision,locale(),editors.has(outboxIdentityKey(value))]);
     const body=preparedAsset('saved-message',signature,()=>{
       const body=node('div','message-body'),destination=node('p','hint',value.destination?.name||t('outbox.destination'));
       if(value.destination?.space)destination.textContent+=' · '+value.destination.space;
@@ -37,7 +38,7 @@ export function createOutboxDialog({client,outbox,locale,notify}){
     if(closed)return;title.textContent=t('outbox.title');close.textContent=t('close');root.setAttribute('aria-label',t('outbox.title'));empty.textContent=t('outbox.empty');
     if(!root.open)return;
     const rows=outbox.rows().filter(value=>value.state!=='cancelled');empty.hidden=!!rows.length;
-    messageWindow.setMessages(rows.map(value=>({id:'saved:'+value.sequence,viewKey:'saved:'+value.sequence,role:'user',text:value.request.text,queue:value,editing:editors.has(value.sequence)})),{layoutEpoch:[locale()],renderContext:{}});
+    messageWindow.setMessages(rows.map(value=>{const key=outboxIdentityKey(value),id='saved:'+encodeURIComponent(key);return {id,viewKey:id,role:'user',text:value.request.text,queue:value,editing:editors.has(key)};}),{layoutEpoch:[locale()],renderContext:{}});
   }
   root.addEventListener('close',()=>messageWindow.suspend());
   return {root,update,open(){root.showModal();update();},close(){closed=true;messageWindow.close();root.close();root.remove();}};

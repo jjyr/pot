@@ -1,4 +1,4 @@
-import {createChatOutboxStore,outboxTerminal} from './chat-outbox-store.mjs';
+import {createChatOutboxStore,outboxTerminal,outboxIdentityKey} from './chat-outbox-store.mjs';
 import {validSnapshot} from './conversation.mjs';
 import {supportsCapability} from './agent-links.mjs';
 import {uploadChatOriginal} from './chat-upload.mjs';
@@ -10,7 +10,6 @@ export function createChatOutbox({client,changed=()=>{},cacheFailed=()=>{},stora
   const channel=globalThis.BroadcastChannel?new BroadcastChannel('pot-chat-outbox:'+(client.chatCacheName||'pot-chat-cache')):null;
   const publish=()=>{if(!closed)changed();};
   const fail=problem=>Object.assign(Error(problem),{outboxProblem:problem});
-  const projectionKey=value=>JSON.stringify([value.sequence,value.target.key,value.target.host,value.target.control,value.target.space,value.target.owner,value.target.conversation,value.request.request_id]);
   const ready=target=>!closed&&online()&&client.onlineReady!==false&&client.operationsReady!==false&&client.operationScopeReady?.(target)!==false;
   async function refresh(){rows=await storage.list();failure=null;publish();return rows;}
   async function bounded(work){const abort=new AbortController(),timer=clock.setTimeout(()=>abort.abort(),timeout);try{return await Promise.race([work(abort.signal),new Promise((_,reject)=>abort.signal.addEventListener('abort',()=>reject(Error('outbox_timeout')),{once:true}))]);}finally{clock.clearTimeout(timer);}}
@@ -38,7 +37,7 @@ export function createChatOutbox({client,changed=()=>{},cacheFailed=()=>{},stora
     return client.resources.applyCommand(path,{...scope,body:request,commandID:request.request_id},receipt,['conversation','assistants']);
   }
   function commitAcceptance(value,receipt,scope,commit){
-    const key=projectionKey(value);if(projections.has(key))return projections.get(key);
+    const key=outboxIdentityKey(value);if(projections.has(key))return projections.get(key);
     repaired.add(key);
     const retry=async()=>{await commit();await storage.releaseFiles(value);repaired.delete(key);channel?.postMessage('changed');await refresh();};
     const promise=retry().catch(reason=>{if(!closed)cacheFailed({...value,key:JSON.stringify([value.target.host,JSON.stringify([value.target.space,value.target.owner]),value.target.conversation])},reason,retry);}).finally(()=>projections.delete(key));
@@ -110,7 +109,7 @@ export function createChatOutbox({client,changed=()=>{},cacheFailed=()=>{},stora
     if(closed)return Promise.resolve();if(flight)return flight;
     flight=(async()=>{
       await refresh();if(!online()||client.onlineReady===false||client.operationsReady===false)return;
-      for(const value of rows)if(value.state==='accepted'&&value.projection_pending&&!repaired.has(projectionKey(value))&&client.runtime?.runtime_id===value.target.host&&client.spaces?.find(space=>space.id===value.target.space)?.control_id===value.target.control){
+      for(const value of rows)if(value.state==='accepted'&&value.projection_pending&&!repaired.has(outboxIdentityKey(value))&&client.runtime?.runtime_id===value.target.host&&client.spaces?.find(space=>space.id===value.target.space)?.control_id===value.target.control){
         const scope={space:value.target.space,owner:value.target.owner,expectedControl:value.target.control};commitAcceptance(value,{message_id:value.message_id,duplicate:true},scope,()=>acceptanceProjection(value,{message_id:value.message_id,duplicate:true},scope));
       }
       // One head per immutable target; unrelated assistants progress independently.

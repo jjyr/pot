@@ -1,7 +1,7 @@
 import {outboxControls} from './outbox-controls.mjs';
 import {createOutboxDialog} from './outbox-dialog.mjs';
 import {createChatOutbox} from '../state/chat-outbox.mjs';
-import {outboxTarget} from '../state/chat-outbox-store.mjs';
+import {outboxTarget,outboxIdentityKey} from '../state/chat-outbox-store.mjs';
 import {projectOutboxRows} from '../state/chat-outbox-projection.mjs';
 import {moveConversationNode} from './conversation-dom.mjs';
 import {currentPreparedRender,preparedAsset,consumePreparationSurrogates} from './prepared-render.mjs';
@@ -942,7 +942,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if(prepared)moveConversationNode(bubble,prepared);
     }
     if(message.queue){
-      const queued=message.queue,editing=queueEditors.has(queued.sequence),signature=JSON.stringify([queued.revision,locale,editing]);
+      const queued=message.queue,editing=queueEditors.has(outboxIdentityKey(queued)),signature=JSON.stringify([outboxIdentityKey(queued),queued.revision,locale,editing]);
       if(record.queueSignature!==signature||!record.queueNode?.isConnected){
         const controls=preparedAsset('outbox-controls',signature,()=>outboxControls(queued,{outbox,editors:queueEditors,locale:()=>locale,changed:()=>renderMessages(),notify:value=>{error=value;updateControls();}}));
         record.queueNode?.remove();record.queueNode=controls;record.queueSignature=signature;moveConversationNode(bubble,controls);
@@ -980,7 +980,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const snapshot=state.snapshot;
     const sending=state.sends.get(editorOwner||(snapshot&&ownerKey(snapshot)));
     const queued=outbox?.rows().filter(row=>row.state!=='cancelled'&&row.target.host===client.runtime?.runtime_id&&row.target.space===selectedAssistant?.space_id&&row.target.owner===selectedAssistant?.id&&row.target.control===controlOf(selectedAssistant)&&row.target.conversation===snapshot?.conversation_id)||[];
-    const queueSignature=JSON.stringify(queued.map(row=>[row.sequence,row.revision,queueEditors.has(row.sequence)]));
+    const queueSignature=JSON.stringify(queued.map(row=>[outboxIdentityKey(row),row.revision,queueEditors.has(outboxIdentityKey(row))]));
     const activeTurn=snapshot?.running?(snapshot.messages.find(message=>message.id===snapshot.turn_id)?.request_id||snapshot.turn_id):null;
     const offline=connection!=='connected'||disconnected||selectedAssistant?.offline;
     if(!chatProjection||chatProjection.queueSignature!==queueSignature||chatProjection.snapshot!==snapshot||chatProjection.sending!==sending||chatProjection.phase!==sending?.phase||chatProjection.detail!==sending?.detail||chatProjection.offline!==offline||chatProjection.activeTurn!==activeTurn){
