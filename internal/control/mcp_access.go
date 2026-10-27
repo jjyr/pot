@@ -17,9 +17,10 @@ import (
 // MCPAccessOptions does not accept an owner operation Port. Remote callers enter
 // a collaboration-only typed boundary and never gain authority from SDK metadata.
 type MCPAccessOptions struct {
-	OAuth *MCPOAuthServer
-	Queue *MCPAccessQueue
-	Local *Service
+	HumanReview agentlink.MCPHumanReviewBackend
+	OAuth       *MCPOAuthServer
+	Queue       *MCPAccessQueue
+	Local       *Service
 	// ReceiverCapabilities supplies the provisioned driver's effective description.
 	// A nil callback disables registration, rather than trusting an advertisement.
 	ReceiverCapabilities func(context.Context, agentlink.MCPReceiver, protocol.AgentRef) (agentlink.Description, error)
@@ -46,6 +47,9 @@ func NewMCPAccess(o MCPAccessOptions) (*MCPAccess, error) {
 	if _, e := o.Queue.DB.Exec("UPDATE mcp_remote_approvals SET state='invalidated' WHERE state='pending'"); e != nil {
 		return nil, e
 	}
+	if o.HumanReview == nil && o.Local != nil {
+		o.HumanReview, _ = any(o.Local).(agentlink.MCPHumanReviewBackend)
+	}
 	o.Queue.CheckConnection = o.OAuth.CheckConnection
 	a := &MCPAccess{options: o, sdk: mcp.NewServer(&mcp.Implementation{Name: "pot", Version: "1"}, nil), receiverSDK: mcp.NewServer(&mcp.Implementation{Name: "pot", Version: "1"}, nil)}
 	if o.Local != nil {
@@ -59,6 +63,7 @@ func NewMCPAccess(o MCPAccessOptions) (*MCPAccess, error) {
 	a.nodeExecutionTools()
 	a.nodeSubmitTool()
 	a.nodeTaskTools()
+	a.reverseHumanReviewTools()
 	transport := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		info := mcp.TokenInfoFromContext(r.Context())
 		if info != nil {

@@ -12,6 +12,11 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
+type mcpRemoteHumanPort interface {
+	MCPRemoteReviewView(context.Context, string) []any
+	DecideMCPRemoteReview(context.Context, string, string, string) error
+}
+
 type linkedReview struct {
 	LinkID string
 	Name   string
@@ -92,6 +97,12 @@ func (s *Service) decideLinkedApproval(ctx context.Context, owner, id, action st
 			}
 		}
 	}
+	if strings.HasPrefix(id, "linked:mcp-outbound:") {
+		if remote, ok := any(s).(mcpRemoteHumanPort); ok {
+			return remote.DecideMCPRemoteReview(ctx, owner, id, action)
+		}
+		return agentlink.ErrNotFound
+	}
 	for _, item := range s.linkedReviews(ctx, owner) {
 		for _, p := range item.Pending {
 			if linkedApprovalID(item, p.ID) != id {
@@ -117,6 +128,9 @@ func (s *Service) reviewView(ctx context.Context, owner string, policy any, pend
 			args["justification"] = args["reason"]
 			pending = append(pending, map[string]any{"id": mcpHumanApprovalID(item), "once_only": true, "source": item.Pending.Context.Binding.Task.NodeID, "details": p.Params, "request": map[string]any{"owner": owner, "task": item.Task, "tool": p.Method, "args": args, "call_id": p.ID, "turn": item.Pending.Context.Binding.RunID, "machine_id": item.Pending.Context.Binding.Task.NodeID}})
 		}
+	}
+	if remote, ok := any(s).(mcpRemoteHumanPort); ok {
+		pending = append(pending, remote.MCPRemoteReviewView(ctx, owner)...)
 	}
 	linked := s.linkedReviews(ctx, owner)
 	for _, item := range linked {
