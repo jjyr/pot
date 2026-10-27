@@ -356,3 +356,17 @@ process-local lease is refreshed by authenticated registration and claim polls.
 New work requires a live lease; exact accepted retries retain their original
 receipts after disconnect or lease loss. Restart clears liveness without deleting
 saved endpoints, work, reports or artifacts.
+
+When execution stays on the listening Pot, the directing node uses the same
+outbound connection to poll `pot_receiver_human_review_read` and return a decision
+through `pot_receiver_human_review_decide`. These internal RPCs are absent unless
+the owning backend implements the complete `MCPHumanReviewBackend`. They retain
+public accepted Task ID, actual execution Task/run/generation, original caller and
+request, pending request ID and process epoch. The backend must verify the
+original acceptance relationship and consume only the existing pending request;
+registration and a supplied user field are insufficient authority. The decision
+must originate in the directing node's authenticated human `ManageApproval` port,
+with no model/tool-message path. It grants no reusable rule or owner policy.
+An empty read selector derives the authenticated ordinary caller; another user
+cannot be selected or converted into a node actor. The original human provenance
+remains separate from the authenticated collaboration caller.

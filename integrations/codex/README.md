@@ -117,10 +117,8 @@ reverse message and Task tools. Both local Host and service gates enforce this
 role boundary. Ordinary global MCP credentials never become execution identity.
 Codex thread start/resume injects the required `mcp_servers.pot_receiver` service
 with exact actor/job/run environment. This per-thread override writes no global
-client config and leaves unrelated servers/policies to the native client. Actual
-Pot HTTP plus a fake native process verifies the trusted gateway; native client
-loading, effective tool policies, plugin lifecycle and real-model behavior still
-require live Codex validation.
+client config and leaves unrelated servers/policies to the native client. Verify native client loading, effective tool policies and plugin lifecycle on
+the supported Codex version before operating a receiver.
 
 ## Breaking upgrade
 

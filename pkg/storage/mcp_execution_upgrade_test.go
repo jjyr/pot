@@ -108,7 +108,12 @@ func TestMCPNodeExecutionUpgradeFromPreviousVersion(t *testing.T) {
 	if e = db.QueryRow("SELECT body,revision FROM mcp_receiver_journal").Scan(&body, &revision); e != nil || body != `{"schema_version":2,"outbox":{"result":"unknown-keep"}}` || revision != 17 {
 		t.Fatal("node attestation migration changed accepted work", body, revision, e)
 	}
-	if _, e = db.Exec(`INSERT INTO mcp_node_executions VALUES('c','task','execution','{"actor":"same","run":"real"}','',1)`); e != nil {
+	currentBinding := `{"actor":{"node_id":"local-node","kind":"task","agent_id":"root-task"},"task":{"node_id":"local-node","kind":"task","agent_id":"root-task"},"run_id":"real-current-run"}`
+	endedBinding := `{"actor":{"node_id":"local-node","kind":"task","agent_id":"ended-task"},"task":{"node_id":"local-node","kind":"task","agent_id":"ended-task"},"run_id":"real-ended-run"}`
+	if _, e = db.Exec(`INSERT INTO mcp_node_executions VALUES('c','{"node_id":"local-node","kind":"task","agent_id":"root-task"}','execution',?,'',1)`, currentBinding); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = db.Exec(`INSERT INTO mcp_node_executions VALUES('c','{"node_id":"local-node","kind":"task","agent_id":"ended-task"}','ended-execution',?,'',0)`, endedBinding); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = db.Exec(`UPDATE mcp_node_executions SET active=2`); e == nil {
@@ -118,7 +123,10 @@ func TestMCPNodeExecutionUpgradeFromPreviousVersion(t *testing.T) {
 		t.Fatal(e)
 	}
 	var binding string
-	if e = db.QueryRow("SELECT binding FROM mcp_node_executions").Scan(&binding); e != nil || binding != `{"actor":"same","run":"real"}` {
+	if e = db.QueryRow("SELECT binding FROM mcp_node_executions WHERE execution_id='execution' AND active=1").Scan(&binding); e != nil || binding != currentBinding {
 		t.Fatal("attestation changed on reentry", binding, e)
+	}
+	if e = db.QueryRow("SELECT binding FROM mcp_node_executions WHERE execution_id='ended-execution' AND active=0").Scan(&binding); e != nil || binding != endedBinding {
+		t.Fatal("ended attestation reactivated on reentry", binding, e)
 	}
 }
