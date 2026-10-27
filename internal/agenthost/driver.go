@@ -12,7 +12,7 @@ import (
 // Local Codex review and assistant mail remain separate existing Host paths;
 // they are not yet connected to the receiver extension. Paths are not file bytes.
 func (r Runtime) ReceiverCapabilities() agentlink.Description {
-	d := agentlink.Description{Version: 1, Scope: "peer", Operations: []agentlink.Operation{}}
+	d := agentlink.Description{Version: 1, Scope: "caller", Operations: []agentlink.Operation{}}
 	if r.Kind == "codex" || r.Kind == "antigravity" {
 		d.Operations = []agentlink.Operation{agentlink.TaskSubmit, agentlink.TaskRead, agentlink.TaskCancel, agentlink.TaskInput, agentlink.TaskEvents}
 	}

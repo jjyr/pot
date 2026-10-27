@@ -30,6 +30,9 @@ func TestNativeEnvironmentReplacesInheritedIdentityWithoutChangingLogin(t *testi
 func TestReceiverDriverCapabilitiesAreConservative(t *testing.T) {
 	for _, r := range []Runtime{Codex(), Antigravity()} {
 		d := r.ReceiverCapabilities()
+		if d.Scope != "caller" {
+			t.Fatal("receiver requires caller scope", d)
+		}
 		for _, op := range []agentlink.Operation{agentlink.TaskSubmit, agentlink.TaskRead, agentlink.TaskCancel, agentlink.TaskInput, agentlink.TaskEvents} {
 			if !d.Supports(op) {
 				t.Fatal(r.Kind, op)
