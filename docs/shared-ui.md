@@ -184,6 +184,16 @@ Ready media reflows from intrinsic dimensions and current ancestor CSS when the
 layout generation changes. A measurement surrogate must not carry its old rendered
 width or height into the new generation. The fixed deadline frame belongs to an
 unresolved component's lifetime and remains distinct from this ready-media reflow.
+Ready HTML uses its actual browsing context at the candidate width in a transparent
+top-layer viewport, retaining its DOM parent, document state and lease. An inert
+projection of the old measured frame shows the loading status during this bounded
+handoff and never supplies a new reading anchor. Only an already focused native
+document retains its existing focus; new candidates stay inside the inert hidden
+surface. Commit and cancellation restore the native viewport before retiring the
+surface. Cancellation retains the unfinished native reflow budget until commit;
+this does not renew an unresolved component's content deadline. Resize, result
+and dependency notices carry resource revisions through
+the same preparation batch; a late revision invalidates an older measurement.
 
 Tool candidates inherit the live tool's one-time approval auto-open state and
 its actual open/raw disclosure when no explicit reading memory overrides it;
@@ -192,6 +202,9 @@ its tool; later explicit close/open actions remain authoritative at commit.
 An unexpected preparation/commit exception retires unfinished candidates and
 releases transient layout holds before propagating the error. A failed transaction
 does not report a prepared layout or reuse slots already consumed by that commit.
+This includes errors in the first layout check and later animation/timer callbacks.
+Observer callbacks cannot silently retry a failed transaction; the caller's next
+explicit message update is its retry entry point and receives a fresh candidate.
 
 At the deadline an unresolved block receives a fixed, scrollable outer frame of
 at least 240 pixels; an inline reference keeps its measured link box. Binding,

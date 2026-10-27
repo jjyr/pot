@@ -1,0 +1,52 @@
+import assert from 'node:assert/strict';
+
+export async function preparedNativeLifecycle(browser,origin){
+  const results=[];
+  for(const query of ['', '?cancel', '?fallback&cancel&keyboard']){
+    const context=await browser.newContext(),page=await context.newPage(),errors=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    try{
+      await page.goto(origin+'/scripts/tests/fixtures/prepared-native.html'+query);
+      if(query.includes('keyboard')){
+        await page.waitForFunction(()=>window.nativeKeyboardReady);
+        // Send to the current focus without refocusing the iframe element;
+        // refocusing the host can itself reset a sandbox's internal focus.
+        await page.keyboard.press('Enter');
+      }
+      await page.waitForFunction(()=>window.preparedNativeResult);
+      const result=await page.evaluate(()=>window.preparedNativeResult);
+      assert.equal(result.failure,null);assert.deepEqual(errors,[]);
+      assert.deepEqual(result.errors,[]);assert.equal(result.acquired,result.released);
+      assert.equal(result.observations.find(item=>item.label==='fresh-current-width-reference').parity,0);
+      results.push({query,...result});
+    }finally{await context.close();}
+  }
+  for(const scenario of ['commit','prepare','prepare-raf']){
+    const context=await browser.newContext(),page=await context.newPage();
+    try{
+      await page.goto(origin+'/scripts/tests/fixtures/prepared-failure.html?scenario='+scenario);
+      await page.waitForFunction(()=>window.preparedFailureResult);
+      const result=await page.evaluate(()=>window.preparedFailureResult);
+      assert.equal(result.failure,null);assert.equal(result.errors.length,1);
+      assert(result.errors[0].message.includes('Synthetic independent '+(scenario==='commit'?'commit':'preparation')+' interruption'));
+      assert.equal(result.acquired,result.released);
+      results.push(result);
+    }finally{await context.close();}
+  }
+  const context=await browser.newContext(),page=await context.newPage(),errors=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  try{
+    await page.goto(origin+'/scripts/tests/fixtures/prepared-events.html');
+    await page.waitForFunction(()=>window.htmlEvents?.ready);
+    const document=page.frameLocator('.history:not([data-preparation-surface]) iframe');
+    await document.getByRole('button',{name:'Grow content'}).click();
+    await document.getByRole('button',{name:'Publish result'}).click();
+    await document.getByRole('button',{name:'Report dependency'}).click();
+    await page.getByRole('button',{name:'Finish iframe actions'}).click();
+    await page.waitForFunction(()=>window.preparedEventsResult);
+    const result=await page.evaluate(()=>window.preparedEventsResult);
+    assert.equal(result.failure,null);assert.deepEqual(errors,[]);assert.deepEqual(result.errors,[]);
+    assert.equal(result.acquired,result.released);results.push(result);
+  }finally{await context.close();}
+  return results;
+}

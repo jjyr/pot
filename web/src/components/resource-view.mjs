@@ -1,4 +1,5 @@
-import {currentPreparedRender,preparedAsset,preparedIsland,deferPreparedConnection} from './prepared-render.mjs';
+import {currentPreparedRender,preparedAsset,preparedIsland,deferPreparedConnection,adoptPreparedChildren} from './prepared-render.mjs';
+import {moveConversationNode} from './conversation-dom.mjs';
 import {translate} from '../locales/messages.mjs';
 import {renderMarkdown} from './markdown.mjs';
 import {openImageViewer} from './image-viewer.mjs';
@@ -22,6 +23,30 @@ function register(){
   if(customElements.get('pot-resource'))return;
   customElements.define('pot-resource',class extends HTMLElement{
     generation=0;
+    queuePreparedState(change){
+      this.resourceRenderState={...this.resourceRenderState,...change,revision:(this.resourceRenderState?.revision||0)+1};
+      const iframe=this.querySelector('iframe'),hidden=!!this.closest('[data-preparation-surface]'),managed=hidden||this.closest('.prepared-row,.prepared-region');
+      if(change.resize!==undefined&&(hidden||iframe?.nativePreparation||this.dataset.preparedFallback==='true'))iframe?.style.setProperty('--resource-height',change.resize+'px');
+      if(hidden||!managed){this.projectPreparedState(this);if(hidden){let parent=this;while(parent&&!parent.preparedContext)parent=parent.parentElement;const context=parent?.preparedContext;if(context?.alive)context.changed?.();}return;}
+      if(change.resize!==undefined&&iframe?.nativePreparation&&!iframe.nativePreparation.context.ready)return;
+      this.dispatchEvent(new CustomEvent('pot:prepare-resize',{bubbles:true}));
+    }
+    projectPreparedState(target){
+      if(!target)return;const state=structuredClone(this.resourceRenderState||{revision:0});target.preparedResourceState=state;
+      const iframe=target.querySelector('iframe')||target.querySelector('[data-native-preparation]');if(state.resize!==undefined)iframe?.style.setProperty('--resource-height',state.resize+'px');
+      if(state.result!==undefined){const body=target.querySelector(':scope > .resource-body');let result=body.querySelector(':scope > .resource-interaction-result');if(!result){result=node('details','resource-interaction-result');result.append(node('summary','resource-result-title',translate(target.ownerDocument.documentElement.lang,'resource.result')),node('pre','resource-result-value'));body.append(result);}const pre=result.querySelector('pre');if(pre.textContent!==state.result)pre.textContent=state.result;}
+      if(state.dependencyError){const notice=target.lastElementChild;notice.hidden=false;notice.textContent=translate(target.ownerDocument.documentElement.lang,'fileReference.unsupported_dependency');}
+    }
+    commitPreparedState(projection){
+      const state=projection.preparedResourceState;if(!state||projection===this||projection.preparedResourceCommitted)return;
+      if(state.revision!==(this.resourceRenderState?.revision||0))throw Error('Prepared resource state does not match its committed revision');
+      const body=this.querySelector(':scope > .resource-body'),candidate=projection.querySelector(':scope > .resource-body > .resource-interaction-result'),existing=body.querySelector(':scope > .resource-interaction-result');
+      if(candidate&&existing){const pre=existing.querySelector('pre'),next=candidate.querySelector('pre'),summary=existing.querySelector('summary'),nextSummary=candidate.querySelector('summary');adoptPreparedChildren(pre,next);adoptPreparedChildren(existing,candidate,{retain:[[next,pre],...(summary.isEqualNode(nextSummary)?[[nextSummary,summary]]:[])]});}
+      else if(candidate)moveConversationNode(body,candidate);
+      if(state.resize!==undefined)this.querySelector('iframe')?.style.setProperty('--resource-height',state.resize+'px');
+      if(state.dependencyError){const notice=this.lastElementChild,copy=projection.lastElementChild;notice.hidden=copy.hidden;adoptPreparedChildren(notice,copy);}
+      this.preparedResourceState=state;projection.preparedResourceCommitted=true;
+    }
     connectedCallback(){
       if(this.preparationSurrogate||this.started)return;if(deferPreparedConnection(this,()=>this.connectedCallback()))return;this.started=true;
       const generation=++this.generation,{resource,mode,caption}=this.presentation,preview=resourcePreviewKind(resource),kind=this.line&&preview==='html'?'text':preview;
@@ -86,11 +111,11 @@ function register(){
           if(!current()||event.source!==frame.contentWindow||event.data?.type!=='pot-resource'||event.data.token!==token)return;
           if(event.data.action==='ready')ready();
           if(event.data.action==='escape')this.closest('dialog')?.close();
-          if(event.data.action==='dependency_error'){this.noticeKey='fileReference.unsupported_dependency';notice.hidden=false;refresh();}
-          if(event.data.action==='resize'&&Number.isFinite(event.data.value))frame.style.setProperty('--resource-height',`${Math.min(960,Math.max(180,event.data.value))}px`);
+          if(event.data.action==='dependency_error')this.queuePreparedState({dependencyError:true});
+          if(event.data.action==='resize'&&Number.isFinite(event.data.value)){this.nativeResizeRevision=(this.nativeResizeRevision||0)+1;this.queuePreparedState({resize:Math.min(960,Math.max(180,event.data.value))});}
           if(event.data.action==='result'){
             let value;try{value=JSON.stringify(event.data.value);}catch{return;}if(!value||value.length>16384)return;
-            let result=body.querySelector('.resource-interaction-result');if(!result){result=node('details','resource-interaction-result');result.append(node('summary','resource-result-title',t('result')),node('pre','resource-result-value'));body.append(result);}result.querySelector('pre').textContent=value;
+            this.queuePreparedState({result:value});
           }
         };
         window.addEventListener('message',onMessage);this.stopMessages=()=>window.removeEventListener('message',onMessage);
@@ -102,6 +127,7 @@ function register(){
       this.preparationTicket?.release();
       if(!this.started)return;this.started=false;
       ++this.generation;this.viewer?.close();this.stopLocale?.();this.stopMessages?.();clearTimeout(this.loadTimer);
+      delete this.nativeReflowDeadline;
       for(const media of this.querySelectorAll('audio,video')){media.pause();media.removeAttribute('src');media.load();}
       for(const image of this.querySelectorAll('img'))image.removeAttribute('src');
       for(const frame of this.querySelectorAll('iframe')){frame.removeAttribute('src');frame.srcdoc='';}

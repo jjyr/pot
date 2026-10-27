@@ -1,0 +1,8 @@
+<!doctype html><meta charset="utf-8"><style>html,body{margin:0;padding:0}#text{font:16px/20px sans-serif;overflow-wrap:anywhere;padding:8px}</style><div id="text"></div><script>
+const token=new URL(location.href).searchParams.get('token'),documentID=crypto.randomUUID();let state=17,last;
+document.querySelector('#text').textContent='Synthetic responsive wrapping content. '.repeat(18);
+const input=document.createElement('input');input.style.cssText='position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';document.body.append(input);input.onkeydown=event=>{if(event.key==='Enter'){state++;parent.postMessage({type:'synthetic-key',token,documentID,state,value:input.value,focused:document.activeElement===input,trusted:event.isTrusted},'*');}};addEventListener('message',event=>{if(event.data?.type!=='synthetic-control')return;if(event.data.set){state=29;input.value='retained state';input.focus({preventScroll:true});}parent.postMessage({type:'synthetic-probe',token,documentID,state,value:input.value,focused:document.activeElement===input},'*');});
+parent.postMessage({type:'synthetic-boot',token,documentID,state},'*');
+function report(){const box=document.querySelector('#text').getBoundingClientRect();if(box.height===last)return;last=box.height;parent.postMessage({type:'pot-resource',token,action:'resize',value:box.height},'*');parent.postMessage({type:'synthetic-size',token,documentID,state,width:box.width,height:box.height,viewport:innerWidth},'*');}
+new ResizeObserver(report).observe(document.querySelector('#text'));addEventListener('resize',report);report();parent.postMessage({type:'pot-resource',token,action:'ready'},'*');
+</script>

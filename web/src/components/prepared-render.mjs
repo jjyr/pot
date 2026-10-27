@@ -50,7 +50,7 @@ export function withPreparedRender(context,member,work){
 }
 
 export function createPreparedRender({previousRoot,renderContext,deadlines=new Map(),member='',reframe=false,budget=createPreparationBudget()}={}){
-  const context={phase:'prepare',disclosures:new Map(),now:Date.now(),previousRoot,previousRoots:new Map(),registeredRoots:new WeakSet(),renderContext,deadlines,member,budget,connectionContext:{budget,alive:true},localDeadlines:new Map(),reframe,frames:new Map(),islands:new Map(),slots:new Map(),incompleteSources:new Map(),assets:new Map(),used:new Map(),alive:true};
+  const context={phase:'prepare',resourceStates:new Map(),nativeIslands:new Map(),disclosures:new Map(),now:Date.now(),previousRoot,previousRoots:new Map(),registeredRoots:new WeakSet(),renderContext,deadlines,member,budget,connectionContext:{budget,alive:true},localDeadlines:new Map(),reframe,frames:new Map(),islands:new Map(),slots:new Map(),incompleteSources:new Map(),assets:new Map(),used:new Map(),alive:true};
   registerPreparedRoot(context,previousRoot);return context;
 }
 export function preparedPreviousRoot(context,member){return context.previousRoots.get(member)||context.previousRoot;}
@@ -73,7 +73,7 @@ export function registerPreparedRoot(context,root){
 // Surrogates never acquire resources or run custom-element connection work.
 // The old island remains live, including its selection/media/viewer state.
 export function staticPreparationClone(source){
-  const clone=source.cloneNode(true),originals=[source,...source.querySelectorAll('*')],copies=[clone,...clone.querySelectorAll('*')];
+  const clone=source.cloneNode(true),originals=[source,...source.querySelectorAll('*')],copies=[clone,...clone.querySelectorAll('*')],pairs=originals.map((old,index)=>[old,copies[index]]);
   for(let index=0;index<copies.length;index++){
     const next=copies[index],old=originals[index];
     next.removeAttribute('id');next.removeAttribute('autofocus');
@@ -96,6 +96,7 @@ export function staticPreparationClone(source){
       next.preparationMedia=true;
     }
   }
+  for(const [old,next]of pairs){old.projectPreparedState?.(next);const environment=currentPreparedRender();if(environment?.context.phase==='prepare'&&old.projectPreparedState)environment.context.resourceStates.set(old,next);if(environment?.context.phase==='prepare'&&environment.context.reframe&&old.localName==='pot-resource'&&old.dataset.kind==='html'&&old.dataset.state==='ready'&&old.dataset.preparedFallback!=='true'){const iframe=old.querySelector('iframe'),projection=next.querySelector('iframe');if(iframe&&projection)environment.context.nativeIslands.set(iframe,{context:environment.context,original:iframe,projection,owner:old,stable:0});}}
   return clone;
 }
 
@@ -114,10 +115,78 @@ export function preparedIsland(element){
 
 export function consumePreparationSurrogates(root){
   for(const element of [...root.childNodes]){
-    if(element.preparationOriginal){moveConversationNode(element.parentNode,element.preparationOriginal,element);element.remove();}
+    if(element.preparationOriginal){element.preparationOriginal.commitPreparedState?.(element);moveConversationNode(element.parentNode,element.preparationOriginal,element);element.remove();}
     else if(element.nodeType===1)consumePreparationSurrogates(element);
   }
   return root;
+}
+
+// The real iframe keeps its DOM parent and browsing context. Its temporary
+// transparent top-layer viewport supplies current document layout even while
+// the conversation surface is hidden or clipped by a containing block.
+function stageNativeIslands(context){
+  for(const iframe of context.root.querySelectorAll('pot-resource[data-kind="html"] iframe'))if(!iframe.preparationMedia&&!iframe.nativePreparation&&!context.nativeIslands.has(iframe))context.nativeIslands.set(iframe,{context,original:iframe,owner:iframe.closest('pot-resource'),stable:0});
+  for(const entry of context.nativeIslands.values()){
+    const {original,owner}=entry;if(entry.home)continue;
+    if(!original.isConnected)throw Error('Prepared native document lost its original owner');
+    owner.nativeReflowDeadline??=performance.now()+5000;
+    const box=(entry.projection||original).getBoundingClientRect(),oldBox=original.getBoundingClientRect();
+    entry.style=original.getAttribute('style');entry.popover=original.getAttribute('popover');entry.inert=original.inert;entry.hidden=original.getAttribute('aria-hidden');entry.focus=document.activeElement===original;
+    entry.home=original.ownerDocument.createElement('div');entry.home.className=original.className;entry.home.style.cssText='box-sizing:border-box;width:'+oldBox.width+'px;height:'+oldBox.height+'px;max-width:100%';entry.home.inert=true;entry.home.setAttribute('aria-hidden','true');entry.home.dataset.conversationHold='';entry.home.dataset.nativePreparationPlaceholder='';
+    // Prepare the temporary status in the same connected hidden surface. The
+    // old measured frame is a hold, never ready content or a reading anchor.
+    const status=original.ownerDocument.createElement('p');status.className='resource-status';status.textContent=translate(original.ownerDocument.documentElement.lang,'resource.loading');entry.home.append(status);context.root.append(entry.home);entry.home.getBoundingClientRect();moveConversationNode(original.parentNode,entry.home,original);
+    if(entry.projection){const projection=original.ownerDocument.createElement('div');projection.className=entry.projection.className;projection.style.cssText=entry.projection.style.cssText;entry.projection.replaceWith(projection);entry.projection=projection;}else entry.projection=entry.home;
+    entry.projection.dataset.nativePreparation='';entry.projection.nativePreparation=entry;original.nativePreparation=entry;
+    original.style.cssText+=';position:fixed;inset:auto;left:0;top:0;margin:0;padding:0;border:0;max-height:none;opacity:0;visibility:visible;pointer-events:none;box-sizing:border-box;width:'+box.width+'px;min-width:0;max-width:none';if(!entry.focus)original.inert=true;original.setAttribute('aria-hidden','true');
+    if(original.showPopover){original.setAttribute('popover','manual');original.showPopover();}
+    const height=owner.resourceRenderState?.resize;if(height!==undefined)original.style.setProperty('--resource-height',height+'px');
+  }
+}
+function nativeIslandsPending(context,deadlineFor,now){
+  let pending=false;
+  for(const entry of context.nativeIslands.values()){
+    if(!entry.home)continue;
+    const {original,projection,owner}=entry;
+    const box=original.getBoundingClientRect(),next=JSON.stringify([box.width,box.height,owner.nativeResizeRevision||0]);
+    if(next!==entry.previous)for(let element=projection.parentElement;element&&context.root.contains(element);element=element.parentElement)if(element.matches(components)&&element.dataset.preparedFallback!=='true')element.classList.remove('prepared-frame');
+    projection.style.width=box.width+'px';projection.style.height=box.height+'px';projection.style.boxSizing='border-box';
+    owner.projectPreparedState?.(projection.closest('pot-resource'));
+    entry.stable=next===entry.previous?entry.stable+1:0;entry.previous=next;
+    if(entry.stable<3){
+      const deadline=owner.dataset.state==='ready'?owner.nativeReflowDeadline:deadlineFor(componentDeadlineKey(owner,context.member));
+      if(now>=deadline)frame(projection.closest('pot-resource')||owner,true);
+      else pending=true;
+    }
+  }
+  return pending;
+}
+export function finishPreparedNative(context,{commit=false,preparedOnly=false}={}){
+  for(const entry of [...context.nativeIslands.values()]){
+    const {original,home,projection}=entry;if(!home)continue;
+    if(preparedOnly&&!context.root.contains(original))continue;
+    const height=original.style.getPropertyValue('--resource-height');
+    if(original.matches(':popover-open'))original.hidePopover();
+    if(entry.popover===null)original.removeAttribute('popover');else original.setAttribute('popover',entry.popover);
+    if(entry.style===null)original.removeAttribute('style');else original.setAttribute('style',entry.style);
+    if(commit&&height)original.style.setProperty('--resource-height',height);
+    if(commit&&projection.closest('pot-resource')?.dataset.preparedFallback==='true')entry.owner.dataset.preparedFallback='true';
+    if(commit)delete entry.owner.nativeReflowDeadline;
+    original.inert=entry.inert;if(entry.hidden===null)original.removeAttribute('aria-hidden');else original.setAttribute('aria-hidden',entry.hidden);
+    delete original.nativePreparation;delete projection.nativePreparation;home.remove();context.nativeIslands.delete(original);
+    if(entry.focus&&original.isConnected&&original.ownerDocument.activeElement!==original)original.focus({preventScroll:true});
+  }
+}
+export function cancelPreparedNative(root){
+  const contexts=new Set([root,...root.querySelectorAll(components+',iframe,[data-native-preparation]')].map(element=>element.nativePreparation?.context).filter(Boolean));
+  for(const context of contexts)finishPreparedNative(context);
+}
+export function commitPreparedResources(context){
+  for(const [original,projection]of context.resourceStates)if(projection.preparedResourceState?.revision!==(original.resourceRenderState?.revision||0))throw Error('Prepared resource state does not match its committed revision');
+  for(const [original,projection]of context.resourceStates)original.commitPreparedState(projection);
+}
+export function preparedResourcesCurrent(context){
+  return [...context.resourceRevisions||[]].every(([element,revision])=>(element.resourceRenderState?.revision||0)===revision);
 }
 
 // Each caller supplies a stable slot within its logical record. Parsing calls
@@ -182,6 +251,7 @@ export function preparedText(target,slot,value){
 export function retirePreparedTree(root){
   // Retire while still connected too: connection alone does not prove that a
   // candidate belongs to the current owner/conversation/layout generation.
+  cancelPreparedNative(root);
   for(const element of [root,...root.querySelectorAll(components)])element.retireRendering?.();
   root.remove();
 }
@@ -204,8 +274,9 @@ function frame(element,fallback){
 }
 
 export function settlePreparedTree(root,context,{valid=()=>true,layout=()=>{},timeout=5000}={}){
+  context.root ||= root;
   const view=root.ownerDocument.defaultView;let animation,timer,observer,cancelRun,closed=false;
-  const finish=()=>{closed=true;view.cancelAnimationFrame(animation);view.clearTimeout(timer);observer.disconnect();};
+  const finish=()=>{closed=true;view.cancelAnimationFrame(animation);view.clearTimeout(timer);observer?.disconnect();};
   const promise=new Promise((resolve,reject)=>{
     let previous,fontWaiting=false;const decoded=new WeakMap();
     const deadlineFor=key=>{
@@ -215,12 +286,15 @@ export function settlePreparedTree(root,context,{valid=()=>true,layout=()=>{},ti
       while(context.deadlines.size>2048)context.deadlines.delete(context.deadlines.keys().next().value);
       return deadline;
     };
-    const cancel=()=>{if(closed)return;finish();reject(new DOMException('Prepared render retired','AbortError'));};cancelRun=cancel;
+    const fail=reason=>{if(closed)return;finish();try{finishPreparedNative(context);}finally{reject(reason);}};
+    const cancel=()=>fail(new DOMException('Prepared render retired','AbortError'));cancelRun=cancel;
     function check(){
+      try{
       animation=0;if(closed)return;
       if(!context.alive||!valid())return cancel();
       if(!root.isConnected)return schedule();
-      layout();const counts=new Map();for(const detail of [root,...root.querySelectorAll('details')].filter(node=>node.localName==='details')){const key=disclosureKey(detail,context.member,counts);if(context.disclosures.has(key)){detail.preparedOpenIntent=context.disclosures.get(key);detail.open=detail.preparedOpenIntent;}}observer.takeRecords();
+      stageNativeIslands(context);layout();const counts=new Map();for(const detail of [root,...root.querySelectorAll('details')].filter(node=>node.localName==='details')){const key=disclosureKey(detail,context.member,counts);if(context.disclosures.has(key)){detail.preparedOpenIntent=context.disclosures.get(key);detail.open=detail.preparedOpenIntent;}}observer.takeRecords();
+      if(nativeIslandsPending(context,deadlineFor,performance.now())){previous=undefined;schedule();return;}
       if(root.querySelector('[data-prepared-pending]')){previous=undefined;return schedule();}
       const now=performance.now(),all=[...root.querySelectorAll(components)],pending=[];
       for(const element of all){
@@ -251,7 +325,10 @@ export function settlePreparedTree(root,context,{valid=()=>true,layout=()=>{},ti
       if(geometry!==previous){previous=geometry;return schedule();}
       const box=root.getBoundingClientRect(),style=getComputedStyle(root);
       const marginTop=style.display==='none'?0:parseFloat(style.marginTop||0),marginBottom=style.display==='none'?0:parseFloat(style.marginBottom||0);
-      finish();resolve({height:box.height,size:box.height+marginTop+marginBottom,marginTop,marginBottom});
+      context.resourceRevisions=new Map([...root.querySelectorAll('pot-resource')].map(element=>{const original=element.preparationOriginal||element;return [original,original.resourceRenderState?.revision||0];}));
+      finishPreparedNative(context,{commit:true,preparedOnly:true});
+      context.ready=true;finish();resolve({height:box.height,size:box.height+marginTop+marginBottom,marginTop,marginBottom});
+      }catch(reason){fail(reason);}
     }
     function schedule(){if(!closed&&!animation)animation=view.requestAnimationFrame(check);}
     observer=new MutationObserver(schedule);observer.observe(root,{subtree:true,childList:true,attributes:true,characterData:true});check();

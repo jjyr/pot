@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {sourceServer,launchBrowser} from './browser-harness.mjs';
 import {preparedResourceMatrix,preparedLateResources} from './prepared-resource-matrix.mjs';
 import {preparedLifetimes,preparedTaskDisclosure} from './prepared-lifetimes-browser.mjs';
+import {preparedNativeLifecycle} from './prepared-native-browser.mjs';
 
 const source=await sourceServer(),browser=await launchBrowser();
 try{
@@ -100,4 +101,5 @@ try{
  const matrix=await preparedResourceMatrix(page),lateTypes=await preparedLateResources(page);assert.deepEqual(errors,[]);
  await context.close();const lifetimes=await preparedLifetimes(browser,source.origin),taskDisclosure=await preparedTaskDisclosure(browser,source.origin);console.log(JSON.stringify({passed:true,sameNode:true,recursiveReady:true,measurementParity:true,leaseReused:true,trueRemovalReleasedOnce:true,metadataRace,unfinished,budget,matrix,lateTypes,lifetimes,taskDisclosure,errors}));
  console.log(JSON.stringify({approvalGeneration:await preparedApprovalGeneration(browser,source.origin)}));
+ console.log(JSON.stringify({nativeLifecycle:await preparedNativeLifecycle(browser,source.origin)}));
 }finally{await browser.close();await source.close();}

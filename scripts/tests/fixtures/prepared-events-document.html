@@ -1,0 +1,10 @@
+<!doctype html><meta charset="utf-8"><style>html,body{margin:0;padding:0}main{font:16px/20px sans-serif;padding:8px}button{font:inherit}#extra{height:0}body.grown #extra{height:260px}</style><main><button id="grow">Grow content</button><button id="result">Publish result</button><button id="dependency">Report dependency</button><p>Synthetic ready interactive document.</p><div id="extra"></div></main><script>
+const token=new URL(location.href).searchParams.get('token'),mode=new URL(location.href).searchParams.get('mode');
+const result={message:'Independent delayed HTML result'};
+function emit(action,value){parent.postMessage({type:'pot-resource',token,action,value},'*');}
+function resize(){const box=document.querySelector('main').getBoundingClientRect();emit('resize',box.height);parent.postMessage({type:'synthetic-events',token,height:box.height,width:box.width},'*');}
+function grow(){document.body.classList.add('grown');resize();}
+document.querySelector('#dependency').onclick=()=>emit('dependency_error');document.querySelector('#grow').onclick=grow;document.querySelector('#result').onclick=()=>emit('result',result);
+if(mode==='grown-result')document.body.classList.add('grown');
+new ResizeObserver(resize).observe(document.querySelector('main'));resize();emit('ready');if(mode==='grown-result'){emit('result',result);emit('dependency_error');}
+</script>

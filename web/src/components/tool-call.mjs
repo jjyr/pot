@@ -79,7 +79,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
   function update(message,next={}){
     current=message;options=next;const tool=message.tool;if(!tool)return;
     if(currentPreparedRender()){
-      const desired=memory.get(key);if(desired){root.open=desired.open;raw.open=desired.raw;}
+      const desired=memory.get(key);if(desired){if(desired.open!==undefined)root.open=desired.open;if(desired.raw!==undefined)raw.open=desired.raw;}
     }
     if(next.expanded)root.open=true;
     root.classList.toggle('work-record-call',!!message.workRecord);

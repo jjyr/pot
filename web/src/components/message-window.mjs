@@ -1,4 +1,4 @@
-import {currentPreparedRender,withPreparedRender,createPreparedRender,createPreparationBudget,createPreparationSurface,settlePreparedTree,preparedLayoutRect,framePreparedElement,retirePreparedDeadlines,consumePreparationSurrogates,rememberPreparedLayout,freezePreparedLayout,releasePreparedLayout} from './prepared-render.mjs';
+import {preparedResourcesCurrent,commitPreparedResources,finishPreparedNative,cancelPreparedNative,currentPreparedRender,withPreparedRender,createPreparedRender,createPreparationBudget,createPreparationSurface,settlePreparedTree,preparedLayoutRect,framePreparedElement,retirePreparedDeadlines,consumePreparationSurrogates,rememberPreparedLayout,freezePreparedLayout,releasePreparedLayout} from './prepared-render.mjs';
 import {moveConversationNode} from './conversation-dom.mjs';
 import {Virtualizer, observeElementRect, defaultRangeExtractor} from '../vendor/tanstack-virtual-core.mjs';
 import {createConversationController} from './conversation-controller.mjs';
@@ -10,7 +10,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
   let margin = 0, reportRect, reportOffset, owner, controller=parentController, frame=0,inputStarted=()=>{};
   const spacers = [],regionRevisions=new Map(),geometry=new Map(),rowRevisions=new Map(),revealedRows=new Set();
   let lastReadable=[],lastReadableTop=0;const held=new Map(),layoutHosts=new Set([host]);
-  let requested=rows,requestedRevision='[]',committedRevision='[]',requestedOptions={},flight=null,layoutEpoch=0,layoutFingerprint='',committing=null,measuredOptions={},layoutReframe=false,queueUpdating=false;
+  let requested=rows,requestedRevision='[]',committedRevision='[]',requestedOptions={},flight=null,layoutEpoch=0,layoutFingerprint='',committing=null,measuredOptions={},layoutReframe=false,queueUpdating=false,preparationError=false;
   const inheritedPreparation=currentPreparedRender();
   const deadlines=inheritedPreparation?.context.deadlines||new Map();
   const preparationBudget=inheritedPreparation?.context.budget||createPreparationBudget();
@@ -140,12 +140,13 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       else if(committing?.has(item.key)){
         const job=committing.get(item.key);job.context.phase='commit';
         for(const [element,clone]of job.context.frames){const box=clone.getBoundingClientRect();framePreparedElement(element,box.height,element.matches('pot-message-file[data-block="false"]')?box.width:undefined);}
+        commitPreparedResources(job.context);
         record=withPreparedRender(job.context,message.id,()=>old?render(message,old):job.record.commit?.(message)||job.record);
-        record.preparedSignature=job.signature;job.context.phase='live';
+        finishPreparedNative(job.context,{commit:true});record.preparedSignature=job.signature;job.context.phase='live';
         record.row.preparedContext=job.context.connectionContext;
         record.row.classList.add('prepared-row');
         record.row.style.setProperty('--prepared-margin-top',job.measurement.marginTop+'px');record.row.style.setProperty('--prepared-margin-bottom',job.measurement.marginBottom+'px');
-        if(old)dispose(job.record);committing.delete(item.key);
+        if(old)disposePreparation(job);committing.delete(item.key);
         record.row.dataset.messageId=message.id;
         const previous=sources.get(old),removed=[previous?.id,...(previous?.members||[]).map(member=>member.id)].filter(id=>id&&!retainedMembers.has(id));
         retirePreparedDeadlines(deadlines,[message.id,...(message.members||[]).map(member=>member.id),...removed],record.row,message.id);
@@ -216,12 +217,22 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
   };
   if(!nested){scroller.addEventListener('click',interaction,true);scroller.addEventListener('pot:prepare-resize',interaction);}
   if(!nested){host.ownerDocument.fonts?.addEventListener('loading',fontChanged);host.ownerDocument.fonts?.addEventListener('loadingdone',fontChanged);}
+  function disposePreparation(job){if(job.record){cancelPreparedNative(job.record.row);dispose(job.record);}}
   function releaseLayout(){for(const element of layoutHosts)releasePreparedLayout(element);}
   function discardPreparation(){
     if(!flight)return;
-    for(const job of flight.jobs.values()){job.wait?.cancel();if(job.record)dispose(job.record);job.surface.close();}
-    for(const job of flight.regions.values()){job.wait?.cancel();job.surface.close();}
-    flight=null;delete host.dataset.preparedPending;host.removeAttribute('aria-busy');
+    const retired=flight;flight=null;
+    for(const job of retired.jobs.values()){job.context.alive=false;job.context.connectionContext.alive=false;job.wait?.cancel();disposePreparation(job);job.surface.close();}
+    for(const job of retired.regions.values()){job.context.alive=false;job.context.connectionContext.alive=false;job.wait?.cancel();job.surface.close();}
+    delete host.dataset.preparedPending;host.removeAttribute('aria-busy');
+  }
+  function preparationFailed(reason,current=flight){
+    if(current&&flight===current){preparationError=true;committing=null;discardPreparation();releaseHold();releaseLayout();layoutReframe=true;cancelAnimationFrame(frame);frame=0;}
+  }
+  function rejectPreparation(reason,current){
+    if(reason.name==='AbortError')return;
+    preparationFailed(reason,current);
+    queueMicrotask(()=>{throw reason;});
   }
   function refreshRegions(current){
     let changed=false,valid=true;
@@ -279,6 +290,8 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
   }
   function update(next,options){
     if(closed)return;
+    if(next!==undefined)preparationError=false;
+    if(preparationError)return;
     const inherited=currentPreparedRender()||inheritedPreparation?.context.phase==='prepare'&&inheritedPreparation;
     if(nested){
       if(!inherited?.context.alive||!['prepare','commit'].includes(inherited.context.phase)){requestRender();return;}
@@ -295,7 +308,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     if(fingerprint!==layoutFingerprint){layoutReframe||=!!layoutFingerprint;layoutFingerprint=fingerprint;layoutEpoch++;discardPreparation();}
     if(flight&&flight.revision!==requestedRevision){
       const current=flight,keys=new Set(requested.map(message=>message.viewKey));
-      for(const [key,job]of current.jobs)if(!keys.has(key)){job.wait.cancel();dispose(job.record);job.surface.close();current.jobs.delete(key);}
+      for(const [key,job]of current.jobs)if(!keys.has(key)){job.wait.cancel();disposePreparation(job);job.surface.close();current.jobs.delete(key);}
       for(const key of current.sizes.keys())if(!keys.has(key)){current.sizes.delete(key);current.measurements.delete(key);}
       const renderContext=requestedOptions.renderContext&&Object.fromEntries(Object.entries(requestedOptions.renderContext).map(([key,value])=>[key,typeof value==='function'?value:structuredClone(value)]));
       current.rows=structuredClone(requested);current.revision=requestedRevision;current.options={...requestedOptions,regions:current.options.regions,renderContext};
@@ -324,26 +337,27 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     for(const message of current.rows){
       const stamp=signature(message),measurement=current.measurements.get(message.viewKey),job=current.jobs.get(message.viewKey);
       if(measurement&&measurement.signature!==stamp){current.measurements.delete(message.viewKey);current.sizes.delete(message.viewKey);}
-      if(job&&job.signature!==stamp){job.wait.cancel();dispose(job.record);job.surface.close();current.jobs.delete(message.viewKey);}
+      if(job&&(job.signature!==stamp||job.measurement&&!preparedResourcesCurrent(job.context))){job.wait.cancel();disposePreparation(job);job.surface.close();current.jobs.delete(message.viewKey);current.measurements.delete(message.viewKey);current.sizes.delete(message.viewKey);geometry.delete(message.viewKey);}
       const cached=geometry.get(message.viewKey);if(cached?.signature===signature(message)){current.sizes.set(message.viewKey,cached.measurement.size);current.measurements.set(message.viewKey,cached);}}
     holdReadable();
     const indexes=selectedPreparation(current),selected=new Set(indexes.map(index=>current.rows[index].viewKey));let waiting=false;
     if(!refreshRegions(current).valid){invalidate();return;}
     // Reader movement can retire an offscreen candidate while a slow preview
     // waits. Its identity deadline survives; its DOM/resources do not accumulate.
-    for(const [key,job]of current.jobs)if(!selected.has(key)){job.wait.cancel();dispose(job.record);job.surface.close();current.jobs.delete(key);}
+    for(const [key,job]of current.jobs)if(!selected.has(key)){job.wait.cancel();disposePreparation(job);job.surface.close();current.jobs.delete(key);}
     host.setAttribute('aria-busy','true');host.dataset.preparedPending='';
     for(const region of current.options.regions||[]){
       const stamp=layoutEpoch+':'+region.revision;if(regionRevisions.get(region.key)===stamp)continue;
       let job=current.regions.get(region.key);
+      if(job?.measurement&&!preparedResourcesCurrent(job.context)){job.wait.cancel();job.surface.close();current.regions.delete(region.key);job=null;}
       if(!job){
         const surface=createPreparationSurface(scroller,region.host),context=createPreparedRender({previousRoot:region.host,renderContext:current.options.renderContext,deadlines,member:region.key,reframe:current.reframe,budget:preparationBudget});
-        surface.host.preparedContext=context.connectionContext;
+        surface.host.preparedContext=context.connectionContext;context.connectionContext.changed=invalidate;
         surface.host.classList.remove('prepared-region');
         job={region,signature:stamp,surface,context};current.regions.set(region.key,job);
         withPreparedRender(context,region.key,()=>region.render(surface.host));context.root=surface.host;
         job.wait=settlePreparedTree(surface.host,context,{valid:()=>!closed&&flight===current&&layoutEpoch===current.epoch});
-        job.wait.promise.then(measurement=>{if(flight!==current||closed)return;job.measurement=measurement;invalidate();}).catch(reason=>{if(reason.name!=='AbortError')queueMicrotask(()=>{throw reason;});});
+        job.wait.promise.then(measurement=>{if(flight!==current||closed)return;job.measurement=measurement;invalidate();}).catch(reason=>rejectPreparation(reason,current));
       }
       if(!job.measurement)waiting=true;
     }
@@ -355,11 +369,12 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       if(!job){
         if(admitted++>=96){waiting=true;continue;}
         const surface=createPreparationSurface(scroller,host),context=createPreparedRender({previousRoot:old?.row,renderContext:current.options.renderContext,deadlines,member:message.id,reframe:current.reframe,budget:preparationBudget});
+        context.connectionContext.changed=invalidate;
         const start=measuredStart(current,index);if(start!==undefined)context.liveTop=()=>scroller.getBoundingClientRect().top+margin+start-scroller.scrollTop;
         job={message,signature:stamp,surface,context};current.jobs.set(key,job);
         job.record=withPreparedRender(context,message.id,()=>render(message,undefined));context.root=job.record.row;job.record.row.preparedContext=context.connectionContext;surface.host.append(job.record.row);
         job.wait=settlePreparedTree(job.record.row,context,{valid:()=>!closed&&flight===current&&layoutEpoch===current.epoch,layout:()=>withPreparedRender(context,message.id,()=>render(message,job.record))});
-        job.wait.promise.then(measurement=>{if(flight!==current||closed)return;job.measurement=measurement;current.sizes.set(key,measurement.size);current.measurements.set(key,{signature:stamp,measurement});invalidate();}).catch(reason=>{if(reason.name!=='AbortError')queueMicrotask(()=>{throw reason;});});
+        job.wait.promise.then(measurement=>{if(flight!==current||closed)return;job.measurement=measurement;current.sizes.set(key,measurement.size);current.measurements.set(key,{signature:stamp,measurement});invalidate();}).catch(reason=>rejectPreparation(reason,current));
       }
       if(!job.measurement)waiting=true;
     }
@@ -384,7 +399,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     heights.clear();for(const [key,size]of current.sizes)heights.set(key,size);
     for(const job of current.regions.values()){
       for(const [element,clone]of job.context.frames){const box=clone.getBoundingClientRect();framePreparedElement(element,box.height,element.matches('pot-message-file[data-block="false"]')?box.width:undefined);}
-      job.context.phase='commit';consumePreparationSurrogates(job.surface.host);
+      job.context.phase='commit';commitPreparedResources(job.context);finishPreparedNative(job.context,{commit:true});consumePreparationSurrogates(job.surface.host);
       const attributes=new Set(['hidden','disabled','open',...[...job.region.host.attributes,...job.surface.host.attributes].map(attribute=>attribute.name).filter(name=>name.startsWith('aria-'))]);
       for(const attribute of attributes){if(job.surface.host.hasAttribute(attribute))job.region.host.setAttribute(attribute,job.surface.host.getAttribute(attribute));else job.region.host.removeAttribute(attribute);}
       const preparedNodes=[...job.surface.host.childNodes];for(const node of preparedNodes)moveConversationNode(job.region.host,node);
@@ -401,14 +416,14 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     // New records must leave the connected surface before it is retired; doing
     // this inside drawRows would destroy their live leases/diagram instances
     // immediately before the actual same-node flow transfer.
-    for(const [key,job]of current.jobs){if(committing.has(key)){job.wait.cancel();dispose(job.record);}job.surface.close();}
+    for(const [key,job]of current.jobs){if(committing.has(key)){job.wait.cancel();disposePreparation(job);}job.surface.close();}
     for(const [key,value]of current.measurements){geometry.delete(key);geometry.set(key,value);}
     const loaded=new Set(current.rows.map(message=>message.viewKey));
     for(const key of geometry.keys()){if(geometry.size<=loaded.size+1280)break;if(!loaded.has(key))geometry.delete(key);}
     committing=null;flight=null;delete host.dataset.preparedPending;layoutHosts.clear();layoutHosts.add(host);for(const region of current.options.regions||[])layoutHosts.add(region.host);for(const record of mounted.values())layoutHosts.add(record.row);for(const element of layoutHosts)rememberPreparedLayout(element);committedRevision=current.revision;layoutReframe=false;host.removeAttribute('aria-busy');current.options.afterCommit?.();
     if(requestedRevision!==current.revision||JSON.stringify(requestedOptions.regions?.map(region=>[region.key,region.revision]))!==JSON.stringify(current.options.regions?.map(region=>[region.key,region.revision])))invalidate();
     }catch(reason){
-      committing=null;discardPreparation();releaseHold();releaseLayout();layoutReframe=true;
+      preparationFailed(reason);
       throw reason;
     }finally{queueUpdating=false;}
   }
