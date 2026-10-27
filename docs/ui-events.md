@@ -482,13 +482,27 @@ and attachments survive late or duplicate confirmation.
 closing/reloading the app and restore it through read-only confirmation.
 Assistant messages bind to their input through `reply_to`; terminal failures retain
 their original diagnostic in the message's `error` field, including preparation
-failures before the first model event. Chat projects a single reply bubble from
-the local send through its receipt and first assistant output. Pending sends are
+failures before the first model event. Chat projects one independent execution
+activity row, keyed by input/request identity, from local send through its receipt
+and all model/tool rounds. Nonempty assistant prose retains chronological message
+order and does not own the activity status. Empty model rounds cannot retire or
+recreate activity while the receiver lifecycle remains active. Current execution
+activity stays at the conversation tail so Latest exposes it after long output;
+queued activity and terminal diagnostics retain their input context. Successful
+completion retires activity without inventing prose. Pending sends are
 scoped by owner, preserve drafts and retain request identity across reconciliation.
 Turn `state` distinguishes allowance waiting from active thinking.
 Connection status and reconnect actions stay in the Chat header, including while
-a reply is running. Reply bubbles retain their available text without a separate
-connection notice; Task conversations use their existing stage status.
+a reply is running. The activity row reports interrupted/uncertain execution
+truthfully and retains its nonterminal outer frame while reconnecting; available
+prose remains visible. Nonterminal labels/icons update in place within a two-line
+frame that responds to the current font and width. Task conversations use the
+shared status frame with their existing stage status. Markdown and asynchronous
+resource rendering retain their existing live rendering behavior.
+Historical pages carry durable message outcomes without necessarily supplying
+their receiver lifecycle. In that case failed/cancelled messages retain their
+own diagnostic/stopped status, including when restored from IndexedDB. Only an
+available receiver lifecycle transfers status ownership to the activity row.
 Subscription errors retain their available diagnostics; a
 frontend rendering exception is reported by the interface error handler rather
 than being classified as a service disconnection.

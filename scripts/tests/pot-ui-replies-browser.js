@@ -1,5 +1,5 @@
 // Production DOM components with deterministic transport boundaries. No model
-// calls: this tests receipt/SSE ordering, one reply identity, and failure styles.
+// calls: this tests receipt/SSE ordering, stable activity, and failure styles.
 async page=>{
  const assert=(value,message)=>{if(!value)throw Error(message);},errors=[];
  const onError=error=>errors.push(error.message);page.on('pageerror',onError);
@@ -11,7 +11,7 @@ async page=>{
   const root=document.createElement('div');document.body.replaceChildren(root);
   const context={owner:'',space:''},empty={runtime_id:'reply-runtime',boot_id:'boot',owner_id:JSON.stringify(['local','main']),conversation_id:'main',cursor:'1',running:false,turn_id:null,kind:'reset',replies:[],history:{before:'',after:'',has_more:false,has_newer:false},messages:[]};
   const fixture=window.replyFixture={snapshot:empty,requests:[],subscriptions:0,changeSubscriptions:0};
-  const client={production:true,runtime:{runtime_id:'reply-runtime',boot_id:'boot'},scope:()=>({...context}),setScope:value=>Object.assign(context,value),
+  const client={production:true,desktop:true,runtime:{runtime_id:'reply-runtime',boot_id:'boot'},scope:()=>({...context}),setScope:value=>Object.assign(context,value),
    snapshot:async()=>structuredClone(context.owner==='other'?{...empty,owner_id:JSON.stringify(['local','other']),conversation_id:'other'}:fixture.snapshot),
    send:request=>{fixture.requests.push(request);return new Promise((resolve,reject)=>{fixture.resolveSend=resolve;fixture.rejectSend=reject;});},
    cancel:async()=>{},changes:()=>{fixture.changeSubscriptions++;return ()=>{};},
@@ -30,30 +30,30 @@ async page=>{
   };
   fixture.project=value=>{const cursor=String(Number(value.cursor)+1),messages=value.messages.map((message,index)=>({...message,sequence:String(index+1),version:Number(cursor)}));return {...value,cursor,messages,replies:messages.filter(message=>message.role==='user').map(input=>{const output=messages.findLast(message=>message.reply_to===input.id);return {input_id:input.id,state:value.running&&value.turn_id===input.id?'running':output?.status==='failed'?'failed':'completed',...(output?.error?{error:output.error}:{})};}),history:{before:messages.length?'1':'',after:messages.length?String(messages.length):'',has_more:false,has_newer:false}};};
   fixture.publish=value=>{fixture.snapshot=fixture.project({...fixture.snapshot,...value});fixture.deliver(structuredClone(fixture.snapshot));};
-  fixture.restart=()=>{fixture.dispose?.();client.chatCacheName='reply-active-fixture-cache';fixture.snapshot=structuredClone(empty);fixture.dispose=mountApp(root,client);};
+  fixture.restart=()=>{fixture.dispose?.();client.chatCacheName='reply-active-fixture-cache-'+(fixture.restarts=(fixture.restarts||0)+1);fixture.snapshot=structuredClone(empty);fixture.dispose=mountApp(root,client);};
   fixture.dispose=mountApp(root,client);
  });
  await page.waitForFunction(()=>document.querySelector('#pot-composer')&&!document.querySelector('#pot-composer').disabled);
  await page.locator('#pot-composer').fill('你好');await page.locator('#pot-composer').press('Enter');
  await page.getByText('发送中…',{exact:true}).waitFor();
  assert(await page.locator('.role-assistant').count()===1,'Sending immediately creates one assistant bubble');
- await page.evaluate(()=>{replyFixture.bubble=document.querySelector('.reply-bubble');replyFixture.user=document.querySelector('.role-user');const request=replyFixture.requests[0];replyFixture.input={id:'input',request_id:request.request_id,role:'user',text:request.text,status:'accepted'};replyFixture.publish({messages:[replyFixture.input],running:true,turn_id:'input'});});
+ await page.evaluate(()=>{replyFixture.bubble=document.querySelector('.is-activity .reply-bubble');replyFixture.user=document.querySelector('.role-user');const request=replyFixture.requests[0];replyFixture.input={id:'input',request_id:request.request_id,role:'user',text:request.text,status:'accepted'};replyFixture.publish({messages:[replyFixture.input],running:true,turn_id:'input'});});
  await page.getByText('思考中',{exact:true}).waitFor();
- assert(await page.evaluate(()=>document.querySelector('.reply-bubble')===replyFixture.bubble&&document.querySelector('.role-user')===replyFixture.user),'SSE acceptance adopts the optimistic nodes');
+ assert(await page.evaluate(()=>document.querySelector('.is-activity .reply-bubble')===replyFixture.bubble&&document.querySelector('.role-user')===replyFixture.user),'SSE acceptance adopts the optimistic nodes');
  await page.evaluate(()=>replyFixture.resolveSend({message_id:'input',duplicate:false}));
  await page.waitForFunction(()=>document.querySelector('#pot-composer').value==='');
  await page.evaluate(()=>replyFixture.publish({messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'streaming',text:'你好！'}]}));
  await page.locator('.reply-content').getByText('你好！',{exact:true}).waitFor();
- assert(await page.evaluate(()=>document.querySelector('.reply-bubble')===replyFixture.bubble),'Streaming updates the same bubble');
- assert(await page.locator('.role-assistant').count()===1,'Streaming does not leave a second Thinking placeholder');
+ assert(await page.evaluate(()=>document.querySelector('.is-activity .reply-bubble')===replyFixture.bubble),'Streaming retains the execution activity bubble');
+ assert(await page.locator('.role-assistant').count()===2&&await page.locator('.is-activity').count()===1,'Streaming has prose and one execution activity');
  await page.evaluate(()=>replyFixture.publish({messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'complete',text:'你好！'}]}));
- assert(await page.locator('.role-assistant').count()===1,'Turn cleanup keeps feedback in the same completed message');
+ assert(await page.locator('.role-assistant').count()===2,'Completed prose retains activity until execution settles');
  await page.locator('#pot-composer').fill('保留新草稿');
  await page.evaluate(()=>replyFixture.publish({messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'failed',text:'你好！',error:'model provider returned HTTP 404'}],running:false,turn_id:null}));
  await page.getByText('回复失败',{exact:true}).waitFor();
  assert(await page.locator('.reply-bubble.is-failed').count()===1,'Failure has one distinct bubble');
- assert(await page.evaluate(()=>document.querySelector('.reply-bubble')===replyFixture.bubble),'Failure updates the same bubble');
- assert(await page.locator('.reply-content').innerText()==='你好！','Failure preserves partial prose');
+ assert(await page.evaluate(()=>document.querySelector('.is-activity .reply-bubble')===replyFixture.bubble),'Failure updates the execution activity bubble');
+ assert(await page.locator('.role-assistant:not(.is-activity) .reply-content').innerText()==='你好！','Failure preserves partial prose');
  assert(!await page.locator('.connection-status').isVisible(),'Failure is not duplicated below the composer');
  assert(await page.locator('.reply-bubble button').count()===1,'Failure exposes one main action');
  assert(await page.locator('#pot-composer').inputValue()==='保留新草稿','Failure keeps newly typed text');
@@ -75,18 +75,27 @@ async page=>{
  await page.getByText('思考中',{exact:true}).waitFor();
  assert(await page.locator('.waiting-dots i').first().evaluate(node=>getComputedStyle(node).animationName)==='none','Reduced Motion disables thinking animation');
  await page.emulateMedia({reducedMotion:'no-preference'});
+ await page.evaluate(()=>replyFixture.active={node:document.querySelector('.is-activity .reply-status'),line:document.querySelector('.is-activity .reply-status-title'),height:document.querySelector('.is-activity').getBoundingClientRect().height});
  await page.evaluate(()=>replyFixture.status('offline'));
  await page.locator('.connection-status').getByText('实时连接已中断，正在重新连接…',{exact:true}).waitFor();
- await page.locator('.reply-bubble .reply-status').waitFor({state:'hidden'});
+ await page.locator('.is-activity .reply-status').getByText('连接中断，正在确认状态',{exact:true}).waitFor();
+ assert(await page.evaluate(()=>{const row=document.querySelector('.is-activity');return row.querySelector('.reply-status')===replyFixture.active.node&&row.querySelector('.reply-status-title')===replyFixture.active.line&&Math.abs(row.getBoundingClientRect().height-replyFixture.active.height)<0.5;}),'Reconnecting preserves the nonterminal status identity and frame');
  assert(await page.locator('.reply-bubble.is-failed').count()===0,'An interrupted connection does not declare the reply failed');
  assert(await page.evaluate(()=>replyFixture.requests.length)===1,'Connection failure never resends input');
  await page.evaluate(()=>replyFixture.status('connected'));
+ await page.locator('.is-activity .reply-status').getByText('连接中断，正在确认状态',{exact:true}).waitFor();
+ await page.evaluate(()=>replyFixture.publish({}));
  await page.getByText('思考中',{exact:true}).waitFor();
  await page.evaluate(()=>replyFixture.publish({messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'complete',text:'连接正常'}],running:false,turn_id:null}));
  await page.getByText('连接正常',{exact:true}).waitFor();
- assert(await page.locator('.waiting-dots,.role-assistant .activity-dot').count()===0,'Completed replies stop all activity animation');
+ assert(await page.locator('.is-activity').count()===0,'Completed execution retires its activity');
+ // A new isolated lifecycle avoids rewinding a durable terminal input.
+ await page.evaluate(()=>replyFixture.restart());
+ await page.waitForFunction(()=>document.querySelector('#pot-composer')&&!document.querySelector('#pot-composer').disabled);
+ await page.locator('#pot-composer').fill('保留新草稿');
+ await page.evaluate(()=>replyFixture.publish({messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'streaming',text:'等待后台完成'}],running:true,turn_id:'input'}));
+ await page.getByText('正在回复…',{exact:true}).waitFor();
  await page.evaluate(()=>{
-  replyFixture.publish({messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'streaming',text:'等待后台完成'}],running:true,turn_id:'input'});
   replyFixture.status('offline');
   replyFixture.retiredDeliver=replyFixture.deliver;replyFixture.retiredStatus=replyFixture.status;
   replyFixture.beforeResume={subscriptions:replyFixture.subscriptions,changes:replyFixture.changeSubscriptions,requests:replyFixture.requests.length};
@@ -95,7 +104,7 @@ async page=>{
   replyFixture.snapshot=replyFixture.project({...replyFixture.snapshot,messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'complete',text:'切回后同步完成'}],running:false,turn_id:null});
  });
  await page.locator('.connection-status').getByText('实时连接已中断，正在重新连接…',{exact:true}).waitFor();
- await page.locator('.reply-bubble .reply-status').waitFor({state:'hidden'});
+ await page.locator('.is-activity .reply-status').getByText('连接中断，正在确认状态',{exact:true}).waitFor();
  await page.evaluate(()=>{window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));});
  await page.getByText('切回后同步完成',{exact:true}).waitFor();
  assert(await page.evaluate(()=>replyFixture.subscriptions===replyFixture.beforeResume.subscriptions+1&&replyFixture.changeSubscriptions===replyFixture.beforeResume.changes+1),'Returning renews both streams once for paired lifecycle events');
@@ -157,36 +166,38 @@ async page=>{
   const {projectChatReplies}=await import('/state/chat-replies.mjs');
   const {translate}=await import('/locales/messages.mjs');
   const root=document.createElement('main');root.style.cssText='max-width:840px;margin:80px auto;padding:24px';document.body.replaceChildren(root);
-  const host=document.createElement('div');root.append(host);const bubble=createReplyBubble(host);
+  const proseHost=document.createElement('div'),host=document.createElement('div');root.append(proseHost,host);const proseBubble=createReplyBubble(proseHost),bubble=createReplyBubble(host);
   const input={id:'request',role:'user',text:'Hello',status:'complete'};
   const fixture=window.outcomeFixture={root,host,bubble,locale:'zh-CN',input,project:projectChatReplies};
   fixture.render=(state='failed',partial='',error='codex_thread_open_failed',project=true)=>{
    const text=JSON.stringify({state,error,partial_output:partial});
    const message={id:'reply',reply_to:input.id,role:'assistant',status:'complete',text};
-   const row=project?projectChatReplies({messages:[input,message],replies:[{input_id:input.id,state,error}]}).at(-1):{...message,phase:state,error};
-   bubble.update(row,{t:key=>translate(fixture.locale,key)});
+   const rows=project?projectChatReplies({messages:[input,message],replies:[{input_id:input.id,state,error}]}):[{...message,phase:state,error}];
+   const options={t:key=>translate(fixture.locale,key)};
+   proseBubble.update(rows.find(row=>row.activity===false)||{text:'',phase:'complete',activity:false},options);
+   bubble.update(rows.at(-1),options);
   };
  });
  for(const locale of ['en','zh-CN']){
   await page.evaluate(locale=>{outcomeFixture.locale=locale;outcomeFixture.render();},locale);
   await page.getByText(locale==='en'?'Reply failed':'回复失败',{exact:true}).waitFor();
-  assert(!await page.locator('.reply-content').isVisible(),'Empty remote failures hide protocol JSON');
+  assert(await page.locator('.reply-content:visible').count()===0,'Empty remote failures hide protocol JSON');
   await page.locator('.reply-error-details summary').click();
   assert(await page.locator('.reply-error-details pre').innerText()==='codex_thread_open_failed','Remote diagnostic remains in details');
   await page.evaluate(()=>outcomeFixture.render('failed','Partial answer','codex_thread_open_failed: session unavailable'));
-  assert(await page.locator('.reply-content').innerText()==='Partial answer','Only actual partial prose is rendered');
+  assert(await page.locator('.reply-content:visible').innerText()==='Partial answer','Only actual partial prose is rendered');
   assert(await page.locator('.reply-error-details').evaluate(node=>node.open),'Diagnostic updates retain disclosure state');
   await page.evaluate(()=>outcomeFixture.render('cancelled','Partial answer',''));
-  assert(await page.locator('.reply-content').innerText()==='Partial answer'&&await page.locator('.is-failed').count()===0,'Cancellation preserves prose with its stopped state');
+  assert(await page.locator('.reply-content:visible').innerText()==='Partial answer'&&await page.locator('.is-failed').count()===0,'Cancellation preserves prose with its stopped state');
  }
  for(const locale of ['en','zh-CN']){
   await page.evaluate(locale=>{outcomeFixture.locale=locale;outcomeFixture.render('failed','','codex_thread_in_use: codex_rpc_rejected_thread_resume (-32600): thread busy-thread already has an active writer');},locale);
   const summary=await page.locator('.reply-error-summary').innerText();
   assert(locale==='en'?summary.includes('Another Codex client on the Codex host')&&summary.includes('archive and restore')&&summary.includes('history is retained'):summary.includes('另一个客户端占用')&&summary.includes('临时归档再恢复')&&summary.includes('聊天记录会保留'),'Writer conflict explains the cause and recovery in the current locale');
-  assert(!await page.locator('.reply-content').isVisible(),'Writer conflict keeps protocol JSON out of prose');
+  assert(await page.locator('.reply-content:visible').count()===0,'Writer conflict keeps protocol JSON out of prose');
   if(!await page.locator('.reply-error-details').evaluate(node=>node.open))await page.locator('.reply-error-details summary').click();
   assert(await page.locator('.reply-error-details pre').innerText()==='codex_thread_in_use: codex_rpc_rejected_thread_resume (-32600): thread busy-thread already has an active writer','Writer diagnostics remain verbatim');
-  assert(await page.locator('.reply-status').getAttribute('role')==='alert','Writer conflict remains an accessible error');
+  assert(await page.locator('.reply-status:visible').getAttribute('role')==='alert','Writer conflict remains an accessible error');
  }
 
  page.off('pageerror',onError);assert(errors.length===0,errors.join('\n'));
