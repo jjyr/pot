@@ -3,8 +3,10 @@ package agenthost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -132,6 +134,7 @@ func TestReceiverRealHTTPNativeAssistantReverseAndHumanApproval(t *testing.T) {
 	done := make(chan struct{})
 	go func() { defer close(done); h.backend.execute(ctx, j) }()
 	awaitTask(t, h.backend, j.Request.From, j.Task.ID, "running")
+	var loseNext atomic.Bool
 	local := agentHostClient(h.token)
 	defer local.client.CloseIdleConnections()
 	local.client.Transport = hostRoundTripper(func(r *http.Request) (*http.Response, error) {
@@ -139,7 +142,12 @@ func TestReceiverRealHTTPNativeAssistantReverseAndHumanApproval(t *testing.T) {
 		r.Host = hostListen
 		w := httptest.NewRecorder()
 		h.handler().ServeHTTP(w, r)
-		return w.Result(), nil
+		response := w.Result()
+		if loseNext.Swap(false) {
+			response.Body.Close()
+			return nil, errors.New("fixture_local_response_lost_after_acceptance")
+		}
+		return response, nil
 	})
 	a, b := sdk.NewInMemoryTransports()
 	go executionMCPServer(local, j.Task.ID, j.Task.RunID, "codex").Run(ctx, a)
@@ -150,10 +158,29 @@ func TestReceiverRealHTTPNativeAssistantReverseAndHumanApproval(t *testing.T) {
 	defer model.Close()
 	// This is an SDK model-tool client while the actual fake native process is
 	// active. It is not a live Codex MCP subprocess/plugin validation.
-	result, e := model.CallTool(ctx, "pot_task_submit", json.RawMessage(encoded(agentlink.MCPSubmitInput{RequestID: "model-reverse-task", Target: target, Text: "real local Task admission; maintenance prevents model execution"})))
-	if e != nil || result.IsError {
-		t.Fatal("native reverse task failed", result, e)
+	var beforeTasks int
+	if e = s.Tasks.DB().QueryRow("SELECT count(*) FROM tasks").Scan(&beforeTasks); e != nil {
+		t.Fatal(e)
 	}
+	loseNext.Store(true)
+	result, e := model.CallTool(ctx, "pot_task_submit", json.RawMessage(encoded(agentlink.MCPSubmitInput{RequestID: "model-reverse-task", Target: target, Text: "real local Task admission; maintenance prevents model execution"})))
+	if e != nil || !result.IsError {
+		t.Fatal("lost accepted local response was not unknown", result, e)
+	}
+	result, e = model.CallTool(ctx, "pot_task_submit", json.RawMessage(encoded(agentlink.MCPSubmitInput{RequestID: "model-reverse-task", Target: target, Text: "real local Task admission; maintenance prevents model execution"})))
+	if e != nil || result.IsError {
+		t.Fatal("reverse receipt reconciliation failed", result, e)
+	}
+	var retried control.MCPTaskAcceptance
+	bytes, _ := json.Marshal(result.StructuredContent)
+	if json.Unmarshal(bytes, &retried) != nil || !retried.Receipt.Duplicate {
+		t.Fatal("unknown callback was re-dispatched", string(bytes))
+	}
+	var afterTasks int
+	if e = s.Tasks.DB().QueryRow("SELECT count(*) FROM tasks").Scan(&afterTasks); e != nil || afterTasks != beforeTasks+1 {
+		t.Fatal("unknown callback replayed business admission", beforeTasks, afterTasks, e)
+	}
+
 	result, e = model.CallTool(ctx, "pot_message", json.RawMessage(encoded(agentlink.MCPMessageInput{RequestID: "model-reverse-message", Message: protocol.SendMail{To: target, Text: "causal reference"}})))
 	if e != nil || result.IsError {
 		t.Fatal("native reverse mail failed", result, e)

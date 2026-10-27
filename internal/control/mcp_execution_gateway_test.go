@@ -24,6 +24,15 @@ type gatewayFixture struct {
 
 func newGatewayFixture(t *testing.T) *gatewayFixture { return gatewayFixtureFor(t, false) }
 func gatewayFixtureFor(t *testing.T, assistant bool) *gatewayFixture {
+	mode := "node-task"
+	if assistant {
+		mode = "mail"
+	}
+	return gatewayFixtureMode(t, mode)
+}
+func gatewayFixtureMode(t *testing.T, mode string) *gatewayFixture {
+	assistant := mode == "mail"
+	assistantTarget := assistant || mode == "assistant-task"
 	t.Helper()
 	f := mcpLocalAccessFixture(t)
 	description := fixtureReceiverDescription()
@@ -38,9 +47,13 @@ func gatewayFixtureFor(t *testing.T, assistant bool) *gatewayFixture {
 	registration := fixtureRegistration()
 	registration.Capabilities = description
 	registration.Epoch = "native-epoch"
-	if assistant {
+	if assistantTarget {
 		registration.Receiver.Address = agentlink.AssistantTarget("receiver-fixture", "native-assistant")
 		registration.Capabilities = agentlink.Description{Version: 1, Scope: "peer", Operations: []agentlink.Operation{agentlink.ChatSend, agentlink.ChatRead, agentlink.ChatReceipt}}
+		if !assistant {
+			registration.Capabilities = description
+			registration.Capabilities.Scope = "peer"
+		}
 		f.access.options.ReceiverCapabilities = func(context.Context, agentlink.MCPReceiver, protocol.AgentRef) (agentlink.Description, error) {
 			return registration.Capabilities, nil
 		}
@@ -283,4 +296,89 @@ func TestMCPNodeMailPreservesOriginalUserReplyAndDedup(t *testing.T) {
 	input.Message.Text = "conflicting bytes"
 	fixtureCallError(t, g.receiver, "pot_receiver_node_mail", input, agentlink.MCPConflict)
 	_ = ctx
+}
+
+func TestMCPRegisteredRootAssistantDelegatesWithoutBecomingUserOrTask(t *testing.T) {
+	g := gatewayFixtureFor(t, true)
+	ctx := context.Background()
+	actor := g.execution.Binding.Actor
+	input := agentlink.MCPNodeSubmit{Actor: actor, Input: agentlink.MCPSubmitInput{RequestID: "root-assistant", Target: agentlink.AssistantTarget(g.f.queue.NodeID, "main"), Text: "root assistant admission"}}
+	var accepted MCPTaskAcceptance
+	fixtureCall(t, g.receiver, "pot_receiver_node_submit", input, &accepted)
+	var task agentlink.Task
+	fixtureCall(t, g.receiver, "pot_receiver_node_task_get", agentlink.MCPNodeRead{Actor: actor, TaskID: accepted.Task.ID}, &task)
+	if task.ID != accepted.Task.ID || task.RunID == "" {
+		t.Fatal(task)
+	}
+	forged := input
+	forged.Actor = g.binding.Task
+	fixtureCallError(t, g.receiver, "pot_receiver_node_submit", forged, agentlink.MCPUnauthorized)
+	localExecution := agentlink.MCPExecutionBinding{Actor: actor, Task: protocol.AgentRef{NodeID: actor.NodeID, Kind: "task", AgentID: "local-conversation-task"}, RunID: "local-conversation-run"}
+	var admission agentlink.MCPNodeExecutionAdmission
+	fixtureCall(t, g.receiver, "pot_receiver_execution_admit", agentlink.MCPNodeExecutionAdmission{ExecutionID: "local-assistant-execution", Binding: localExecution}, &admission)
+	var reverse MCPTaskAcceptance
+	fixtureCall(t, g.receiver, "pot_receiver_task_submit", agentlink.MCPExecutionSubmit{Context: agentlink.MCPExecutionContext{NodeExecutionID: admission.ExecutionID, Binding: localExecution}, Input: agentlink.MCPSubmitInput{RequestID: "root-executing-assistant", Target: input.Input.Target, Text: "same actual root assistant"}}, &reverse)
+	var payload string
+	if e := g.f.access.options.Local.integrationDB.QueryRow("SELECT payload FROM agent_link_received_tasks WHERE id=?", reverse.Task.ID).Scan(&payload); e != nil {
+		t.Fatal(e)
+	}
+	var request agentlink.TaskRequest
+	if json.Unmarshal([]byte(payload), &request) != nil || request.From != actor {
+		t.Fatal("root assistant impersonated", payload)
+	}
+	// A supervised reply derives the immutable processing parent without model
+	// reply/conversation/hop arguments, including an ordinary user destination.
+	var mail MCPAccessMessageAcceptance
+	fixtureCall(t, g.receiver, "pot_receiver_message", agentlink.MCPExecutionMessage{Context: g.execution, Input: agentlink.MCPMessageInput{RequestID: "bound-user-reply", Message: protocol.SendMail{To: g.origin, Text: "reply"}}}, &mail)
+	var parentRaw string
+	if e := g.f.queue.DB.QueryRow("SELECT work FROM mcp_service_deliveries WHERE id=?", g.claim.DeliveryID).Scan(&parentRaw); e != nil {
+		t.Fatal(e)
+	}
+	var work agentlink.MCPWorkDelivery
+	if json.Unmarshal([]byte(parentRaw), &work) != nil {
+		t.Fatal(parentRaw)
+	}
+	if mail.Message.Message.ReplyTo == nil || *mail.Message.Message.ReplyTo != work.Message.ID || mail.Message.Message.ConversationID != work.Message.ConversationID || mail.Message.Message.Hops != work.Message.Hops+1 {
+		t.Fatal("supervised reply causation lost", mail)
+	}
+	_ = ctx
+}
+func TestMCPServiceRestartInvalidatesPendingHumanChannel(t *testing.T) {
+	g := newGatewayFixture(t)
+	pending := agentlink.MCPApprovalPending{Context: g.execution, Epoch: "native-epoch", RequestID: "origin", Approval: agentlink.ExecutionApproval{ID: "service-restart", JobID: g.binding.Task.AgentID, Method: "command", Params: json.RawMessage(`{}`)}}
+	var saved agentlink.MCPApprovalPending
+	fixtureCall(t, g.receiver, "pot_receiver_approval_pending", pending, &saved)
+	before := g.f.access.humanReviews(context.Background(), "main")
+	if len(before) != 1 {
+		t.Fatal(before)
+	}
+	g.f.access.Close()
+	reopened, e := NewMCPAccess(g.f.access.options)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer reopened.Close()
+	if len(reopened.humanReviews(context.Background(), "main")) != 0 {
+		t.Fatal("service restored nonexistent native channel")
+	}
+	if e = reopened.decideHumanApproval(context.Background(), before[0], g.origin, "allow_once"); !errors.Is(e, agentlink.ErrFenced) {
+		t.Fatal("stale restart approval accepted", e)
+	}
+}
+
+func TestMCPAssistantTargetTaskSupportsBoundHumanReview(t *testing.T) {
+	g := gatewayFixtureMode(t, "assistant-task")
+	if g.execution.Binding.Actor.Kind != "task" {
+		t.Fatal("assistant target fabricated assistant execution")
+	}
+	pending := agentlink.MCPApprovalPending{Context: g.execution, Epoch: "native-epoch", RequestID: "origin", Approval: agentlink.ExecutionApproval{ID: "pot-assistant-target", JobID: g.binding.Task.AgentID, Method: "command", Params: json.RawMessage(`{}`)}}
+	var saved agentlink.MCPApprovalPending
+	fixtureCall(t, g.receiver, "pot_receiver_approval_pending", pending, &saved)
+	reviews := g.f.access.humanReviews(context.Background(), "main")
+	if len(reviews) != 1 {
+		t.Fatal("assistant target task approval missing", reviews)
+	}
+	if e := g.f.access.decideHumanApproval(context.Background(), reviews[0], g.origin, "allow_once"); e != nil {
+		t.Fatal(e)
+	}
 }

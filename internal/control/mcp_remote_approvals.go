@@ -52,7 +52,7 @@ func (q *MCPAccessQueue) approvalPending(ctx context.Context, receiver agentlink
 				return e
 			}
 		}
-		if mcpRead(d.work, &work) != nil || work.Message != nil || work.Request.RequestID != in.RequestID || work.Request.Target.Kind != "node" {
+		if mcpRead(d.work, &work) != nil || work.Message != nil || work.Request.RequestID != in.RequestID {
 			return agentlink.ErrUnauthorized
 		}
 		var body, state string
