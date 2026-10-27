@@ -473,6 +473,10 @@ prose remains visible. Nonterminal labels/icons update in place within a two-lin
 frame that responds to the current font and width. Task conversations use the
 shared status frame with their existing stage status. Markdown and asynchronous
 resource rendering retain their existing live rendering behavior.
+Historical pages carry durable message outcomes without necessarily supplying
+their receiver lifecycle. In that case failed/cancelled messages retain their
+own diagnostic/stopped status, including when restored from IndexedDB. Only an
+available receiver lifecycle transfers status ownership to the activity row.
 Subscription errors retain their available diagnostics; a
 frontend rendering exception is reported by the interface error handler rather
 than being classified as a service disconnection.

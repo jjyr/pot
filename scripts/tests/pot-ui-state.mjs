@@ -240,6 +240,14 @@ console.log('Pot UI state and DOM composer checks passed');
 
 const chatInput={id:'input',request_id:'request',role:'user',text:'Hello',status:'streaming'};
 const chatReply={id:'output',reply_to:'input',role:'assistant',text:'',status:'streaming'};
+for(const status of ['failed','cancelled'])for(const text of ['', 'Historical partial prose']){
+ const history=projectChatReplies({messages:[chatInput,{...chatReply,status,text,error:'Historical diagnostic'}],replies:[]});
+ const outcome=history.find(row=>row.role==='assistant');
+ assert(outcome,`${status} history has an outcome even without prose`);
+ assert.equal(outcome.activity,undefined,'Durable history retains its own diagnostic when no lifecycle is supplied');
+ assert.equal(outcome.phase,status==='failed'?'failed':'stopped');
+ assert.equal(outcome.text,text);assert.equal(outcome.error,'Historical diagnostic');
+}
 const waiting={...snapshot(),running:true,turn_id:'input',messages:[chatInput],replies:[{input_id:'input',state:'running'}]};
 const optimistic=projectChatReplies(snapshot(),{request:{request_id:'request',text:'Hello'},phase:'sending'});
 const thinking=projectChatReplies(waiting);

@@ -274,7 +274,7 @@ run = "node scripts/tests/chat-scroll-http-browser.mjs"
 
 [tasks."test:ui-chat-activity"]
 description = "Stable execution activity across reconnect, model/tool rounds and parallel inputs"
-run = "node scripts/tests/chat-activity-browser.mjs"
+run = ["node scripts/tests/chat-activity-browser.mjs", "node scripts/tests/chat-history-diagnostics-browser.mjs"]
 
 [tasks."test:ui-nav"]
 description = "Trusted touch Back intermediate frames and keyed conversation navigation"

@@ -55,7 +55,10 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
       // owns that frame, including between tool completion and the next round.
       if(!message.text.trim()&&!message.presentation&&(lifecycleInputs.has(input?.id||message.reply_to)||message.status==='complete'))continue;
       row.inputID=input?.id||message.reply_to;
-      row.activity=false;
+      // Historical pages carry durable message outcomes but need not include
+      // their receiver lifecycle. Keep those diagnostics on the message; only
+      // an available lifecycle takes ownership in its separate activity row.
+      if(lifecycleInputs.has(row.inputID))row.activity=false;
       if(input&&!firstReplies.has(input.id)){
         row.viewKey=`reply:${input.request_id||input.id}`;firstReplies.add(input.id);
       }

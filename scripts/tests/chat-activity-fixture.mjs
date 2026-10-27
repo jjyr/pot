@@ -7,6 +7,9 @@ export async function chatActivityFixture(sourceOrigin){
  const trace=[],streams=new Set();let revision=1,holdEvents=null;
  const owners=['alpha','short'];
  const messages=new Map(owners.map(owner=>[owner,Array.from({length:owner==='short'?3:800},(_,i)=>({id:`${owner}-${i+1}`,role:i%2?'assistant':'user',text:`${owner} message ${i+1}\n\n`+'Synthetic history content. '.repeat(i%5+1),status:'complete'}))]));
+ Object.assign(messages.get('alpha')[689],{reply_to:'alpha-689',text:'Historical partial answer.',status:'failed',error:'Synthetic historical HTTP 404'});
+ Object.assign(messages.get('alpha')[691],{reply_to:'alpha-691',text:'',status:'failed',error:'Synthetic historical empty failure'});
+ Object.assign(messages.get('alpha')[693],{reply_to:'alpha-693',text:'Historical cancelled answer.',status:'cancelled'});
  const input={id:'active-input',request_id:'active-request',role:'user',text:'Synthetic active turn: keep one stable activity slot.',status:'accepted'};
  messages.get('alpha').push(input);let scenario='thinking';
  const answer=(text,status='streaming')=>({id:'active-answer',reply_to:input.id,role:'assistant',text,status});
