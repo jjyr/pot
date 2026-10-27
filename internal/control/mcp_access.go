@@ -12,7 +12,6 @@ import (
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/mcp"
 	"github.com/jjyr/pot/pkg/protocol"
-	"github.com/modelcontextprotocol/go-sdk/auth"
 )
 
 // MCPAccessOptions does not accept an owner operation Port. Remote callers enter
@@ -38,7 +37,7 @@ func NewMCPAccess(o MCPAccessOptions) (*MCPAccess, error) {
 	a := &MCPAccess{options: o, sdk: mcp.NewServer(&mcp.Implementation{Name: "pot", Version: "1"}, nil)}
 	a.tools()
 	transport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return a.sdk }, &mcp.StreamableHTTPOptions{JSONResponse: true, SessionTimeout: 5 * time.Minute})
-	a.handler = auth.RequireBearerToken(a.verify, &auth.RequireBearerTokenOptions{ResourceMetadataURL: o.OAuth.origin + "/.well-known/oauth-protected-resource/mcp", Scopes: []string{mcpAccessScope}})(transport)
+	a.handler = mcp.RequireBearerToken(a.verify, &mcp.RequireBearerTokenOptions{ResourceMetadataURL: o.OAuth.origin + "/.well-known/oauth-protected-resource/mcp", Scopes: []string{mcpAccessScope}})(transport)
 	return a, nil
 }
 
@@ -62,7 +61,7 @@ func (a *MCPAccess) Close() {
 		_ = session.Close()
 	}
 }
-func (a *MCPAccess) verify(ctx context.Context, token string, r *http.Request) (*auth.TokenInfo, error) {
+func (a *MCPAccess) verify(ctx context.Context, token string, r *http.Request) (*mcp.TokenInfo, error) {
 	return a.options.OAuth.Verify(ctx, token, r)
 }
 func mcpDecodeBody(w http.ResponseWriter, r *http.Request, limit int64, value any) error {

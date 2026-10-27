@@ -19,9 +19,9 @@ import (
 
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/mcp"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
-	"github.com/modelcontextprotocol/go-sdk/auth"
 )
 
 const mcpAccessScope = "pot:collaborate"
@@ -57,7 +57,7 @@ type mcpOAuthClient struct {
 
 func NewMCPOAuthServer(o MCPOAuthOptions) (*MCPOAuthServer, error) {
 	u, e := url.Parse(o.Origin)
-	if e != nil || u.Host == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || o.DB == nil || !core.Identifier(o.NodeID) || o.OwnerSession == nil {
+	if e != nil || u.Host == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || o.DB == nil || !agentlink.NodeTarget(o.NodeID).Valid() || o.OwnerSession == nil {
 		return nil, agentlink.ErrInvalid
 	}
 	if o.LoginURL != "" {
@@ -401,22 +401,22 @@ func (s *MCPOAuthServer) token(w http.ResponseWriter, r *http.Request) {
 
 // Verify rechecks revocation, expiry and audience for every HTTP request. UserID
 // is logical connection identity so SDK session ownership survives token rotation.
-func (s *MCPOAuthServer) Verify(ctx context.Context, token string, _ *http.Request) (*auth.TokenInfo, error) {
+func (s *MCPOAuthServer) Verify(ctx context.Context, token string, _ *http.Request) (*mcp.TokenInfo, error) {
 	var connection, resource, actorRaw, node string
 	var expires, revoked int64
 	e := s.options.DB.QueryRowContext(ctx, `SELECT t.connection_id,t.resource,t.expires_at,c.revoked_at,c.actor,c.receiver_node FROM mcp_oauth_tokens t JOIN mcp_oauth_connections c ON c.id=t.connection_id WHERE t.digest=?`, mcpCredentialDigest(token)).Scan(&connection, &resource, &expires, &revoked, &actorRaw, &node)
 	if e != nil || resource != s.resource || revoked != 0 || expires <= time.Now().Unix() {
-		return nil, auth.ErrInvalidToken
+		return nil, mcp.ErrInvalidToken
 	}
 	var actor protocol.AgentRef
 	if mcpRead(actorRaw, &actor) != nil {
-		return nil, auth.ErrInvalidToken
+		return nil, mcp.ErrInvalidToken
 	}
 	caller, e := agentlink.NewMCPCaller(connection, actor)
 	if e != nil {
-		return nil, auth.ErrInvalidToken
+		return nil, mcp.ErrInvalidToken
 	}
-	return &auth.TokenInfo{UserID: connection, Expiration: time.Unix(expires, 0), Scopes: []string{mcpAccessScope}, Extra: map[string]any{"caller": caller, "receiver_node": node}}, nil
+	return &mcp.TokenInfo{UserID: connection, Expiration: time.Unix(expires, 0), Scopes: []string{mcpAccessScope}, Extra: map[string]any{"caller": caller, "receiver_node": node}}, nil
 }
 func (s *MCPOAuthServer) revokeToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
@@ -497,8 +497,12 @@ func (s *MCPOAuthServer) connections(w http.ResponseWriter, r *http.Request) {
 
 func (s *MCPOAuthServer) CheckConnection(ctx context.Context, id string) error {
 	var revoked int64
-	if s.options.DB.QueryRowContext(ctx, "SELECT revoked_at FROM mcp_oauth_connections WHERE id=?", id).Scan(&revoked) != nil || revoked != 0 {
+	err := s.options.DB.QueryRowContext(ctx, "SELECT revoked_at FROM mcp_oauth_connections WHERE id=?", id).Scan(&revoked)
+	if errors.Is(err, sql.ErrNoRows) || revoked != 0 {
 		return agentlink.ErrUnauthorized
+	}
+	if err != nil {
+		return err
 	}
 	return nil
 }
