@@ -777,7 +777,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   latest.onclick = async()=>{const ticket=positionChat({kind:'latest'});if(state.snapshot?.history?.has_newer){prepareChat();await readHistory({},{around:true,positionTicket:ticket});}if(!currentChatPosition(ticket))return;state.uiAnchor=null;renderMessagesNow();};
   historyStatus.onclick=()=>{pauseFollowing();if(historyFailure==='history.missing'){historyFailure='';renderMessages();}else if(!historyLoading&&state.snapshot?.history?.has_more)readHistory({before:state.snapshot.history.before});};
   let backgroundProjection={key:'',items:[]};
-  const projectedTasks=scope=>backgroundProjection.key===JSON.stringify([scope.space,scope.owner])?backgroundProjection.items:[];
+  const projectedTasks=scope=>backgroundProjection.key===JSON.stringify([scope.space,scope.owner])?backgroundProjection.items.map(task=>({...task,_stale:!!task._stale||client.onlineReady===false||!can('task.list')})):[];
   const openChatTask=(task,scope=client.scope())=>{route='tasks';pages.openTask({...task,_space_id:task._space_id||scope.space,assistant_id:task.assistant_id||scope.owner},{returnTo:{route:'chat',scope:{...scope}}});renderShell();};
   const backgroundTaskView=createBackgroundTasks({locale:()=>locale,
     onOpen:openChatTask,
@@ -789,7 +789,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(!can('task.list')){backgroundTasks?.close();backgroundTasks=null;backgroundTaskKey='';backgroundProjection={...backgroundProjection,items:backgroundProjection.items.map(task=>({...task,_stale:true}))};if(route==='chat')renderMessages();return Promise.resolve();}
     const scope={...client.scope()},key=JSON.stringify([scope.space,scope.owner]);
     if(!backgroundTasks||key!==backgroundTaskKey){backgroundTasks?.close();backgroundTaskKey=key;
-      const stop=domains.tasks.watchActive(scope,snapshot=>{if(disposed||key!==JSON.stringify([client.scope().space,client.scope().owner])||!snapshot.data)return;const items=snapshot.data;backgroundProjection={key,items};messageIdentities(client).rememberTasks(items);pages.rememberTasks(items);if(route==='chat')renderMessages();});
+      const stop=domains.tasks.watchActive(scope,snapshot=>{if(disposed||key!==JSON.stringify([client.scope().space,client.scope().owner])||!snapshot.data)return;const items=snapshot.data.map(task=>({...task,_stale:!!task._stale||!snapshot.fresh}));backgroundProjection={key,items};messageIdentities(client).rememberTasks(items);pages.rememberTasks(items);if(route==='chat')renderMessages();});
       backgroundTasks={close:stop,run:()=>domains.tasks.active(scope).refresh()};
     }return backgroundTasks.run();
   }
@@ -1079,7 +1079,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if(selectedAssistant&&!pages.editing&&!assistants.some(item=>item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id)){
         const missing=selectedAssistant;try{const confirmed=await domains.directory.confirm(missing);if(ticket!==directoryEpoch||disposed)return;if(confirmed){assistants=[...assistants,confirmed];client.assistants=assistants;}else clearSelectedAssistant();}catch(reason){if(reason.storage){directoryStorageFailed=true;error=t('storage.failed');}else error=t('partialOffline');}
       }
-      if (selectedAssistant){const taskAccess=can('task.list');selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;if(selectedAssistant.offline)connection='offline';if(taskAccess!==can('task.list'))refreshBackgroundTasks();}
+      if (selectedAssistant){const watchingTasks=!!backgroundTasks;selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;if(selectedAssistant.offline)connection='offline';if(watchingTasks!==can('task.list'))refreshBackgroundTasks();}
       renderShell();renderMessages();
       if(!assistants.length&&route==='chat'&&!pages.editing){
         const available=!directory.partial&&spaces.some(space=>space.connected!==false);
