@@ -1,138 +1,134 @@
-# Antigravity Agent Link plugin
+# Antigravity MCP setup and receiver
 
-The native Antigravity plugin connects the App and CLI to Pot through MCP and
-Agent Link. Pot users can create persistent Antigravity assistants, choose any
-model slug advertised by the receiving `agy models`, chat with those assistants,
-and exchange assistant messages across connected nodes. The receiving machine
-owns the Antigravity login, native permissions and allowed workspace scopes.
+Ordinary Antigravity calls use an independently configured remote Pot MCP server.
+The optional `pot` helper contains setup instructions only, starts no Host and
+contributes no MCP server or execution hook. The native driver baseline remains
+**agy 1.4.7**. Validate the installed client's actual commands and schema rather
+than assuming a newer SDK applies to this CLI.
 
 ```text
-Pot user -> assistant management -> model / existing workspace scope
-                                      |
-Pot chat / assistant mail <-> authenticated Agent Link <-> shared adapter host
-                                                            |
-                                                  durable assistant queue
-                                                            |
-                                                   agy stream-json
-                                                conversation_id per assistant
-                                                            |
-                                                   native Pot MCP tools
-                                                            |
-                                                Agent Link -> Pot / Codex
+Antigravity -- independent remote MCP + client OAuth --> Pot
+  optional pot helper: setup instructions
+
+Explicit shared receiver Host --> agy stream-json
+  required pot-receiver support: PreToolUse permission hook
+  local execution-tools: active Task/run context only
 ```
 
-## Install and connect
-
-Install and sign into Antigravity CLI locally. This integration uses the native
-CLI protocol in `agy 1.4.7`; it does not use Gemini API keys or a model proxy.
+## Ordinary setup and lifecycle
 
 ```sh
-mise exec -- python integrations/antigravity/install.py
+python3 integrations/antigravity/install.py --source-only
+# Omit --source-only to validate/install/enable with an existing local agy CLI.
 ```
 
-The installer builds `cmd/pot-antigravity-agent`, stages its executable and native
-plugin under `~/.config/pot-antigravity/plugin`, validates it with
-`agy plugin validate --strict`, and installs/enables it through the official CLI.
-Unrelated configuration is retained and modified managed source files are not
-overwritten. `--binary /absolute/path` uses a prebuilt executable; `--home PATH
---source-only` stages an isolated package without changing Antigravity's registry.
-Stop the host before upgrading its executable.
+Use `pot-setup` or the native MCP manager. Review existing names, exact URLs,
+source/scope, enablement and policies without printing credentials or entire
+configuration. Keep matching connections; resolve same-name/different-endpoint,
+duplicate alias, project and old stdio conflicts before writing. The documented
+remote shape is:
 
-Run `pot-setup` in Antigravity. It returns a private, short-lived connection-page
-URL. Open that page and copy an invitation into Pot's **Add assistant >
-＋ Connect a new Agent > Antigravity** guide, or paste a Pot invitation into the
-connection page. The guide shows installation and invitation steps; after
-connecting, configure and create the new assistant explicitly. Pairing
-allows messaging and user-only assistant management within existing local scope
-choices. It grants no arbitrary filesystem path selection or credentials.
+```json
+{"mcpServers":{"pot_deployment":{"serverUrl":"https://pot.example.invalid/custom-endpoint"}}}
+```
 
-The local owner endpoint is `127.0.0.1:8794`; authenticated TLS Agent Link starts
-on `127.0.0.1:8795`. The connection page supports the same address discovery and
-signed listeners as the Codex adapter. One reachable peer endpoint carries both
-directions. Management credentials never appear in invitations or MCP results.
+Use the field supported by the installed client (`serverUrl`, or its documented
+`url` alias). Do not use legacy `httpUrl`/SSE or invent a CLI configuration flag.
+Configure the exact deployment-provided HTTP/HTTPS URL without query secrets,
+userinfo or fragments. Deployment owners manage certificates and reachability.
+Complete the client's standard OAuth/PKCE browser flow, confirm the connection
+once in Pot, then return to Antigravity and verify discovery plus a permitted tool
+call. Tokens, codes, callback queries and auth URLs do not belong in chat/logs,
+plugin files or endpoint queries.
 
-After pairing, choose a model and an existing host workspace scope in Pot.
-The native model list already includes reasoning levels in its slugs and labels;
-Pot uses that exact selection instead of adding a conflicting effort override. The
-initial scope is an isolated read-only directory under
-`~/.config/pot-antigravity/agent/workspace`. New assistants have independent IDs,
-avatars, model selections and persistent conversations. The Link inspector offers
-**Create assistant** and each assistant's **Model settings**.
+Review/change/logout/remove through the independent server's native MCP manager.
+Preserve its policies and unrelated settings when changing a URL. Removing or
+disabling the optional helper leaves the independent connection and native login
+under their own lifecycle; server grant revocation is separate. Actual lifecycle
+behavior must also be verified against the installed client.
 
-To offer another workspace, configure a template assistant on the receiving host:
+## Independent execution support
+
+A schedulable receiver is explicitly installed/authorized/started. It retains
+receiver-owned native login, model, workspace and permissions. The `pot-receiver`
+support package is mandatory for native execution, independently of the optional
+helper. It retains `pot-execution-scope` / `PreToolUse`; removing the helper does
+not remove this hook. The driver checks enabled support, hook and local context
+server before sending effective input. Missing support fails closed.
 
 ```sh
-~/.config/pot-antigravity/plugin/bin/pot-antigravity-agent assistant \
-  --root ~/.config/pot-antigravity/agent --id project --name Project \
-  --workspace /absolute/project --mode workspace-write \
-  --model MODEL_SLUG
+python3 integrations/antigravity/install.py --receiver --source-only
+# Or --receiver --binary /path/to/built/pot-antigravity-agent to avoid building.
+# Without --source-only, validate/install/enable pot-receiver using native agy.
+~/.config/pot-antigravity/receiver-support/bin/pot-antigravity-agent receiver-connect \
+  --root ~/.config/pot-antigravity/agent --url https://pot.example.invalid/custom-endpoint
+~/.config/pot-antigravity/receiver-support/bin/pot-antigravity-agent receiver-serve \
+  --root ~/.config/pot-antigravity/agent --connection CONNECTION_ID
+~/.config/pot-antigravity/receiver-support/bin/pot-antigravity-agent receiver-disconnect \
+  --root ~/.config/pot-antigravity/agent --connection CONNECTION_ID
 ```
 
-Remote creation selects an existing assistant's scope by ID and inherits its
-workspace and permission mode. It cannot supply a new path or broaden that mode.
-Changing a model requires an idle assistant and the current revision. It retains
-the original conversation and applies at the next execution. Invalid or unavailable
-models fail without fallback. Model discovery is metadata, not proof of plan access,
-remaining quota or successful inference.
+Installation never starts a receiver, changes HOME, logs in or changes network
+settings. Source-only installation requires explicit native support activation
+before execution. Stop the receiver before updating its executable/support files.
+Local package modifications and symlinks are rejected; historical data is retained.
 
-## Execution and permissions
+Read-only executions retain the enforced native-tool allowlist: reads/search are
+allowed, while shell, writes, edits and subagents are denied. Other native
+execution remains under existing policy. The hook is inert outside supervised
+jobs; it does not disable users' other MCP globally. Trusted execution context
+replaces inherited reserved actor/job/run variables per process. The local
+`pot_receiver` context tool checks the current active Task/run and provides no
+owner page, credentials, approval or legacy TCP fallback. It does not provide
+remote message/Task callback tools. Those remain an integration gap requiring a
+trusted execution-binding gateway; ordinary OAuth cannot substitute for it.
 
-The [shared adapter host](../../internal/agenthost) owns identity, durable queues,
-mail transport, session bindings, supervision and recovery for Codex and
-Antigravity. Runtime-specific protocol handlers remain separate. Every assistant
-processes inputs serially; different assistants and independent tasks may run in
-parallel. An `init` conversation ID is persisted before writing the first user
-input. Later executions use `--conversation`, never `--continue` or a replacement
-conversation after a resume failure.
+The driver persists conversation identity before writing input, resumes the exact
+saved conversation and rejects mismatches without opening a replacement. It has
+no native turn ID; the real Pot RunID remains separate. Input means terminal
+continuation, not live steering. Cancellation is confirmed only after supervised
+process cleanup; it cannot roll back external effects. Unknown cleanup remains
+fenced. Headless CLI interactive approvals are not implemented; success text alone
+is not proof a permission-requiring action ran. No file-byte delivery is advertised.
 
-Each execution requires the installed, enabled Pot MCP server and execution-scope
-hook. The hook is inert in ordinary unbound Antigravity chats. In host-bound
-read-only executions it denies command execution, file edits, subagents and other
-non-read tools. It permits the explicitly scoped Pot messaging tools. Writable
-executions retain the host's configured Antigravity permission policy; the adapter
-does not pass `--dangerously-skip-permissions`.
+## Capability boundaries
 
-Antigravity headless mode cannot relay interactive approvals through its stream.
-No remote approval capability is advertised. Native policy may soft-deny a tool
-while the model continues and explains the refusal. A completed text answer alone
-does not prove that a requested tool action succeeded.
+This matrix separates implemented Pot drivers from documented upstream interfaces.
+The remote receiver extension currently wires task submit/read/cancel/terminal
+input and lifecycle snapshots only for Codex/Antigravity. It does not yet wire
+remote human review or native model message/Task callbacks; those gaps do not
+remove the existing local Codex review/message behavior or the product goals.
 
-Native assistant processes inherit their exact assistant/job/root binding into the
-MCP process. A task cannot impersonate a message assistant. Outgoing mail names
-an explicit advertised recipient and binds the active parent when applicable.
-Receipts mean durable acceptance, not model completion. Direct user replies enter
-Pot's existing chat projection without waking a local Pot model.
+| Agent/surface | Ordinary MCP configuration | Execution interface and current Pot boundary |
+| --- | --- | --- |
+| Codex CLI/Desktop/IDE | Independent HTTP server + client OAuth; optional onboarding helper | Existing App Server v2 start/exact thread resume/turn interrupt/terminal events; local Task-bound review retained. New receiver callbacks/review not yet connected; files are metadata only. |
+| Antigravity CLI/App | Independent `serverUrl` + client OAuth; optional helper | Existing stream-json init/result, exact conversation resume and process supervision; separate enforced execution hook required. No headless remote approval or file bytes. |
+| Claude Code | Documented `claude mcp add --transport http NAME URL`, scoped config and `/mcp` OAuth | Official Agent SDK/headless interfaces exist. No Pot driver or verified Pot session/cancel/approval mapping. |
+| Grok API / Build CLI / web | API remote-MCP tool configuration; Build CLI documented MCP management; web custom connector uses reachable URL | API tool calling does not prove control of an existing Grok Agent. Build documents session/headless/resume candidates. No Pot driver, verified cancellation, run binding or approval mapping. |
+| dot | Installed MCP plugins; #314 records MCP Events subscription/webhook requirements | Existing-dot identity/profile, accepted Task/run mapping, wakeup and cancellation remain unverified. No Pot driver or universal SDK claim. Ordinary notifications do not establish model wakeup. |
 
-The independent node executor snapshots its own workspace, mode and model for
-each task. Creating or updating an assistant does not configure this executor. Its model and
-permissions are separate local owner operations:
+References: [Claude MCP](https://code.claude.com/docs/en/mcp),
+[Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview),
+[Grok remote MCP](https://docs.x.ai/developers/tools/remote-mcp.md),
+[Grok Build MCP](https://docs.x.ai/build/features/mcp-servers.md),
+[Grok Build sessions](https://docs.x.ai/build/features/sessions.md),
+[dot investigation #314](https://github.com/jjyr/pot/issues/314),
+[Antigravity MCP](https://antigravity.google/docs/mcp) and
+[plugins](https://antigravity.google/docs/plugins).
+These are source/documentation boundaries, not live validation of any client.
+The first version does not add drivers for the other names.
 
-```sh
-~/.config/pot-antigravity/plugin/bin/pot-antigravity-agent executor \
-  --root ~/.config/pot-antigravity/agent --workspace /absolute/project \
-  --mode workspace-write --model MODEL_SLUG
-```
+## Breaking upgrade
 
-Cancellation and shutdown drain the trusted process supervisor before publishing
-a terminal result. Unconfirmed cleanup fences new execution. Restart never replays
-unfinished accepted work. Disconnect and delete retain accepted execution history.
-The integration creates adapter-managed CLI conversations; it does not claim to
-control arbitrary existing Antigravity GUI chats.
+Stop old execution, update Pot/helper/receiver, refresh installed native plugin
+caches and verify the old bundled stdio MCP and helper hook are absent. Activate
+`pot-receiver` separately for execution. Reconnect through the explicit new MCP
+path. Old P2P pairings are unsupported, never migrated and never used as fallback.
+The installer removes only unmodified receipted obsolete package assets; it does
+not erase connection history, Tasks, reports or artifacts. Modified assets require
+review. Disconnection/revocation does not cancel or replay accepted work.
 
-## Development
-
-```sh
-mise exec -- go test -race ./internal/agenthost ./pkg/agentlink ./pkg/storage
-mise exec -- python integrations/antigravity/install_test.py
-POT_AGY_LIVE=1 mise exec -- go test ./internal/agenthost \
-  -run '^TestAntigravityLive$' -count=1 -v -timeout=9m
-```
-
-The live command requires an authenticated `agy`, the installed plugin and idle
-adapter ports. It uses disposable host/Pot roots and real model calls. Failed
-fixtures are retained under the printed temporary path for local diagnosis.
-
-Protocol references: [plugins](https://antigravity.google/docs/plugins),
-[MCP](https://antigravity.google/docs/mcp),
-[headless streaming](https://antigravity.google/docs/cli/headless),
-[hooks](https://antigravity.google/docs/hooks).
+See [Codex setup](../codex/README.md) and the
+[shared contract](../../docs/mcp-collaboration-contract.md). Native login, actual
+CLI plugin/schema behavior, per-run MCP configuration and end-to-end remote
+callbacks need live client verification before claiming bidirectional execution.

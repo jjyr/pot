@@ -52,11 +52,9 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((self.home / ".config/pot-codex/bridge.json").exists())
         manifest = json.loads((destination / ".codex-plugin/plugin.json").read_text())
         self.assertEqual(manifest["name"], "pot")
-        mcp = json.loads((destination / manifest["mcpServers"]).read_text())["mcpServers"]["pot"]
-        self.assertEqual(mcp["command"], str(destination / "bin/pot-codex-agent"))
-        self.assertEqual(
-            mcp["args"], ["host", "--root", str(self.home / ".config/pot-codex/agent")]
-        )
+        self.assertNotIn("mcpServers", manifest)
+        self.assertFalse((destination / ".mcp.json").exists())
+        self.assertFalse((destination / "bin").exists())
         self.assertEqual(manifest["skills"], "./skills/")
         setup = manifest["extensions"]["com.openai"]["onboardingSkill"]
         self.assertTrue((destination / setup).is_file())
@@ -66,20 +64,67 @@ class InstallTests(unittest.TestCase):
 
     def test_local_edits_are_retained(self):
         destination = self.install()
-        file = destination / ".mcp.json"
+        file = destination / ".codex-plugin/plugin.json"
         file.write_text("owner changes")
         with self.assertRaisesRegex(ValueError, "local change"):
             self.install()
         self.assertEqual(file.read_text(), "owner changes")
 
-    def test_missing_dependency_or_binary_does_not_install(self):
+    def test_helper_needs_no_go_or_native_cli(self):
+        with (
+            mock.patch.object(installer.shutil, "which", return_value=None),
+            mock.patch.object(
+                installer.subprocess, "run", side_effect=AssertionError("helper spawned a process")
+            ),
+        ):
+            self.assertTrue(self.install().is_dir())
+
+    def test_receiver_is_explicit_and_never_launched(self):
+        with mock.patch.object(
+            installer.subprocess, "run", side_effect=AssertionError("receiver launched")
+        ):
+            installer.install(self.home, self.binary, build=False, receiver=True)
+        receiver = self.home / ".local/bin/pot-codex-agent"
+        self.assertEqual(receiver.read_bytes(), self.binary.read_bytes())
         with mock.patch.object(installer.shutil, "which", return_value=None):
             with self.assertRaisesRegex(ValueError, "Go is required"):
-                installer.install(self.home, self.binary)
-        self.binary.unlink()
-        with self.assertRaisesRegex(ValueError, "binary missing"):
-            self.install()
-        self.assertFalse((self.home / ".agents/plugins/marketplace.json").exists())
+                installer.install(self.home, self.binary, build=True, receiver=True)
+
+    def test_upgrade_removes_only_receipted_plugin_transport(self):
+        destination = self.install()
+        old = destination / ".mcp.json"
+        old.write_text('{"mcpServers":{"pot":{"command":"old-host"}}}')
+        receipt = destination / ".pot-install.json"
+        previous = installer.load(receipt)
+        previous[".mcp.json"] = installer.digest(old)
+        receipt.write_text(json.dumps(previous))
+        history = self.home / ".config/pot-codex/agent/history"
+        history.parent.mkdir(parents=True)
+        history.write_text("retained")
+        independent = self.home / ".codex/config.toml"
+        independent.write_text('[mcp_servers.owner]\nurl="https://owner.invalid/mcp"\n')
+        self.install()
+        self.assertFalse(old.exists())
+        self.assertEqual(history.read_text(), "retained")
+        self.assertIn("owner.invalid", independent.read_text())
+
+    def test_activation_preserves_home_and_uses_explicit_native_config_root(self):
+        self.install()
+        captured = []
+        native = self.home / "explicit-codex"
+        original_home = os.environ.get("HOME")
+
+        def run(args, **kwargs):
+            captured.append(kwargs["env"])
+            output = '{"installed":[{"pluginId":"pot@personal","enabled":true}]}'
+            return installer.subprocess.CompletedProcess(args, 0, output)
+
+        with mock.patch.object(installer.subprocess, "run", side_effect=run):
+            self.assertTrue(installer.activate(self.home, native, "fake-codex"))
+        self.assertTrue(captured)
+        for env in captured:
+            self.assertEqual(env.get("HOME"), original_home)
+            self.assertEqual(env["CODEX_HOME"], str(native))
 
     @unittest.skipUnless(
         os.environ.get("POT_CODEX_CLI_TEST"), "Optional real Codex CLI discovery test"
@@ -99,7 +144,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((cache / "bridge.json").exists())
 
     def test_binary_and_config_parent_symlinks_are_rejected_before_writes(self):
-        for relative in [".codex/plugins/pot/bin", ".config/pot-codex"]:
+        for relative in [".codex/plugins/pot/bin", ".agents/plugins"]:
             with self.subTest(relative=relative):
                 with tempfile.TemporaryDirectory() as directory:
                     self.home = Path(directory) / "home"
@@ -115,12 +160,12 @@ class InstallTests(unittest.TestCase):
 
     def test_unmanaged_package_and_symlinks_are_not_overwritten(self):
         destination = self.home / ".codex/plugins/pot"
-        destination.mkdir(parents=True)
-        (destination / ".mcp.json").write_text("unmanaged")
+        (destination / ".codex-plugin").mkdir(parents=True)
+        (destination / ".codex-plugin/plugin.json").write_text("unmanaged")
         with self.assertRaisesRegex(ValueError, "local change"):
             self.install()
-        (destination / ".mcp.json").unlink()
-        (destination / ".mcp.json").symlink_to(self.binary)
+        (destination / ".codex-plugin/plugin.json").unlink()
+        (destination / ".codex-plugin/plugin.json").symlink_to(self.binary)
         with self.assertRaisesRegex(ValueError, "symlink"):
             self.install()
 

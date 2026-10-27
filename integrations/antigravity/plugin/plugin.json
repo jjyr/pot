@@ -1,5 +1,5 @@
 {
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "pot",
-  "description": "Connect Antigravity assistants to Pot through authenticated Agent Link messaging."
+  "description": "Optional setup guidance for an independent Pot MCP connection."
 }

@@ -34,10 +34,9 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def install(home, binary, build=True, codex=None):
+def install(home, binary=None, build=False, codex=None, receiver=False):
     destination = home / ".codex/plugins/pot"
     marketplace = home / ".agents/plugins/marketplace.json"
-    config = home / ".config/pot-codex/agent"
     if any(
         p.is_symlink()
         for p in [
@@ -45,8 +44,6 @@ def install(home, binary, build=True, codex=None):
             *destination.parents,
             marketplace,
             *marketplace.parents,
-            config,
-            *config.parents,
         ]
         if p != home.parent
     ):
@@ -74,14 +71,6 @@ def install(home, binary, build=True, codex=None):
         for path in SOURCE.rglob("*")
         if path.is_file()
     }
-    mcp = json.loads(desired[".mcp.json"])
-    mcp["mcpServers"]["pot"]["command"] = str(destination / "bin/pot-codex-agent")
-    mcp["mcpServers"]["pot"]["args"] = [
-        "host",
-        "--root",
-        str(home / ".config/pot-codex/agent"),
-    ]
-    desired[".mcp.json"] = (json.dumps(mcp, indent=2) + "\n").encode()
     # Protect edits and unmanaged packages; private Agent Link data belongs to the owner.
     for relative in set(desired) | set(previous) | {"bin/pot-codex-agent", ".pot-install.json"}:
         target = destination / relative
@@ -93,7 +82,7 @@ def install(home, binary, build=True, codex=None):
             and previous.get(relative) != digest(target)
         ):
             raise ValueError(f"Existing local change retained: {relative}")
-    if build:
+    if receiver and build:
         go = shutil.which("go")
         if not go:
             raise ValueError(
@@ -104,12 +93,17 @@ def install(home, binary, build=True, codex=None):
             cwd=REPO,
             check=True,
         )
-    if not binary.is_file():
-        raise ValueError("Agent Link binary missing; build it or pass --binary PATH")
-    desired["bin/pot-codex-agent"] = binary.read_bytes()
-    target_binary = destination / "bin/pot-codex-agent"
-    if target_binary.exists() and previous.get("bin/pot-codex-agent") != digest(target_binary):
-        raise ValueError("Locally modified Agent Link binary retained")
+    if receiver:
+        if binary is None or not binary.is_file():
+            raise ValueError("Receiver binary missing; build it or pass --binary PATH")
+        # Execution is an independent installation, never an MCP plugin command.
+        receiver_binary = home / ".local/bin/pot-codex-agent"
+        if any(p.is_symlink() for p in [receiver_binary, *receiver_binary.parents]):
+            raise ValueError("Refusing symlink at receiver destination")
+        if receiver_binary.exists() and receiver_binary.read_bytes() != binary.read_bytes():
+            raise ValueError("Receiver executable exists; explicitly replace it while stopped")
+    else:
+        receiver_binary = None
     for relative, data in desired.items():
         path = destination / relative
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -128,28 +122,25 @@ def install(home, binary, build=True, codex=None):
     old["pot"] = expected
     catalog["plugins"] = list(old.values())
     atomic(marketplace, json.dumps(catalog, indent=2) + "\n")
-    if not codex and not shutil.which("codex"):
-        print(
-            "Codex CLI is missing from PATH: install/login locally on B before running the Agent Link host."
-        )
-    print(f"Installed local plugin source: {destination}")
-    print("Local source registered; enable Pot with a supported Codex CLI or plugin directory.")
-    print(
-        "The Agent Link host starts automatically when Codex enables the plugin. Open its connections page with pot_open_connections; no network/system configuration was changed."
-    )
+    if receiver_binary:
+        receiver_binary.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        receiver_binary.write_bytes(binary.read_bytes())
+        receiver_binary.chmod(0o700)
+    print(f"Installed optional setup helper: {destination}")
+    print("Independent MCP connections and receiver processes have separate lifecycles.")
     return destination
 
 
 def activate(home, codex_home, codex):
     # This is the documented CLI in Codex 0.163.0. Probe support rather than
     # inventing commands or silently rewriting an older config.toml.
-    env = {**os.environ, "HOME": str(home), "CODEX_HOME": str(codex_home)}
+    env = {**os.environ, "CODEX_HOME": str(codex_home)}
     probe = subprocess.run(
         [codex, "plugin", "add", "--help"], env=env, capture_output=True, timeout=15
     )
     if probe.returncode != 0:
         print(
-            "This Codex CLI has no plugin add command. Install Pot through its plugin directory; see the integration README for the local MCP fallback."
+            "This Codex CLI has no plugin add command. Install Pot through its plugin directory; see the integration README for independent remote MCP setup."
         )
         return False
     catalog = load(home / ".agents/plugins/marketplace.json")
@@ -174,7 +165,7 @@ def activate(home, codex_home, codex):
     ):
         raise ValueError("Codex did not report the Pot plugin installed/enabled")
     print(
-        "Pot plugin installed and enabled in Codex; start a new chat. Pairing/connection is still separate."
+        "Pot plugin installed and enabled in Codex; start a new chat. Independent MCP setup is still separate."
     )
     return True
 
@@ -187,7 +178,14 @@ def main():
         default=Path.home(),
         help="Personal configuration home (use an isolated directory for testing)",
     )
-    parser.add_argument("--binary", type=Path, help="Use an already built Agent Link executable")
+    parser.add_argument(
+        "--receiver",
+        action="store_true",
+        help="Also install the independent receiver executable; never start it",
+    )
+    parser.add_argument(
+        "--binary", type=Path, help="Built receiver executable (requires --receiver)"
+    )
     parser.add_argument(
         "--codex", help="Codex executable for supported plugin activation (defaults to PATH)"
     )
@@ -203,7 +201,15 @@ def main():
             binary = args.binary.resolve() if args.binary else Path(directory) / "pot-codex-agent"
             home = args.home.resolve()
             codex = args.codex or shutil.which("codex")
-            install(home, binary, build=args.binary is None, codex=codex)
+            if args.binary and not args.receiver:
+                raise ValueError("--binary requires --receiver")
+            install(
+                home,
+                binary,
+                build=args.receiver and args.binary is None,
+                codex=codex,
+                receiver=args.receiver,
+            )
             if codex and not args.source_only:
                 codex_home = args.codex_home or (
                     Path(os.environ["CODEX_HOME"])
