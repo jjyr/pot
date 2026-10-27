@@ -163,6 +163,10 @@ func TestTemporaryWorkspaceAllocationFailureIsFenced(t *testing.T) {
 func TestTemporaryWorkspaceConcurrentAllocation(t *testing.T) {
 	t.Parallel()
 	s := taskResourceService(t)
+	canonical, err := filepath.EvalSymlinks(s.options.Workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
 	const count = 16
 	launches := make([]tasks.Launch, count)
 	for i := range launches {
@@ -187,7 +191,7 @@ func TestTemporaryWorkspaceConcurrentAllocation(t *testing.T) {
 		if result.err != nil {
 			t.Fatal(result.err)
 		}
-		if seen[result.w.Path] || filepath.Dir(result.w.Path) != filepath.Join(s.options.Workspace, "tasks") {
+		if seen[result.w.Path] || filepath.Dir(result.w.Path) != filepath.Join(canonical, "tasks") {
 			t.Fatal("allocation reused or escaped", result.w)
 		}
 		seen[result.w.Path] = true
@@ -283,7 +287,23 @@ func TestRealTemporaryWorkspacePermissions(t *testing.T) {
 	if os.Getenv("POT_SANDBOX_INTEGRATION") != "1" {
 		t.Skip("requires real sandbox qualification")
 	}
-	s := taskResourceService(t)
+	for _, variant := range []string{"default", "root-alias"} {
+		t.Run(variant, func(t *testing.T) {
+			root := t.TempDir()
+			if variant == "root-alias" {
+				alias := filepath.Join(t.TempDir(), "state-alias")
+				if err := os.Symlink(root, alias); err != nil {
+					t.Fatal(err)
+				}
+				root = alias
+			}
+			testTemporaryWorkspacePermissions(t, taskResourceServiceAt(t, root, ""))
+		})
+	}
+}
+
+func testTemporaryWorkspacePermissions(t *testing.T, s *Service) {
+	t.Helper()
 	var err error
 	s.options.Node, err = exec.LookPath("node")
 	if err != nil {
@@ -307,7 +327,7 @@ func TestRealTemporaryWorkspacePermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := "printf proof > proof.txt && test -r proof.txt"
+	command := "printf proof > proof.txt && test -r proof.txt || exit 20"
 	for _, file := range []string{sibling, authority, assistant} {
 		path := quoteFixturePath(file)
 		command += "; if cat " + path + "; then exit 21; fi"
@@ -333,7 +353,7 @@ func TestRealTemporaryWorkspacePermissions(t *testing.T) {
 	}
 	data, err := (taskFiles{s}).ReadFile(ctx, l.ExecutionTarget, l.TaskID, "proof.txt", 1024)
 	if err != nil || string(data) != "proof" {
-		t.Fatalf("protected delivery: %q %v", data, err)
+		t.Fatalf("protected delivery: %q %v; execution: %v", data, err, result)
 	}
 	for _, file := range []string{sibling, authority, assistant} {
 		data, err := os.ReadFile(file)

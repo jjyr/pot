@@ -57,13 +57,17 @@ func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace stri
 	if !filepath.IsAbs(workspace) || workspace == "/" {
 		return nil, errors.New("sandbox requires a confined absolute workspace")
 	}
-	for _, protected := range append(append([]string{}, l.ProtectedPaths...), l.Directory, l.Node) {
+	protectedPaths := make([]string, 0, len(l.ProtectedPaths))
+	for i, protected := range append(append([]string{}, l.ProtectedPaths...), l.Directory, l.Node) {
 		canonical, e := filepath.EvalSymlinks(protected)
 		if e != nil {
 			return nil, fmt.Errorf("sandbox protected path: %w", e)
 		}
 		if within(canonical, workspace) {
 			return nil, errors.New("sandbox workspace contains trusted runtime assets or state")
+		}
+		if i < len(l.ProtectedPaths) {
+			protectedPaths = append(protectedPaths, canonical)
 		}
 	}
 	cwd, err := filepath.EvalSymlinks(command.Dir)
@@ -162,9 +166,9 @@ func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace stri
 	if runtime.GOOS == "linux" {
 		request.Read = append(request.Read, filepath.Join(l.Directory, "node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp"))
 	}
-	request.DenyRead = append([]string{"/"}, l.ProtectedPaths...)
+	request.DenyRead = append([]string{"/"}, protectedPaths...)
 	request.DenyWrite = append([]string{l.Directory, markerDir}, nodePaths...)
-	for _, protected := range l.ProtectedPaths {
+	for _, protected := range protectedPaths {
 		if !within(workspace, protected) {
 			request.DenyWrite = append(request.DenyWrite, protected)
 		}
