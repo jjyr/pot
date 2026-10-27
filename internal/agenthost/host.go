@@ -34,6 +34,7 @@ const hostListen = "127.0.0.1:8792"
 const hostPeerListen = "127.0.0.1:8793"
 
 type agentHost struct {
+	receiverEpoch            string
 	adapter                  Runtime
 	db, tasks                *sql.DB
 	secrets                  *secrets.Store
@@ -74,7 +75,7 @@ func openAgentHost(root string, runtimes ...Runtime) (*agentHost, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := &agentHost{adapter: adapter, db: db, peerCtx: context.Background()}
+	h := &agentHost{receiverEpoch: identifier(), adapter: adapter, db: db, peerCtx: context.Background()}
 	ok := false
 	defer func() {
 		if !ok {
@@ -284,6 +285,10 @@ func (h *agentHost) handler() http.Handler {
 				return
 			}
 			writeJSON(w, 200, map[string]bool{"accepted": true})
+			return
+		}
+		if r.URL.Path == "/api/v1/agent-host/execution" && r.Method == "POST" {
+			h.executionHTTP(w, r)
 			return
 		}
 		if r.URL.Path == "/api/v1/agent-host/tool" && r.Method == "POST" {

@@ -259,77 +259,66 @@ func (b *backend) Submit(ctx context.Context, r agentlink.TaskRequest) (agentlin
 // submitMessage admits one addressed inbox envelope. It never resolves a node
 // default or accepts task workspace/configuration overrides.
 func (b *backend) submitMessage(ctx context.Context, r agentlink.TaskRequest, message protocol.Envelope) (agentlink.Task, error) {
+	var accepted job
+	err := storage.Transaction(ctx, b.db, func(tx *sql.Tx) error { return b.submitMessageTx(ctx, tx, r, message, &accepted) })
+	return accepted.Task, err
+}
+func (b *backend) submitMessageTx(ctx context.Context, tx *sql.Tx, r agentlink.TaskRequest, message protocol.Envelope, accepted *job) error {
 	if r.Target.Kind != "assistant" || r.Target.NodeID != b.nodeID || r.Configuration != nil || r.Workspace != "" {
-		return agentlink.Task{}, agentlink.ErrUnsupported
+		return agentlink.ErrUnsupported
 	}
 	if !validID(r.RequestID) || message.Validate() != nil || message.Kind != "message" ||
 		(message.From.Kind != "assistant" && message.From.Kind != "task" && message.From.Kind != "user") || message.To.NodeID != b.nodeID || message.To.Kind != "assistant" ||
 		message.From != r.From || message.To.AgentID != r.Target.AgentID || message.Text != r.Text {
-		return agentlink.Task{}, agentlink.ErrInvalid
+		return agentlink.ErrInvalid
 	}
 	payload := encoded(r)
-	// Exact retries retain their accepted explicit recipient.
-	var oldPayload, oldData string
-	priorErr := b.db.QueryRowContext(ctx, "SELECT payload,data FROM agent_adapter_jobs WHERE caller=? AND request_id=?", callerKey(r.From), r.RequestID).Scan(&oldPayload, &oldData)
-	if priorErr == nil {
-		if oldPayload != payload {
-			return agentlink.Task{}, agentlink.ErrConflict
+	var data, old string
+	err := tx.QueryRowContext(ctx, "SELECT payload,data FROM agent_adapter_jobs WHERE caller=? AND request_id=?", callerKey(r.From), r.RequestID).Scan(&old, &data)
+	if err == nil {
+		if old != payload {
+			return agentlink.ErrConflict
 		}
-		var previous job
-		if err := json.Unmarshal([]byte(oldData), &previous); err != nil {
-			return agentlink.Task{}, err
-		}
-		return previous.Task, nil
+		return json.Unmarshal([]byte(data), accepted)
 	}
-	if !errors.Is(priorErr, sql.ErrNoRows) {
-		return agentlink.Task{}, priorErr
-	}
-	a, err := b.resolve(ctx, r.Target.AgentID)
-	if err != nil {
-		return agentlink.Task{}, err
-	}
-	var accepted job
-	err = storage.Transaction(ctx, b.db, func(tx *sql.Tx) error {
-		var data, old string
-		err := tx.QueryRowContext(ctx, "SELECT payload,data FROM agent_adapter_jobs WHERE caller=? AND request_id=?", callerKey(r.From), r.RequestID).Scan(&old, &data)
-		if err == nil {
-			if old != payload {
-				return agentlink.ErrConflict
-			}
-			return json.Unmarshal([]byte(data), &accepted)
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if err = activeAssistantTx(ctx, tx, a.ID); err != nil {
-			return err
-		}
-		var count int
-		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM agent_adapter_jobs WHERE json_extract(data,'$.task.state') IN ('queued','running','cancelling','waiting_approval')`).Scan(&count); err != nil {
-			return err
-		}
-		if count >= 32 {
-			return agentlink.ErrCapacity
-		}
-		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM agent_adapter_jobs").Scan(&count); err != nil {
-			return err
-		}
-		if count >= 256 {
-			return agentlink.ErrCapacity
-		}
-		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM agent_adapter_jobs WHERE assistant_id=? AND json_extract(data,'$.cleanup_uncertain')=1`, a.ID).Scan(&count); err != nil {
-			return err
-		}
-		if count > 0 {
-			return agentlink.ErrFenced
-		}
-		now := time.Now().UTC()
-		accepted = job{Task: agentlink.Task{ID: jobID(r.From, r.RequestID), RequestID: r.RequestID, Receiver: b.identity(a), State: "queued", CreatedAt: now, UpdatedAt: now}, Request: r, Message: &message}
-		_, err = tx.ExecContext(ctx, "INSERT INTO agent_adapter_jobs(id,caller,request_id,assistant_id,payload,data) VALUES(?,?,?,?,?,?)", accepted.Task.ID, callerKey(r.From), r.RequestID, a.ID, payload, encoded(accepted))
+	if !errors.Is(err, sql.ErrNoRows) {
 		return err
-	})
-	return accepted.Task, err
+	}
+	var a assistant
+	if err := tx.QueryRowContext(ctx, "SELECT id,name,model FROM agent_adapter_assistants WHERE id=? AND deleted=0", r.Target.AgentID).Scan(&a.ID, &a.Name, &a.Model); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return agentlink.ErrNotFound
+		}
+		return err
+	}
+	if err = activeAssistantTx(ctx, tx, a.ID); err != nil {
+		return err
+	}
+	var count int
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM agent_adapter_jobs WHERE json_extract(data,'$.task.state') IN ('queued','running','cancelling','waiting_approval')`).Scan(&count); err != nil {
+		return err
+	}
+	if count >= 32 {
+		return agentlink.ErrCapacity
+	}
+	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM agent_adapter_jobs").Scan(&count); err != nil {
+		return err
+	}
+	if count >= 256 {
+		return agentlink.ErrCapacity
+	}
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM agent_adapter_jobs WHERE assistant_id=? AND json_extract(data,'$.cleanup_uncertain')=1`, a.ID).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return agentlink.ErrFenced
+	}
+	now := time.Now().UTC()
+	*accepted = job{Task: agentlink.Task{ID: jobID(r.From, r.RequestID), RunID: jobID(r.From, r.RequestID), RequestID: r.RequestID, Receiver: b.identity(a), State: "queued", CreatedAt: now, UpdatedAt: now}, Request: r, Message: &message}
+	_, err = tx.ExecContext(ctx, "INSERT INTO agent_adapter_jobs(id,caller,request_id,assistant_id,payload,data) VALUES(?,?,?,?,?,?)", accepted.Task.ID, callerKey(r.From), r.RequestID, a.ID, payload, encoded(*accepted))
+	return err
 }
+
 func (b *backend) read(ctx context.Context, from protocol.AgentRef, id string) (job, error) {
 	var raw string
 	var j job

@@ -296,3 +296,63 @@ not receive receiver coordination tools. The receiver catalogue adds those tools
 without changing its ordinary user-kind business caller. The SDK still verifies
 logical connection ownership for each session; catalogue selection grants no
 execution actor or owner authority.
+
+## Trusted reverse calls and human review
+
+Receiver-only `pot_receiver_task_submit/read/input/cancel`,
+`pot_receiver_message` and `pot_receiver_directory` carry
+`MCPExecutionContext`. The native model sees only typed destination/content
+arguments. Its local Host derives the active actor, job and run again at every
+call, loads its journal admission and keeps its receiver credential outside the
+model process. The service checks the authenticated connection, exact saved
+claim and admission, current claim/run and nonterminal business state before
+constructing a node caller. Ordinary OAuth remains user-kind and does not
+advertise receiver tools. Result ownership follows the real execution actor,
+which can differ from the original caller and dispatch Task.
+
+An owning Pot can attest an actual locally originated execution with
+`pot_receiver_execution_admit`, without inventing a remote claim.
+`MCPNodeExecutionAdmission` associates an execution ID with the real node-owned
+actor/Task/run and an optional already-saved causal parent. The owning Control
+must derive this from trusted invocation context and its current persisted active
+run; models cannot supply an attestation. Exactly one of a real claim or a saved
+node execution ID identifies a gateway context. Ending an attestation fences it;
+a distinct run requires the previous run to be ended and an exact previous-run
+comparison. These associations cannot enqueue or launch work.
+
+Identity proof grants no new model capabilities. Workers retain their existing
+no-delegation and local-owner message restrictions. Native direct Task executions
+advertise only `pot_execution_context`; both local and service gateways reject
+Task-actor submit and cross-node message callbacks. A registered root assistant
+may use receiver-only node submit/get/input/cancel operations under the existing
+node trust boundary. Input remains limited to targets that actually advertise
+terminal continuation. No Task may impersonate that assistant to obtain these
+operations.
+
+`MCPWorkDelivery.Message`, when present, carries the immutable Mailbox envelope
+into the receiver's existing message backend. Native assistant execution has its
+actual backend Task/run, and reverse messages derive their parent from the stored
+Work. Conversation, reply, hop limits and canonical mutation deduplication remain
+with Mailbox. Pot receivers that accept mail into their existing serial mailbox
+may acknowledge durable acceptance without inventing a Task/run. Registered
+nodes can forward their own assistant's already-saved envelope through
+`pot_receiver_node_mail`; task actors require supervised execution context.
+
+Codex pending native human requests use `pot_receiver_approval_pending` and a
+receiver process epoch. The original directing caller, original request, dispatch
+Task and actual execution Task/run remain separate. The existing human approval
+port displays these requests and enqueues an `MCPControlDelivery.Approval` for
+`allow_once` or `deny`. No OAuth collaboration tool, model message, execution
+context or receiver SDK session grants human decision authority. Native automatic
+review stays in the native client. Decisions cannot alter session policy, and
+wrong caller, run, request, epoch, duplicate and terminal decisions are fenced.
+The native pending map and done channel are not restored from storage: a process
+epoch change or service restart invalidates pending requests. A decision intent
+is saved before touching the native channel and is never replayed after an
+uncertain result.
+
+Receiver registration is retained history, not proof of availability. A 45-second
+process-local lease is refreshed by authenticated registration and claim polls.
+New work requires a live lease; exact accepted retries retain their original
+receipts after disconnect or lease loss. Restart clears liveness without deleting
+saved endpoints, work, reports or artifacts.

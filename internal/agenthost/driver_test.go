@@ -41,7 +41,10 @@ func TestReceiverDriverCapabilitiesAreConservative(t *testing.T) {
 				t.Fatal(r.Kind, op)
 			}
 		}
-		for _, op := range []agentlink.Operation{agentlink.TaskFiles, agentlink.Approvals, agentlink.ChatSend, agentlink.TaskResume, agentlink.TaskRetry, agentlink.TaskConfigure} {
+		if d.Supports(agentlink.Approvals) != (r.Kind == "codex") {
+			t.Fatal("incorrect approval capability", r.Kind)
+		}
+		for _, op := range []agentlink.Operation{agentlink.TaskFiles, agentlink.ChatSend, agentlink.TaskResume, agentlink.TaskRetry, agentlink.TaskConfigure} {
 			if d.Supports(op) {
 				t.Fatal("unwired receiver capability", r.Kind, op)
 			}
@@ -103,7 +106,7 @@ func TestCodexStartAndResumeReplaceOnlyExecutionContextConfiguration(t *testing.
 			method = "thread/resume"
 		}
 		local := got.Config["mcp_servers.pot_receiver"]
-		if got.Method != method || got.Job != "task" || got.Run != run || got.Assistant != "" || len(got.Config) != 1 || local.Command != worker || strings.Join(local.Args, "|") != "execution-tools|--root|"+root || !local.Required || strings.Join(local.Tools, ",") != "pot_execution_context" {
+		if got.Method != method || got.Job != "task" || got.Run != run || got.Assistant != "" || len(got.Config) != 1 || local.Command != worker || strings.Join(local.Args, "|") != "execution-tools|--root|"+root || !local.Required || strings.Join(local.Tools, ",") != strings.Join(executionToolsFor(s.AssistantID), ",") {
 			t.Fatalf("incorrect child configuration: %s", raw)
 		}
 		if local.Env["POT_AGENT_JOB_ID"] != "task" || local.Env["POT_AGENT_RUN_ID"] != run || local.Env["POT_AGENT_ASSISTANT_ID"] != "" || len(local.Env) != 5 {

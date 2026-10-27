@@ -107,3 +107,59 @@ func TestReceiverNativeReviewCannotApproveAnotherRun(t *testing.T) {
 		t.Fatal("stale request consumed a decision")
 	}
 }
+
+func TestReceiverApprovalDecisionIsBoundAndNeverReplayed(t *testing.T) {
+	p, _, delivery := receiverFixture(t)
+	p.epoch = "epoch"
+	receiverMustStep(t, p)
+	receiverMustStep(t, p)
+	record := receiverRecordFixture(t, p, delivery)
+	ctx := context.Background()
+	caller := record.Work.Request.From
+	taskID := record.Admission.Binding.Task.AgentID
+	if e := p.backend.update(ctx, taskID, func(j *job) error { j.Task.State = "waiting_approval"; return nil }); e != nil {
+		t.Fatal(e)
+	}
+	j, e := p.backend.read(ctx, caller, taskID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	p.backend.active[taskID] = func() {}
+	pending := &pendingReview{value: agentlink.ExecutionApproval{ID: "approval", JobID: taskID}, job: j, done: make(chan string, 1), ctx: ctx}
+	p.backend.reviews["approval"] = pending
+	decision := agentlink.MCPApprovalDecision{ApprovalID: "approval", Epoch: p.epoch, RequestID: record.Work.Request.RequestID, User: protocol.AgentRef{NodeID: caller.NodeID, Kind: "user", AgentID: "operator"}, Action: "allow_once"}
+	control := agentlink.MCPControlDelivery{Version: 1, DeliveryID: "approval-delivery", Dispatch: record.Claim.Binding, Binding: record.Admission.Binding, Caller: caller, Approval: &decision}
+	claim := agentlink.MCPClaim{ConnectionID: p.identity.ConnectionID(), DeliveryID: control.DeliveryID, ClaimID: "approval-claim", Binding: control.Dispatch}
+	d := receiverDelivery{Claim: &claim, Control: &control}
+	if e = p.accept(ctx, d); e != nil {
+		t.Fatal(e)
+	}
+	saved := receiverRecordFixture(t, p, d)
+	saved.Acknowledged = true
+	if e = p.save(ctx, &saved); e != nil {
+		t.Fatal(e)
+	}
+	for _, mutate := range []func(*agentlink.MCPControlDelivery){func(c *agentlink.MCPControlDelivery) { c.Caller.AgentID = "foreign" }, func(c *agentlink.MCPControlDelivery) { c.Binding.RunID = "old-run" }, func(c *agentlink.MCPControlDelivery) { c.Approval.Epoch = "old-epoch" }, func(c *agentlink.MCPControlDelivery) { c.Approval.RequestID = "wrong-request" }} {
+		bad := saved
+		copyControl := *saved.Control
+		copyDecision := *saved.Control.Approval
+		copyControl.Approval = &copyDecision
+		bad.Control = &copyControl
+		mutate(bad.Control)
+		if e = p.applyApproval(ctx, &bad); e == nil {
+			t.Fatal("unbound native decision accepted")
+		}
+		if pending.resolved {
+			t.Fatal("bad decision consumed native channel")
+		}
+	}
+	if e = p.applyApproval(ctx, &saved); e != nil {
+		t.Fatal(e)
+	}
+	if !saved.ControlApplied || <-pending.done != "allow_once" {
+		t.Fatal("native one-shot missing")
+	}
+	if e = p.applyApproval(ctx, &saved); !errors.Is(e, agentlink.ErrFenced) {
+		t.Fatal("native decision replayed", e)
+	}
+}

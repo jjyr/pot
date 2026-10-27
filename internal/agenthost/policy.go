@@ -31,7 +31,7 @@ func agyPolicy(in io.Reader, out io.Writer) error {
 			if tool == "" {
 				tool, _ = payload.ToolCall.Args["tool_name"].(string)
 			}
-			if server == "pot_receiver" && tool == "pot_execution_context" && os.Getenv("POT_AGENT_RUN_ID") != "" {
+			if server == "pot_receiver" && isExecutionTool(tool) && (os.Getenv("POT_AGENT_ASSISTANT_ID") != "" || tool == "pot_execution_context") && os.Getenv("POT_AGENT_RUN_ID") != "" {
 				decision = "auto_approve"
 			} else if (server == "pot" || server == "pot_pot") && (tool == "pot_connections" || tool == "pot_assistants" || tool == "pot_send" || tool == "pot_message_receipt") {
 				decision = "auto_approve"
@@ -50,4 +50,13 @@ func agyPolicy(in io.Reader, out io.Writer) error {
 		// policy still owns all non-read-only execution and explicit deny rules.
 	}
 	return json.NewEncoder(out).Encode(map[string]string{"decision": decision, "reason": strings.TrimSpace(reason)})
+}
+
+func isExecutionTool(name string) bool {
+	for _, tool := range executionToolNames {
+		if name == tool {
+			return true
+		}
+	}
+	return false
 }

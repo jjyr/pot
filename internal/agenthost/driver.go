@@ -12,12 +12,15 @@ import (
 // ReceiverCapabilities describes the implemented receiver extension, not the
 // full local Host API. Events are durable lifecycle snapshots, input is terminal
 // continuation. Native resume is an implementation detail, not replay authority.
-// Local Codex review and assistant mail remain separate existing Host paths;
-// they are not yet connected to the receiver extension. Paths are not file bytes.
+// Codex human review and configured assistant mail use the same receiver
+// extension. Paths are not file bytes.
 func (r Runtime) ReceiverCapabilities() agentlink.Description {
 	d := agentlink.Description{Version: 1, Scope: "caller", Operations: []agentlink.Operation{}}
 	if r.Kind == "codex" || r.Kind == "antigravity" {
 		d.Operations = []agentlink.Operation{agentlink.TaskSubmit, agentlink.TaskRead, agentlink.TaskCancel, agentlink.TaskInput, agentlink.TaskEvents}
+	}
+	if r.Kind == "codex" {
+		d.Operations = append(d.Operations, agentlink.Approvals)
 	}
 	return d
 }
@@ -70,7 +73,7 @@ func codexExecutionConfig(s Session) (map[string]any, error) {
 			"env":           env,
 			"enabled":       true,
 			"required":      true,
-			"enabled_tools": []string{"pot_execution_context"},
+			"enabled_tools": append([]string(nil), executionToolsFor(s.AssistantID)...),
 		},
 	}, nil
 }

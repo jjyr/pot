@@ -13,8 +13,8 @@ import (
 
 // executionTools connects only to an already operated receiver Host. The model
 // can ask for its verified context, but cannot supply an actor, run or credential.
-// Remote callbacks need a separate trusted gateway integration; this context
-// tool does not turn an ordinary model MCP login into an execution identity.
+// Assistant callbacks cross the authenticated receiver gateway; direct Task
+// workers retain their context-only model surface and no delegation authority.
 func executionTools(in io.Reader, out io.Writer, root string, adapter Runtime) error {
 	jobID, runID := os.Getenv("POT_AGENT_JOB_ID"), os.Getenv("POT_AGENT_RUN_ID")
 	if jobID == "" || runID == "" || os.Getenv("POT_AGENT_HOST_ROOT") != root {
@@ -45,6 +45,7 @@ func executionMCPServer(client hostClient, jobID, runID, assistantID string) *mc
 		}
 		return toolResult(binding, ""), nil, nil
 	})
+	addExecutionTools(server, client, jobID, runID, assistantID)
 	return server
 }
 

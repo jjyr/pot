@@ -20,8 +20,14 @@ func (b *backend) awaitReview(ctx context.Context, j job, method string, params 
 	if len(params) > maxBody {
 		return "", agentlink.ErrInvalid
 	}
-	if j.Message != nil || j.Request.Target.Kind != "node" || j.Request.From.Kind != "assistant" {
+	if j.Message != nil || j.Request.Target.Kind != "node" || (j.Request.From.Kind != "assistant" && j.Request.From.Kind != "user") {
 		return "", agentlink.ErrUnauthorized
+	}
+	if j.Request.From.Kind == "user" {
+		var mapped bool
+		if b.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM mcp_receiver_journal WHERE execution_task=? AND execution_run=?)", j.Task.ID, j.Task.RunID).Scan(&mapped) != nil || !mapped {
+			return "", agentlink.ErrUnauthorized
+		}
 	}
 	p := &pendingReview{value: agentlink.ExecutionApproval{ID: identifier(), JobID: j.Task.ID, Method: method, Params: append(json.RawMessage(nil), params...)}, job: j, done: make(chan string, 1), ctx: ctx}
 	b.mu.Lock()

@@ -238,11 +238,14 @@ func (h *agentHost) receiverLoop(ctx context.Context, id string) error {
 		token.AccessToken = ""
 		if err == nil {
 			capabilities := h.runtime().ReceiverCapabilities()
-			registration := agentlink.MCPReceiverRegistration{Version: agentlink.MCPContractVersion, Receiver: agentlink.Identity{Address: agentlink.NodeTarget(node), Name: h.runtime().Name, Adapter: h.runtime().Kind}, Capabilities: capabilities}
+			registration := agentlink.MCPReceiverRegistration{Version: agentlink.MCPContractVersion, Receiver: agentlink.Identity{Address: agentlink.NodeTarget(node), Name: h.runtime().Name, Adapter: h.runtime().Kind}, Capabilities: capabilities, Epoch: h.receiverEpoch}
 			if err = registration.ValidateAgainst(identity, capabilities); err == nil {
 				err = client.Register(ctx, registration)
 			}
-			pump := &receiverPump{backend: h.backend, control: h.db, identity: identity, remote: client}
+			if err == nil {
+				err = h.registerReceiverAssistants(ctx, client)
+			}
+			pump := &receiverPump{epoch: h.receiverEpoch, backend: h.backend, control: h.db, identity: identity, remote: client}
 			for err == nil && ctx.Err() == nil {
 				err = pump.step(ctx)
 				if err == nil {
@@ -341,6 +344,29 @@ func receiverServe(root, id string, adapter Runtime) error {
 	workers.Wait()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
+	}
+	return nil
+}
+
+func (h *agentHost) registerReceiverAssistants(ctx context.Context, client *receiverClient) error {
+	directory, err := h.backend.Directory(ctx)
+	if err != nil {
+		return err
+	}
+	for _, endpoint := range directory.Targets {
+		if endpoint.Identity.Address.Kind != "assistant" || !endpoint.Capabilities.Supports(agentlink.ChatSend) {
+			continue
+		}
+		operations := []agentlink.Operation{}
+		for _, op := range []agentlink.Operation{agentlink.ChatSend, agentlink.ChatRead, agentlink.ChatReceipt} {
+			if endpoint.Capabilities.Supports(op) {
+				operations = append(operations, op)
+			}
+		}
+		registration := agentlink.MCPReceiverRegistration{Version: agentlink.MCPContractVersion, Receiver: endpoint.Identity, Capabilities: agentlink.Description{Version: 1, Scope: "peer", Operations: operations}, Epoch: h.receiverEpoch}
+		if err = client.Register(ctx, registration); err != nil {
+			return err
+		}
 	}
 	return nil
 }

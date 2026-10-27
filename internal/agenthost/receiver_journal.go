@@ -12,31 +12,11 @@ import (
 	"github.com/jjyr/pot/pkg/storage"
 )
 
-// receiverRecord is the version-1 body owned by the receiver-host migration.
+// receiverRecord is the version-2 body owned by the receiver-host migration.
 // The single pending event is an outbox: its bytes survive until the exact
 // claim/sequence/digest receipt commits. Network retries never launch execution.
-type receiverRecord struct {
-	SchemaVersion         int                           `json:"schema_version"`
-	Claim                 agentlink.MCPClaim            `json:"claim"`
-	Work                  *agentlink.MCPWorkDelivery    `json:"work,omitempty"`
-	Control               *agentlink.MCPControlDelivery `json:"control,omitempty"`
-	Ack                   agentlink.MCPDeliveryAck      `json:"ack"`
-	Acknowledged          bool                          `json:"acknowledged"`
-	Admission             *agentlink.MCPRunAdmission    `json:"admission,omitempty"`
-	AdmissionAcknowledged bool                          `json:"admission_acknowledged"`
-	ControlApplied        bool                          `json:"control_applied"`
-	Sequence              uint64                        `json:"sequence"`
-	LastPhase             protocol.TaskPhase            `json:"last_phase,omitempty"`
-	Outbox                *agentlink.MCPExecutionEvent  `json:"outbox,omitempty"`
-	Receipt               *agentlink.MCPEventReceipt    `json:"receipt,omitempty"`
-	revision              int64
-}
-
-type receiverDelivery struct {
-	Claim   *agentlink.MCPClaim           `json:"claim,omitempty"`
-	Work    *agentlink.MCPWorkDelivery    `json:"work,omitempty"`
-	Control *agentlink.MCPControlDelivery `json:"control,omitempty"`
-}
+type receiverRecord = agentlink.MCPReceiverRecord
+type receiverDelivery agentlink.MCPReceiverDelivery
 
 func (d receiverDelivery) record(ctx agentlink.MCPReceiver) (receiverRecord, error) {
 	var r receiverRecord
@@ -62,7 +42,7 @@ func (d receiverDelivery) record(ctx agentlink.MCPReceiver) (receiverRecord, err
 			return r, agentlink.ErrFenced
 		}
 	}
-	r = receiverRecord{SchemaVersion: 1, Claim: c, Work: d.Work, Control: d.Control, Ack: agentlink.MCPDeliveryAck{Claim: c, Accepted: true}, revision: 1}
+	r = receiverRecord{SchemaVersion: 2, Claim: c, Work: d.Work, Control: d.Control, Ack: agentlink.MCPDeliveryAck{Claim: c, Accepted: true}, Revision: 1}
 	return r, nil
 }
 
@@ -71,16 +51,16 @@ func readReceiverRecord(ctx context.Context, q interface {
 }, connection, delivery string) (receiverRecord, error) {
 	var r receiverRecord
 	var raw string
-	err := q.QueryRowContext(ctx, "SELECT revision,body FROM mcp_receiver_journal WHERE connection_id=? AND delivery_id=?", connection, delivery).Scan(&r.revision, &raw)
+	err := q.QueryRowContext(ctx, "SELECT revision,body FROM mcp_receiver_journal WHERE connection_id=? AND delivery_id=?", connection, delivery).Scan(&r.Revision, &raw)
 	if err != nil {
 		return r, err
 	}
-	rev := r.revision
+	rev := r.Revision
 	if err = json.Unmarshal([]byte(raw), &r); err != nil {
 		return r, err
 	}
-	r.revision = rev
-	if r.SchemaVersion != 1 || r.Claim.ConnectionID != connection || r.Claim.DeliveryID != delivery {
+	r.Revision = rev
+	if r.SchemaVersion != 2 || r.Claim.ConnectionID != connection || r.Claim.DeliveryID != delivery {
 		return r, agentlink.ErrFenced
 	}
 	return r, nil
@@ -92,7 +72,7 @@ func saveReceiverRecord(ctx context.Context, tx *sql.Tx, r *receiverRecord) erro
 		task = r.Admission.Binding.Task.AgentID
 		run = r.Admission.Binding.RunID
 	}
-	result, err := tx.ExecContext(ctx, "UPDATE mcp_receiver_journal SET body=?,execution_task=?,execution_run=?,revision=revision+1 WHERE connection_id=? AND delivery_id=? AND revision=?", encoded(r), task, run, r.Claim.ConnectionID, r.Claim.DeliveryID, r.revision)
+	result, err := tx.ExecContext(ctx, "UPDATE mcp_receiver_journal SET body=?,execution_task=?,execution_run=?,revision=revision+1 WHERE connection_id=? AND delivery_id=? AND revision=?", encoded(r), task, run, r.Claim.ConnectionID, r.Claim.DeliveryID, r.Revision)
 	if err != nil {
 		return err
 	}
@@ -103,7 +83,7 @@ func saveReceiverRecord(ctx context.Context, tx *sql.Tx, r *receiverRecord) erro
 	if n != 1 {
 		return agentlink.ErrConflict
 	}
-	r.revision++
+	r.Revision++
 	return nil
 }
 
@@ -132,7 +112,7 @@ func (p *receiverPump) accept(ctx context.Context, d receiverDelivery) error {
 		// the server verifies this exact claim again when committing our ack.
 		var rejection error
 		if r.Work != nil {
-			if r.Work.Request.Target != agentlink.NodeTarget(p.identity.NodeID()) || len(r.Work.Request.Text) > 24000 {
+			if (r.Work.Message == nil && r.Work.Request.Target != agentlink.NodeTarget(p.identity.NodeID())) || len(r.Work.Request.Text) > 24000 {
 				rejection = agentlink.ErrUnsupported
 			}
 		} else {
@@ -192,6 +172,18 @@ func (p *receiverPump) validateControl(ctx context.Context, tx *sql.Tx, c *agent
 	if current.Task.RunID != c.Binding.RunID {
 		return agentlink.ErrFenced
 	}
+	if c.Approval != nil {
+		if c.Approval.Epoch != p.epoch || current.Task.State != "waiting_approval" {
+			return agentlink.ErrFenced
+		}
+		p.backend.mu.Lock()
+		pending := p.backend.reviews[c.Approval.ApprovalID]
+		valid := pending != nil && !pending.resolved && pending.ctx.Err() == nil && pending.job.Task.RunID == c.Binding.RunID && pending.job.Task.ID == c.Binding.Task.AgentID && pending.job.Request.From == c.Caller && p.backend.active[c.Binding.Task.AgentID] != nil
+		p.backend.mu.Unlock()
+		if !valid {
+			return agentlink.ErrFenced
+		}
+	}
 	if c.Input != nil && (!terminal(current.Task.State) || current.CleanupUncertain || prior.Outbox != nil || prior.Receipt == nil || !receiverTerminal(prior.LastPhase)) {
 		return agentlink.ErrFenced
 	}
@@ -219,11 +211,16 @@ func (p *receiverPump) admit(ctx context.Context, r *receiverRecord) error {
 		var previous *agentlink.MCPRunBinding
 		if r.Work != nil {
 			request := r.Work.Request
-			if request.Target != agentlink.NodeTarget(p.identity.NodeID()) || len(request.Text) > 24000 {
+			if (r.Work.Message == nil && request.Target != agentlink.NodeTarget(p.identity.NodeID())) || len(request.Text) > 24000 {
 				return agentlink.ErrUnsupported
 			}
 			request.RequestID = jobID(protocol.AgentRef{NodeID: p.identity.NodeID(), Kind: "task", AgentID: r.Claim.ConnectionID}, r.Claim.DeliveryID)
-			if err = p.backend.submitTaskTx(ctx, tx, request, &accepted); err != nil {
+			if r.Work.Message != nil {
+				err = p.backend.submitMessageTx(ctx, tx, request, *r.Work.Message, &accepted)
+			} else {
+				err = p.backend.submitTaskTx(ctx, tx, request, &accepted)
+			}
+			if err != nil {
 				return err
 			}
 		} else {

@@ -252,9 +252,9 @@ func TestMCPReceiverBoundaries(t *testing.T) {
 		t.Fatalf("unimplemented driver operation advertised: %v", err)
 	}
 	registration := f.Registration
-	registration.Capabilities.Operations = []agentlink.Operation{agentlink.Approvals}
+	registration.Capabilities.Operations = []agentlink.Operation{agentlink.TaskConfigure}
 	if err := registration.ValidateAgainst(receiver, registration.Capabilities); !errors.Is(err, agentlink.ErrUnsupported) {
-		t.Fatalf("approval authority advertised: %v", err)
+		t.Fatalf("owner configuration authority advertised: %v", err)
 	}
 	registration = f.Registration
 	registration.Capabilities.Scope = "owner"

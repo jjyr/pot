@@ -110,29 +110,31 @@ new receiver does not consume an old pending mailbox as newly authorized work.
 
 ## Driver and execution context boundary
 
-The current receiver advertisement includes node Task submission, read,
-cancellation, terminal input and lifecycle event snapshots for Codex/Antigravity.
-It does not advertise native token streaming, live input, file transfer, assistant
-mail, or remote approval management. Existing native review and assistant mail
-code remains for its existing callers; connecting those business paths to MCP
-requires their own complete trusted routing. This receiver path alone does not
-complete the MCP cutover.
+The receiver advertises node Task submission, read, cancellation, terminal input
+and lifecycle snapshots. Codex additionally advertises native human review;
+Antigravity retains its native permission policy and does not claim human review.
+Configured native assistants register their implemented mail capabilities.
+Token streaming, live steering and remote file transfer remain unsupported.
 
-Native subprocesses receive the actual job/run and their own assistant identity
-when applicable. A direct Task executes as that receiver-owned Task actor, even
-when its original caller is an OAuth user. The original caller does not become
-the execution actor or an owner. Receiver OAuth credentials are not injected into
-native MCP configuration or model tools.
+Native subprocesses receive the real job/run and their own assistant identity
+when processing assistant mail. A directly submitted Task remains a Task actor,
+even when its original caller is an OAuth user. Receiver OAuth credentials never
+enter native MCP configuration or model arguments.
 
-`execution-tools --root ROOT` connects only to an already-running local Host;
-it never starts one. It requires trusted job/run/root environment and currently
-exposes only `pot_execution_context`. Each call checks the persisted run and
-active native execution. Arguments cannot supply an actor or binding. The tool
-grants no approval authority. Codex can receive this context server through
-thread-scoped native configuration; Antigravity's execution-support package
-retains its required policy hook. This context tool is not an implemented remote
-message or task-delegation callback. An ordinary global MCP login cannot replace
-that missing trusted execution gateway.
+`execution-tools --root ROOT` connects only to an already-running Host and checks
+the persisted Task/run plus the active native execution on every dispatch. Direct
+Task workers expose only `pot_execution_context`; they gain no delegation or
+cross-node message tools. Assistant message execution additionally exposes typed
+sender-free discovery, messaging and Task operations through the authenticated
+receiver gateway. Codex injects this service through thread-scoped configuration;
+Antigravity retains its mandatory independent execution-support hook and native
+read-only policy. Neither path replaces execution binding with a global login.
+
+The service's existing human review UI receives Codex pending requests through
+the receiver extension. Decisions are once-only controls bound to the original
+caller/request and real execution Task/run. Models cannot approve. Pending native
+channels are process-local: restarts invalidate them, and uncertain decision
+intents are not replayed. See the shared contract for correlation and fences.
 
 Updated Pot and plugins/adapters require explicit MCP reconnection. Old P2P
 pairing is unsupported by this path, with no automatic migration or fallback.

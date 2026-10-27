@@ -19,6 +19,7 @@ type receiverRemote interface {
 }
 
 type receiverPump struct {
+	epoch    string
 	backend  *backend
 	control  *sql.DB
 	identity agentlink.MCPReceiver
@@ -105,53 +106,22 @@ func (p *receiverPump) step(ctx context.Context) error {
 }
 
 func (p *receiverPump) advance(ctx context.Context, r *receiverRecord) error {
-	if !r.Acknowledged {
-		if err := p.remote.Ack(ctx, r.Ack); err != nil {
-			return err
-		}
-		r.Acknowledged = true
-		if err := p.save(ctx, r); err != nil {
-			return err
-		}
-	}
-	if !r.Ack.Accepted {
-		return nil
-	}
-	if r.Admission == nil && !r.ControlApplied {
-		if err := p.admit(ctx, r); err != nil {
-			return err
-		}
-	}
-	if r.Admission == nil {
-		return nil
-	} // cancellation intent has no new run
-	if !r.AdmissionAcknowledged {
-		if err := p.remote.Admit(ctx, *r.Admission); err != nil {
-			return err
-		}
-		r.AdmissionAcknowledged = true
-		if err := p.save(ctx, r); err != nil {
-			return err
-		}
-	}
-	if err := p.snapshot(ctx, r); err != nil {
-		return err
-	}
-	if r.Outbox == nil {
-		return nil
-	}
-	receipt, err := p.remote.Event(ctx, *r.Outbox)
-	if err != nil {
-		return err
-	}
-	if _, err = receipt.Retry(*r.Outbox); err != nil {
-		return err
-	}
-	r.Receipt = &receipt
-	r.Sequence = r.Outbox.Sequence
-	r.LastPhase = r.Outbox.Phase
-	r.Outbox = nil
+	return agentlink.AdvanceMCPReceiver(ctx, p.remote, p, r)
+}
+func (p *receiverPump) Save(ctx context.Context, r *agentlink.MCPReceiverRecord) error {
 	return p.save(ctx, r)
+}
+func (p *receiverPump) Admit(ctx context.Context, r *agentlink.MCPReceiverRecord) error {
+	return p.admit(ctx, r)
+}
+func (p *receiverPump) Snapshot(ctx context.Context, r *agentlink.MCPReceiverRecord) error {
+	return p.snapshot(ctx, r)
+}
+func (p *receiverPump) Approval(ctx context.Context, r *agentlink.MCPReceiverRecord) error {
+	return p.applyApproval(ctx, r)
+}
+func (p *receiverPump) BeforeSnapshot(ctx context.Context, r *agentlink.MCPReceiverRecord) error {
+	return p.reportApprovals(ctx, r)
 }
 
 func receiverPermanent(err error) bool {
