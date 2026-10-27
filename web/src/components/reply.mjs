@@ -35,7 +35,7 @@ export function createReplyBubble(host) {
       content.hidden=!message.text&&!message.presentation;
       const preparation=currentPreparedRender(),previousDetails=(status.querySelector('details')||preparation?.context.phase==='prepare'&&preparedPreviousRoot(preparation.context,preparation.member)?.querySelector('.reply-status details'));
       const expanded=previousDetails?.preparedOpenIntent??previousDetails?.open??false;
-      const next=JSON.stringify([message.phase,message.error,t('replyFailed'),message.local,canRetrySend,message.activity,expanded]);
+      const next=JSON.stringify([message.phase,message.error,t('replyFailed'),message.local,canRetrySend,!!onSettings,message.activity,expanded]);
       if(signature===next)return;signature=next;
       const classes=['has-active-status','is-waiting','is-streaming','is-failed'];
       if(preparation?.context.phase==='commit'){

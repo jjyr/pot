@@ -12,7 +12,7 @@ export async function preparedRevisionTransfers(page,origin){
   const scope={space:'fixture',owner:'owner'},task={id:'handoff-task',assistant_id:'owner',phase:'running'},record={run_id:'run',request:{text:'Synthetic handoff'},info:task,capabilities:{version:1,operations:['task.read','task.events']}};
   const state=createTaskTranscript();appendTaskEvents(state,[{sequence:1,event:{turn_id:'run',update:{type:'tool_started',id:'call',name:'exec_command',args:{cmd:'Synthetic command'}}}},{sequence:2,event:{turn_id:'run',update:{type:'tool_state',id:'call',phase:'running'}}}]);
   const memory=new Map([[JSON.stringify([scope,task.id,'tool-1']),{open:true,raw:true}],[JSON.stringify([scope,task.id])+'work:tool-1',{open:true}]]);let approval=null;
-  const ui=createTaskConversation({root,task,record,scope,locale:()=> 'en',client:{runtime:{},scope:()=>scope,request:async()=>({items:[]})},draft:'',onDraft(){},toolMemory:memory,approvalFor:()=>approval,onDecision(){}});
+  const ui=createTaskConversation({root,task,record,scope,locale:()=> 'en',client:{runtime:{},scope:()=>scope,request:async()=>({items:[]})},draft:'',onDraft(){},toolMemory:memory,approvalFor:()=>approval,onDecision(){},onSettings(){}});
   const witnesses=new WeakMap();
   function observe(){for(const surface of document.querySelectorAll('[data-preparation-surface]')){const walk=document.createTreeWalker(surface,NodeFilter.SHOW_ELEMENT|NodeFilter.SHOW_TEXT);while(walk.nextNode())witnesses.set(walk.currentNode,walk.currentNode.textContent);}}
   const observer=new MutationObserver(observe);observer.observe(document.body,{subtree:true,childList:true,attributes:true,characterData:true});
@@ -32,7 +32,12 @@ export async function preparedRevisionTransfers(page,origin){
    const revisedPrepared=witnessed(second)&&second.textContent.includes('Changed approval args');
    approval={...approval,fresh:false};ui.refreshApprovals();const staleDisabled=[...second.querySelectorAll('button')].every(button=>button.disabled);
    await wait(()=>ready()&&ui.history.querySelector('.approval-card')!==second);const stale=ui.history.querySelector('.approval-card');
-   return {rawPrepared,disabledBeforeCommit,revisedPrepared,staleDisabled,stalePrepared:witnessed(stale),staleFinal:[...stale.querySelectorAll('button')].every(button=>button.disabled)};
+   const stalePrepared=witnessed(stale),staleFinal=[...stale.querySelectorAll('button')].every(button=>button.disabled);
+   state.messages.push({id:'configuration-error',sequence:5,role:'system',text:'HTTP 401 synthetic configuration error'});
+   record.capabilities={...record.capabilities,operations:[...record.capabilities.operations,'assistant.configure']};ui.update({record,state,fresh:true,approvals:[approval]});await wait(()=>ready()&&ui.history.querySelector('.reply-action'));
+   const settingsPrepared=witnessed(ui.history.querySelector('.reply-action'));
+   record.capabilities={...record.capabilities,operations:record.capabilities.operations.filter(value=>value!=='assistant.configure')};ui.update({record,state,fresh:true,approvals:[approval]});await wait(()=>ready()&&!ui.history.querySelector('.reply-action'));
+   return {rawPrepared,disabledBeforeCommit,revisedPrepared,staleDisabled,stalePrepared,staleFinal,settingsPrepared,removedSettings:!ui.history.querySelector('.reply-action')};
   }finally{observer.disconnect();ui.dispose();}
  });
  for(const [name,passed]of Object.entries(result))assert(passed,name);

@@ -129,7 +129,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   }
   const disposeMessage=entry=>{if(liveTools.get(entry.element.dataset.messageId)===entry.tool)liveTools.delete(entry.element.dataset.messageId);entry.element.remove();};
   function renderMessage(message,existing){
-      const context=currentPreparedRender()?.context.renderContext||{forest,record,unavailable,connectionError};
+      const context=currentPreparedRender()?.context.renderContext||{forest,record,unavailable,connectionError,canConfigure:can('assistant.configure')};
       const renderForest=context.forest;
       let entry=existing;
       if(!entry){const element=n('article',`message task-event role-${message.role}`);entry={element,row:element,text:null};entry.commit=()=>{if(entry.tool)liveTools.set(message.id,entry.tool);return entry;};}
@@ -144,7 +144,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
         if(transcriptWindow.revealing&&transcriptWindow.visibilityPath.has(message.id)||transcriptWindow.destination?.expand&&transcriptWindow.destination.id===message.id)entry.tool.element.open=true;
       }else{
         if(!entry.body){entry.body=n('div','message-body');entry.element.append(entry.body);if(message.role==='assistant')entry.reply=createReplyBubble(entry.body);}
-        if(message.role==='assistant')entry.reply.update(message,{t,downloadFile,acquireFileImage,...resourceOptions,onSettings:can('assistant.configure')?onSettings:undefined});
+        if(message.role==='assistant')entry.reply.update(message,{t,downloadFile,acquireFileImage,...resourceOptions,onSettings:context.canConfigure?onSettings:undefined});
         else{
           if(!entry.source){entry.source=n('div','task-message-source');entry.element.prepend(entry.source);}
           const sender=message.input?.sender,name=sender===task.assistant_id?assistantName:(context.senders||(client.assistants||[]).filter(item=>item.space_id===scope.space)).find(item=>item.id===sender)?.name||sender;
@@ -192,7 +192,8 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     const identities=messageIdentities(client).snapshot(scope);
     const machineLabels=Object.fromEntries(rendered.flatMap(message=>[message.tool?.target?.runtime_id,message.approval?.request?.machine_id]).filter(Boolean).map(id=>[id,machinePresentation(client).label(id,scope,locale())]));
     const senders=(client.assistants||[]).filter(item=>item.space_id===scope.space).map(item=>({id:item.id,name:item.name}));
-    transcriptWindow.setMessages(rendered,{parents,regions,afterCommit:()=>{if(transcriptWindow.prepared)history.style.visibility='';},layoutEpoch:[locale(),record.info,unavailable,connectionError,identities,machineLabels,senders],renderContext:{forest,record,unavailable,connectionError,identities,machineLabels,senders}});
+    const canConfigure=can('assistant.configure');
+    transcriptWindow.setMessages(rendered,{parents,regions,afterCommit:()=>{if(transcriptWindow.prepared)history.style.visibility='';},layoutEpoch:[locale(),record.info,unavailable,connectionError,identities,machineLabels,senders,canConfigure],renderContext:{forest,record,unavailable,connectionError,identities,machineLabels,senders,canConfigure}});
     latest.hidden=transcriptWindow.following;scheduleHistory();
   }
   function renderMenu(force=false){
