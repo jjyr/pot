@@ -123,15 +123,15 @@ export function createToolContent({locale=()=> 'en',downloadFile,acquireFileImag
       if(result.result!==undefined&&result.result!==null)section('task-result',t('latestResult'),result.result,{structured:typeof result.result==='object',markdown:typeof result.result==='string'});
       if(result.error)section('task-error',t('field.error'),result.error,{structured:typeof result.error==='object'});
     }else resultView(result);
-    if(result===undefined&&Object.keys(args).length)section('input',t('arguments'),args,{structured:true});
+    if(!context.compact&&result===undefined&&Object.keys(args).length)section('input',t('arguments'),args,{structured:true});
   }
   function update(tool,next={}){
-    current=tool;context=next;const {result,pending,targetLabel='',hasChildren=false}=next,args=toolArgs(tool),kind=toolKind(tool);
+    current=tool;context=next;const {result,pending,targetLabel='',hasChildren=false,compact=false}=next,args=toolArgs(tool),kind=toolKind(tool);
     element.dataset.kind=kind;for(const item of entries.values())item.box.hidden=true;terminal.hidden=kind!=='terminal'||!!pending;sections.hidden=!!pending;if(pending)return;
     if(kind==='terminal'){
       location.textContent=[targetLabel,tool.workdir||args?.workdir].filter(Boolean).join(' · ')||t('executionContext');shell.textContent=args?.shell||'';bar.hidden=false;
-      if(tool.name==='exec_command')section('input',t('command'),args?.cmd||'',{parent:terminalSections}).content.classList.add('tool-command');
-      else{
+      if(!compact&&tool.name==='exec_command')section('input',t('command'),args?.cmd||'',{parent:terminalSections}).content.classList.add('tool-command');
+      else if(!compact){
         const actions=[args?.chars?`${t('sendInput')}\n${args.chars}`:'',args?.interrupt?t('interruptProcess'):'',args?.terminate?t('terminateProcess'):'',args?.close_stdin?t('closeInput'):'',args?.rows||args?.cols?t('resizeTerminal').replace('{rows}',args.rows||'—').replace('{cols}',args.cols||'—'):''].filter(Boolean);
         if(actions.length)section('input',t('sessionActions'),actions.join('\n'),{parent:terminalSections}).content.classList.add('tool-session-input');
       }
@@ -142,8 +142,9 @@ export function createToolContent({locale=()=> 'en',downloadFile,acquireFileImag
       if(result!==undefined&&(!object(result)||!['stdout','stderr','exit_code','session_id'].some(key=>key in result)))resultView(result);
       return;
     }
-    if(!args){section('input',t('preparingArguments'),typeof tool.args==='string'?tool.args:'');resultView(result);return;}
+    if(!args){if(!compact)section('input',t('preparingArguments'),typeof tool.args==='string'?tool.args:'');resultView(result);return;}
     if(kind==='patch'){
+      if(compact){resultView(result);return;}
       const patch=args.patch||'',groups=patchGroups(patch);let remaining=LIMIT;
       if(groups.length){
         const signature=JSON.stringify([patch,locale()]),item=section('patch',t('changes'),patch);item.copy.hidden=false;
@@ -160,7 +161,7 @@ export function createToolContent({locale=()=> 'en',downloadFile,acquireFileImag
       resultView(result);return;
     }
     if(kind==='script'||kind==='browser'){
-      if(!hasChildren&&typeof args.code==='string')section('input',t('code'),args.code).content.classList.add('tool-script-code');
+      if(!compact&&!hasChildren&&typeof args.code==='string')section('input',t('code'),args.code).content.classList.add('tool-script-code');
       if(kind==='script'&&typeof result?.output==='string')section('result',t('scriptOutput'),tool.script?.output||result.output||t('emptyOutput'),{output:true});
       else if(kind==='browser')browserView(result);
       else resultView(result);
@@ -174,10 +175,10 @@ export function createToolContent({locale=()=> 'en',downloadFile,acquireFileImag
       if(object(resource)){
         section('resource',resource.name||args.path||t('resourceDetails'),{name:resource.name,mime_type:resource.mime_type,size:resource.size,files:resource.files?.map(file=>({path:file.path,mime_type:file.mime_type,size:file.size}))},{structured:true});
         section('receipt',t('result'),t(tool.name==='register_resource'?'resourceRegistered':'resourcePresented'));
-      }else{section('input',t('resourceDetails'),args,{structured:true});resultView(result);}return;
+      }else{if(!compact)section('input',t('resourceDetails'),args,{structured:true});resultView(result);}return;
     }
     if(!Object.hasOwn(toolLabels,tool.name))section('source',t('name'),tool.name);
-    if(Object.keys(args).length)section('input',t(kind==='schedule'?'scheduleDetails':'arguments'),args,{structured:true});
+    if(!compact&&Object.keys(args).length)section('input',t(kind==='schedule'?'scheduleDetails':'arguments'),args,{structured:true});
     resultView(result);
     const output=(tool.output||[]).map(chunk=>chunk.text).join('\n');if(output)section('output',t('output'),output,{output:true});
     if(result===undefined&&!Object.keys(args).length)section('pending',t('result'),t(activeTool(tool)?'waitingResult':'resultUnavailable'));

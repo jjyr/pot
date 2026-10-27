@@ -8,7 +8,8 @@ import {assistantMention} from './assistant-mention.mjs';
 import {communication} from '../state/communication.mjs';
 import {createCommunication} from './communication.mjs';
 import {agentSource} from './connection-visuals.mjs';
-import {taskIdentities} from '../state/task-identity.mjs';
+import {taskIdentities,addressKey} from '../state/task-identity.mjs';
+import {communicationParticipant} from './communication-participant.mjs';
 const n=(tag,cls='',text)=>{const node=document.createElement(tag);node.className=cls;if(text!==undefined)node.textContent=text;return node;};
 const pretty=value=>typeof value==='string'?value:JSON.stringify(value??null,null,2);
 const LIMIT=24000;
@@ -26,7 +27,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
   const communicationView=createCommunication({locale,resolveIdentity:resolveMessageIdentity,downloadFile,acquireFileImage,onOpenTask,resolveTask});
   summary.append(communicationView.summary);body.insertBefore(communicationView.body,sections);
   let current,options={},signature='',approvalID='',approvalCard=null,rawSignature='',autoOpened=false,building=false,refreshStatus=()=>{};
-  let bodyVersion=[],stacked=false,standaloneOpen=false;
+  let bodyVersion=[];
   const contentView=createToolContent({locale,downloadFile,acquireFileImage,onOpenTask,resolveTask});
   sections.append(contentView.element);
   // Ordinary communication starts collapsed; only explicit reading/navigation or
@@ -52,63 +53,72 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     if(model?.kind==='receive'&&model.count>1)title.append(document.createTextNode(t('messageCount').replace('{count}',model.count.toLocaleString(locale()))));
     title.title=title.textContent;return true;
   }
-  const remember=()=>{if(!building)memory.set(key,{...memory.get(key),open:stacked?standaloneOpen:root.open,raw:raw.open});};root.addEventListener('toggle',()=>{remember();refreshStatus();if(current)update(current,options);});raw.addEventListener('toggle',()=>{remember();if(current)update(current,options);});
+  const remember=()=>{if(!building)memory.set(key,{...memory.get(key),open:root.open,raw:raw.open});};root.addEventListener('toggle',()=>{remember();refreshStatus();if(current)update(current,options);});raw.addEventListener('toggle',()=>{remember();if(current)update(current,options);});
   // Populate on activation, before a second click can target an empty disclosure
   // whose position will change when its deferred toggle event renders content.
-  summary.addEventListener('click',event=>{if(event.defaultPrevented||event.target.closest('button,a,input,select,textarea'))return;event.preventDefault();if(stacked)return;root.open=!root.open;remember();refreshStatus();if(current)update(current,options);});
+  summary.addEventListener('click',event=>{if(event.defaultPrevented||event.target.closest('button,a,input,select,textarea'))return;event.preventDefault();root.open=!root.open;remember();refreshStatus();if(current)update(current,options);});
   // Commit before ResizeObserver/virtual-window recycling can detach this row.
   rawTitle.addEventListener('click',event=>{event.preventDefault();onInteract(event);raw.open=!raw.open;remember();if(current)update(current,options);});
   function copyButton(label,get){const button=n('button','tool-action',label);button.type='button';button.onclick=async()=>{try{await navigator.clipboard.writeText(get());button.textContent=t('copied');}catch{button.textContent=t('copyFailed');}};return button;}
   function update(message,next={}){
     current=message;options=next;const tool=message.tool;if(!tool)return;
-    if(!!next.stacked!==stacked){if(next.stacked)standaloneOpen=root.open;stacked=!!next.stacked;root.open=stacked||standaloneOpen;}
-    root.classList.toggle('communication-stacked-record',stacked);
-    summary.tabIndex=stacked?-1:0;
-    const result=tool.process?tool.process.result:toolResult(tool),pending=next.approval,script=tool.script,isGroup=tool.name==='script_group';
-    root.classList.toggle('script-group',isGroup);root.classList.toggle('script-run',!!script&&!isGroup);
-    const model=communication(tool,messageActor()),summaryModel=model||(!isGroup&&script?.focus?communication(script.focus,messageActor()):null);
-    metadata.hidden=isGroup;raw.hidden=isGroup;
+    root.classList.toggle('work-record-call',!!message.workRecord);
+    summary.tabIndex=0;
+    const result=tool.process?tool.process.result:toolResult(tool),pending=next.approval,script=tool.script;
+    root.classList.toggle('script-run',!!script);
+    const originalModel=communication(tool,messageActor()),model=message.workReceipt?null:originalModel&&message.workMail?{...originalModel,messages:message.workMail,count:message.workMail.length}:originalModel,summaryModel=model;
+    if(model?.task)taskIdentities.register([model.task]);
+    metadata.hidden=false;raw.hidden=false;
     if(metadata.parentElement!==rawBody)rawBody.prepend(metadata);
-    communicationView.update(summaryModel,{expanded:root.open&&!pending,summaryOnly:!model,preparing:tool.phase==='preparing'});
+    communicationView.update(summaryModel,{expanded:root.open&&!pending,summaryOnly:!model,preparing:tool.phase==='preparing',compact:!!message.workRecord});
     communicationView.body.hidden=!model||!!pending;
+    if(message.workRecord)communicationView.summary.hidden=true;
     root.classList.toggle('communication-tool',!!summaryModel);
     // Receive records are a history projection, not a timed network operation.
-    duration.hidden=model?.kind==='receive';
+    duration.hidden=originalModel?.kind==='receive';
 
     const phase=pending?'waiting_approval':tool.phase;
-    const messaging=messageTitle(tool);root.classList.toggle('message-tool',messaging);
+    const messaging=message.workRecord?!!model:messageTitle(tool);root.classList.toggle('message-tool',messaging);
     if(!messaging)title.textContent=t(presentationLabel(tool));
-    const preview=messaging?'':presentationPreview(tool,{resolveTask})||(['terminal','patch','script','browser'].includes(toolKind(tool))?toolSummary(tool):'');
+    const preview=messaging||message.workRecord?'':presentationPreview(tool,{resolveTask})||(['terminal','patch','script','browser'].includes(toolKind(tool))?toolSummary(tool):'');
     excerpt.textContent=preview===tool.name||preview===title.textContent?'':preview;excerpt.title=excerpt.textContent;excerpt.hidden=!excerpt.textContent;
     const childTools=(next.children||[]).map(child=>child.tool);
-    // A tool failure is execution detail, not a request for the user's attention.
-    // Keep the original phase and reveal its precise label when the call is open.
+    // Keep failures explicit in collapsed and expanded records.
     refreshStatus=()=>{
       let shown=phase;
-      if((isGroup&&['completed','failed','denied'].includes(phase))||(!model&&!root.open&&['failed','denied'].includes(phase)))shown='ended';
       if(phase==='completed'&&result?.completed===false&&result?.exec_id&&!script)shown='scriptYielded';
       if(model?.kind==='receive'&&phase==='completed')shown='messageReceived';
       else if(model?.kind==='send'&&model.accepted)shown='messageAccepted';
       else if(model?.kind==='send'&&phase==='completed')shown='ended';
       else if(model?.kind==='delegate'&&phase==='completed')shown=model.task?'messageTaskCreated':'ended';
       status.textContent=t(next.offline&&activeTool(tool)?'reconnecting':shown);
-      if(childTools.length&&!script&&!tool.process){const complete=childTools.filter(child=>!activeTool(child)).length;if(complete<childTools.length&&!next.offline)status.textContent=t(childTools.filter(activeTool).every(child=>child.phase==='waiting_approval')?'waiting_approval':'scriptRunning');status.textContent+=` · ${complete}/${childTools.length}`;}
+      if(childTools.length&&!message.workRecord&&!script&&!tool.process){const complete=childTools.filter(child=>!activeTool(child)).length;if(complete<childTools.length&&!next.offline)status.textContent=t(childTools.filter(activeTool).every(child=>child.phase==='waiting_approval')?'waiting_approval':'scriptRunning');status.textContent+=` · ${complete}/${childTools.length}`;}
     };
     refreshStatus();
-    if(script){
-      const focus=script.focus,label=focus?.name==='exec_command'?focus.args?.cmd?.trim().split('\n')[0]:focus?t(presentationLabel(focus)):'';
-      title.textContent=isGroup?t('executionHistory'):label||t('script');
-      if(!isGroup&&focus&&messageTitle(focus))root.classList.add('message-tool');
-      excerpt.hidden=true;excerpt.textContent='';title.title=title.textContent;
-    }
+    if(message.workReceipt){title.textContent=translate(locale(),'work.receipt');}
+    else if(message.workRecord&&model){
+      const first=model.messages[0],actor=addressKey(messageActor()),from=addressKey(first?.from),to=addressKey(first?.to);
+      const label=n('span','work-message-action',translate(locale(),'work.'+(model.kind==='delegate'?'create':from&&actor===from?'send':to&&actor===to?'receive':'message')));
+      const identities=[];
+      if(model.kind==='delegate'){
+        const address=model.task?.address||first?.to;identities.push(communicationParticipant(address,{resolveIdentity:resolveMessageIdentity,locale}));
+      }else if(actor&&(from===actor||to===actor)){
+        identities.push(communicationParticipant(from===actor?first?.to:first?.from,{resolveIdentity:resolveMessageIdentity,locale}));
+      }else if(first){
+        identities.push(communicationParticipant(first.from,{resolveIdentity:resolveMessageIdentity,locale}),n('span','work-message-direction','→'),communicationParticipant(first.to,{resolveIdentity:resolveMessageIdentity,locale}));
+      }
+      title.replaceChildren(label,...identities);
+      if(model.count>1)title.append(n('span','work-message-count',t('messageCount').replace('{count}',model.count.toLocaleString(locale()))));
+    }else if(script){title.textContent=t('script');excerpt.hidden=true;excerpt.textContent='';}
+    title.title=title.textContent;
     root.dataset.phase=phase;root.dataset.callId=tool.id;root.dataset.turnId=tool.turn_id||'';
     const start=script?tool.started_at_ms:phase==='waiting_approval'?(tool.waiting_at_ms||tool.started_at_ms):(tool.running_at_ms||tool.started_at_ms);
     // Live clocks run only while a visible operation needs one, and honor backend time.
-    const elapsed=start?Math.max(0,((tool.finished_at_ms||Date.now())-start)/1000):null;
+    const end=tool.finished_at_ms||(activeTool(tool)?Date.now():null),elapsed=start&&end?Math.max(0,(end-start)/1000):null;
     duration.textContent=elapsed===null?'':`${phase==='waiting_approval'&&!script?t('waited')+' ':''}${elapsed<1?elapsed.toFixed(1):Math.floor(elapsed)}s`;
     const targetLabel=tool.target?.runtime_id?machineLabel(tool.target.runtime_id):'';
     context.textContent=[targetLabel,tool.workdir,tool.execution_mode==='host'?t('hostExecution'):tool.execution_mode==='sandbox'?t('sandboxExecution'):''].filter(Boolean).join(' · ');context.hidden=!activeTool(tool)||!context.textContent;
-    const error=isGroup?'':tool.diagnostic||(tool.failurePhase?t(tool.failurePhase):['failed','denied','unknown'].includes(phase)?String(toolFailure(tool)||t(phase)).split('\n')[0]:'');failure.textContent=String(error).split('\n')[0];failure.hidden=!error;
+    const error=tool.diagnostic||(tool.failurePhase?t(tool.failurePhase):['failed','denied','unknown'].includes(phase)?String(toolFailure(tool)||t(phase)).split('\n')[0]:'');failure.textContent=String(error).split('\n')[0];failure.hidden=!error;
     failure.onclick=script?event=>{event.preventDefault();root.open=true;onLocate?.(tool.failureID||script.failureID,tool.turn_id);}:null;
     if(script&&error){failure.tabIndex=0;failure.setAttribute('role','button');failure.onkeydown=event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();failure.click();}};}else{failure.removeAttribute('tabindex');failure.removeAttribute('role');failure.onkeydown=null;}
     const channels=model?[...new Set(model.messages.map(mail=>t(!mail.from?.node_id||!mail.to?.node_id?'channelUnknown':mail.from.node_id===mail.to.node_id?'channelLocal':'channelLink')))].join(', '):'';
@@ -125,13 +135,12 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     // Collapsed cards need only their summary and approval identity. Defer
     // output Markdown, media and raw JSON until the reader asks to see them.
     if(!root.open)return;
-    contentView.element.hidden=!!model||isGroup;
+    contentView.element.hidden=!!model;
     const version=[tool,tool.phase,tool.args,tool.result,tool.output?.length,tool.output?.at(-1)?.text,script?.output,tool.process?.result,locale(),pending,raw.open,next.children?.length,targetLabel];
     if(version.every((value,index)=>value===bodyVersion[index]))return;
     bodyVersion=version;
-    if(isGroup)return;
-    if(!model)contentView.update(tool,{result,pending,targetLabel,hasChildren:!!next.children?.length});
-    rawTitle.textContent=t(model?'callDetails':'raw');if(!raw.open)return;
+    if(!model)contentView.update(tool,{result,pending,targetLabel,hasChildren:!!next.children?.length,compact:!!message.workRecord});
+    rawTitle.textContent=t(originalModel?'callDetails':'raw');if(!raw.open)return;
     const calls=tool.process?.calls||script?.calls||[tool],rawValue=JSON.stringify([locale(),calls]);
     if(rawSignature!==rawValue){rawSignature=rawValue;rawBody.replaceChildren(metadata);for(const call of calls){rawBody.append(n('p','tool-call-id',`${call.name} · ${call.id}`),n('p','tool-call-time',call.started_at_ms?new Date(call.started_at_ms).toLocaleString(locale()):''));for(const [label,value]of [[t('arguments'),call.args],[t('result'),call.result],[t('output'),call.output]])if(value!==undefined){const text=pretty(value),head=n('div','tool-section-heading');head.append(n('strong','',label),copyButton(t('copyJSON'),()=>text));rawBody.append(head,n('pre','tool-code',text.slice(0,LIMIT)));if(text.length>LIMIT)rawBody.append(n('p','tool-truncated',t('displayTruncated')));}}}
   }

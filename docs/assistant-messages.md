@@ -260,26 +260,22 @@ remain opaque evidence; restart recovery keeps uncertain executions fenced.
 
 ## Conversation presentation
 
-Chat and Task transcripts share the communication tool disclosure. Its summary
-keeps the operation and resolved full-address identities, with a compact pair of
-avatar or brand endpoints and a static directional line. Names and brands come
-from the existing assistant directory/cache; unknown addresses keep a neutral
-node. The direction line contains no channel label; channel and tool information
-remain in secondary Call details. Offline is an endpoint property and never
-changes Task phase. Ordinary send and receive records start collapsed. Manual
-choices survive message, directory, stream, locale and theme updates; existing
-approval and explicit navigation rules still apply.
+Chat and Task transcripts share the compact work-record projection described in
+[Shared UI](shared-ui.md). A collapsed group already shows the actual communication
+counterparts' avatars/Task marks; its expanded timeline retains message order and
+individual disclosures. Current-actor identity is not repeated in compact rows.
+If neither endpoint is the actor, both identities and direction remain visible.
+Directory profiles and complete addresses own identity; a missing avatar uses the
+shared person icon. Task identity colors require a confirmed catalogue mapping.
 
-Opening a message hides the summary relation diagram and shows a sender avatar
-and readable name, recipient and necessary source on a single identity row.
-The complete parsed `text` follows through the shared safe Markdown renderer,
-without a bubble, outer card, tinted fill or decorative left rule. Full address
-JSON stays in the secondary disclosure. Receive batches retain every envelope's own from/to/body;
-summary counts distinguish one sender with several messages from several sources.
-Incomplete arguments show preparation, and unavailable bodies point to the
-secondary Call details disclosure. That disclosure retains the tool name, full
-addresses, arguments, result and diagnostic output with copy controls. Tool
-failures have a separate error area.
+Ordinary send and receive bodies start collapsed. The full parsed `text` uses the
+shared safe Markdown renderer, without a bubble or nested card. Receive batches
+retain each envelope's from/to/body and stable ID. Secondary Call details keep the
+original name, full addresses, arguments, receipt and diagnostic output. Repeated
+projections of the same identified envelope show a receipt rather than another
+message body/count; absent identity fields are not reconstructed from text.
+Manual choices survive stream, directory, locale and theme updates and virtual
+recycling. Approval requests stay independently visible and actionable.
 
 Only an explicit successful `accepted: true` receipt is labeled Accepted. Received
 here means the envelope entered this conversation; neither label implies delivery,

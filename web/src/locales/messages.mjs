@@ -2,6 +2,18 @@ import serverMessages from './server.json' with {type:'json'};
 
 export const messages = {
   en: {
+    "work.title": "Work records",
+    "work.tools": "Tools: {count}",
+    "work.messages": "Messages: {count}",
+    "work.failures": "{count} failed",
+    "work.participants": "{count} communication counterparts; expand for all",
+    "work.activity": "Current activity · {name}",
+    "work.send": "↗ Send",
+    "work.receive": "↙ Receive",
+    "work.message": "Message",
+    "work.create": "Create task",
+    "work.receipt": "Message receipt",
+
     "startup.connectTitle":"Connect to Pot",
     "startup.token":"Access token",
     "startup.connect":"Connect",
@@ -149,8 +161,6 @@ export const messages = {
     "tasks.retry":"Retry loading",
     "tasks.stage.waiting":"Waiting for allowance",
 
-    'tool.communicationStack':'{records} records · {messages} messages · {tasks} tasks',
-    'tool.communicationStackOneTask':'{records} records · {messages} messages · {tasks} task',
     'tool.communicationRouteCount':'{count} messages',
     'tool.communicationRouteOne':'{count} message',
     'tool.messageTaskIDMissing':'(ID unavailable)',
@@ -1157,6 +1167,18 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    "work.title": "工作记录",
+    "work.tools": "工具{count}次",
+    "work.messages": "通信{count}条",
+    "work.failures": "{count}项失败",
+    "work.participants": "{count}个通信对象；展开查看全部",
+    "work.activity": "当前活动 · {name}",
+    "work.send": "↗ 发给",
+    "work.receive": "↙ 收到",
+    "work.message": "通信",
+    "work.create": "创建任务",
+    "work.receipt": "通信回执",
+
     "startup.connectTitle":"连接到 Pot",
     "startup.token":"访问令牌",
     "startup.connect":"连接",
@@ -1304,8 +1326,6 @@ export const messages = {
     "tasks.retry":"重试读取",
     "tasks.stage.waiting":"等待配额",
 
-    'tool.communicationStack':'{records} 条记录 · {messages} 条消息 · {tasks} 个任务',
-    'tool.communicationStackOneTask':'{records} 条记录 · {messages} 条消息 · {tasks} 个任务',
     'tool.communicationRouteCount':'{count} 条消息',
     'tool.communicationRouteOne':'{count} 条消息',
     'tool.messageTaskIDMissing':'（ID 缺失）',

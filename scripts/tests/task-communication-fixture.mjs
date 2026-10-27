@@ -61,12 +61,14 @@ window.taskCommunication={errors,messages,send,receive,taskA,taskB,taskC,client,
   async tasks(change){change(catalogue);for(const callback of changes)callback(['tasks'],{space:space.id});await frame();await frame();},
   async update(change){change(messages);cursor++;emit(snapshot());await frame();await frame();},
   async prepare(){
-    for(let i=0;i<180&&!document.querySelector('.communication-stack, [data-call-id="mail-1"]');i++)await frame();
-    const stack=document.querySelector('.communication-stack');
+    for(let i=0;i<180&&!document.querySelector('.work-records,.communication-stack, [data-call-id="mail-1"]');i++)await frame();
+    const stack=document.querySelector('.work-records,.communication-stack');
     if(scenario!=='collapsed'){
       if(stack){if(!stack.open)stack.querySelector('summary').click();}
       else for(const item of document.querySelectorAll('.communication-tool'))if(!item.open)item.querySelector('summary').click();
     }
+    await frame();
+    if(scenario!=='collapsed')for(const item of document.querySelectorAll('.communication-tool'))if(!item.open)item.querySelector('summary').click();
     await frame();await document.fonts.ready;
     const history=document.querySelector('.history');history.dispatchEvent(new WheelEvent('wheel',{deltaY:-10000,bubbles:true}));history.scrollTop=0;history.dispatchEvent(new Event('scroll'));await frame();
     if(errors.length)throw Error(errors.join('; '));this.ready=true;
