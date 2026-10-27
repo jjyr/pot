@@ -512,6 +512,17 @@ and a deterministic local provider that invokes the real resource tools.
 Playwright CLI's `run-code --filename` option against that origin. Stop the
 fixture with `POST /fixture/stop`. No product data or paid model calls are used.
 
+Set `POT_HTML_SCROLL_FIXTURE=1` on that fixture command for long, nested-list and
+short HTML resources. Open `/scripts/tests/fixtures/html-scroll.html` to exercise
+the real reply renderer, historical presentation and file-reference modal with
+live scroll coordinates. The focused native-scroll regression runs with
+`node scripts/tests/pot-ui-html-scroll-browser.mjs ORIGIN [BASELINE_ORIGIN]
+[CAPTURE_DIRECTORY]`, using the existing `POT_PLAYWRIGHT_MODULE` and
+`POT_CHROMIUM_EXECUTABLE` overrides. An optional independently running baseline
+origin enables matched before/after captures; it must serve the same synthetic
+fixture with the baseline production sources. Wheel input in Chromium does not
+establish physical touchpad inertia, touchscreen or native WebView behavior.
+
 For semantic tool activity, serve the repository root on loopback and open
 `/scripts/tests/fixtures/tool-content.html?locale=en&theme=light`. The shared Chat/Task
 disclosure runs behavioral checks for terminal copying/following, retained output,

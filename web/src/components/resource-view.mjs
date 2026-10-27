@@ -80,6 +80,7 @@ function register(){
         const onMessage=event=>{
           if(!current()||event.source!==frame.contentWindow||event.data?.type!=='pot-resource'||event.data.token!==token)return;
           if(event.data.action==='ready')ready();
+          if(event.data.action==='escape')this.closest('dialog')?.close();
           if(event.data.action==='dependency_error'){this.noticeKey='fileReference.unsupported_dependency';notice.hidden=false;refresh();}
           if(event.data.action==='resize'&&Number.isFinite(event.data.value))frame.style.setProperty('--resource-height',`${Math.min(960,Math.max(180,event.data.value))}px`);
           if(event.data.action==='result'){

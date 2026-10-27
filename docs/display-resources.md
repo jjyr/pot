@@ -223,3 +223,20 @@ invoke a model or execute a tool. The frame also reports CSP dependency violatio
 verifies the frame's window, a fresh per-mount token and the allowed message
 action. Reloading a component cannot
 replay a privileged action because no privileged action exists on this bridge.
+
+The render document contains its native viewport scroll chain while that axis
+has scrollable content. Read-only layout observers recognize nested scroll
+surfaces before input, and passive input observers recognize scrollable target
+ancestors, so reaching either edge stays inside the preview. They do not cancel
+input or change author event handlers. Short documents without scrollable
+content retain ordinary browser scroll handoff.
+Moving the pointer outside the frame immediately allows chat scrolling. This
+does not rewrite arbitrary third-party scroll widgets, closed shadow trees or
+author-managed gestures; nested frames remain prohibited by CSP.
+
+File-reference modal viewers lock the launching chat's scroll ancestors and the
+document until they close, then restore their offsets, original overflow styles
+and opener focus. An unhandled trusted Escape inside the frame sends a
+source/token-checked close notice for its containing viewer; inline previews
+have no modal to close. This adds no method to the public `window.pot` API and
+does not cancel or synthesize the original key event.
