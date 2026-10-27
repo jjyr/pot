@@ -109,3 +109,10 @@ type MCPNodeExecutionEnd struct {
 	ExecutionID string              `json:"execution_id" required:"true"`
 	Binding     MCPExecutionBinding `json:"binding" required:"true"`
 }
+
+// MCPNodeSubmit is for a registered node's unsupervised root assistant. A local
+// Task must instead use actual execution admission; it cannot become assistant.
+type MCPNodeSubmit struct {
+	Actor protocol.AgentRef `json:"actor" required:"true"`
+	Input MCPSubmitInput    `json:"input" required:"true"`
+}
