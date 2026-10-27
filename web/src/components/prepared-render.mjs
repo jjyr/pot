@@ -7,6 +7,17 @@ const componentKey=element=>JSON.stringify([element.localName,element.renderSlot
   element.identity||element.sourceText&&[element.sourceText,element.closed]||element.file&&[element.file,element.label]||
   element.presentation&&[element.presentation,element.line,element.noticeKey]]);
 const deadlineKey=element=>element.localName==='pot-mermaid'&&element.renderSlot?JSON.stringify([element.localName,element.renderSlot]):componentKey(element);
+const deadlineMember=(element,fallback)=>element.closest('article[data-message-id]')?.dataset.messageId||fallback;
+const componentDeadlineKey=(element,member)=>JSON.stringify([deadlineMember(element,member),deadlineKey(element)]);
+const imageDeadlineKey=(element,member)=>JSON.stringify([deadlineMember(element,member),'image',element.getAttribute('src')]);
+
+// Only a committed absence or a real unmount ends a logical component lifetime.
+// Candidate replacement and changing Mermaid tokens keep the existing deadline.
+export function retirePreparedDeadlines(deadlines,members,root,member=''){
+  const owned=new Set(members),present=new Set();
+  if(root){for(const element of root.querySelectorAll(components))present.add(componentDeadlineKey(element,member));for(const image of root.querySelectorAll('img'))present.add(imageDeadlineKey(image,member));}
+  for(const key of deadlines.keys())if(key!=='fonts'&&owned.has(JSON.parse(key)[0])&&!present.has(key))deadlines.delete(key);
+}
 
 export function currentPreparedRender(){return rendering;}
 export function createPreparationBudget(limit=32){
@@ -37,8 +48,8 @@ export function withPreparedRender(context,member,work){
   try{return work();}finally{rendering=previous;}
 }
 
-export function createPreparedRender({previousRoot,renderContext,deadlines=new Map(),reframe=false,budget=createPreparationBudget()}={}){
-  const context={phase:'prepare',previousRoot,previousRoots:new Map(),registeredRoots:new WeakSet(),renderContext,deadlines,budget,connectionContext:{budget,alive:true},localDeadlines:new Map(),reframe,frames:new Map(),islands:new Map(),slots:new Map(),incompleteSources:new Map(),assets:new Map(),used:new Map(),alive:true};
+export function createPreparedRender({previousRoot,renderContext,deadlines=new Map(),member='',reframe=false,budget=createPreparationBudget()}={}){
+  const context={phase:'prepare',previousRoot,previousRoots:new Map(),registeredRoots:new WeakSet(),renderContext,deadlines,member,budget,connectionContext:{budget,alive:true},localDeadlines:new Map(),reframe,frames:new Map(),islands:new Map(),slots:new Map(),incompleteSources:new Map(),assets:new Map(),used:new Map(),alive:true};
   registerPreparedRoot(context,previousRoot);return context;
 }
 export function preparedPreviousRoot(context,member){return context.previousRoots.get(member)||context.previousRoot;}
@@ -163,14 +174,14 @@ export function settlePreparedTree(root,context,{valid=()=>true,layout=()=>{},ti
       const now=performance.now(),all=[...root.querySelectorAll(components)],pending=[];
       for(const element of all){
         if(element.preparationSurrogate||element.closest('[hidden]')||!element.getBoundingClientRect().height||element.dataset.state!=='loading')continue;
-        const member=element.closest('article[data-message-id]')?.dataset.messageId||'',key=member+':'+deadlineKey(element);
+        const key=componentDeadlineKey(element,context.member||root.dataset.messageId||'');
         const deadline=deadlineFor(key);
         if(now>=deadline)frame(element,true);else pending.push({element,deadline});
       }
       for(const image of root.querySelectorAll('img')){
         if(image.preparationMedia||image.closest('[hidden]')||decoded.get(image)==='ready'||image.complete&&!image.naturalWidth)continue;
         if(!decoded.has(image)){decoded.set(image,'loading');image.decode().catch(()=>{}).then(()=>{decoded.set(image,'ready');schedule();});}
-        const key='image:'+image.closest('article[data-message-id]')?.dataset.messageId+':'+image.getAttribute('src'),deadline=deadlineFor(key);
+        const key=imageDeadlineKey(image,context.member||root.dataset.messageId||''),deadline=deadlineFor(key);
         if(now>=deadline)frame(image,true);else pending.push({element:image,deadline});
       }
       if(root.ownerDocument.fonts?.status==='loading'&&now<deadlineFor('fonts')){

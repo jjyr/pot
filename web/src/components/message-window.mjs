@@ -1,4 +1,4 @@
-import {currentPreparedRender,withPreparedRender,createPreparedRender,createPreparationBudget,createPreparationSurface,settlePreparedTree,preparedLayoutRect,framePreparedElement} from './prepared-render.mjs';
+import {currentPreparedRender,withPreparedRender,createPreparedRender,createPreparationBudget,createPreparationSurface,settlePreparedTree,preparedLayoutRect,framePreparedElement,retirePreparedDeadlines} from './prepared-render.mjs';
 import {moveConversationNode} from './conversation-dom.mjs';
 import {Virtualizer, observeElementRect, defaultRangeExtractor} from '../vendor/tanstack-virtual-core.mjs';
 import {createConversationController} from './conversation-controller.mjs';
@@ -18,7 +18,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
   const margins = new WeakMap(), sources = new WeakMap();
   function retireDeadlines(record,retained){
     const message=sources.get(record),members=[message?.id,...(message?.members||[]).map(member=>member.id)].filter(id=>id&&!retained.has(id));
-    for(const key of deadlines.keys())if(members.some(member=>key.startsWith(member+':')))deadlines.delete(key);
+    retirePreparedDeadlines(deadlines,members);
   }
   function navigationIndex() {
     if(controller?.following)return rows.length-1;
@@ -123,6 +123,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
   }
   function drawRows() {
     const items = virtualizer.getVirtualItems(), selected = new Set(items.map(item=>item.key));
+    const retainedMembers=new Set(items.flatMap(item=>[rows[item.index].id,...(rows[item.index].members||[]).map(member=>member.id)]));
     const layout = []; let offset=0, spacerIndex=0;
     for(const item of items){
       const start=item.start-margin;
@@ -142,6 +143,9 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
         record.row.classList.add('prepared-row');record.row.style.setProperty('--prepared-row-height',job.measurement.height+'px');
         record.row.style.setProperty('--prepared-margin-top',job.measurement.marginTop+'px');record.row.style.setProperty('--prepared-margin-bottom',job.measurement.marginBottom+'px');
         if(old)dispose(job.record);committing.delete(item.key);
+        record.row.dataset.messageId=message.id;
+        const previous=sources.get(old),removed=[previous?.id,...(previous?.members||[]).map(member=>member.id)].filter(id=>id&&!retainedMembers.has(id));
+        retirePreparedDeadlines(deadlines,[message.id,...(message.members||[]).map(member=>member.id),...removed],record.row,message.id);
       }
       if(!record){layout.push({gap:item.size});offset=item.end-margin;continue;}
       sources.set(record,message);
@@ -154,7 +158,6 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     }
     const total=virtualizer.getTotalSize();
     if(total>offset+.5)layout.push({gap:total-offset});
-    const retainedMembers=new Set(items.flatMap(item=>[rows[item.index].id,...(rows[item.index].members||[]).map(member=>member.id)]));
     for(const [key,record]of mounted)if(!selected.has(key)){
       virtualizer.observer.unobserve(record.row);virtualizer.elementsCache.delete(key);
       mounted.delete(key);pending.delete(record);retireDeadlines(record,retainedMembers);dispose(record);
@@ -301,7 +304,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       const stamp=layoutEpoch+':'+region.revision;if(regionRevisions.get(region.key)===stamp)continue;
       let job=current.regions.get(region.key);
       if(!job){
-        const surface=createPreparationSurface(scroller,region.host),context=createPreparedRender({previousRoot:region.host,renderContext:current.options.renderContext,deadlines,reframe:current.reframe,budget:preparationBudget});
+        const surface=createPreparationSurface(scroller,region.host),context=createPreparedRender({previousRoot:region.host,renderContext:current.options.renderContext,deadlines,member:region.key,reframe:current.reframe,budget:preparationBudget});
         surface.host.preparedContext=context.connectionContext;
         surface.host.classList.remove('prepared-region');
         job={region,signature:stamp,surface,context};current.regions.set(region.key,job);
@@ -316,7 +319,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       if(old?.preparedSignature===stamp)continue;
       let job=current.jobs.get(key);
       if(!job){
-        const surface=createPreparationSurface(scroller,host),context=createPreparedRender({previousRoot:old?.row,renderContext:current.options.renderContext,deadlines,reframe:current.reframe,budget:preparationBudget});
+        const surface=createPreparationSurface(scroller,host),context=createPreparedRender({previousRoot:old?.row,renderContext:current.options.renderContext,deadlines,member:message.id,reframe:current.reframe,budget:preparationBudget});
         context.liveTop=()=>scroller.getBoundingClientRect().top+margin+estimatedStart(current.rows,index)-scroller.scrollTop;
         job={message,signature:stamp,surface,context};current.jobs.set(key,job);
         job.record=withPreparedRender(context,message.id,()=>render(message,undefined));context.root=job.record.row;job.record.row.preparedContext=context.connectionContext;surface.host.append(job.record.row);
@@ -347,6 +350,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       for(const [element,clone]of job.context.frames){const box=clone.getBoundingClientRect();framePreparedElement(element,box.height,element.matches('pot-message-file[data-block="false"]')?box.width:undefined);}
       job.context.phase='commit';withPreparedRender(job.context,job.region.key,()=>job.region.render(job.region.host));job.context.phase='live';
       job.region.host.preparedContext=job.context.connectionContext;
+      retirePreparedDeadlines(deadlines,[job.region.key],job.region.host,job.region.key);
       job.region.host.classList.add('prepared-region');job.region.host.style.setProperty('--prepared-region-height',job.measurement.height+'px');regionRevisions.set(job.region.key,job.signature);job.surface.close();
       job.region.host.style.setProperty('--prepared-margin-top',job.measurement.marginTop+'px');job.region.host.style.setProperty('--prepared-margin-bottom',job.measurement.marginBottom+'px');
     }

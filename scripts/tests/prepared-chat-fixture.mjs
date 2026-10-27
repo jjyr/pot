@@ -3,14 +3,14 @@ import {Readable} from 'node:stream';
 
 // Only synthetic HTTP state. The document, adapter, SSE lifecycle and IndexedDB
 // are the product implementation; no model, product profile or Push is used.
-export async function preparedChatFixture(sourceOrigin,{workRecords=false,resourceMatrix=false}={}){
+export async function preparedChatFixture(sourceOrigin,{workRecords=false,resourceMatrix=false,currentReference=false}={}){
  const trace=[],streams=new Set(),held=new Set(),images=new Set();let revision=1,holdSend=false,holdEvents=null,holdImages=false;
  const owners=['alpha','beta','short','media'];
  const image=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==','base64');
  const messages=new Map(owners.map(owner=>[owner,Array.from({length:owner==='short'?3:owner==='media'?24:800},(_,i)=>({id:`${owner}-${i+1}`,role:i%2?'assistant':'user',text:`${owner} message ${i+1}\n\n`+('Synthetic history content. '.repeat(i%5+1))+(owner==='media'&&i%2?'\n\n```js\nconst measured = true;\n```':''),status:'complete',...(owner==='media'&&i===22?{attachments:[{id:'synthetic-image',name:'synthetic.png',mime_type:'image/png',size:image.length,width:480,height:280}]}:{})}))]));
  messages.get('alpha')[699].text='Historical prepared preview.\n\n[Synthetic report](report.md)';
  if(workRecords)for(const sequence of [720,721,722,723])messages.get('alpha')[sequence-1]={id:'alpha-'+sequence,role:'tool',text:'',status:'complete',tool:{id:'historic-'+sequence,turn_id:'historic-work',...(sequence===720?{}:{parent_id:'historic-720'}),name:'fixture_tool',phase:'completed',args:{sequence},result:{content:[{type:'text',text:'Historical native member '+sequence}]}}};
- const input={id:'active-input',request_id:'active-request',role:'user',text:'Synthetic active turn: keep one stable activity slot.',status:'accepted',...(workRecords?{references:[{message_id:'alpha-721',quote:'Historical grouped member'}]}:resourceMatrix?{references:[{message_id:'alpha-700',quote:'Historical mixed previews'}]}:{})};
+ const input={id:'active-input',request_id:'active-request',role:'user',text:'Synthetic active turn: keep one stable activity slot.',status:'accepted',...(workRecords?{references:[{message_id:'alpha-721',quote:'Historical grouped member'}]}:resourceMatrix?{references:[{message_id:'alpha-700',quote:'Historical mixed previews'}]}:currentReference?{references:[{message_id:'active-answer',quote:'Independent exact current-scope answer'}]}:{})};
  messages.get('alpha').push(input);let scenario='thinking',holdPreview=true,customText='';
  const previewHeld=new Set(),previewBytes=Buffer.from('# Rendered report\n\n```mermaid\ngraph TD\n A[Prepare] --> B[Commit]\n```\n\n'+Array.from({length:12},(_,i)=>`## Section ${i+1}\n\nSynthetic **Markdown** content.\n\n\x60\x60\x60js\nconst measured = true;\n\x60\x60\x60`).join('\n\n'));
  const resource={id:'synthetic-markdown',name:'report.md',entry:'report.md',mime_type:'text/markdown',size:previewBytes.length,download:{path:'report.md'},files:[{path:'report.md',size:previewBytes.length,mime_type:'text/markdown',digest:'synthetic-digest'}]};

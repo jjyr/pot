@@ -795,7 +795,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       backgroundTasks={close:stop,run:()=>domains.tasks.active(scope).refresh()};
     }return backgroundTasks.run();
   }
-  const disposeMessage=record=>{record.attachmentNode?.dispose?.();record.row.remove();messageNodes.delete(record.row.dataset.windowKey);};
+  const disposeMessage=record=>{record.attachmentNode?.dispose?.();record.row.remove();const key=record.row.dataset.windowKey;if(messageNodes.get(key)===record)messageNodes.delete(key);};
   const requestMessageRender=resize=>{
     renderMessages(true);
   };

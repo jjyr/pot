@@ -155,7 +155,10 @@ at once. It retains one running snapshot and the newest pending revision, so
 continuous tokens do not indefinitely replace an otherwise publishable batch.
 Width, font, locale, scope and navigation changes retire incompatible candidates.
 Logical component slots carry their original five-second deadline across token
-updates and candidate replacement. A known Mermaid fence remains unready until
+updates and candidate replacement. A committed removal retires that slot's
+deadline, so a new component added later receives its own five seconds; retiring
+an uncommitted candidate does not end the live component's lifetime. A known
+Mermaid fence remains unready until
 it closes and its diagram renders; its temporary long source is not a preview.
 Closing the fence can replace that waiting candidate without restarting its
 deadline. Other Markdown parsing and code formatting finish synchronously in the
