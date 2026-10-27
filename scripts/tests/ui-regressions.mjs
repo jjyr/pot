@@ -69,8 +69,8 @@ else {
           await trigger.press('Enter');await dialog.waitFor();await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});
           await page.waitForFunction(()=>document.querySelector('.assistant-profile-trigger')?.getAttribute('aria-expanded')==='false');
           if(await trigger.getAttribute('aria-expanded')!=='false'||await composer.inputValue()!==draft)throw Error('Assistant menu dismissal lost its accessible state or draft');
-          return {...state,shell,menuKeyboardAndOutsideDismissal:true,menuLocaleAndTarget:true};
-          }catch(error){await page.evaluate(()=>{const h=document.querySelector('.history');window.switchingFailure={probe:window.shellInputProbe,history:h&&{top:h.scrollTop,extent:h.scrollHeight,height:h.clientHeight,busy:h.getAttribute('aria-busy'),visibility:getComputedStyle(h).visibility,latestHidden:document.querySelector('.latest-button')?.hidden}};});throw error;}
+          return {...state,shell,menuKeyboardAndOutsideDismissal:true,menuLocaleAndTarget:true,referenceNavigation:await page.evaluate(()=>window.chatSwitchingReferenceEvidence)};
+          }catch(error){await page.evaluate(()=>{const h=document.querySelector('.history');window.switchingFailure={probe:window.shellInputProbe,referenceNavigation:window.chatSwitchingReferenceEvidence,history:h&&{top:h.scrollTop,extent:h.scrollHeight,height:h.clientHeight,busy:h.getAttribute('aria-busy'),visibility:getComputedStyle(h).visibility,latestHidden:document.querySelector('.latest-button')?.hidden}};});throw error;}
           finally{await page.evaluate(()=>window.chatSwitchingDispose?.());}
         }
         // The CLI expression derives its origin without loading the application.
