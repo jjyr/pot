@@ -187,7 +187,12 @@ unresolved component's lifetime and remains distinct from this ready-media reflo
 Ready HTML uses its actual browsing context at the candidate width in a transparent
 top-layer viewport, retaining its DOM parent, document state and lease. An inert
 projection of the old measured frame shows the loading status during this bounded
-handoff and never supplies a new reading anchor. Only an already focused native
+handoff and never supplies a new reading anchor. When the candidate's border box
+and inner viewport dimensions match the live iframe, the iframe stays in place
+with its current input surface. Outer result and dependency text still render,
+measure and transfer from the hidden candidate; these revisions do not require
+another native viewport handoff. Changed viewport dimensions use the actual
+browsing context before measurement. Only an already focused native
 document retains its existing focus; new candidates stay inside the inert hidden
 surface. Native viewport restoration does not restore an earlier focus snapshot:
 Tab or click destinations chosen during preparation remain authoritative through

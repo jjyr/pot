@@ -3,7 +3,7 @@ import {preparedNativeFocusIntent} from './prepared-focus-browser.mjs';
 
 export async function preparedNativeLifecycle(browser,origin){
   const results=[];
-  for(const query of ['', '?cancel', '?fallback&cancel&keyboard']){
+  for(const query of ['', '?cancel', '?cancel-back', '?fallback&cancel&keyboard']){
     const context=await browser.newContext(),page=await context.newPage(),errors=[];
     page.on('pageerror',error=>errors.push(error.message));
     try{
@@ -40,6 +40,8 @@ export async function preparedNativeLifecycle(browser,origin){
     await page.goto(origin+'/scripts/tests/fixtures/prepared-events.html');
     await page.waitForFunction(()=>window.htmlEvents?.ready);
     const document=page.frameLocator('.history:not([data-preparation-surface]) iframe');
+    // Keep this rapid sequence: per-action ACK/RAF waits hide native input
+    // surfaces retired unnecessarily by outer result/notice preparation.
     await document.getByRole('button',{name:'Grow content'}).click();
     await document.getByRole('button',{name:'Publish result'}).click();
     await document.getByRole('button',{name:'Report dependency'}).click();
@@ -47,6 +49,9 @@ export async function preparedNativeLifecycle(browser,origin){
     await page.waitForFunction(()=>window.preparedEventsResult);
     const result=await page.evaluate(()=>window.preparedEventsResult);
     assert.equal(result.failure,null);assert.deepEqual(errors,[]);assert.deepEqual(result.errors,[]);
+    assert.deepEqual(result.actions.map(item=>item.action),['grow','result','dependency']);
+    assert(result.actions.every(item=>item.live&&item.trusted&&item.token===result.actions[0].token&&item.documentID===result.actions[0].documentID));
+    assert.equal(result.stagedAfterResult,null);assert.equal(result.loads,0);
     assert.equal(result.acquired,result.released);results.push(result);
   }finally{await context.close();}
   results.push({focusIntent:await preparedNativeFocusIntent(browser,origin)});

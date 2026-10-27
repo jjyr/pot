@@ -129,8 +129,12 @@ function stageNativeIslands(context){
   for(const entry of context.nativeIslands.values()){
     const {original,owner}=entry;if(entry.home)continue;
     if(!original.isConnected)throw Error('Prepared native document lost its original owner');
-    owner.nativeReflowDeadline??=performance.now()+5000;
     const box=(entry.projection||original).getBoundingClientRect(),oldBox=original.getBoundingClientRect();
+    // Outer result/notice revisions still measure their new DOM in the hidden
+    // candidate. An unchanged embedded viewport already has its real layout:
+    // staging it would unnecessarily retire the browser's current input surface.
+    if(entry.projection&&box.width===oldBox.width&&box.height===oldBox.height&&entry.projection.clientWidth===original.clientWidth&&entry.projection.clientHeight===original.clientHeight)continue;
+    owner.nativeReflowDeadline??=performance.now()+5000;
     entry.style=original.getAttribute('style');entry.popover=original.getAttribute('popover');entry.inert=original.inert;entry.hidden=original.getAttribute('aria-hidden');entry.focus=document.activeElement===original;
     entry.home=original.ownerDocument.createElement('div');entry.home.className=original.className;entry.home.style.cssText='box-sizing:border-box;width:'+oldBox.width+'px;height:'+oldBox.height+'px;max-width:100%';entry.home.inert=true;entry.home.setAttribute('aria-hidden','true');entry.home.dataset.conversationHold='';entry.home.dataset.nativePreparationPlaceholder='';
     // Prepare the temporary status in the same connected hidden surface. The
@@ -163,15 +167,16 @@ function nativeIslandsPending(context,deadlineFor,now){
 }
 export function finishPreparedNative(context,{commit=false,preparedOnly=false}={}){
   for(const entry of [...context.nativeIslands.values()]){
-    const {original,home,projection}=entry;if(!home)continue;
+    const {original,home,projection}=entry;
     if(preparedOnly&&!context.root.contains(original))continue;
+    if(commit)delete entry.owner.nativeReflowDeadline;
+    if(!home)continue;
     const height=original.style.getPropertyValue('--resource-height');
     if(original.matches(':popover-open'))original.hidePopover();
     if(entry.popover===null)original.removeAttribute('popover');else original.setAttribute('popover',entry.popover);
     if(entry.style===null)original.removeAttribute('style');else original.setAttribute('style',entry.style);
     if(commit&&height)original.style.setProperty('--resource-height',height);
     if(commit&&projection.closest('pot-resource')?.dataset.preparedFallback==='true')entry.owner.dataset.preparedFallback='true';
-    if(commit)delete entry.owner.nativeReflowDeadline;
     original.inert=entry.inert;if(entry.hidden===null)original.removeAttribute('aria-hidden');else original.setAttribute('aria-hidden',entry.hidden);
     delete original.nativePreparation;delete projection.nativePreparation;home.remove();context.nativeIslands.delete(original);
     // The browsing context never moved. Preserve its current native focus;
