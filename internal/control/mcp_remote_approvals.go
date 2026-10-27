@@ -58,7 +58,13 @@ func (q *MCPAccessQueue) approvalPending(ctx context.Context, receiver agentlink
 		var body, state string
 		e = tx.QueryRowContext(ctx, "SELECT body,state FROM mcp_remote_approvals WHERE connection_id=? AND approval_id=?", receiver.ConnectionID(), in.Approval.ID).Scan(&body, &state)
 		if e == nil {
-			if body != mcpJSON(in) {
+			var previous agentlink.MCPApprovalPending
+			if mcpRead(body, &previous) != nil {
+				return agentlink.ErrConflict
+			}
+			before, beforeErr := core.HashJSON(previous)
+			after, afterErr := core.HashJSON(in)
+			if beforeErr != nil || afterErr != nil || before != after {
 				return agentlink.ErrConflict
 			}
 			if state == "invalidated" {

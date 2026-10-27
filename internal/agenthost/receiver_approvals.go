@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jjyr/pot/pkg/agentlink"
+	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/storage"
 )
 
@@ -108,7 +109,9 @@ func (c *receiverClient) ApprovalPending(ctx context.Context, in agentlink.MCPAp
 	if err := c.call(ctx, "pot_receiver_approval_pending", in, &out); err != nil {
 		return err
 	}
-	if encoded(out) != encoded(in) {
+	before, err := core.HashJSON(in)
+	after, afterErr := core.HashJSON(out)
+	if err != nil || afterErr != nil || before != after {
 		return agentlink.ErrConflict
 	}
 	return nil

@@ -146,7 +146,9 @@ func TestMCPHumanApprovalHTTPAndOwnerPortAreOneShotAndFenced(t *testing.T) {
 	pending := agentlink.MCPApprovalPending{Context: g.execution, Epoch: "native-epoch", RequestID: "origin", Approval: agentlink.ExecutionApproval{ID: "approval", JobID: g.binding.Task.AgentID, Method: "command", Params: json.RawMessage(`{"command":"legacy", "reason":"legacy", "cmd":"fixture only", "justification":"preserve"}`)}}
 	var saved agentlink.MCPApprovalPending
 	fixtureCall(t, g.receiver, "pot_receiver_approval_pending", pending, &saved)
-	fixtureCall(t, g.receiver, "pot_receiver_approval_pending", pending, &saved)
+	reordered := pending
+	reordered.Approval.Params = json.RawMessage(`{"justification":"preserve","cmd":"fixture only","reason":"legacy","command":"legacy"}`)
+	fixtureCall(t, g.receiver, "pot_receiver_approval_pending", reordered, &saved)
 	s := g.f.access.options.Local
 	reviews := g.f.access.humanReviews(ctx, "main")
 	if len(reviews) != 1 || reviews[0].Caller != g.origin {

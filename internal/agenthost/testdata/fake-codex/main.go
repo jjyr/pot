@@ -133,7 +133,15 @@ func main() {
 			notification("turn/started", map[string]any{"threadId": threadID, "turn": map[string]string{"id": "turn-1", "status": "inProgress"}})
 			notification("item/started", map[string]any{"threadId": threadID, "item": map[string]string{"id": "command-1", "type": "commandExecution", "command": "fixture only"}})
 			if prompt == "approve" || strings.HasPrefix(prompt, "approve\n") {
-				send(map[string]any{"id": "approval-1", "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": threadID, "turnId": "turn-1", "itemId": "command-1", "command": "untrusted"}})
+				// Keep native Params in a deliberately non-canonical order. SDK
+				// structured-content round trips may reorder these object keys.
+				params := struct {
+					Turn    string `json:"turnId"`
+					Thread  string `json:"threadId"`
+					Command string `json:"command"`
+					Item    string `json:"itemId"`
+				}{"turn-1", threadID, "untrusted", "command-1"}
+				send(map[string]any{"id": "approval-1", "method": "item/commandExecution/requestApproval", "params": params})
 				continue
 			}
 			if prompt == "auto-review" || strings.HasPrefix(prompt, "auto-review\n") {

@@ -43,6 +43,11 @@ func (a *MCPAccess) directory(ctx context.Context) (agentlink.Directory, error) 
 				operations = append(operations, op)
 			}
 		}
+		// This describes the original directing human's once-only review
+		// extension, never the general owner Approvals operation/model tool.
+		if a.options.HumanReview != nil && endpoint.Identity.Address.Kind == "assistant" && endpoint.Capabilities.Supports(agentlink.TaskSubmit) {
+			operations = append(operations, agentlink.Approvals)
+		}
 		endpoint.Capabilities = agentlink.Description{Version: 1, Scope: "peer", Operations: operations}
 		directory.Targets = append(directory.Targets, endpoint)
 	}
