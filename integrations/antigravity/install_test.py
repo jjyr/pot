@@ -69,6 +69,34 @@ class InstallTests(unittest.TestCase):
             installer.install(Path(temporary) / "home", activate=False)
         self.assertEqual(dict(os.environ), before)
 
+    def test_helper_upgrade_retains_history_and_independent_configuration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            helper = installer.install(home, activate=False)
+            previous = json.loads((helper / ".pot-install.json").read_text())
+            for name, data in {
+                "hooks.json": b"old hook",
+                "mcp_config.json": b"old stdio",
+                "bin/pot-antigravity-agent": b"old executable",
+            }.items():
+                target = helper / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+                previous[name] = installer.digest(data)
+            (helper / ".pot-install.json").write_text(json.dumps(previous))
+            history = home / ".config/pot-antigravity/agent/history"
+            history.parent.mkdir(parents=True)
+            history.write_text("retained")
+            independent = home / "independent-mcp.json"
+            independent.write_text('{"mcpServers":{"other":{"serverUrl":"https://other.invalid"}}}')
+            before = independent.read_bytes()
+            installer.install(home, activate=False)
+            self.assertFalse((helper / "hooks.json").exists())
+            self.assertFalse((helper / "mcp_config.json").exists())
+            self.assertFalse((helper / "bin/pot-antigravity-agent").exists())
+            self.assertEqual(history.read_text(), "retained")
+            self.assertEqual(independent.read_bytes(), before)
+
     def test_symlink_receipt_is_rejected_before_writes(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
