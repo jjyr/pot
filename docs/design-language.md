@@ -287,6 +287,14 @@ Codex. Only the explicit API creation action creates a local assistant, using th
 node default or the shared Provider editor. Visiting the page never creates an
 assistant. Linked chats do not require a local model connection.
 
+Runtime choices retain their button identity during directory refreshes. Selecting
+a runtime shows loading progress and permits one configuration lookup at a time;
+language changes preserve that lookup. Leaving the page or retiring its Space,
+Control, boot or connection prevents a late lookup from opening a form.
+Configuration steps share one Add assistant history entry. Successful creation
+replaces it with the returned assistant's conversation; browser Back and the
+narrow conversation Back gesture return to the assistant directory.
+
 Each choice pairs its heading and description with a consistent rounded icon
 holder: a blue plug for API creation and the existing Pot/Codex brand assets for
 connections. Icons are decorative; the translated heading names each choice.

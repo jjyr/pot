@@ -200,7 +200,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   const updates=client.production?createUpdates({client,locale:()=>locale,changed:()=>{if(!disposed)renderShell();},notify:message=>{error=message;updateControls();}}):null;
  if(updates)root.append(updates.dialog);
- const pages = client.production ? createPages({updates,chatVisible:()=>route==='chat'&&!root.classList.contains('show-directory'),onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, chatApprovalHost:chatApprovals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: async value => {if(value?.assistant)pendingSelection=value.assistant;const removed=value?.deletedAssistant;if(removed){attachmentUI?.forget(removed);await assistantDrafts?.forget(removed).catch(()=>{error=t('drafts.cleanupFailed');});const selected=selectedAssistant?.id===removed.owner&&selectedAssistant?.space_id===removed.space;if(selected)clearSelectedAssistant();await domains.chat.remove(removed).catch(cacheFailure);}await loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:async target=>{if(target?.assistant)directoryEpoch++;if(target?.owner&&(!selectedAssistant||selectedAssistant.id!==target.owner||selectedAssistant.space_id!==target.space)){let assistant=assistants.find(item=>item.id===target.owner&&item.space_id===target.space);if(!assistant&&target.assistant){assistant={...target.assistant,space_id:target.space};assistants=[...assistants,assistant];client.assistants=assistants;}if(assistant)await selectAssistant(assistant,false,false);}route='chat';directoryOpen=!!target?.directory&&!selectedAssistant;renderShell();renderMessages();pages.permissions();if(!selectedAssistant&&!target?.directory)loadDirectory();}}) : null;
+ const pages = client.production ? createPages({updates,chatVisible:()=>route==='chat'&&!root.classList.contains('show-directory'),onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, chatApprovalHost:chatApprovals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: async value => {if(value?.assistant)pendingSelection=value.assistant;const removed=value?.deletedAssistant;if(removed){attachmentUI?.forget(removed);await assistantDrafts?.forget(removed).catch(()=>{error=t('drafts.cleanupFailed');});const selected=selectedAssistant?.id===removed.owner&&selectedAssistant?.space_id===removed.space;if(selected)clearSelectedAssistant();await domains.chat.remove(removed).catch(cacheFailure);}await loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:async target=>{if(target?.assistant)directoryEpoch++;if(target?.owner&&(!selectedAssistant||selectedAssistant.id!==target.owner||selectedAssistant.space_id!==target.space)){let assistant=assistants.find(item=>item.id===target.owner&&item.space_id===target.space);if(!assistant&&target.assistant){assistant={...target.assistant,space_id:target.space};assistants=[...assistants,assistant];client.assistants=assistants;}if(assistant)await selectAssistant(assistant,false,false);}route='chat';directoryOpen=!!target?.directory;if(target?.created)saveNavigation('chat',true);renderShell();renderMessages();pages.permissions();if(!selectedAssistant&&!target?.directory)loadDirectory();}}) : null;
   const media = matchMedia('(max-width: 719px)');
   const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
   const saveReads=()=>{if(!client.desktop)persist('pot-ui-read-v1',JSON.stringify(replies.records()));};
@@ -445,9 +445,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   async function navigate(next,{replace=false,record=true}={}) {
     if(client.operationsReady===false&&next!=='chat')return;
     if (pages && !await pages.leave()) return;
+    if(client.production&&record&&next==='add-assistant'&&route==='chat'){const prior=directoryOpen;directoryOpen=true;saveNavigation('chat',true);directoryOpen=prior;}
     route = next;
     menuOpen = false;
     if (next === 'chat') directoryOpen = true;
+    if (next === 'add-assistant') directoryOpen = false;
     if(client.production&&record)saveNavigation(next,replace);
     renderShell();
     if(pages&&next==='chat')pages.permissions();if (pages && next !== 'chat') pages.show(next);
@@ -704,7 +706,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     const add = button('plus', t(client.production ? 'assistantStart.title' : 'preview'));
     add.disabled = !client.production||client.operationsReady===false||!creationSpace()||creationSpace()?.connected===false;
-    add.onclick = () => {directoryOpen=false;navigate('add-assistant');};
+    add.onclick = () => navigate('add-assistant');
     heading.append(add);
     const search = el('input', 'assistant-search');
     search.type = 'search'; search.placeholder = t('search'); search.setAttribute('aria-label', t('search')); search.value = searchValue;
@@ -1083,7 +1085,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       renderShell();renderMessages();
       if(!assistants.length&&route==='chat'&&!pages.editing){
         const available=!directory.partial&&spaces.some(space=>space.connected!==false);
-        if(available){directoryOpen=false;route='add-assistant';renderShell();await pages.show('add-assistant');}else{directoryOpen=false;renderShell();const empty=el('div','empty-chat');empty.append(el('p','hint',t('partialOffline')));const retry=el('button','control',t('retry'));retry.onclick=()=>loadDirectory();empty.append(retry);messageColumn.replaceChildren(empty);}
+        if(available){directoryOpen=true;saveNavigation('chat',true);directoryOpen=false;route='add-assistant';saveNavigation('add-assistant');renderShell();await pages.show('add-assistant');}else{directoryOpen=false;renderShell();const empty=el('div','empty-chat');empty.append(el('p','hint',t('partialOffline')));const retry=el('button','control',t('retry'));retry.onclick=()=>loadDirectory();empty.append(retry);messageColumn.replaceChildren(empty);}
       }
       mainReady();
       if(pendingSelection){const chosen=assistants.find(item=>item.id===pendingSelection.id&&item.space_id===pendingSelection.space_id);pendingSelection=null;if(chosen){await selectAssistant(chosen);notifications?.directory({epoch:notificationEpoch});return;}}
@@ -1159,11 +1161,15 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     settling=true;
     await Promise.all(targets.map(target=>settleMotion(target,{transform:target.style.transform},{transform:`translateX(${end}px)`})));
     if(disposed)return;
-    if(commit){if(gesture.mode==='back'){if(pages?.hasParent)await pages.back();else directoryOpen=true;}else menuOpen=gesture.mode==='open';}
+    if(commit){if(gesture.mode==='back'){if(pages?.hasParent)await pages.back();else {directoryOpen=true;if(client.production)saveNavigation('chat',true);}}else menuOpen=gesture.mode==='open';}
     clearSwipe();settling=false;renderShell();
   };
   const pointerUp=event=>{finishSwipe(event).catch(reason=>{clearSwipe();settling=false;error=reason.message;updateControls();});};
   const pointerCancel=event=>{finishSwipe(event,true).catch(()=>{clearSwipe();settling=false;});};
+  // Cancelling pointermove alone does not suppress native touch panning. Claim
+  // only an active horizontal edge gesture; ordinary scrolling remains native.
+  const touchMove=event=>{if(swipe?.active)event.preventDefault();};
+  root.addEventListener('touchmove',touchMove,{passive:false});
   root.addEventListener('pointerdown',pointerDown,{passive:true});root.addEventListener('pointermove',pointerMove,{passive:false});root.addEventListener('pointerup',pointerUp);root.addEventListener('pointercancel',pointerCancel);
   const mediaChanged = () => { menuOpen = false; closeAssistantProfile(); renderShell(); };
   document.addEventListener('keydown', keydown);
@@ -1208,7 +1214,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     stopStartup?.();assistantDrafts?.close();disposed = true;updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);viewportObserver.disconnect();stopReading();messageWindow.close();stopResources?.();releaseDomains();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();backgroundTaskView.close();directoryEpoch++; unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     stopMessageSelection();completions?.dispose();attachmentUI?.destroy();client.releaseAttachments?.();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
-    root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);
+    root.removeEventListener('touchmove',touchMove);root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);
     window.removeEventListener('pot:preference',preferencesChanged);window.removeEventListener('pot:cache-forgotten',forgotten);
     document.removeEventListener('keydown', keydown);window.removeEventListener('popstate',popNavigation);
     media.removeEventListener('change', mediaChanged);
