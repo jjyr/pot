@@ -55,7 +55,7 @@ try{
       await page.getByRole('button',{name:t('assistantSettings'),exact:true}).click();
       const name=page.getByLabel(locale==='en'?'Name':'名称',{exact:true});await name.waitFor();
       check(!await name.isDisabled()&&!await page.locator('.page-host').evaluate(node=>node.inert),'offline settings editable while outbox waits '+width);
-      check(await page.getByLabel(locale==='en'?'Model':'模型',{exact:true}).isDisabled(),'slow settings section alone is disabled '+width);
+      check(await page.getByLabel(locale==='en'?'Model':'模型',{exact:true}).isDisabled(),'unavailable settings section alone is disabled '+width);
       await name.fill('Submitted settings '+width);
       await page.evaluate(()=>{window.combinedNameNode=document.querySelector('.editor-form input[aria-label]');});
       const save=page.getByRole('button',{name:locale==='en'?'Save':'保存',exact:true});await save.click();
@@ -64,7 +64,9 @@ try{
       await config({hold:['configuration','rules','snapshot','save']});await context.setOffline(false);
       // Failed sections retain explicit retries; a successful connection does
       // not replace the name control or discard its edits.
-      for(const retry of await page.locator('[data-section-state="error"] button').all())await retry.click();
+      await page.locator('[data-section="instructions"] > summary').click();
+      for(const retry of await page.locator('[data-section-state="error"] button').elementHandles())await retry.click();
+      check(await page.locator('[data-section-state="loading"]').count()===2,'configuration and instructions retry independently while held '+width);
       await save.click();
       await name.fill('Newer settings edit '+width);
       check(!await name.isDisabled()&&await save.isDisabled(),'pending save permits new editing and deduplicates '+width);
@@ -90,6 +92,7 @@ try{
       check(!saved.calls.slice(callStart).some(call=>call.method==='POST'&&['/api/v1/messages','/api/v1/turn/steer'].includes(call.path)),'held snapshot prevents POST but preserves queue identity/order '+width);
       await send('Third submission while network reads held '+width);
       await waitForOutbox(page,([rows])=>rows.length===3);
+      await history.locator('article.message').filter({hasText:'Third submission while network reads held '+width}).waitFor();
       await page.screenshot({path:resolve(output,'combined-'+width+'.png')});
       await config({hold:[],release:'all'});
       const accepted=await waitForOutbox(page,([rows])=>rows.length===3&&rows.every(row=>row.state==='accepted'&&!row.projection_pending),{timeout:45000});
