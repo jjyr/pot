@@ -158,11 +158,15 @@ Logical component slots carry their original five-second deadline across token
 updates and candidate replacement. A committed removal retires that slot's
 deadline, so a new component added later receives its own five seconds; retiring
 an uncommitted candidate does not end the live component's lifetime. A known
-Mermaid fence remains unready until
-it closes and its diagram renders; its temporary long source is not a preview.
+Mermaid fence stays unready until it closes and its diagram renders; its
+temporary long source is not a preview.
 Closing the fence can replace that waiting candidate without restarting its
 deadline. Other Markdown parsing and code formatting finish synchronously in the
 candidate.
+
+Tool candidates inherit the live tool's one-time approval auto-open state and
+never write shared disclosure intent. A first pending approval can still open
+its tool; later explicit close/open actions remain authoritative at commit.
 
 At the deadline an unresolved block receives a fixed, scrollable outer frame of
 at least 240 pixels; an inline reference keeps its measured link box. Binding,

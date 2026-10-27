@@ -1,5 +1,5 @@
 import {activeTool,toolResult,toolSummary,toolFailure} from '../state/tool-calls.mjs';
-import {currentPreparedRender} from './prepared-render.mjs';
+import {currentPreparedRender,preparedPreviousRoot} from './prepared-render.mjs';
 import {translate} from '../locales/messages.mjs';
 import {createToolContent} from './tool-content.mjs';
 import {toolKind,presentationLabel,presentationPreview} from '../state/tool-presentation.mjs';
@@ -22,12 +22,15 @@ function scheduleClock(update){clocks.add(update);if(clockFrame)return;const fra
 export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolveMessageIdentity=()=>undefined,messageActor=()=>undefined,onOpenTask,resolveTask,machineLabel=()=>translate(locale(),'machine.unavailable'),onDecision,onLocate,onInteract=()=>{},downloadFile,acquireFileImage}={}){
   const t=name=>translate(locale(),`tool.${name}`),root=n('details','tool-call'),summary=n('summary','tool-summary');
   root.dataset.cacheKey=`tool:${key}`;
+  const preparation=currentPreparedRender(),previousRoot=preparation?.context.phase==='prepare'?preparedPreviousRoot(preparation.context,preparation.member):null;
+  const previousTool=previousRoot&&[previousRoot,...previousRoot.querySelectorAll('details.tool-call')].find(node=>node.dataset.cacheKey===root.dataset.cacheKey);
+  const live=()=>root.isConnected&&!root.closest('[data-preparation-surface]')&&preparation?.context.phase!=='prepare'&&preparation?.context.alive!==false;
   summary.addEventListener('click',onInteract);
   const title=n('span','tool-title'),excerpt=n('span','tool-excerpt'),status=n('span','tool-status'),duration=n('span','tool-duration');summary.append(title,excerpt,status,duration);
   const context=n('div','tool-context'),failure=n('p','tool-failure'),body=n('div','tool-body'),metadata=n('dl','tool-metadata'),approval=n('div','tool-approval'),children=n('div','tool-children'),sections=n('div'),raw=n('details','tool-raw'),rawTitle=n('summary'),rawBody=n('div');raw.append(rawTitle,rawBody);body.append(failure,metadata,approval,children,sections,raw);summary.append(context);root.append(summary,body);
   const communicationView=createCommunication({locale,resolveIdentity:resolveMessageIdentity,downloadFile,acquireFileImage,onOpenTask,resolveTask});
   summary.append(communicationView.summary);body.insertBefore(communicationView.body,sections);
-  let current,options={},signature='',approvalID='',approvalCard=null,rawSignature='',autoOpened=false,building=false,refreshStatus=()=>{};
+  let current,options={},signature='',approvalID='',approvalCard=null,rawSignature='',autoOpened=previousTool?.toolAutoOpened||false,building=false,refreshStatus=()=>{};
   let bodyVersion=[];
   const contentView=createToolContent({locale,downloadFile,acquireFileImage,onOpenTask,resolveTask});
   sections.append(contentView.element);
@@ -54,10 +57,11 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     if(model?.kind==='receive'&&model.count>1)title.append(document.createTextNode(t('messageCount').replace('{count}',model.count.toLocaleString(locale()))));
     title.title=title.textContent;return true;
   }
-  const remember=()=>{if(!building)memory.set(key,{...memory.get(key),open:root.open,raw:raw.open});};root.addEventListener('toggle',()=>{remember();refreshStatus();if(current)update(current,options);});raw.addEventListener('toggle',()=>{remember();if(current)update(current,options);});
+  const remember=()=>{if(!building&&live())memory.set(key,{...memory.get(key),open:root.open,raw:raw.open});};root.addEventListener('toggle',()=>{if(!live())return;remember();refreshStatus();if(current)update(current,options);});raw.addEventListener('toggle',()=>{if(!live())return;remember();if(current)update(current,options);});
   // Populate on activation, before a second click can target an empty disclosure
   // whose position will change when its deferred toggle event renders content.
   function disclose(field,node){
+    if(!live())return;
     if(root.closest('.prepared-row')){
       memory.set(key,{...memory.get(key),[field]:!(memory.get(key)?.[field]??node.open)});
       root.dispatchEvent(new CustomEvent('pot:prepare-resize',{bubbles:true}));return;
@@ -143,6 +147,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     approval.hidden=!pending;
     if((pending||next.approvalDescendant)&&!autoOpened){building=true;root.open=true;autoOpened=true;building=false;remember();queueMicrotask(()=>{for(let parent=root.parentElement?.closest('details.tool-call');parent;parent=parent.parentElement?.closest('details.tool-call'))parent.open=true;});}
     if(!pending&&!next.approvalDescendant)autoOpened=false;
+    root.toolAutoOpened=autoOpened;
     if(activeTool(tool))scheduleClock(tick);
     // Collapsed cards need only their summary and approval identity. Defer
     // output Markdown, media and raw JSON until the reader asks to see them.

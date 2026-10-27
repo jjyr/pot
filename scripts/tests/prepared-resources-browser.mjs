@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {sourceServer,launchBrowser} from './browser-harness.mjs';
 import {preparedResourceMatrix,preparedLateResources} from './prepared-resource-matrix.mjs';
-import {preparedLifetimes} from './prepared-lifetimes-browser.mjs';
+import {preparedLifetimes,preparedTaskDisclosure} from './prepared-lifetimes-browser.mjs';
 
 const source=await sourceServer(),browser=await launchBrowser();
 try{
@@ -95,5 +95,5 @@ try{
  });
  assert.equal(budget.first,32,'One window admits at most 32 component loads at once');assert(budget.maxLoading<=32);assert.equal(budget.ready,48,'Queued components progress when earlier loads settle');assert.equal(budget.released,48,'Retirement releases active and queued candidates exactly once');assert.deepEqual(errors,[]);
  const matrix=await preparedResourceMatrix(page),lateTypes=await preparedLateResources(page);assert.deepEqual(errors,[]);
- await context.close();const lifetimes=await preparedLifetimes(browser,source.origin);console.log(JSON.stringify({passed:true,sameNode:true,recursiveReady:true,measurementParity:true,leaseReused:true,trueRemovalReleasedOnce:true,metadataRace,unfinished,budget,matrix,lateTypes,lifetimes,errors}));
+ await context.close();const lifetimes=await preparedLifetimes(browser,source.origin),taskDisclosure=await preparedTaskDisclosure(browser,source.origin);console.log(JSON.stringify({passed:true,sameNode:true,recursiveReady:true,measurementParity:true,leaseReused:true,trueRemovalReleasedOnce:true,metadataRace,unfinished,budget,matrix,lateTypes,lifetimes,taskDisclosure,errors}));
 }finally{await browser.close();await source.close();}
