@@ -23,10 +23,9 @@ async page => {
   await page.setViewportSize({width:1200,height:850});await page.goto(`${origin}/?theme=light&locale=zh-CN&conversation=alpha`);
   await page.waitForFunction(()=>window.__processSubscribed);await push();
   await page.getByText('我会检查项目，然后验证构建结果。',{exact:true}).waitFor();
-  const group=page.locator('.script-group').first();
-  if(!await group.count()){await node('check-done').waitFor();await capture('before');return 'Baseline command/session screenshots captured';}
-  await group.waitFor();assert(await page.locator('.script-group').count()===1,'Commands share one group');assert(!await group.evaluate(element=>element.open),'Execution history starts collapsed');
-  assert(await group.locator(':scope > summary .tool-title').textContent()==='执行记录','Group has a stable generic title');
+  const group=page.locator('.work-records').first();
+  await group.waitFor();assert(await page.locator('.work-records').count()===1,'Commands share one group');assert(!await group.evaluate(element=>element.open),'Execution history starts collapsed');
+  assert(await group.locator(':scope > summary .work-record-title').textContent()==='工作记录','Group has a stable generic title');
   await capture('after');await page.setViewportSize({width:1200,height:850});await group.locator(':scope > summary').click();
   await node('check').waitFor();await node('build').waitFor();assert(await node('check-poll').count()===0&&await node('check-done').count()===0,'Polls do not add rows');
   for(const id of ['check','build'])assert(!await node(id).locator(':scope > summary').textContent().then(text=>/private-process/.test(text)),'Command summaries hide session IDs');
@@ -54,13 +53,15 @@ async page => {
   assert(await output.evaluate((element,old)=>element===old,retained),'Output node survives session updates');assert(await output.evaluate(element=>element.scrollTop)===0,'Paused output following survives updates');
   await node('check').getByRole('button',{name:'回到最新输出',exact:true}).click();assert(await output.evaluate(element=>element.scrollTop>0),'Jump to latest resumes following');
   const input=call('send-input','write_stdin',{session_id:'private-process-one',chars:'yes\n'},{session_id:'private-process-one'});messages.push(input);await push();
-  await node('send-input').waitFor();assert(await node('send-input').evaluate(element=>element.parentElement.closest('.tool-call').dataset.callId)==='check','Input action is nested beneath its command');
-  await node('send-input').locator(':scope > summary').click();await node('send-input').getByText('发送输入\nyes',{exact:false}).waitFor();
+  await node('send-input').waitFor();assert(await node('send-input').evaluate(element=>!!element.closest('.work-record-items')&&!element.parentElement.closest('.tool-call')),'Input action keeps its chronological row in the work group');
+  await node('send-input').locator(':scope > summary').click();assert(await node('send-input').locator('.tool-session-input').count()===0,'Input parameters stay in secondary raw details');
+  await node('send-input').locator('.tool-raw>summary').click();await node('send-input').locator('.tool-raw').getByText('yes',{exact:false}).first().waitFor();
   assert(!await node('send-input').locator(':scope > summary').textContent().then(text=>text.includes('private-process-one')),'Action summary hides session ID');
   const failed=poll('failed-poll','private-process-one',{stderr:'Checks failed',exit_code:2});messages.push(failed,secondDone);running=false;await push();
-  assert(await group.locator(':scope > summary .tool-failure').count()===0,'Group summaries keep intermediate process failures quiet');
+  await group.locator(':scope > summary .work-record-failure').waitFor();
+  assert(await group.locator(':scope > summary .work-record-failure').isVisible(),'Collapsed work summary reports process failure');
   await node('check').locator('.tool-section').filter({has:page.getByText('输出',{exact:true})}).getByText('Checks failed',{exact:false}).waitFor();
-  await node('check').locator(':scope > summary').click();assert(!await node('check').evaluate(element=>element.open),'Completed process failure can be collapsed');await node('check').locator(':scope > summary').getByText('已结束',{exact:true}).waitFor();
+  await node('check').locator(':scope > summary').click();assert(!await node('check').evaluate(element=>element.open),'Completed process failure can be collapsed');await node('check').locator(':scope > summary').getByText('失败',{exact:true}).waitFor();
   assert(!await node('check').locator(':scope > summary').textContent().then(text=>text.includes('Checks failed')),'Collapsed command summary hides the diagnostic');
   await node('check').locator(':scope > summary').click();await node('check').getByText('Checks failed',{exact:false}).first().waitFor();await node('check').locator(':scope > summary').getByText('失败',{exact:true}).waitFor();
   await page.setViewportSize({width:390,height:850});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Expanded history fits mobile');
@@ -73,19 +74,22 @@ async page => {
    let sequence=0;const emit=update=>appendTaskEvents(state,[{sequence:++sequence,event:{turn_id:'task-turn',update:{at_ms:Date.now(),...update}}}]);
    try{
     emit({type:'tool_started',id:'task-command',name:'exec_command',args:{cmd:'npm run check'}});emit({type:'tool_finished',id:'task-command',result:{stdout:'start\n',session_id:'task-session'}});view.update({state,record});
-    const group=root.querySelector('.script-group');if(group?.dataset.phase!=='running')throw Error('Task session stays running');
+    const group=root.querySelector('.work-records');if(!group||root.querySelector('.work-record-activity').hidden)throw Error('Task session stays running');
+    group.querySelector('summary').click();await Promise.resolve();
     emit({type:'tool_started',id:'task-poll',name:'write_stdin',args:{session_id:'task-session'}});emit({type:'tool_finished',id:'task-poll',result:{stdout:'middle\n',session_id:'task-session'}});
     emit({type:'tool_started',id:'task-input',name:'write_stdin',args:{session_id:'task-session',chars:'yes\n'}});emit({type:'tool_state',id:'task-input',phase:'waiting_approval'});view.update({state,record,approvals:[approval]});await Promise.resolve();
-    if(!group.open||!root.querySelector('[data-call-id="task-command"]').open||!root.querySelector('[data-call-id="task-input"]').open)throw Error('Session approval opens command and group ancestors');
+    if(root.querySelector('[data-call-id="task-input"]')?.closest('.work-records'))throw Error('Input approval stays outside the work group');
     if(root.querySelectorAll('.approval-card').length!==1||root.querySelector('[data-call-id="task-poll"]'))throw Error('One approval and no polling row');
-    emit({type:'tool_finished',id:'task-input',result:{stdout:'done\n',exit_code:0}});view.update({state,record,approvals:[]});if(group.dataset.phase!=='completed')throw Error('Final process receipt completes Task group');
+    emit({type:'tool_finished',id:'task-input',result:{stdout:'done\n',exit_code:0}});view.update({state,record,approvals:[]});if(!root.querySelector('.work-record-activity').hidden)throw Error('Final process receipt completes Task group');
    }finally{view.dispose();root.remove();}
   });
   await page.evaluate(async()=>{
    const {createToolCall}=await import('/components/tool-call.mjs');let language='en';const view=createToolCall({locale:()=>language});document.body.append(view.element);view.element.open=true;
    const message={tool:{id:'locale-action',name:'write_stdin',phase:'completed',args:{session_id:'hidden-session',chars:'yes\n',interrupt:true,terminate:true,close_stdin:true,rows:40,cols:100},result:{stdout:'ready',session_id:'hidden-session'}}};
-   try{for(const [locale,input,resize]of [['en','Send input','40 rows × 100 columns'],['zh-CN','发送输入','40 行 × 100 列']]){language=locale;view.update(message);const text=[...view.element.querySelectorAll('.tool-section')].map(node=>node.textContent).join('\n');if(!text.includes(input)||!text.includes(resize)||text.includes('hidden-session'))throw Error('Process interactions switch locale and hide IDs');}}finally{view.element.remove();}
+   try{for(const [locale,input,resize]of [['en','Send input','40 rows × 100 columns'],['zh-CN','发送输入','40 行 × 100 列']]){language=locale;view.update(message);const text=[...view.element.querySelectorAll('.tool-section')].map(node=>node.textContent).join('\n');if(!text.includes(input)||!text.includes(resize)||text.includes('hidden-session'))throw Error('Process interactions switch locale and hide IDs');}
+    message.tool={...message.tool,phase:'unknown',started_at_ms:1000};view.update(message);if(view.element.querySelector('.tool-duration').textContent)throw Error('Unknown execution without a finish time must not invent elapsed time');
+   }finally{view.element.remove();}
   });
-  assert(errors.length===0,errors.join('\n'));return {passed:true,errors,checks:'Chat/Task grouping, receipts, input, approvals, live output, quiet failures, expanded diagnostics and mobile layout'};
+  assert(errors.length===0,errors.join('\n'));return {passed:true,errors,checks:'Chat/Task grouping, receipts, input, approvals, live output, visible failures, expanded diagnostics and mobile layout'};
  }finally{await page.unroute('**/access/status',access);await page.unroute('**/api/v1/**',handler);page.off('pageerror',onError);}
 }

@@ -366,8 +366,9 @@ At phone widths, select Pot from the assistant list first. Repeat with
 `locale=zh-CN`; `before=1` shows the previous private-correspondence presentation
 for comparison. This fixture uses production Chat components and synthetic data.
 
-For adjacent Task communication, run `mise run test:task-communication`, serve the
-repository on loopback and open `/scripts/tests/fixtures/task-communication.html`.
+For compact work records, run `mise run test:work-records`, serve the
+repository on loopback and open `/scripts/tests/fixtures/work-records.html`.
+The separate `/scripts/tests/fixtures/task-communication.html` fixture covers Task identities.
 Add `?identity=1` for the matching communication/background identity fixture,
 including linked addresses, missing mappings and normal UUID-shaped IDs.
 Add `edge=1` separately for repeated prefixes and equal IDs across nodes; both
@@ -379,7 +380,7 @@ The fixture mounts production Chat with synthetic records and rejects writes.
 shared presentation. With a disposable Playwright installation, run
 `scripts/tests/task-communication-browser.mjs` against that origin using
 `POT_PLAYWRIGHT_MODULE` and optional `POT_CHROMIUM_EXECUTABLE`. It covers grouping,
-batch counts, identity, native keyboard disclosure, append/prepend, retained text
+tool/message counts, identity, native keyboard disclosure, append/prepend, retained text
 selection, failures and virtual recycling. No real Task or model is started.
 
 For background Task elapsed-time checks, serve the repository on loopback and open

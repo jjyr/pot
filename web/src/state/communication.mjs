@@ -13,8 +13,9 @@ export function communication(tool,actor){
   const args=communicationArgs(tool),result=toolResult(tool);
   if(tool.name==='receive_message'){
     const messages=Array.isArray(args?.messages)?args.messages:[];
-    return {kind:'receive',messages:messages.map(mail=>({from:mail?.from,to:mail?.to,text:typeof mail?.text==='string'?mail.text:null})),sources:[...new Map(messages.map(mail=>[communicationKey(mail?.from),mail?.from])).values()],count:messages.length};
+    return {kind:'receive',messages:messages.map(mail=>({from:mail?.from,to:mail?.to,text:typeof mail?.text==='string'?mail.text:null,...(typeof mail?.id==='string'?{id:mail.id}:{})})),sources:[...new Map(messages.map(mail=>[communicationKey(mail?.from),mail?.from])).values()],count:messages.length};
   }
   const task=tool.name==='create_task';
-  return {kind:task?'delegate':'send',sources:[],count:1,task:task&&result?.id?result:null,accepted:!task&&tool.phase==='completed'&&result?.accepted===true,messages:[{from:actor,to:task?(args?.target||(result?.agent_link?.assistant_id?{node_id:result.agent_link.node_id,kind:'assistant',agent_id:result.agent_link.assistant_id}:result?.address)):args?.to,text:typeof args?.text==='string'?args.text:null}]};
+  const envelope=result?.message||result,mailID=typeof result?.message_id==='string'?result.message_id:typeof envelope?.id==='string'&&envelope?.from&&envelope?.to?envelope.id:undefined;
+  return {kind:task?'delegate':'send',sources:[],count:1,task:task&&result?.id?result:null,accepted:!task&&tool.phase==='completed'&&result?.accepted===true,messages:[{...(mailID?{id:mailID}:{}),from:task?actor:envelope?.from||actor,to:task?(args?.target||(result?.agent_link?.assistant_id?{node_id:result.agent_link.node_id,kind:'assistant',agent_id:result.agent_link.assistant_id}:result?.address)):envelope?.to||args?.to,text:typeof args?.text==='string'?args.text:null}]};
 }

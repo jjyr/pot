@@ -18,7 +18,7 @@ import {renderMarkdown} from './markdown.mjs';
 import {toolForest} from '../state/tool-calls.mjs';
 import {projectScriptRuns} from '../state/script-runs.mjs';
 import {projectTaskMessages} from '../state/task-transcript.mjs';
-import {createCommunicationWindow} from './communication-window.mjs';
+import {createWorkRecordWindow} from './work-record-window.mjs';
 import {copyFeedback} from './motion.mjs';
 
 export function createTaskConversation({root,task,record:initial,locale,client,scope,draft,onDraft,downloadFile:downloadTaskFile,toolMemory,approvalFor,onDecision,onSend,onStop,onPause,onCancel,onArchive,onUsage,onRefresh,onSettings,onOpenTask,assistantName,onEarlier,onLatest}){
@@ -59,7 +59,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     catch(reason){if(!disposed){downloadFailure={file,diagnostic:reason?.message||String(reason)};renderDownloadFailure();}}
   }
   const heights=new Map();
-  const transcriptWindow=createCommunicationWindow({onOpenTask,locale,actor:()=>record.info?.address||task.address,resolveIdentity:address=>messageIdentities(client).resolve(address),blocked:message=>!!approvalFor(message.tool),memory:toolMemory,scope:JSON.stringify([scope,task.id]),scroller:history,host:transcript,render:renderMessage,dispose:entry=>disposeMessage(entry),requestRender:scheduleFollow,heights,active:()=>!disposed&&root.isConnected&&!!history.clientHeight,upward:scheduleHistory,scrolled:scheduleHistory,earlierBoundary:boundary,onEarlierVisible:scheduleHistory,canReadEarlier:()=>!!state?.has_more});
+  const transcriptWindow=createWorkRecordWindow({locale,actor:()=>record.info?.address||task.address,resolveIdentity:address=>messageIdentities(client).resolve(address),blocked:message=>!!approvalFor(message.tool),memory:toolMemory,scope:JSON.stringify([scope,task.id]),scroller:history,host:transcript,render:renderMessage,dispose:entry=>disposeMessage(entry),requestRender:scheduleFollow,heights,active:()=>!disposed&&root.isConnected&&!!history.clientHeight,upward:scheduleHistory,scrolled:scheduleHistory,earlierBoundary:boundary,onEarlierVisible:scheduleHistory,canReadEarlier:()=>!!state?.has_more});
   const stopReading=transcriptWindow.subscribeReading(()=>{latest.hidden=transcriptWindow.following;});
   const editor=bindComposer(input,{onInput:text=>{draftVersion++;onDraft(completion.value());updateComposer();},onSend:submit,onCompositionEnd:updateComposer});
   const completion=bindCompletions(input,{client:{scope:()=>scope,resources:client.resources,read:client.read?(path,options)=>client.read(path,options):undefined,request:(path,options)=>client.request(path,options)},host:composerArea,locale,mobile:editor.mobile,id:`pot-task-${task.id}-completions`,setText:text=>editor.setValue(text)});
@@ -124,7 +124,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   function copyButton(entry){
     if(entry.copy){label(entry.copy,t(entry.copy.dataset.copied?'copied':'copy'));return;}entry.copy=iconButton('copy',t('copy'),'copy-message');copyFeedback(entry.copy,{text:()=>entry.text||'',locale,translate,onError:reason=>{error.textContent=reason.message;error.hidden=false;}});entry.element.append(entry.copy);
   }
-  const disposeMessage=entry=>{entry.childrenWindow?.close();entry.element.remove();};
+  const disposeMessage=entry=>{entry.element.remove();};
   function renderMessage(message,existing){
       let entry=existing;
       if(!entry){const element=n('article',`message task-event role-${message.role}`);entry={element,row:element,text:null};}
@@ -135,13 +135,8 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
  }else if(message.tool){
         if(!entry.tool){entry.tool=createToolCall({messageActor:()=>record.info?.address||task.address,onOpenTask,resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key:JSON.stringify([scope,task.id,message.id]),locale,machineLabel,onDecision,onInteract:event=>transcriptWindow.engage(event),onLocate:(call,turn)=>{const target=forest.byID.get(turn+':'+call)?.message;if(target){transcriptWindow.locate({id:target.id,expand:true});renderTranscript();}},downloadFile,acquireFileImage});entry.element.append(entry.tool.element);}
         const children=forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children||[];
-        const approvalDescendant=children.some(function pending(entry){return !!approvalFor(entry.message.tool)||entry.children.some(pending);});
-        entry.tool.update(message,{stacked:message.communicationStacked,approval:approvalFor(message.tool),approvalDescendant,offline:unavailable||!!connectionError,children:children.map(child=>child.message)});
+        entry.tool.update(message,{approval:approvalFor(message.tool),offline:unavailable||!!connectionError,children:children.map(child=>child.message)});
         if(transcriptWindow.revealing&&transcriptWindow.visibilityPath.has(message.id)||transcriptWindow.destination?.expand&&transcriptWindow.destination.id===message.id)entry.tool.element.open=true;
-        if(children.length||entry.childrenWindow){
-          if(!entry.childrenWindow){entry.childrenWindow=createCommunicationWindow({onOpenTask,locale,actor:()=>record.info?.address||task.address,resolveIdentity:address=>messageIdentities(client).resolve(address),blocked:message=>!!approvalFor(message.tool),memory:toolMemory,scope:JSON.stringify([scope,task.id]),scroller:history,host:entry.tool.children,nested:true,render:renderMessage,dispose:disposeMessage,requestRender:scheduleFollow,controller:transcriptWindow,heights});entry.tool.element.addEventListener('toggle',scheduleFollow);}
-          entry.childrenWindow.setMessages(entry.tool.element.open?children.map(child=>({...child.message,viewKey:child.message.id})):[]);
-        }
       }else{
         if(!entry.body){entry.body=n('div','message-body');entry.element.append(entry.body);if(message.role==='assistant')entry.reply=createReplyBubble(entry.body);}
         if(message.role==='assistant')entry.reply.update(message,{t,downloadFile,acquireFileImage,...resourceOptions,onSettings:can('assistant.configure')?onSettings:undefined});
@@ -162,7 +157,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     if(!projection){const rows=projectScriptRuns(projectTaskMessages(state,inputs,record,{offline:unavailable||!!connectionError}),{activeTurn:active()?[...state.tools.values()].at(-1)?.tool.turn_id:null});projection={rows,forest:toolForest(rows)};}
     const {rows}=projection;forest=projection.forest;
     const parents=new Map(rows.flatMap(message=>{const parent=message.tool?.parent_id&&forest.byID.get(message.tool.turn_id+':'+message.tool.parent_id)?.message;return parent?[[message.id,parent.id]]:[];}));
-    transcriptWindow.setMessages(rows.filter(message=>!message.tool?.parent_id||!forest.byID.has(message.tool.turn_id+':'+message.tool.parent_id)).map(message=>({...message,viewKey:message.id})),{parents});
+    transcriptWindow.setMessages(rows.map(message=>({...message,viewKey:message.id})),{parents});
     latest.hidden=transcriptWindow.following;scheduleHistory();
   }
   function renderMenu(force=false){

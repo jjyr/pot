@@ -88,31 +88,10 @@ export function projectScriptRuns(messages,{activeTurn=null}={}){
     run.state=summarize(tools);
     run.output=run.calls.map(tool=>toolResult(tool)?.output).filter(value=>typeof value==='string').join('');
   }
-  const rows=[];let group=null;
-  for(const message of messages){
-    if(waits.has(message))continue;
-    const run=runs.get(message),command=message.tool?.name==='exec_command'&&!message.tool.parent_id;
-    if(run||command){
-      if(!group||group.tool.turn_id!==message.tool.turn_id){
-        const id=`script-group:${message.tool.id}`;
-        group={...message,id,viewKey:`script-group:${message.viewKey||message.id}`,tool:{id,turn_id:message.tool.turn_id,name:'script_group',script:{runs:[]}}};rows.push(group);
-      }
-      const projected={...message,tool:{...message.tool,...run?.state,parent_id:group.tool.id,...(run?{script:{...run.state,calls:run.calls,output:run.output}}:{})}};
-      group.tool.script.runs.push(projected.tool);rows.push(projected);
-    }else{
-      rows.push(message);
-      // Children and empty model-round placeholders do not interrupt a block.
-      if(!message.tool?.parent_id&&!(message.role==='assistant'&&!message.text&&!message.error))group=null;
-    }
-  }
-  for(const row of rows)if(row.tool?.name==='script_group'){
-    const tools=row.tool.script.runs;
-    Object.assign(row.tool,summarize(tools));
-    const active=tools.filter(activeTool);
-    const focused=(active.length?active:tools).at(-1);
-    row.tool.script.focus=focused?.script?.focus||focused;
-    const focus=row.tool.script.focus;
-    if(focus)for(const key of ['target','workdir','execution_mode'])row.tool[key]=focus[key];
-  }
-  return rows;
+  // All surviving calls stay in transcript order. The shared work-record window
+  // owns the only visible group; parent_id remains evidence, never a second list.
+  return messages.filter(message=>!waits.has(message)).map(message=>{
+    const run=runs.get(message);
+    return run?{...message,tool:{...message.tool,...run.state,script:{...run.state,calls:run.calls,output:run.output}}}:message;
+  });
 }

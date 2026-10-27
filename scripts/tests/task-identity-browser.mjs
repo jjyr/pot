@@ -19,7 +19,7 @@ try{
       const f=window.taskCommunication,rows=[...document.querySelectorAll('.background-task')];
       const marks=node=>[node.querySelector('.task-identity-mark').dataset.taskColor,node.querySelector('.task-identity-short').textContent];
       const identities=f.catalogue.slice(0,3).map((task,index)=>{
-        const label=taskIdentities.short(task),communications=[...document.querySelectorAll('.communication-task-endpoint')].filter(node=>node.querySelector('.task-identity-short').textContent===label);
+        const label=taskIdentities.short(task),communications=[...document.querySelectorAll('.work-participant')].filter(node=>node.querySelector('.task-identity-short').textContent===label);
         return communications.length>0&&[rows[index],...communications].every(node=>JSON.stringify(marks(node))===JSON.stringify([String(taskColorIndex(task)),label]));
       });
       const singleLine=rows.every(row=>{
@@ -32,19 +32,21 @@ try{
     assert.deepEqual(collapsed.identities,[true,true,true]);assert.deepEqual(collapsed.labels,['#a078','#b169','#c25a']);
     assert.equal(collapsed.singleLine,true);assert.equal(collapsed.summaryCount,0);assert.equal(collapsed.icon,true);
     assert.equal(collapsed.size,22);assert.equal(collapsed.overflow,false);
-    await page.locator('.communication-stack-summary').focus();await page.keyboard.press('Enter');
+    await page.locator('.work-record-summary').focus();await page.keyboard.press('Enter');
+    await page.locator('.communication-tool').first().waitFor();
+    await page.evaluate(()=>{for(const d of document.querySelectorAll('.communication-tool'))if(!d.open)d.querySelector('summary').click();});
     await page.waitForSelector('.communication-entry');
     assert.equal(await page.locator('.communication-entry').count(),7);
     assert.equal(await page.evaluate(()=>[...document.querySelectorAll('.communication-entry .communication-task-endpoint')].every(node=>node.querySelector('.task-identity-mark[data-task-color]')&&node.querySelector('.task-identity-short').textContent)),true);
     // The same mapped Task must route through its catalogue key in all three places.
-    for(const selector of ['.communication-stack-routes .communication-task-endpoint','.communication-entry .communication-task-endpoint','.background-task']){
+    for(const selector of ['.communication-entry .communication-task-endpoint','.background-task']){
       const target=page.locator(selector).filter({hasText:'Remote review'}).first();
       await target.focus();await page.keyboard.press('Enter');
       await page.waitForSelector('.task-conversation');
       assert.equal(await page.evaluate(()=>history.state.potTask.id),await page.evaluate(()=>window.taskCommunication.catalogue[2].id));
       assert.equal(await page.evaluate(()=>{const r=window.taskCommunication.requests.filter(item=>item.path==='/api/v1/tasks/'+window.taskCommunication.catalogue[2].id).at(-1);return r?.space==='review-local'&&r?.owner==='pot';}),true);
       await page.goBack();await page.waitForSelector('.background-task');
-      assert.equal(await page.locator('.communication-stack').getAttribute('open'),'','detail Back retains stack expansion');
+      assert.equal(await page.locator('.work-records').getAttribute('open'),'','detail Back retains stack expansion');
     }
     await page.locator('.background-tasks-toggle').focus();await page.keyboard.press('Enter');
     await page.waitForFunction(()=>document.querySelectorAll('.background-task').length===7);
@@ -66,6 +68,8 @@ try{
       return nodes.length>3&&nodes.every(node=>node.textContent==='#b169');
     });assert.equal(collision,true);
     await page.evaluate(()=>window.taskCommunication.update(messages=>{const f=window.taskCommunication;messages.splice(-1,0,{...f.send('unmapped',{node_id:'unknown-node',kind:'task',agent_id:'unmapped-identity'},'Unknown full address'),sequence:'100',version:1});}));
+    await page.evaluate(()=>{for(const d of document.querySelectorAll('.work-records'))if(!d.open)d.querySelector('summary').click();});
+    await page.locator('[data-call-id="unmapped"]>summary').click();
     const unknown=await page.evaluate(()=>{
       const endpoint=[...document.querySelectorAll('.communication-task-endpoint')].find(node=>node.querySelector('.task-identity-short').textContent==='#unma');
       return !!endpoint&&endpoint.tagName==='SPAN'&&!endpoint.querySelector('.task-identity-mark').hasAttribute('data-task-color');
@@ -80,7 +84,9 @@ try{
       };
       await f.update(messages=>messages.splice(-1,0,{...f.send('foreign',foreign.address,'Another confirmed catalogue scope'),sequence:'101',version:1}));
     });
-    await page.locator('.communication-stack-routes .communication-task-endpoint').filter({hasText:'Foreign mapped task'}).click();await page.waitForSelector('.task-conversation');
+    await page.evaluate(()=>{for(const d of document.querySelectorAll('.work-records'))if(!d.open)d.querySelector('summary').click();});
+    await page.locator('[data-call-id="foreign"]>summary').click();
+    await page.locator('[data-call-id="foreign"] .communication-entry .communication-task-endpoint').filter({hasText:'Foreign mapped task'}).click();await page.waitForSelector('.task-conversation');
     assert.equal(await page.evaluate(()=>history.state.potTask._space_id==='foreign-scope'&&history.state.potTask.assistant_id==='foreign-owner'),true,'equal catalogue IDs never overwrite a confirmed address scope');
     assert.equal(await page.evaluate(()=>window.taskCommunication.requests.some(item=>item.path==='/api/v1/tasks/'+window.taskCommunication.catalogue[2].id&&item.space==='foreign-scope'&&item.owner==='foreign-owner')),true);
     await page.goBack();await page.waitForSelector('.background-task');

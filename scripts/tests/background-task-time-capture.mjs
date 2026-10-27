@@ -29,7 +29,9 @@ try{
   await page.evaluate(()=>window.taskCommunication.tasks(tasks=>{
    tasks[0].phase='complete';tasks[0].started_at_ms=1700000000000;tasks[0].finished_at_ms=1700000138000;
   }));
-  await page.locator('.communication-stack-routes .communication-task-endpoint').filter({hasText:'Layout review'}).first().click();
+  await page.locator('.work-record-summary').click();
+  await page.locator('[data-call-id="mail-1"]>summary').click();
+  await page.locator('[data-call-id="mail-1"] .communication-entry .communication-task-endpoint').filter({hasText:'Layout review'}).first().click();
   await page.waitForSelector('.task-conversation');
   await page.getByRole('button',{name:'Task actions',exact:true}).click();
   await page.getByRole('dialog').getByRole('button',{name:'Task details',exact:true}).click();

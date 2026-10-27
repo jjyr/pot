@@ -393,21 +393,44 @@ an unsaved choice onto a different revision.
 
 Conversation and Task stream contracts are in [UI events](ui-events.md).
 
-Chat and Task transcripts project consecutive completed Task `send_message` and
-`receive_message` records through `components/communication-window.mjs` before
-virtualization. Two or more eligible siblings share a native disclosure; its
-summary retains each distinct direction and Task identity, and separately counts
-records, messages and Tasks. A receive batch remains one record with its original
-message order. Prose, other tools, mixed assistant mail, incomplete calls,
-approvals and failures break the stack. Individual calls and failure labels stay
-visible independently. Expanding a stack shows every original message body, with
-call details available in a second disclosure. This is a UI projection only;
-model history, correspondence, transport receipts and Task lifecycle are unchanged.
+Chat and Task transcripts share `components/work-record-window.mjs` and
+`state/work-records.mjs`. Consecutive process records in one stream/turn use one
+collapsed Work records disclosure: tool operations and messages are counted
+separately. Its single summary line includes the first two communication
+counterparts' profile avatars or existing Task identity marks, with an overflow
+count. Full-address identity owns deduplication; the current actor is omitted.
+Missing profile images use the shared person icon, never a provider logo.
+Expanding reveals all counterparts and the original mixed timeline. Each record
+opens its own body/result, with raw parameters and code in secondary Call details.
 
-The adapter retains group keys by membership and original record nodes across
-append, prepend and splits, giving the existing reading cursor and virtualizer
-stable member targets. Disclosures are scoped to the conversation and survive
-virtual recycling. `state/task-identity.mjs` is shared with Task views: complete
+Tools, Task creation/management, ordinary peer messages and normal compaction
+can share a group. Prose, user inputs, deliveries/presentations, a new turn,
+unknown/stopped execution, failed compaction and actual approvals remain boundaries.
+Task live status, user-facing result reports, artifacts and approval controls keep
+their existing independent locations. Tool failures stay in the timeline and also
+mark the collapsed summary. The activity line uses tool-category metadata only,
+never inferred intent or source code, and disappears when activity ends.
+
+`state/script-runs.mjs` folds command-session polls and exec/wait receipts without
+adding another visible history group. Surviving parent and child calls retain
+their global source order, even when prose or other work interleaves. Known
+orchestration wrappers with children do not add an atomic tool count; real session
+input/control actions do. Outputs and chunks update their source call. Message
+IDs from existing receive envelopes and send receipts correlate duplicate
+projections, which remain inspectable as receipts without another body/message
+count. Missing IDs never trigger text-based deduplication. Raw facts and model
+history remain unchanged. Acceptance is not delivery or completion; receive is not
+read. No group elapsed total is calculated by summing concurrent calls.
+
+The adapter retains group keys by membership and reading anchor, and original
+record nodes across append, prepend and splits. Disclosure state survives virtual
+recycling within the existing conversation-scoped memory; it is not a persisted
+history field. The existing virtualizer/controller alone owns scrolling. Task
+inputs whose API provides only a scalar sender keep their existing independent
+reference/guidance projection rather than inventing a full endpoint. Adapters
+without individual tool or plan events do not acquire synthesized progress.
+
+`state/task-identity.mjs` is shared with Task views: complete
 `node_id / kind / agent_id` addresses identify Tasks. The shared `taskShortID`
 helper displays `#` followed by the first four
 characters of the real `address.agent_id` (or the entire ID when shorter).

@@ -20,7 +20,7 @@ try{
   check(!send.root.open,'offline/status update does not open send');
   check(send.root.querySelector('.tool-status').textContent===t('messageAccepted'),'durable acceptance label');
   check(send.root.querySelector('.communication-name').textContent==='Pot','actual sender');
-  check(send.root.querySelectorAll('.communication-mark .connection-brand').length===2,'known real Pot and Codex brands');
+  check(send.root.querySelectorAll('.communication-mark>svg').length===2&&!send.root.querySelector('.communication-mark .connection-brand'),'missing profile avatars use shared people icons, never provider brands');
   check(send.root.querySelector('.communication-offline')?.textContent===t('endpointOffline'),'offline belongs to endpoint');
   await expand(send);
   check(send.root.querySelector('.communication-summary').hidden,'expanded hides duplicate summary graph');
@@ -74,11 +74,11 @@ try{
   check(approved.root.open&&!approved.root.querySelector('.tool-approval').hidden,'existing approval still takes priority and opens');
   const composed=card('composed','exec',{},undefined);
   composed.value.tool={...composed.value.tool,script:{focus:{name:'send_message',args:{to:remote,text:'Focused message'}},calls:[]}};composed.view.update(composed.value);
-  check(!composed.root.open&&!composed.root.querySelector('.communication-summary').hidden,'composed tool focus stays collapsed');
+  check(!composed.root.open&&composed.root.querySelector('.communication-summary').hidden,'orchestration wrapper does not borrow a child message identity');
   await expand(composed);check(composed.root.querySelector('.communication-summary').hidden,'expanded composition hides summary diagram');
   check(!composed.root.querySelector('.communication-text'),'composition focus never mounts duplicate hidden Markdown or media');
   const unknown=card('unknown','send_message',{to:address('unlisted'),text:'Unknown target'});
-  check(unknown.root.querySelectorAll('.communication-mark .connection-brand').length===1,'unknown remote cannot borrow same-id brand');
+  check(!unknown.root.querySelector('.communication-mark .connection-brand')&&unknown.root.querySelectorAll('.communication-mark>svg').length===2,'unknown remote cannot borrow same-id profile or brand');
   client.assistants=client.assistants.map(item=>item.origin?.node_id==='remote'?{...item,profile_name:'<b>Renamed</b> · 超长助手名称 '.repeat(4)}:item);
   for(const item of cards)item.view.update(item.value);
   check(send.root.open&&raw.open,'directory refresh retains both native disclosure levels');
@@ -103,7 +103,7 @@ try{
   check(!one.root.querySelector('.communication-summary').hidden&&send.root.querySelector('.communication-summary').hidden,'graph follows actual disclosure after locale switch');
   check(host.scrollWidth<=host.clientWidth+1,'names and bodies fit available width');
   send.root.querySelector('.tool-raw>summary').click();await frame();
-  output.textContent='PASS: send, batches, brands, partial args, errors, safe Markdown, raw details, Task navigation, selection, rename, disclosure and locale';
+  output.textContent='PASS: send, batches, profile avatars and generic fallback, partial args, errors, safe Markdown, raw details, Task navigation, selection, rename, disclosure and locale';
   window.communicationResults={passed:true};
   if(!params.has('phone')){
     const phone=document.createElement('iframe');phone.title='390px communication';phone.src='/scripts/tests/fixtures/communication.html?phone=1&locale=zh-CN&theme=dark';document.body.prepend(phone);
