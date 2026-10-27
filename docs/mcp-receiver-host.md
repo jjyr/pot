@@ -86,6 +86,10 @@ creates the new run and mapping. It requires a terminal previous run, confirmed
 cleanup and its reconciled terminal event. A stale scheduler selection cannot
 launch a newer run. Input does not advertise live steering.
 
+Native submission and terminal continuation exclude retired jobs from capacity
+checks. Retired jobs retain their saved bytes and last state; current work still
+shares the existing 32-active-job limit, including continuations.
+
 Each claim has a single pending event outbox. The event is saved before its
 network call; its claim, sequence and canonical digest must match the returned
 receipt. A lost response repeats that same event, not native execution. The next

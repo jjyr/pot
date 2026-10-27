@@ -189,6 +189,13 @@ func TestReceiverResponseLossNeverDuplicatesAdmissionOrExecution(t *testing.T) {
 }
 
 func TestReceiverTerminalContinuationUsesNewRunAndRejectsStaleControl(t *testing.T) {
+	for _, retiredCount := range []int{0, 32, 256} {
+		t.Run(strconv.Itoa(retiredCount), func(t *testing.T) { receiverTerminalContinuationFixture(t, retiredCount) })
+	}
+}
+
+func receiverTerminalContinuationFixture(t *testing.T, retiredCount int) {
+	t.Helper()
 	p, remote, d := receiverFixture(t)
 	ctx := context.Background()
 	receiverMustStep(t, p)
@@ -200,6 +207,11 @@ func TestReceiverTerminalContinuationUsesNewRunAndRejectsStaleControl(t *testing
 	}
 	p.backend.runTask(ctx, j)
 	receiverMustStep(t, p)
+	assertRetiredUnchanged := receiverRetiredJobsFixture(t, p, retiredCount)
+	var previousRun string
+	if err = p.backend.db.QueryRow("SELECT data FROM agent_adapter_jobs WHERE id=?", j.Task.ID).Scan(&previousRun); err != nil {
+		t.Fatal(err)
+	}
 	control := agentlink.MCPControlDelivery{Version: 1, DeliveryID: "input-delivery", Dispatch: d.Claim.Binding, Binding: old.Admission.Binding, Caller: d.Work.Request.From, Input: &agentlink.MCPTaskInput{RequestID: "follow-up", TaskID: d.Claim.Binding.Task.AgentID, RunID: old.Admission.Binding.RunID, Text: "continue fixture"}}
 	claim := agentlink.MCPClaim{ConnectionID: p.identity.ConnectionID(), DeliveryID: control.DeliveryID, ClaimID: "input-claim", Binding: d.Claim.Binding}
 	next := receiverDelivery{Claim: &claim, Control: &control}
@@ -218,6 +230,15 @@ func TestReceiverTerminalContinuationUsesNewRunAndRejectsStaleControl(t *testing
 	}
 	p.backend.runTask(ctx, pending)
 	receiverMustStep(t, p)
+	current = receiverRecordFixture(t, p, next)
+	if current.LastPhase != protocol.TaskComplete || current.Outbox != nil || current.Receipt == nil || !current.AdmissionAcknowledged {
+		t.Fatal("continued terminal receipt not reconciled", current)
+	}
+	var savedPreviousRun string
+	if err = p.backend.db.QueryRow("SELECT previous_run FROM agent_adapter_inputs WHERE task_id=?", j.Task.ID).Scan(&savedPreviousRun); err != nil || savedPreviousRun != previousRun {
+		t.Fatal("previous run bytes changed", err)
+	}
+	assertRetiredUnchanged()
 	var history int
 	p.backend.db.QueryRow("SELECT count(*) FROM agent_adapter_inputs").Scan(&history)
 	if history != 1 {

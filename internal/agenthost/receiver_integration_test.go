@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -127,6 +128,13 @@ func (c *receiverLostEvent) Event(ctx context.Context, e agentlink.MCPExecutionE
 }
 
 func TestReceiverRealPotHTTPAdmissionRecoveryAndContinuation(t *testing.T) {
+	for _, retiredCount := range []int{0, 32} {
+		t.Run(strconv.Itoa(retiredCount), func(t *testing.T) { receiverHTTPContinuationFixture(t, retiredCount) })
+	}
+}
+
+func receiverHTTPContinuationFixture(t *testing.T, retiredCount int) {
+	t.Helper()
 	p, _, _ := receiverFixture(t)
 	origin, _ := receiverPotHTTP(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -216,6 +224,7 @@ func TestReceiverRealPotHTTPAdmissionRecoveryAndContinuation(t *testing.T) {
 	if err = caller.call(ctx, "pot_task_read", read, &task); err != nil || task.State != string(protocol.TaskComplete) || task.RunID != r.Admission.Binding.RunID {
 		t.Fatal("missing actual Pot terminal projection", task, err)
 	}
+	assertRetiredUnchanged := receiverRetiredJobsFixture(t, p, retiredCount)
 	oldRun := task.RunID
 	var inputAccepted control.MCPTaskAcceptance
 	input := agentlink.MCPTaskInput{RequestID: "http-continuation", TaskID: task.ID, RunID: oldRun, Text: "HTTP continuation"}
@@ -236,9 +245,11 @@ func TestReceiverRealPotHTTPAdmissionRecoveryAndContinuation(t *testing.T) {
 	var jobs, events int
 	p.backend.db.QueryRow("SELECT count(*) FROM agent_adapter_jobs").Scan(&jobs)
 	p.backend.db.QueryRow("SELECT count(*) FROM mcp_receiver_journal WHERE json_extract(body,'$.last_phase')='complete'").Scan(&events)
-	if jobs != 1 || events != 2 {
+	if jobs != 1+retiredCount || events != 2 {
 		t.Fatal("duplicate work or missing continued terminal receipts", jobs, events)
 	}
+
+	assertRetiredUnchanged()
 }
 
 func TestReceiverRealPotOAuthRenewalPreservesConnectionAndPendingClaim(t *testing.T) {

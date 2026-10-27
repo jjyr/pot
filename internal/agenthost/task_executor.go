@@ -136,7 +136,7 @@ func (b *backend) inputTx(ctx context.Context, tx *sql.Tx, r agentlink.TaskGuida
 		return agentlink.ErrFenced
 	}
 	var active int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM agent_adapter_jobs WHERE json_extract(data,'$.task.state') NOT IN ('completed','failed','cancelled')`).Scan(&active); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM agent_adapter_jobs WHERE id NOT IN (SELECT id FROM retired_agent_link_work WHERE kind='job') AND json_extract(data,'$.task.state') NOT IN ('completed','failed','cancelled')`).Scan(&active); err != nil {
 		return err
 	}
 	if active >= 32 {
