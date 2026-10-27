@@ -53,4 +53,4 @@ export function messageIdentities(client){
   presentations.set(client,presentation);return presentation;
 }
 export function resolveMessageRenderIdentity(snapshot,address){return snapshot?.profiles?.[addressKey(address)];}
-export function messageRenderIssuer(client,scope){return {space:scope?.space,owner:scope?.owner,control:(client.spaces||[]).find(item=>item.id===scope?.space)?.control_id,runtime:client.runtime?.runtime_id,boot:client.runtime?.boot_id};}
+export function messageRenderIssuer(client,scope){const space=(client.spaces||[]).find(item=>item.id===scope?.space);return {space:scope?.space,owner:scope?.owner,control:space?.control_id,runtime:client.runtime?.runtime_id,boot:space?.boot_id||client.runtime?.boot_id};}

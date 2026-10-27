@@ -29,6 +29,9 @@ assert.equal(resolveMessageRenderIdentity(newer,address('local')).name,'New prep
 assert.notDeepEqual(prepared,newer,'An unchanged message gets a new renderer revision when its peer profile changes');
 client.spaces=[{id:'space',control_id:'replacement'}];
 assert.notDeepEqual(identities.snapshot({space:'space',owner:'same'}).issuer,prepared.issuer,'Replacing the issuing Control invalidates resource ownership');
+const previousIssuer=identities.snapshot({space:'space',owner:'same'}).issuer;
+client.spaces=[{id:'space',control_id:'replacement',boot_id:'remote-reboot'}];
+assert.notDeepEqual(identities.snapshot({space:'space',owner:'same'}).issuer,previousIssuer,'The selected Space boot owns remote geometry independently of the local boot');
 client.assistants=[];
 assert.equal(identities.resolve(address('remote')).name,'Remote chef','Retains a known name after directory removal');
 client.runtime={runtime_id:'other',boot_id:'next'};
