@@ -306,6 +306,17 @@ at desktop and phone widths; `locale=zh-CN&theme=dark` exercises the other local
 and theme. Add `capture-navigation=1` to pause at the multiline-draft return
 scenario; `window.navigationCaptureContinue()` resumes the checks.
 
+`mise run test:ui-chat-position` checks send positioning and assistant switches
+using the production UI, HTTP adapter, SSE and IndexedDB with synthetic loopback
+history. It samples visible and hidden frames at desktop and phone widths,
+including delayed draft hydration, acceptance, fonts and images, history beyond
+the data window, reconnects and the five-second preview slot fallback. Set
+`POT_PLAYWRIGHT_MODULE` and `POT_CHROMIUM_EXECUTABLE` to existing installations.
+`POT_CHAT_OUTPUT` selects the untracked evidence directory; `POT_CHAT_SOURCE`
+selects an extracted source tree. Pass `--baseline` directly to
+`node scripts/tests/chat-scroll-http-browser.mjs` to record the known send and
+draft-layout regressions in that tree while retaining the other assertions.
+
 On the same loopback server, `/scripts/tests/fixtures/chat-cache.html` exercises
 the actual IndexedDB schema, reopening, atomic rollback, history reads, version
 fencing, multiple writers and retired boots. `/scripts/tests/fixtures/chat-cache-ui.html?conversation=alpha&locale=en`

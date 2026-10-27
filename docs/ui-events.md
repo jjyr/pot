@@ -287,6 +287,10 @@ All Chat entry paths share a scoped positioning intent: restore the saved readin
 position, locate an explicit message, or follow Latest. Page returns, assistant
 switches and browser history prepare the composer, mount the destination window,
 measure its rows and restore the viewport before exposing the first Chat frame.
+Composer preparation includes restoring the selected assistant's persisted draft,
+references and attachments. A failed draft read exposes its recovery controls;
+an unrelated assistant's cleanup failure does not complete the selected draft's
+preparation.
 Hidden rows do not overwrite measured heights. The destination remains visually
 hidden through mounting, measurement and position restoration; only the prepared
 viewport is exposed. Persisted height hints are qualified by width, locale, theme
@@ -300,6 +304,12 @@ through the cached projection, stream reset and background-task refresh. Visible
 task rows do not turn following into a saved historical reading position. Only
 paused reading restores a message or task anchor; restoration requests are
 scoped to the originating navigation generation.
+
+Submitting a message explicitly resumes Latest following before its optimistic
+row is rendered, including while the submitted draft is being persisted. A later
+receipt or draft flush does not issue another positioning command. Subsequent
+reading gestures and assistant navigation therefore retain their newer intent;
+ordinary background snapshots preserve historical reading.
 
 Main Chat and Task transcripts share the same conversation-list controller. It
 owns one intent: Latest following, historical reading by stable message/row ID
