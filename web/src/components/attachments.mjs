@@ -1,3 +1,4 @@
+import {uploadChatOriginal} from '../state/chat-upload.mjs';
 import {icon} from './icons.mjs';
 import {translate} from '../locales/messages.mjs';
 import {createResourceView} from './resource-view.mjs';
@@ -86,20 +87,8 @@ export function createAttachmentComposer({client,form,input,getKey,getCaps,canSe
     item.phase='uploading';item.error='';item.abort=new AbortController();item.started=true;draftChanged(key);
     const check=()=>{if(!live(item,key)||item.abort.signal.aborted)throw new DOMException('Cancelled','AbortError');};
     item.pending=(async()=>{
-      const send=async body=>{check();const result=await client.request('/api/v1/attachments',{...item.scope,method:'POST',body,signal:item.abort.signal});check();return result;};
-      let status=await send({action:'begin',id:item.attachment.id,name:item.file.name,mime_type:item.attachment.mime_type,size:item.file.size});
-      if(!status.ready){
-        for(let offset=status.offset;offset<item.file.size;){
-          const bytes=new Uint8Array(await item.file.slice(offset,offset+192*1024).arrayBuffer());check();
-          let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
-          status=await send({action:'chunk',id:item.attachment.id,offset,data:btoa(binary)});
-          if(status.offset<=offset||status.offset>item.file.size)throw Error('Invalid attachment upload offset');
-          offset=status.offset;item.progress=offset/item.file.size;refresh();
-        }
-        status=await send({action:'finish',id:item.attachment.id});
-      }
-      if(!status.ready)throw Error('Attachment upload did not finish');
-      item.attachment=status.attachment;item.phase='ready';item.progress=1;
+      const attachment=await uploadChatOriginal(client,item.attachment,item.file,item.scope,{signal:item.abort.signal,check,progress:value=>{item.progress=value;refresh();}});
+      item.attachment=attachment;item.phase='ready';item.progress=1;
     })().catch(reason=>{if(live(item,key)){item.phase='failed';item.error=reason.message||String(reason);}}).finally(()=>{item.pending=null;if(live(item,key))draftChanged(key);refresh();});
     refresh();await item.pending;
   }
@@ -129,10 +118,11 @@ export function createAttachmentComposer({client,form,input,getKey,getCaps,canSe
     toolbar,
     items:list,
     refs:()=>list().map(item=>item.attachment),
+    localProblem:()=>{const items=list();return items.length>8||items.reduce((n,item)=>n+item.attachment.size,0)>attachmentLimit?t('attachments.restoredLimit'):'';},
     problem:()=>attachmentProblem(list(),getCaps(),zh())||(list().length&&!canUpload()?t('attachments.waiting'):''),
     cancelSelection(){cancelPicker(true);refresh();},
-    markSubmitted(key,refs){const ids=new Set(refs.map(a=>a.id));for(const item of list(key))if(ids.has(item.attachment.id))item.submitted=true;draftChanged(key);},
-    clearSubmitted(key,refs){const ids=new Set(refs.map(a=>a.id));for(const item of list(key))if(ids.has(item.attachment.id)&&item.url){URL.revokeObjectURL(item.url);urls.delete(item.url);}set(key,list(key).filter(item=>!ids.has(item.attachment.id)));},
+    markSubmitted(key,refs){const ids=new Set(refs.map(a=>a.id)),previous=list(key).filter(item=>ids.has(item.attachment.id)).map(item=>[item,item.submitted]);for(const [item]of previous)item.submitted=true;draftChanged(key);return()=>{for(const [item,submitted]of previous)if(list(key).includes(item))item.submitted=submitted;draftChanged(key);};},
+    clearSubmitted(key,refs){const ids=new Set(refs.map(a=>a.id));for(const item of list(key))if(ids.has(item.attachment.id)){item.submitted=true;item.removed=true;item.abort?.abort();if(item.url){URL.revokeObjectURL(item.url);urls.delete(item.url);}}set(key,list(key).filter(item=>!ids.has(item.attachment.id)));},
     restore(key,refs,scope){if(list(key).length)return;set(key,refs.map(attachment=>({attachment,scope,phase:'ready',progress:1})));},
     hydrate(key,records,files,scope){
       // Paste/drop may already have accepted Files while the disk read (or its
@@ -197,13 +187,13 @@ export function createAttachmentComposer({client,form,input,getKey,getCaps,canSe
   };
 }
 
-export function renderMessageAttachments(refs,{client,scope,locale,onError,caps}) {
+export function renderMessageAttachments(refs,{client,scope,locale,onError,caps,originalResource}) {
   const host=node('div','message-attachments');host.dispose=()=>host.replaceChildren();
   for(const attachment of refs||[]){
     const resource={...attachment,entry:attachment.name,files:[],download:{path:attachment.name}};
     const card=createResourceView({resource,mode:'preview'},{
       renderSlot:'attachment:'+attachment.id,
-      acquireResource:()=>{const release=client.retainAttachment?.(attachment,scope);return {url:()=>client.attachmentURL(attachment,scope),release:()=>release?.()};},
+      acquireResource:()=>{if(originalResource)return originalResource(attachment);const release=client.retainAttachment?.(attachment,scope);return {url:()=>client.attachmentURL(attachment,scope),release:()=>release?.()};},
       downloadResource:()=>client.downloadAttachment(attachment,scope),
       noticeKey:caps&&!attachmentAllowed(caps,attachment.mime_type)?'attachments.historyUnavailable':null,
     });

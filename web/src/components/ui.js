@@ -1,3 +1,8 @@
+import {outboxControls} from './outbox-controls.mjs';
+import {createOutboxDialog} from './outbox-dialog.mjs';
+import {createChatOutbox} from '../state/chat-outbox.mjs';
+import {outboxTarget} from '../state/chat-outbox-store.mjs';
+import {projectOutboxRows} from '../state/chat-outbox-projection.mjs';
 import {moveConversationNode} from './conversation-dom.mjs';
 import {currentPreparedRender,preparedAsset,consumePreparationSurrogates} from './prepared-render.mjs';
 import {domainsFor} from '../state/domains/index.mjs';
@@ -91,7 +96,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let directoryCollapsed = false;
   let cancelPending = false;
   let editorOwner = null;
-  let assistantDrafts=null;
+  let assistantDrafts=null,outbox=null,outboxDialog=null,enqueuePending=false;
+  const queueEditors=new Map();
   let menuOpen = false;
   let preferencesOpen = false,restoringHistory=false;
   let assistants = [], spaces = [], selectedAssistant = null, pendingSelection = null;
@@ -368,8 +374,36 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   if(client.production){
     assistantDrafts=createAssistantDrafts({client,state,attachments:attachmentUI,changed:()=>updateControls(),restored:key=>{if(key===editorOwner){if(!chatPreparing)prepareChat();syncEditor();}},restorePending:(receipt,scope)=>confirmations.restore(receipt,scope)});
     state.draftChanged=key=>assistantDrafts.change(key);
+    outbox=createChatOutbox({client,cacheFailed:(receipt,reason,retry)=>{sendCacheFailures.set(receipt,retry);updateControls();},changed:()=>{if(!disposed){outboxDialog?.update();updateControls();}}});
+    outboxDialog=createOutboxDialog({client,outbox,locale:()=>locale,notify:value=>{error=value;updateControls();}});root.append(outboxDialog.root);
+  }
+  function localSubmissionReady(){
+    const snapshot=state.snapshot;
+    if(!selectedAssistant||!snapshot||editorOwner!==ownerKey(snapshot)||enqueuePending||!assistantDrafts?.ready(editorOwner)||state.pending.has(editorOwner))return false;
+    try{outboxTarget(client,client.scope(),snapshot);}catch{return false;}
+    return !!(draft(state,editorOwner).trim()||attachmentUI?.items(editorOwner).length)&&new TextEncoder().encode(draft(state,editorOwner)).byteLength<=65536&&!attachmentUI?.localProblem()&&!referenceProblem(draftReferences(state,editorOwner));
+  }
+  async function enqueueSubmission(){
+    if(!localSubmissionReady())return;
+    const key=editorOwner,scope={...client.scope()},snapshot=state.snapshot;
+    const value={destination:{name:selectedAssistant.name,space:spaces.find(item=>item.id===scope.space)?.name||''},target:outboxTarget(client,scope,snapshot),request:{request_id:requestID(),conversation_id:snapshot.conversation_id,text:draft(state,key),references:structuredClone(draftReferences(state,key)),attachments:structuredClone(attachmentUI?.refs()||[]),...(snapshot.running?{user_message_id:snapshot.turn_id}:{}),...(retryAttachmentInput()?{retry_user_message_id:retryAttachmentInput()}:{})},draftVersion:state.draftVersions.get(key)||0,referenceVersion:state.referenceVersions.get(key)||0,created_at_ms:Date.now()};
+    const unmark=attachmentUI?.markSubmitted(key,value.request.attachments);
+    let committed=false;enqueuePending=true;error='';updateControls();
+    try{
+      await assistantDrafts.enqueue(key,value,()=>{
+        committed=true;
+        // IDB transaction completion is the ownership boundary. A newer edit,
+        // including typing during the save, belongs to the composer and survives.
+        if((state.draftVersions.get(key)||0)===value.draftVersion&&draft(state,key)===value.request.text)setDraft(state,'',key);
+        if((state.referenceVersions.get(key)||0)===value.referenceVersion&&JSON.stringify(draftReferences(state,key))===JSON.stringify(value.request.references))setDraftReferences(state,[],key);
+        attachmentUI?.clearSubmitted(key,value.request.attachments);
+      });
+      if(!disposed){if(editorOwner===key){syncEditor();positionChat({kind:'latest'});}await outbox.refresh();outbox.wake();}
+    }catch{if(!committed)unmark?.();if(!disposed)error=t(committed?'outbox.storageFailed':'outbox.saveFailed');}
+    finally{enqueuePending=false;if(!disposed)updateControls();}
   }
   async function submit() {
+    if(client.production)return enqueueSubmission();
     if(continuation?.state().pending)return;
     if (!can('chat.send')||chatCacheFailed||(!client.production&&state.snapshot?.running) || selectedAssistant?.offline || connection !== 'connected' || editorOwner !== (state.snapshot && ownerKey(state.snapshot))) return;
     if(attachmentUI?.problem())return;
@@ -416,6 +450,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   });
   function updateControls() { return updateControlsLayout(); }
   function updateControlsLayout() {
+    if(outbox?.error())error=t('outbox.storageFailed');
     if(chatCacheFailed)error=t('chatCache.failed');
     if(directoryStorageFailed)error=t('storage.failed');
     const snapshot = state.snapshot;
@@ -431,14 +466,14 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const running = snapshot?.running;
     const draftReady=!assistantDrafts||assistantDrafts.ready(editorOwner);
     continuation?.update(snapshot,{connected:draftReady&&connection==='connected'&&can('chat.continue')&&!selectedAssistant?.offline&&!pending&&!!snapshot&&editorOwner===ownerKey(snapshot)});
-    const recovery=continuation?.state(),restoring=recovery?.pending,resuming=client.operationsReady!==false&&draftReady&&recovery?.available&&!hasComposerInput();
+    const recovery=continuation?.state(),restoring=recovery?.pending&&!hasComposerInput(),resuming=client.operationsReady!==false&&draftReady&&recovery?.available&&!hasComposerInput();
     const stopping=running&&(!client.production||(!draft(state).trim()&&!attachmentUI?.items().length));
     const label = restoring||resuming ? recovery.label : stopping ? (cancelPending ? t('stopping') : t('stop')) : running?t('send.guidance'):t('send');
     send.replaceChildren(icon(restoring ? 'refresh' : resuming ? 'play' : stopping ? 'stop' : 'send'));
     send.setAttribute('aria-busy',String(!!restoring));
     send.title = label;
     send.setAttribute('aria-label', label);
-    send.disabled = restoring || (resuming ? recovery.disabled : stopping ? !can('chat.cancel')||selectedAssistant?.offline||cancelPending || connection !== 'connected' : !can('chat.send')||chatCacheFailed||saved?.loading||selectedAssistant?.offline|| !snapshot || editorOwner !== ownerKey(snapshot) || pending || (!draft(state).trim()&&!attachmentUI?.items().length) || !!attachmentUI?.problem() || connection !== 'connected');
+    send.disabled = restoring || (resuming ? recovery.disabled : stopping ? !can('chat.cancel')||selectedAssistant?.offline||cancelPending || connection !== 'connected' : client.production ? !localSubmissionReady() : !can('chat.send')||chatCacheFailed||saved?.loading||selectedAssistant?.offline|| !snapshot || editorOwner !== ownerKey(snapshot) || pending || (!draft(state).trim()&&!attachmentUI?.items().length) || !!attachmentUI?.problem() || connection !== 'connected');
     attachmentUI?.update();
     updateReferenceDraft();
     input.disabled = !snapshot && !editorOwner;
@@ -631,6 +666,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     root.querySelector('.assistant-profile-trigger')?.setAttribute('aria-expanded', String(event.newState === 'open'));
   });
   function renderShell() {
+    outboxDialog?.update();
     root.classList.toggle('is-local-startup',client.operationsReady===false);
     unavailable.inert=!configurationRoute(route)&&!pages?.editing&&(client.operationScopeReady?.()===false||pages?.authorityReady===false);approvals.inert=client.operationScopeReady?.()===false;
     root.classList.toggle('is-background',document.visibilityState==='hidden');
@@ -712,6 +748,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     if (client.production && route === 'chat' && selectedAssistant && (canOpenSettings('assistant.configure')||canOpenSettings('assistant.profile'))) { const settings = button('sliders', t('assistantSettings')); settings.dataset.viewKey='assistant-settings';settings.onclick = openAssistantSettings; titlebar.append(settings); }
     if(!client.production){const cloud=el('span','icon-button');cloud.title=t('remote');cloud.append(icon('cloud'));titlebar.append(cloud);}
+    if(outbox){const saved=button('clock',t('outbox.title'));saved.onclick=()=>outboxDialog.open();titlebar.append(saved);}
     const more = button('more', t(client.production ? 'chat.actions' : 'more'));more.dataset.viewKey='conversation-actions';
     more.setAttribute('aria-haspopup', 'dialog');
     more.onclick = () => { preferencesOpen = true; renderPreferences(); preferences.showModal(); };
@@ -890,20 +927,27 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         moveConversationNode(row,record.speaker,row.firstChild);
       }
     }else if(record.speaker){record.speaker.remove();record.speaker=null;}
-    const source=message.role==='assistant'?bubble.querySelector('.reply-content'):message.role==='user'?bubble.querySelector('.message-prose'):null;
+    const source=message.queue?null:message.role==='assistant'?bubble.querySelector('.reply-content'):message.role==='user'?bubble.querySelector('.message-prose'):null;
     if(source&&message.text&&!message.id.startsWith('pending:'))source.dataset.referenceSource=message.id;
     const referenceSignature=JSON.stringify([message.references||[],locale,(message.references||[]).map(ref=>{const source=snapshot?.messages?.find(row=>row.id===ref.message_id);return [source?.role,ref.quote?null:source?.text];})]);
     if(message.role==='user'&&(record.referenceSignature!==referenceSignature||record.referenceNode&&!record.referenceNode.isConnected)){
       record.referenceNode?.remove();record.referenceSignature=referenceSignature;
       if(message.references?.length){record.referenceNode=preparedAsset('references',referenceSignature,()=>renderMessageReferences(message.references,{messages:snapshot?.messages||[],locale:()=>locale,onJump:jumpToMessage}));moveConversationNode(bubble,record.referenceNode,bubble.firstChild);}
     }
-    const attachmentSignature=JSON.stringify([message.attachments||[],snapshot?.agent?.attachments]);
+    const attachmentSignature=JSON.stringify([message.attachments||[],snapshot?.agent?.attachments,!!message.queue]);
     if(message.role==='user'&&(record.attachmentSignature!==attachmentSignature||!record.attachmentNode?.isConnected)){
-      const prepared=message.attachments?.length?preparedAsset('attachments',attachmentSignature,()=>renderMessageAttachments(message.attachments,{client,caps:snapshot?.agent?.attachments,scope:{...context.scope},locale:()=>locale,onError:reason=>{error=reason.message;updateControls();}})):null;
+      const prepared=message.attachments?.length?preparedAsset('attachments',attachmentSignature,()=>renderMessageAttachments(message.attachments,{client,originalResource:message.queue?(attachment=>outbox.acquireOriginal(message.queue.target.key,message.queue.request.request_id,attachment,{space:message.queue.target.space,owner:message.queue.target.owner})):undefined,caps:snapshot?.agent?.attachments,scope:{...context.scope},locale:()=>locale,onError:reason=>{error=reason.message;updateControls();}})):null;
       if(prepared&&currentPreparedRender()?.context.phase==='commit')consumePreparationSurrogates(prepared);
       record.attachmentNode?.dispose?.();record.attachmentNode?.remove();record.attachmentSignature=attachmentSignature;record.attachmentNode=prepared;
       if(prepared)moveConversationNode(bubble,prepared);
     }
+    if(message.queue){
+      const queued=message.queue,editing=queueEditors.has(queued.sequence),signature=JSON.stringify([queued.revision,locale,editing]);
+      if(record.queueSignature!==signature||!record.queueNode?.isConnected){
+        const controls=preparedAsset('outbox-controls',signature,()=>outboxControls(queued,{outbox,editors:queueEditors,locale:()=>locale,changed:()=>renderMessages(),notify:value=>{error=value;updateControls();}}));
+        record.queueNode?.remove();record.queueNode=controls;record.queueSignature=signature;moveConversationNode(bubble,controls);
+      }
+    }else if(record.queueNode){record.queueNode.remove();record.queueNode=null;record.queueSignature='';}
     if ((message.role === 'assistant'||message.role==='user') && message.text && !record.copy) {
       const copy=preparedAsset('copy-control','message-copy',()=>{const control=button('copy',t('copy'),'copy-message');control.type='button';copyFeedback(control,{text:()=>control.copyRecord.text,locale:()=>locale,translate,onError:reason=>{error=reason.message;updateControls();}});return control;});
       copy.copyRecord=record;moveConversationNode(row,copy);record.copy=copy;
@@ -935,13 +979,15 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const anchor=messageWindow.anchor;
     const snapshot=state.snapshot;
     const sending=state.sends.get(editorOwner||(snapshot&&ownerKey(snapshot)));
+    const queued=outbox?.rows().filter(row=>row.state!=='cancelled'&&row.target.host===client.runtime?.runtime_id&&row.target.space===selectedAssistant?.space_id&&row.target.owner===selectedAssistant?.id&&row.target.control===controlOf(selectedAssistant))||[];
+    const queueSignature=JSON.stringify(queued.map(row=>[row.sequence,row.revision,queueEditors.has(row.sequence)]));
     const activeTurn=snapshot?.running?(snapshot.messages.find(message=>message.id===snapshot.turn_id)?.request_id||snapshot.turn_id):null;
     const offline=connection!=='connected'||disconnected||selectedAssistant?.offline;
-    if(!chatProjection||chatProjection.snapshot!==snapshot||chatProjection.sending!==sending||chatProjection.phase!==sending?.phase||chatProjection.detail!==sending?.detail||chatProjection.offline!==offline||chatProjection.activeTurn!==activeTurn){
-      const messages=projectScriptRuns(projectChatReplies(snapshot,sending,{offline}),{activeTurn});
+    if(!chatProjection||chatProjection.queueSignature!==queueSignature||chatProjection.snapshot!==snapshot||chatProjection.sending!==sending||chatProjection.phase!==sending?.phase||chatProjection.detail!==sending?.detail||chatProjection.offline!==offline||chatProjection.activeTurn!==activeTurn){
+      const messages=projectScriptRuns(projectOutboxRows(projectChatReplies(snapshot,sending,{offline}),queued,{editing:queueEditors}),{activeTurn});
       const forest=toolForest(messages),roots=messages;
       const parents=new Map(messages.flatMap(message=>{const parent=message.tool?.parent_id&&forest.byID.get(message.tool.turn_id+':'+message.tool.parent_id)?.message;return parent?[[message.id,parent.id]]:[];}));
-      chatProjection={snapshot,sending,phase:sending?.phase,detail:sending?.detail,offline,activeTurn,messages,forest,roots,parents};
+      chatProjection={snapshot,sending,queueSignature,phase:sending?.phase,detail:sending?.detail,offline,activeTurn,messages,forest,roots,parents};
     }
     const {messages:visibleMessages,forest,roots,parents}=chatProjection;
     renderingSnapshot=snapshot;renderingSending=sending;renderingForest=forest;
@@ -1267,7 +1313,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     window.removeEventListener('pagehide',pageHidden);window.removeEventListener('offline',offline);document.removeEventListener('visibilitychange',persistChat);
     for(const name of ['focus','pageshow','online'])window.removeEventListener(name,resumeSends);
     chatSession?.close().catch(()=>{});
-    stopStartup?.();assistantDrafts?.close();disposed = true;updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);viewportObserver.disconnect();stopReading();messageWindow.close();stopResources?.();releaseDomains();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();backgroundTaskView.close();directoryEpoch++; unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    stopStartup?.();assistantDrafts?.close();outboxDialog?.close();outbox?.close();disposed = true;updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);viewportObserver.disconnect();stopReading();messageWindow.close();stopResources?.();releaseDomains();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();backgroundTaskView.close();directoryEpoch++; unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     stopMessageSelection();completions?.dispose();attachmentUI?.destroy();client.releaseAttachments?.();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);

@@ -1,0 +1,6 @@
+<!doctype html><meta charset="utf-8"><title>Explicit message outbox storage contract</title><pre id="results"></pre>
+<script type="module">
+import {chatOutboxStorage} from '../chat-outbox-storage.mjs';
+const results=document.querySelector('#results');
+chatOutboxStorage(line=>results.textContent+=line+'\n').catch(error=>{results.textContent+='FAIL '+error.stack;window.failure=error.stack;});
+</script>

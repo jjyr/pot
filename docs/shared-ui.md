@@ -865,13 +865,16 @@ installed shell -> startup locator -> committed directory/chat/view/draft -> UI
 
 While verification is pending or the device is offline, cached conversations are
 readable, cached assistants can be selected, and drafts can be edited and saved.
-Sending and online management require current access and Control verification,
+Message delivery and online management require current access and Control verification,
 fresh advertised capabilities, and the existing operation/session checks. Cached
 capabilities never grant authority. Notification permission invitations also wait
 for verified online startup. Network recovery revalidates identity and
 refreshes the directory and conversation without replacing the editor or its
-reading anchor. Interrupted sends keep their existing immutable confirmation
-fences; recovery never automatically submits or retries a message.
+reading anchor. Explicit Send can commit to the local [message outbox](chat-outbox.md)
+with a known saved target while offline. Reopening and reconnection reconcile
+and deliver only these submitted messages with their fixed request identities;
+ordinary drafts remain unsent. Older draft confirmation fences retain their
+explicit recovery action.
 
 Each browser connection has a transient generation. Suspension revokes operation
 authority and aborts the previous generation's reads. Access and runtime checks

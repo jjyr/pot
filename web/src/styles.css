@@ -1077,3 +1077,10 @@ button.communication-task-endpoint:focus-visible{outline:2px solid var(--primary
 .image-viewer-plane img { position: absolute; top: 0; max-width: none; max-height: none; user-select: none; pointer-events: none; }
 .image-viewer-error { color: var(--danger); font-size: 13px; padding: 0 14px; }
 @media (max-width: 480px) { .image-viewer { width: calc(var(--viewport-width) - 16px); height: calc(var(--viewport-height) - 16px); max-width: calc(var(--viewport-width) - 16px); max-height: calc(var(--viewport-height) - 16px); inset: 8px; border-radius: 9px; } .image-viewer-header { gap: 8px; padding-inline: 10px; } .image-viewer-controls { gap: 6px; } }
+
+.outbox-dialog { width:min(48rem,calc(100vw - 2rem)); max-height:calc(100dvh - 2rem); padding:1rem; border:1px solid var(--divider); border-radius:1rem; background:var(--surface); color:var(--text); }
+.outbox-heading { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+.outbox-dialog .history { height:min(65dvh,42rem); overflow:auto; padding:1rem; }
+.outbox-controls { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; margin-top:.5rem; }
+.outbox-status { color:var(--muted); font-size:.8rem; }
+.outbox-editor { width:100%; min-height:5rem; resize:vertical; color:inherit; background:var(--surface); border:1px solid var(--input-border); border-radius:.5rem; padding:.5rem; }

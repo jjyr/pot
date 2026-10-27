@@ -116,6 +116,7 @@ export async function createProductionClient({desktop = false, base = '', resour
   async function request(path, options = {}) {
     let {method = 'GET', body, signal} = options;
     if(options.configuration&&!configurationIdentityCurrent(client,options))throw localized(Object.assign(new APIError(409,{code:'configuration_identity_changed'}),{uiKey:'identityChanged'}));
+    if(options.expectedControl&&(client.spaces||[]).find(space=>space.id===({...context,...options}).space)?.control_id!==options.expectedControl)throw localized(Object.assign(new APIError(409,{code:'control_changed'}),{uiKey:'identityChanged'}));
     if(client?.onlineReady===false)throw localized(Object.assign(new APIError(503,{code:'startup_unconfirmed'}),{uiKey:'startup.local'}));
     if(method!=='GET'&&client?.operationScopeReady?.(options)===false)throw localized(Object.assign(new APIError(503,{code:'authority_unconfirmed'}),{uiKey:'startup.local'}));
     if(client?.startup&&options.session&&!client.sessionReady(options))throw localized(Object.assign(new APIError(503,{code:'session_unconfirmed'}),{uiKey:'startup.local'}));
@@ -157,7 +158,7 @@ export async function createProductionClient({desktop = false, base = '', resour
   if (!runtime || !(runtime.runtime_id || runtime.id)) throw Error('Runtime identity is unavailable');
   const readBaselines=desktop?await invoke('AssistantReads'):[];
   const attachmentURLs=new Map(),attachmentLeases=new Map();
-  const attachmentKey=(attachment,options)=>{const scope={...context,...options};return JSON.stringify([scope.space,scope.owner,attachment.id]);};
+  const attachmentKey=(attachment,options)=>{const scope={...context,...options};return JSON.stringify([scope.expectedControl||'',scope.space,scope.owner,attachment.id]);};
   const onlineWaiters=new Set();
   const whenOnline=handler=>{onlineWaiters.add(handler);return()=>onlineWaiters.delete(handler);};
   async function resourceRequest(path,options={}){
@@ -240,7 +241,7 @@ export async function createProductionClient({desktop = false, base = '', resour
       return ()=>{if(released)return;released=true;const count=(attachmentLeases.get(key)||1)-1;if(count){attachmentLeases.set(key,count);return;}attachmentLeases.delete(key);const pending=attachmentURLs.get(key);attachmentURLs.delete(key);pending?.then(url=>URL.revokeObjectURL(url)).catch(()=>{});};
     },
     async attachmentURL(attachment,options={}) {
-      const scope={...context,...options},key=JSON.stringify([scope.space,scope.owner,attachment.id]);
+      const scope={...context,...options},key=attachmentKey(attachment,scope);
       if(attachmentURLs.has(key))return attachmentURLs.get(key);
       const pending=(async()=>{
         const parts=[];let offset=0;
