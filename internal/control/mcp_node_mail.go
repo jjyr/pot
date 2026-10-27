@@ -83,7 +83,12 @@ func (a *MCPAccess) nodeMail(ctx context.Context, receiver agentlink.MCPReceiver
 		} else if message.Hops != 0 || message.ReplyTo != nil {
 			return agentlink.ErrUnauthorized
 		}
-		if e = a.options.Local.Mailbox.DeliverTx(ctx, tx, message); e != nil {
+		if message.To.Kind == "user" {
+			e = a.options.Local.Mailbox.DeliverChatTx(ctx, tx, message)
+		} else {
+			e = a.options.Local.Mailbox.DeliverTx(ctx, tx, message)
+		}
+		if e != nil {
 			return e
 		}
 		acceptance = MCPAccessMessageAcceptance{Receipt: agentlink.MCPMutationReceipt{RequestID: message.ID, Digest: digest}, Message: protocol.Receipt{Message: message}}

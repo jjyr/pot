@@ -256,6 +256,13 @@ func (m *Mailbox) deliver(ctx context.Context, message protocol.Envelope, state 
 func (m *Mailbox) DeliverTx(ctx context.Context, tx *sql.Tx, message protocol.Envelope) error {
 	return m.deliverTx(ctx, tx, message, "queued")
 }
+
+// DeliverChatTx records an exact direct-user reply without scheduling it as
+// autonomous assistant input. Authentication and parent ownership stay with the
+// calling gateway; the existing remote reply validation remains mandatory.
+func (m *Mailbox) DeliverChatTx(ctx context.Context, tx *sql.Tx, message protocol.Envelope) error {
+	return m.deliverTx(ctx, tx, message, "processed")
+}
 func (m *Mailbox) deliverTx(ctx context.Context, tx *sql.Tx, message protocol.Envelope, state string) error {
 	if err := message.Validate(); err != nil {
 		return err

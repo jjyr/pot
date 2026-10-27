@@ -253,3 +253,34 @@ func TestMCPReceiverOfflineAdmissionDoesNotEraseAcceptedRetry(t *testing.T) {
 	}
 	_ = ctx
 }
+
+func TestMCPNodeMailPreservesOriginalUserReplyAndDedup(t *testing.T) {
+	g := gatewayFixtureFor(t, true)
+	ctx := context.Background()
+	var parentRaw string
+	if e := g.f.queue.DB.QueryRow("SELECT envelope FROM agent_messages WHERE direction='out' LIMIT 1").Scan(&parentRaw); e != nil {
+		t.Fatal(e)
+	}
+	var parent protocol.Envelope
+	if json.Unmarshal([]byte(parentRaw), &parent) != nil {
+		t.Fatal(parentRaw)
+	}
+	reply := protocol.Envelope{ID: "node-reply", Kind: "message", From: parent.To, To: parent.From, ConversationID: parent.ConversationID, ReplyTo: &parent.ID, Hops: parent.Hops + 1, Text: "node reply"}
+	input := agentlink.MCPNodeMail{Message: reply, ProcessingParentID: parent.ID}
+	var accepted MCPAccessMessageAcceptance
+	fixtureCall(t, g.receiver, "pot_receiver_node_mail", input, &accepted)
+	if mcpJSON(accepted.Message.Message) != mcpJSON(reply) {
+		t.Fatal("immutable reply changed", accepted)
+	}
+	var state string
+	if e := g.f.queue.DB.QueryRow("SELECT state FROM agent_messages WHERE id=?", reply.ID).Scan(&state); e != nil || state != "processed" {
+		t.Fatal("user reply became autonomous input", state, e)
+	}
+	fixtureCall(t, g.receiver, "pot_receiver_node_mail", input, &accepted)
+	if !accepted.Receipt.Duplicate {
+		t.Fatal("node mail replayed")
+	}
+	input.Message.Text = "conflicting bytes"
+	fixtureCallError(t, g.receiver, "pot_receiver_node_mail", input, agentlink.MCPConflict)
+	_ = ctx
+}
