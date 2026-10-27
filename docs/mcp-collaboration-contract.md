@@ -198,3 +198,56 @@ migration. Historical Tasks, reports and artifacts remain; unresolved old work
 must not be silently cancelled or replayed. Persistence requirements belong to
 the implementation phase and require centrally owned migrations and upgrade
 coverage; C0 changes no stored format.
+
+## Service composition and consent
+
+`control.NewMCPAccess` composes the official SDK Streamable HTTP handler with
+`MCPOAuthServer` and `MCPAccessQueue`. It returns an HTTP handler and starts no
+listener. Mount `/mcp`, `/.well-known/oauth-protected-resource/mcp`,
+`/.well-known/oauth-authorization-server` and `/oauth/` on the configured public
+origin. Serve the shared web assets on that origin. Keep owner APIs on their
+existing private/browser routes; this handler never proxies them.
+
+The owner-session callback must verify the existing browser login on every
+consent request. `webui.Server.MCPOwnerSession` supplies that binding without
+exporting credentials. Use `/mcp-connect.html` as the login return page; it calls
+the existing browser login component before resuming authorization. The same page
+without a request query lists connections and supports revocation. Deployment
+composition supplies the real public origin, migrated Control/Tasks pools, Task
+service and trusted effective receiver descriptions. Nothing automatically mounts
+or enables this endpoint in the production hosts.
+
+The minimal authorization server supports public-client dynamic registration,
+authorization code and S256 PKCE, with the single `pot:collaborate` scope. It
+issues one-minute, single-use codes and twelve-hour opaque access tokens; it does
+not issue refresh tokens or client secrets. Clients reauthorize on expiry.
+Redirect URIs must exactly match registration. Registered callbacks may use HTTPS
+or loopback HTTP. The resource must exactly equal the public `/mcp` URL. Only
+SHA-256 credential digests enter storage. Reauthorization with the same registered
+client preserves the nonrevoked logical connection and caller. Revocation never
+cancels or replays accepted work.
+
+Receivers declare `pot_receiver_node` during registration. The declaration is
+shown on the owner confirmation page and becomes a connection binding only after
+consent. It does not authorize node actor impersonation or supervised execution
+calls. A separate effective-description callback gates receiver registration;
+absent that callback registration fails. Ordinary connections cannot register or
+claim work. SDK sessions are bound to logical connection ID and every request
+rechecks the access credential, audience, expiry and revocation.
+
+The receiver tools are `pot_receiver_register`, `pot_receiver_claim`,
+`pot_receiver_ack`, `pot_receiver_admit` and `pot_receiver_event`. Claim accepts a
+stable `request_id` and `wait_ms` between zero and 30,000. It returns either `{}` or
+`{claim, work}` / `{claim, control}`. Nonempty claim responses are saved forever
+with the delivery; empty polls create no receipt. A lost claim response retries
+with the original request ID. Ack/admit return their committed typed input; event
+returns `MCPEventReceipt`. Registration returns `connection_id` and `node_id`.
+Errors use `CallToolResult.isError` with a structured C0 `MCPError`. Tool-call
+success means durable acceptance, never execution completion.
+
+Receiver transport snapshots are not another Task engine. Queue submissions and
+admitted-run/result projections enter the existing Task catalogue through
+`AcceptExecutionTx` / `UpdateExecutionTx` in the same Tasks transaction as delivery
+and event receipts. The gateway retains the dispatch Task address while the
+catalogue execution receipt keeps the real execution Task/run. Host acceptance,
+launch, cleanup and recovery remain with the existing receiver backend.

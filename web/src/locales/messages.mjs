@@ -2,6 +2,20 @@ import serverMessages from './server.json' with {type:'json'};
 
 export const messages = {
   en: {
+    "mcpAccess.title": "Connect to Pot",
+    "mcpAccess.connections": "MCP connections",
+    "mcpAccess.client": "MCP client",
+    "mcpAccess.description": "Allow this client to use Pot collaboration capabilities?",
+    "mcpAccess.receiver": "This connection can receive work for this node:",
+    "mcpAccess.connectionScope": "This connection can discover available targets, exchange messages and manage its own Tasks.",
+    "mcpAccess.allow": "Connect",
+    "mcpAccess.deny": "Deny",
+    "mcpAccess.empty": "No MCP connections.",
+    "mcpAccess.revoked": "Revoked",
+    "mcpAccess.connected": "Connected",
+    "mcpAccess.revoke": "Revoke connection",
+    "mcpAccess.failed": "Could not complete the connection request. Reopen the client connection flow and try again.",
+
     "work.title": "Work records",
     "work.tools": "Tools: {count}",
     "work.messages": "Messages: {count}",
@@ -1167,6 +1181,20 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    "mcpAccess.title": "连接到 Pot",
+    "mcpAccess.connections": "MCP 连接",
+    "mcpAccess.client": "MCP 客户端",
+    "mcpAccess.description": "允许此客户端使用 Pot 协作功能吗？",
+    "mcpAccess.receiver": "此连接可以接收以下节点的工作：",
+    "mcpAccess.connectionScope": "此连接可以发现可用目标、收发消息以及管理自己的 Task。",
+    "mcpAccess.allow": "连接",
+    "mcpAccess.deny": "拒绝",
+    "mcpAccess.empty": "暂无 MCP 连接。",
+    "mcpAccess.revoked": "已撤销",
+    "mcpAccess.connected": "已连接",
+    "mcpAccess.revoke": "撤销连接",
+    "mcpAccess.failed": "无法完成连接请求。请重新打开客户端连接流程后重试。",
+
     "work.title": "工作记录",
     "work.tools": "工具{count}次",
     "work.messages": "通信{count}条",
