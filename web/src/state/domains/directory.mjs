@@ -1,10 +1,13 @@
 import {translate} from '../../locales/messages.mjs';
 import {projectLinkedAssistants} from '../agent-links.mjs';
 import {machinePresentation} from '../machine-identity.mjs';
-const retained=item=>({...item,executing:false,pending_approvals:0,capabilities:{version:1,operations:['chat.read']},retained:true});
 export function createDirectoryDomain(client,{resources,queries,commands}){
-  let previous=[];
-  const local=(value,space,offline)=>{let items=value;if(typeof items==='string')items=JSON.parse(items);const fresh=!resources.state(value)||resources.state(value).freshness==='fresh';return (items?.items||items||[]).map(item=>({...(!fresh?retained(item):item),control_id:space.control_id||space.id,space_id:space.id,space_name:space.name,space_kind:space.kind,offline}));};
+  let previous=[],previousGeneration;
+  // A background directory read revokes command capabilities, but it is not an
+  // execution-finished event. Retain activity only from this live connection's
+  // prior projection. Cold/offline/reconnected caches cannot invent activity.
+  const retained=item=>({...item,executing:client.onlineReady!==false&&previousGeneration===client.connectionGeneration&&!!previous.find(old=>old.id===item.id&&old.space_id===item.space_id&&old.control_id===item.control_id&&!old.offline)?.executing,pending_approvals:0,capabilities:{version:1,operations:['chat.read']},retained:true});
+  const local=(value,space,offline)=>{let items=value;if(typeof items==='string')items=JSON.parse(items);const fresh=!resources.state(value)||resources.state(value).freshness==='fresh';return (items?.items||items||[]).map(item=>({...(!fresh?retained({...item,space_id:space.id,control_id:space.control_id||space.id}):item),control_id:space.control_id||space.id,space_id:space.id,space_name:space.name,space_kind:space.kind,offline}));};
   const directory=queries.define('directory',async force=>{
     if(client.startup&&client.onlineReady!==false&&!client.operationsReady)force=true;
     const generation=client.connectionGeneration;
@@ -24,7 +27,7 @@ export function createDirectoryDomain(client,{resources,queries,commands}){
         for(const item of previous.filter(item=>item.origin&&item.space_id===space.id&&!linked.some(current=>current.id===item.id))){if(links.items?.some(link=>link.id===item.origin.link_id&&link.status!=='connected'))linked.push({...item,offline:true});}return [...own,...linked];
       }catch(error){if(error.storage||error.name==='AbortError')throw error;partial=true;return [...own,...previous.filter(item=>item.origin&&item.space_id===space.id).map(item=>({...retained(item),offline:true}))];}
     }catch(error){if(error.storage||error.name==='AbortError')throw error;partial=true;const cached=previous.filter(item=>item.space_id===space.id);return (cached.length?cached:local(space.assistants||[],space,true)).map(item=>({...retained(item),offline:true}));}}));
-    current();previous=results.flat();client.assistants=previous;
+    current();previous=results.flat();previousGeneration=generation;client.assistants=previous;
     // Only this connection's explicit network refresh can grant authority.
     // Failed Spaces and retained linked assistants cannot borrow another scope's
     // confirmation; an unavailable peer does not block confirmed local work.

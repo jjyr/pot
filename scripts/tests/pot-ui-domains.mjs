@@ -65,5 +65,22 @@ for(const path of ['/api/v1/assistants','/api/v1/agent-links','/api/v1/runtime']
   failing=false;assert.equal((await directory.refresh()).data.partial,false,'Explicit retry recovers');registry.dispose();
 }
 console.log('Domain queries: shared first read, consumer disposal, committed publication, freshness, scope isolation, force/requery batching and waiting, failure recovery, reentrant ownership; commands: shared intent and retry identity; Provider scope normalization passed');
+{
+  let freshness='fresh',executing=true,control='control-one';
+  const client={onlineReady:true,connectionGeneration:0};
+  const read=async path=>path==='/api/v1/spaces'?{items:[{id:'same-space',control_id:control,connected:true}]}:path==='/api/v1/assistants'?[{id:'same-owner',executing,capabilities:{version:1,operations:['chat.send']}}]:{items:[]};
+  const registry=createQueryRegistry(resources),directory=createDirectoryDomain(client,{resources:{...resources,read,state:()=>({freshness})},queries:registry});
+  const refresh=async()=>((await directory.refresh()).data.assistants[0]);
+  assert.equal((await refresh()).executing,true);
+  freshness='stale';let retained=await refresh();
+  assert.equal(retained.executing,true,'directory invalidation is not execution completion');
+  assert.equal(retained.retained,true);assert.deepEqual(retained.capabilities.operations,['chat.read'],'activity cannot grant command authority');
+  client.onlineReady=false;assert.equal((await refresh()).executing,false,'offline cache cannot invent active execution');
+  client.onlineReady=true;client.connectionGeneration++;assert.equal((await refresh()).executing,false,'a new connection cannot inherit old activity');
+  freshness='fresh';assert.equal((await refresh()).executing,true);
+  freshness='stale';control='control-two';assert.equal((await refresh()).executing,false,'same presentation IDs in another Control cannot inherit activity');
+  freshness='fresh';executing=false;assert.equal((await refresh()).executing,false,'confirmed execution completion replaces retained activity');
+  registry.dispose();console.log('Directory activity retains current execution across revalidation without retaining capabilities or crossing connection/Control identity');
+}
 
 await tasksDomainContract(console.log);
