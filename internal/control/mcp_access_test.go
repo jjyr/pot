@@ -234,13 +234,15 @@ func TestMCPAccessHTTPIsolationAndReceiverLifecycle(t *testing.T) {
 	if registration["connection_id"] != receiver.Connection {
 		t.Fatal(registration)
 	}
-	fixtureCallError(t, callerSession, "pot_receiver_register", fixtureRegistration(), agentlink.MCPUnauthorized)
+	if result, e := callerSession.CallTool(context.Background(), "pot_receiver_register", json.RawMessage(mcpJSON(fixtureRegistration()))); e == nil && !result.IsError {
+		t.Fatal("ordinary caller reached receiver registration")
+	}
 	tools, e := callerSession.ListTools(context.Background())
 	if e != nil {
 		t.Fatal(e)
 	}
 	for _, tool := range tools {
-		if strings.Contains(tool.Name, "owner") || strings.Contains(tool.Name, "approval") {
+		if strings.Contains(tool.Name, "owner") || strings.Contains(tool.Name, "approval") || strings.HasPrefix(tool.Name, "pot_receiver_") {
 			t.Fatal("owner operation advertised")
 		}
 	}

@@ -27,9 +27,10 @@ type MCPAccessOptions struct {
 type mcpAdmissionCheckKey struct{}
 
 type MCPAccess struct {
-	options MCPAccessOptions
-	sdk     *mcp.Server
-	handler http.Handler
+	options     MCPAccessOptions
+	sdk         *mcp.Server
+	receiverSDK *mcp.Server
+	handler     http.Handler
 }
 
 func NewMCPAccess(o MCPAccessOptions) (*MCPAccess, error) {
@@ -37,9 +38,17 @@ func NewMCPAccess(o MCPAccessOptions) (*MCPAccess, error) {
 		return nil, agentlink.ErrInvalid
 	}
 	o.Queue.CheckConnection = o.OAuth.CheckConnection
-	a := &MCPAccess{options: o, sdk: mcp.NewServer(&mcp.Implementation{Name: "pot", Version: "1"}, nil)}
+	a := &MCPAccess{options: o, sdk: mcp.NewServer(&mcp.Implementation{Name: "pot", Version: "1"}, nil), receiverSDK: mcp.NewServer(&mcp.Implementation{Name: "pot", Version: "1"}, nil)}
 	a.tools()
-	transport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return a.sdk }, &mcp.StreamableHTTPOptions{JSONResponse: true, SessionTimeout: 5 * time.Minute})
+	transport := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
+		info := mcp.TokenInfoFromContext(r.Context())
+		if info != nil {
+			if node, _ := info.Extra["receiver_node"].(string); node != "" {
+				return a.receiverSDK
+			}
+		}
+		return a.sdk
+	}, &mcp.StreamableHTTPOptions{JSONResponse: true, SessionTimeout: 5 * time.Minute})
 	a.handler = mcp.RequireBearerToken(a.verify, &mcp.RequireBearerTokenOptions{ResourceMetadataURL: o.OAuth.origin + "/.well-known/oauth-protected-resource/mcp", Scopes: []string{mcpAccessScope}})(transport)
 	return a, nil
 }
@@ -61,6 +70,9 @@ func (a *MCPAccess) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 func (a *MCPAccess) Close() {
 	for session := range a.sdk.Sessions() {
+		_ = session.Close()
+	}
+	for session := range a.receiverSDK.Sessions() {
 		_ = session.Close()
 	}
 }
@@ -137,7 +149,7 @@ func mcpRefSchema() map[string]any {
 // Contract schemas use the same typed decoder at admission, including nested
 // additionalProperties. The schema is derived only from known Go DTO fields.
 func (a *MCPAccess) tool(name string, schema any, fn func(context.Context, *mcp.CallToolRequest, json.RawMessage) (any, error)) {
-	mcp.AddTool(a.sdk, &mcp.Tool{Name: name, InputSchema: schema}, func(ctx context.Context, request *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, any, error) {
+	handler := func(ctx context.Context, request *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, any, error) {
 		// Reverify the credential at tool entry as well as HTTP entry. Queued SDK
 		// requests cannot outlive a revocation check by reusing a session principal.
 		if request.Extra == nil || request.Extra.TokenInfo == nil {
@@ -162,7 +174,11 @@ func (a *MCPAccess) tool(name string, schema any, fn func(context.Context, *mcp.
 			return mcpToolError(e), nil, nil
 		}
 		return mcpToolResult(value), nil, nil
-	})
+	}
+	if !strings.HasPrefix(name, "pot_receiver_") {
+		mcp.AddTool(a.sdk, &mcp.Tool{Name: name, InputSchema: schema}, handler)
+	}
+	mcp.AddTool(a.receiverSDK, &mcp.Tool{Name: name, InputSchema: schema}, handler)
 }
 func (a *MCPAccess) tools() {
 	a.tool("pot_task_receipt", mcpContractSchema(MCPAccessReceiptInput{}), func(ctx context.Context, r *mcp.CallToolRequest, raw json.RawMessage) (any, error) {

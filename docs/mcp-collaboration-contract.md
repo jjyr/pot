@@ -290,3 +290,9 @@ through the receiver queue. Those integrations must bind the authenticated node,
 stored claim/admission, live execution Task/run and existing review ledger before
 cutover. Ordinary OAuth remains user-kind. Keeping the old transport in the tree
 does not establish equivalence for those capabilities on MCP.
+
+Tool discovery follows the authenticated connection role: ordinary callers do
+not receive receiver coordination tools. The receiver catalogue adds those tools
+without changing its ordinary user-kind business caller. The SDK still verifies
+logical connection ownership for each session; catalogue selection grants no
+execution actor or owner authority.
