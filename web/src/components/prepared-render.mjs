@@ -1,3 +1,4 @@
+import {moveConversationNode} from './conversation-dom.mjs';
 // A preparation is local to one render transaction. It carries no backend or
 // persisted state. Async component work stays owned by its candidate DOM tree.
 import {translate} from '../locales/messages.mjs';
@@ -49,7 +50,7 @@ export function withPreparedRender(context,member,work){
 }
 
 export function createPreparedRender({previousRoot,renderContext,deadlines=new Map(),member='',reframe=false,budget=createPreparationBudget()}={}){
-  const context={phase:'prepare',previousRoot,previousRoots:new Map(),registeredRoots:new WeakSet(),renderContext,deadlines,member,budget,connectionContext:{budget,alive:true},localDeadlines:new Map(),reframe,frames:new Map(),islands:new Map(),slots:new Map(),incompleteSources:new Map(),assets:new Map(),used:new Map(),alive:true};
+  const context={phase:'prepare',now:Date.now(),previousRoot,previousRoots:new Map(),registeredRoots:new WeakSet(),renderContext,deadlines,member,budget,connectionContext:{budget,alive:true},localDeadlines:new Map(),reframe,frames:new Map(),islands:new Map(),slots:new Map(),incompleteSources:new Map(),assets:new Map(),used:new Map(),alive:true};
   registerPreparedRoot(context,previousRoot);return context;
 }
 export function preparedPreviousRoot(context,member){return context.previousRoots.get(member)||context.previousRoot;}
@@ -103,7 +104,7 @@ export function preparedIsland(element){
 
 export function consumePreparationSurrogates(root){
   for(const element of [...root.childNodes]){
-    if(element.preparationOriginal)element.replaceWith(element.preparationOriginal);
+    if(element.preparationOriginal){moveConversationNode(element.parentNode,element.preparationOriginal,element);element.remove();}
     else if(element.nodeType===1)consumePreparationSurrogates(element);
   }
   return root;
@@ -171,6 +172,7 @@ export function settlePreparedTree(root,context,{valid=()=>true,layout=()=>{},ti
       if(!context.alive||!valid())return cancel();
       if(!root.isConnected)return schedule();
       layout();observer.takeRecords();
+      if(root.querySelector('[data-prepared-pending]')){previous=undefined;return schedule();}
       const now=performance.now(),all=[...root.querySelectorAll(components)],pending=[];
       for(const element of all){
         if(element.preparationSurrogate||element.closest('[hidden]')||!element.getBoundingClientRect().height||element.dataset.state!=='loading')continue;
@@ -203,20 +205,35 @@ export function settlePreparedTree(root,context,{valid=()=>true,layout=()=>{},ti
       finish();resolve({height:box.height,size:box.height+marginTop+marginBottom,marginTop,marginBottom});
     }
     function schedule(){if(!closed&&!animation)animation=view.requestAnimationFrame(check);}
-    observer=new MutationObserver(schedule);observer.observe(root,{subtree:true,childList:true,attributes:true,characterData:true});schedule();
+    observer=new MutationObserver(schedule);observer.observe(root,{subtree:true,childList:true,attributes:true,characterData:true});check();
   });
   return {promise,cancel(){context.alive=false;context.connectionContext.alive=false;cancelRun();}};
 }
 
+const layoutProperties=['width','min-width','max-width','height','min-height','max-height','font','line-height','letter-spacing','box-sizing','overflow'];
+export function rememberPreparedLayout(element){
+  const style=getComputedStyle(element);
+  element.preparedLayoutSnapshot={original:layoutProperties.map(key=>[key,element.style.getPropertyValue(key),element.style.getPropertyPriority(key)]),values:layoutProperties.map(key=>[key,style.getPropertyValue(key)])};
+}
+export function freezePreparedLayout(element){
+  const saved=element.preparedLayoutSnapshot;if(!saved)return;
+  for(const [key,value]of saved.values)element.style.setProperty(key,value);
+  element.style.maxWidth='none';element.style.minWidth='0';
+  const height=saved.values.find(([key])=>key==='height')?.[1];
+  if(height&&height!=='auto'){element.style.minHeight=height;element.style.maxHeight=height;}
+  element.style.overflow='clip';
+}
+export function releasePreparedLayout(element){
+  for(const [key,value,priority]of element.preparedLayoutSnapshot?.original||[])if(value)element.style.setProperty(key,value,priority);else element.style.removeProperty(key);
+}
 export function createPreparationSurface(scroller,host){
-  const document=host.ownerDocument,root=document.createElement('div'),style=getComputedStyle(scroller);
-  root.className='prepared-conversation';root.dataset.preparationSurface='';root.inert=true;root.setAttribute('aria-hidden','true');
-  root.style.cssText='position:fixed;left:-100000px;top:0;visibility:hidden;pointer-events:none;box-sizing:border-box;';
+  const document=host.ownerDocument,root=scroller.cloneNode(false),style=getComputedStyle(scroller);root.removeAttribute('id');
+  root.className=scroller.className;root.classList.add('prepared-conversation');root.dataset.preparationSurface='';root.inert=true;root.setAttribute('aria-hidden','true');
+  root.style.cssText+=';position:fixed;left:-100000px;top:0;visibility:hidden;pointer-events:none;box-sizing:border-box;height:auto;min-height:0;max-height:none;overflow:visible;flex:none;';
   root.style.width=scroller.clientWidth+'px';root.style.paddingLeft=style.paddingLeft;root.style.paddingRight=style.paddingRight;
-  root.style.font=style.font;root.style.lineHeight=style.lineHeight;root.style.letterSpacing=style.letterSpacing;
   const path=[];for(let parent=host;parent&&parent!==scroller;parent=parent.parentElement)path.unshift(parent);
   let target=root;
-  for(const parent of path){const copy=parent.cloneNode(false);copy.removeAttribute('id');if(parent!==host){copy.style.minHeight='';copy.style.height='';}target.append(copy);target=copy;}
-  (scroller.closest('.pot-app')||scroller.parentElement||document.body).append(root);
+  for(const parent of path){const copy=parent.cloneNode(false);copy.removeAttribute('id');for(const [key,value,priority]of parent.preparedLayoutSnapshot?.original||[])if(value)copy.style.setProperty(key,value,priority);else copy.style.removeProperty(key);if(parent!==host){copy.style.minHeight='';copy.style.height='';}target.append(copy);target=copy;}
+  (scroller.parentElement||document.body).append(root);
   return {root,host:target,close:()=>retirePreparedTree(root)};
 }

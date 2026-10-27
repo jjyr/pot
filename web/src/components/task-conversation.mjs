@@ -158,7 +158,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   }
   function approvalRegion(){
     const entries=unmatchedApprovals,epoch=approvalGeneration,language=locale();
-    return {key:'task-approvals',host:approvalHost,revision:JSON.stringify([epoch,language,entries.map(entry=>[entry.id,entry.revision])]),current:()=>!disposed&&approvalGeneration===epoch&&locale()===language,latest:approvalRegion,render:target=>{
+    return {key:'task-approvals',host:approvalHost,revision:JSON.stringify([epoch,language,entries.map(entry=>[entry.id,entry.revision])]),current:()=>!disposed&&approvalGeneration===epoch&&locale()===language,latest:approvalRegion,didCommit:()=>{for(const entry of entries)entry.commit([...approvalHost.children].find(node=>node.dataset.approvalId===entry.id));},render:target=>{
       const nodes=entries.map(entry=>target===approvalHost?entry.commit():entry.prepare());
       for(const node of [...target.childNodes])if(!nodes.includes(node))node.remove();
       nodes.forEach((node,index)=>{if(target.childNodes[index]!==node)target.insertBefore(node,target.childNodes[index]||null);});
@@ -181,7 +181,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
       for(const file of attachments)target.append(action(file.name||file.path,()=>downloadFile({task:task.id,path:file.path})));
       if(artifactError){const warning=n('div','task-artifacts-error');warning.append(n('p','hint',t('tasks.artifactsError')));const details=n('details');details.open=open;details.append(n('summary','',t('tasks.artifactsErrorDetails')),n('pre','',artifactError));warning.append(details);target.append(warning);}
     }},approvalRegion(),{key:'task-goal',host:goal,revision:JSON.stringify([goalText,expanded,locale()]),render:target=>{
-      if(!target.firstChild){target.append(staticPreparationClone(goalSummary),n('div','message-body task-goal-body'));}
+      if(!target.firstChild){const copy=staticPreparationClone(goalSummary);copy.preparationOriginal=goalSummary;target.append(copy,n('div','message-body task-goal-body'));}
       target.open=expanded;target.querySelector('.task-goal-preview').textContent=goalText.replace(/\s+/g,' ');
       if(expanded)updateMarkdown(target.querySelector('.task-goal-body'),goalText,{downloadFile,acquireFileImage,renderSlot:'task-goal'});
     }}];

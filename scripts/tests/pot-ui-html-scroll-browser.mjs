@@ -57,7 +57,7 @@ try{
         assert(JSON.parse((await sample(page)).frame).nested>0,'Native keyboard list scrolling survives');
       }
       // Move directly outside the iframe: no click or focus exit.
-      const chatBox=await page.locator('.history').boundingBox(),beforeOutside=(await sample(page)).chat;
+      const chatBox=await page.locator('.history:not([data-preparation-surface])').boundingBox(),beforeOutside=(await sample(page)).chat;
       await page.mouse.move(chatBox.x+3,Math.min(850,chatBox.y+80));await page.mouse.wheel(0,100);await settled(page);
       assert((await sample(page)).chat>beforeOutside,'Moving outside resumes chat without a click');
       evidence.push({width,theme,legacy,kind,bottom:atBottom.chat,top:atTop.chat,outside:(await sample(page)).chat});
@@ -89,7 +89,7 @@ try{
       assert.equal((await sample(page)).chat,original.chat);assert.equal((await sample(page)).page,original.page);
       assert.equal((await sample(page)).locked,'');assert(await link.evaluate(element=>document.activeElement===element),'Focus returns to opener');
     }
-    const chatBox=await page.locator('.history').boundingBox();
+    const chatBox=await page.locator('.history:not([data-preparation-surface])').boundingBox();
     await page.mouse.move(chatBox.x+3,chatBox.y+80);await page.mouse.wheel(0,100);await settled(page);
     assert((await sample(page)).chat>original.chat,'Chat scrolling resumes after the modal closes');
     await page.mouse.move(2,400);await page.mouse.wheel(0,120);await settled(page);

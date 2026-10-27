@@ -20,7 +20,7 @@ async function run(){
   const view=createTaskConversation({root,task,record:{info:task,request:{text:'Synthetic navigation task'},capabilities:{version:1,operations:['task.read']}},locale:()=> 'en',client,scope,draft:'',onDraft:()=>{},toolMemory:new Map(),approvalFor:()=>null,assistantName:'Synthetic coordinator'});
   try{
    view.update({state});view.start();await frame();
-   const history=root.querySelector('.task-history');history.dispatchEvent(new WheelEvent('wheel',{deltaY:-100000,bubbles:true}));history.scrollTop=0;history.dispatchEvent(new Event('scroll'));await frame();
+   const history=root.querySelector('.task-history:not([data-preparation-surface])');history.dispatchEvent(new WheelEvent('wheel',{deltaY:-100000,bubbles:true}));history.scrollTop=0;history.dispatchEvent(new Event('scroll'));await frame();
    await wait(()=>history.querySelector('.work-record-summary'));
    history.querySelector('.work-record-summary').click();await wait(()=>history.querySelector('[data-call-id="parent"] .tool-failure'));
    if(split)check(!history.querySelector('[data-call-id="target"]'),'Cross-prose target starts outside the mounted virtual range');

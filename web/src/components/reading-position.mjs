@@ -1,7 +1,7 @@
 // Preserve visible content rather than a numeric scrollTop when rows above it
 // are inserted, removed or moved. Keys also work after rebuilding a conversation.
 function visibleAnchor(node,history){
-  if(!node||!node.getBoundingClientRect().height)return false;
+  if(!node||node.closest('[data-conversation-hold]')||!node.getBoundingClientRect().height)return false;
   // Closed details can retain descendant layout boxes under content-visibility.
   // Those boxes are not readable anchors or evidence of an expanded child.
   for(let parent=node.parentElement;parent&&parent!==history;parent=parent.parentElement){

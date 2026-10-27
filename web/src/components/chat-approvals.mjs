@@ -4,7 +4,7 @@ import {translate} from '../locales/messages.mjs';
 // A transient UI projection, deliberately separate from conversation messages.
 export function createChatApprovals({host,locale,visible,deferred=false}) {
   host.setAttribute('aria-live','off');
-  const notice=n('p','approval-notice'),cards=n('div','approval-list'),announcer=n('span','visually-hidden');
+  let notice=n('p','approval-notice'),cards=n('div','approval-list'),announcer=n('span','visually-hidden');
   announcer.setAttribute('role','status');announcer.setAttribute('aria-live','polite');announcer.setAttribute('aria-atomic','true');
   host.append(notice,cards,announcer);host.hidden=true;
   const observed=new Map();
@@ -35,7 +35,11 @@ export function createChatApprovals({host,locale,visible,deferred=false}) {
   }
   function region(){
     const {context,entries}=pending,stamp=revision(pending),epoch=generation;
-    return {key:'chat-approvals',host,revision:JSON.stringify([epoch,stamp]),current:()=>generation===epoch&&revision(pending)===stamp,latest:region,render:target=>{
+    return {key:'chat-approvals',host,revision:JSON.stringify([epoch,stamp]),current:()=>generation===epoch&&revision(pending)===stamp,latest:region,didCommit:()=>{
+      notice=host.querySelector('.approval-notice');cards=host.querySelector('.approval-list');announcer=host.querySelector('.visually-hidden');
+      announcer.setAttribute('role','status');announcer.setAttribute('aria-live','polite');announcer.setAttribute('aria-atomic','true');
+      commit(context,entries.map(entry=>({id:entry.id,element:entry.commit([...cards.children].find(node=>node.dataset.approvalId===entry.id))})));
+    },render:target=>{
       if(target===host){commit(context,entries.map(entry=>({id:entry.id,element:entry.commit()})));return;}
       target.hidden=!entries.length;target.setAttribute('aria-label',translate(locale(),'tool.pendingApprovals'));
       const label=n('p','approval-notice',translate(locale(),'tool.pendingApprovalCount').replace('{count}',String(entries.length))),list=n('div','approval-list');

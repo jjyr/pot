@@ -13,36 +13,36 @@ for(const phone of [false,true])for(const test of ['reference-fresh','reference-
   const control=async value=>{assert((await context.request.post(fixture.origin+'/fixture/control',{data:value})).ok());};
   const frames=()=>page.evaluate(async()=>{for(let i=0;i<12;i++)await new Promise(requestAnimationFrame);});
   const sample=()=>page.evaluate(()=>{
-   const h=document.querySelector('.history'),row=h?.querySelector('[data-message-id="active-answer"]'),m=row?.querySelector('pot-mermaid'),r=row?.getBoundingClientRect(),v=h?.getBoundingClientRect(),ref=h?.querySelector('.message-reference-open');
+   const h=document.querySelector('.history:not([data-preparation-surface])'),row=h?.querySelector('[data-message-id="active-answer"]'),m=row?.querySelector('pot-mermaid'),r=row?.getBoundingClientRect(),v=h?.getBoundingClientRect(),ref=h?.querySelector('.message-reference-open');
    return {at:performance.now(),url:location.href,visible:h&&getComputedStyle(h).visibility,busy:!!h?.querySelector('.message-window[aria-busy]'),id:row?.dataset.messageId,sequence:row?.dataset.sequence,windowKey:row?.dataset.windowKey,text:row?.querySelector('.reply-content')?.textContent,highlight:row?.classList.contains('reference-target'),sameRow:row===globalThis.savedLifetimeRow,rowHeight:r?.height,overlap:r&&Math.min(r.bottom,v.bottom)-Math.max(r.top,v.top),mermaid:m&&{connected:m.isConnected,slot:m.renderSlot,source:m.sourceText,state:m.dataset.state,unfinished:m.dataset.unfinished,fallback:m.dataset.preparedFallback,height:m.getBoundingClientRect().height},oldDisconnected:globalThis.savedLifetimeMermaid?!savedLifetimeMermaid.isConnected:undefined,newComponent:m&&globalThis.savedLifetimeMermaid?m!==savedLifetimeMermaid:undefined,reference:ref&&{title:ref.title,sourceRow:ref.closest('article')?.dataset.messageId,sourceSequence:ref.closest('article')?.dataset.sequence,interactive:!ref.disabled&&!ref.closest('[inert]'),overlap:Math.min(ref.getBoundingClientRect().bottom,v.bottom)-Math.max(ref.getBoundingClientRect().top,v.top)},preparing:[...document.querySelectorAll('[data-preparation-surface] pot-mermaid')].map(n=>({slot:n.renderSlot,state:n.dataset.state,source:n.sourceText,height:n.getBoundingClientRect().height}))};
   });
   try{
    await control({scenario:'custom',text:'Independent original answer.'});
    await page.goto(fixture.origin+'/?locale=en&theme=light&assistant_id=alpha');
-   await page.waitForFunction(()=>{const h=document.querySelector('.history');return h&&getComputedStyle(h).visibility==='visible'&&h.querySelector('[data-message-id="active-answer"]')&&!h.querySelector('.message-window[aria-busy]');});await frames();
-   await page.evaluate(()=>globalThis.savedLifetimeRow=document.querySelector('.history [data-message-id="active-answer"]'));
+   await page.waitForFunction(()=>{const h=document.querySelector('.history:not([data-preparation-surface])');return h&&getComputedStyle(h).visibility==='visible'&&h.querySelector('[data-message-id="active-answer"]')&&!h.querySelector('.message-window[aria-busy]');});await frames();
+   await page.evaluate(()=>globalThis.savedLifetimeRow=document.querySelector('.history:not([data-preparation-surface]) [data-message-id="active-answer"]'));
    steps.push({phase:'initial',sample:await sample()});
    if(test.startsWith('reference-')){
     if(test==='reference-retained'){
      await control({scenario:'custom',text:'Independent original answer. Token update committed.'});
-     await page.waitForFunction(()=>document.querySelector('.history [data-message-id="active-answer"]')?.textContent.includes('Token update committed.')&&!document.querySelector('.history .message-window[aria-busy]'));await frames();
+     await page.waitForFunction(()=>document.querySelector('.history:not([data-preparation-surface]) [data-message-id="active-answer"]')?.textContent.includes('Token update committed.')&&!document.querySelector('.history:not([data-preparation-surface]) .message-window[aria-busy]'));await frames();
     }
     const before=await sample();steps.push({phase:'before-click',sample:before});
     assert(before.sameRow);assert.equal(before.reference.title,'Independent exact current-scope answer');assert.equal(before.reference.sourceRow,'active-input');assert(before.reference.interactive);assert(before.reference.overlap>=24);
-    await page.locator('.history [data-message-id="active-input"] .message-reference-open').click();await frames();
+    await page.locator('.history:not([data-preparation-surface]) [data-message-id="active-input"] .message-reference-open').click();await frames();
     const after=await sample();steps.push({phase:'after-click',sample:after});
     assert.equal(after.id,'active-answer');assert(after.sameRow);assert(after.overlap>=24);assert.equal(after.highlight,true,'Mounted exact reference target must receive its visible locate highlight');
    }else{
     const base='Independent paragraph.',first=base+'\n\n```mermaid\ngraph TD\n A[First lifetime] --> B[Waiting]';
     const start=await page.evaluate(()=>performance.now());await control({scenario:'custom',text:first});
-    await page.waitForFunction(()=>document.querySelector('.history [data-message-id="active-answer"] pot-mermaid')?.dataset.preparedFallback==='true');
+    await page.waitForFunction(()=>document.querySelector('.history:not([data-preparation-surface]) [data-message-id="active-answer"] pot-mermaid')?.dataset.preparedFallback==='true');
     const firstSample=await sample();steps.push({phase:'first-fallback',elapsed:firstSample.at-start,sample:firstSample});assert(firstSample.at-start>=4800);assert(firstSample.at-start<6500);
-    await page.evaluate(()=>globalThis.savedLifetimeMermaid=document.querySelector('.history [data-message-id="active-answer"] pot-mermaid'));
+    await page.evaluate(()=>globalThis.savedLifetimeMermaid=document.querySelector('.history:not([data-preparation-surface]) [data-message-id="active-answer"] pot-mermaid'));
     await control({scenario:'custom',text:base});
-    await page.waitForFunction(()=>!document.querySelector('.history [data-message-id="active-answer"] pot-mermaid')&&!document.querySelector('.history .message-window[aria-busy]'));await frames();
+    await page.waitForFunction(()=>!document.querySelector('.history:not([data-preparation-surface]) [data-message-id="active-answer"] pot-mermaid')&&!document.querySelector('.history:not([data-preparation-surface]) .message-window[aria-busy]'));await frames();
     const removed=await sample();steps.push({phase:'true-removal-committed',sample:removed});assert(removed.sameRow);assert(removed.oldDisconnected);
     const secondStart=await page.evaluate(()=>performance.now());await control({scenario:'custom',text:base+'\n\n```mermaid\ngraph TD\n C[Second lifetime] --> D[Waiting]'});
-    await page.waitForFunction(()=>document.querySelector('.history [data-message-id="active-answer"] pot-mermaid')?.dataset.preparedFallback==='true');
+    await page.waitForFunction(()=>document.querySelector('.history:not([data-preparation-surface]) [data-message-id="active-answer"] pot-mermaid')?.dataset.preparedFallback==='true');
     const second=await sample();steps.push({phase:'second-fallback',elapsed:second.at-secondStart,sample:second});assert(second.newComponent);assert(second.oldDisconnected);assert(second.sameRow);
     assert(second.at-secondStart>=4800&&second.at-secondStart<6500,'A genuinely removed component must receive a new five-second readiness deadline');
    }
@@ -73,7 +73,7 @@ try{page=await context.newPage();page.setDefaultTimeout(12000);const errors=[];p
   const observer=new MutationObserver(()=>f.events.push({kind:'dom-change',...f.sample()}));observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['open','aria-busy']});f.observer=observer;const tick=()=>{f.frames.push(f.sample());requestAnimationFrame(tick);};requestAnimationFrame(tick);ui.update({record,state,fresh:true,approvals:[pending]});ui.start();
  });
  await page.waitForFunction(()=>{const f=independentApprovalClose;return getComputedStyle(f.ui.history).visibility==='visible'&&f.ui.history.querySelector('details.tool-call')?.open&&!f.ui.history.querySelector('[aria-busy]');});
- await page.evaluate(()=>independentApprovalClose.phase='explicit-close');const before=await page.evaluate(()=>independentApprovalClose.sample());await page.locator('.task-history details.tool-call > summary').click();await page.evaluate(async()=>{for(let i=0;i<30;i++)await new Promise(requestAnimationFrame);});
+ await page.evaluate(()=>independentApprovalClose.phase='explicit-close');const before=await page.evaluate(()=>independentApprovalClose.sample());await page.locator('.task-history:not([data-preparation-surface]) details.tool-call > summary').click();await page.evaluate(async()=>{for(let i=0;i<30;i++)await new Promise(requestAnimationFrame);});
  const result=await page.evaluate(()=>{const f=independentApprovalClose;return {after:f.sample(),events:f.events,frames:f.frames,decisions:f.decisions};});await writeFile(output+'/raw.json',JSON.stringify({before,...result,errors},null,2));await page.screenshot({path:output+'/after.png'});
  assert.deepEqual(errors,[]);assert(result.events.some(e=>e.kind==='user-click-after-handler'&&e.trusted&&e.memory.some(m=>m.open===false)),'Trusted explicit close must first write closed reading intent');assert.equal(result.after.open,false,'A pending approval candidate must preserve the latest explicit close');assert(result.after.memory.some(m=>m.open===false),'Candidate must not overwrite explicit closed memory');assert.equal(result.decisions.length,0);return {passed:true,before,after:result.after,errors};
 }catch(error){await writeFile(output+'/failure.txt',error.stack);throw error;}finally{await context.close();}

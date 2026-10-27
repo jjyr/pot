@@ -99,7 +99,7 @@ async function directoryChecks(){
  assistants.splice(0,assistants.length,...original);client.resources.invalidate(['assistants','agent-links'],scope);
 }
 async function run(){
- await wait(()=>input()&&!input().disabled&&!root.querySelector('.history').hidden);await pause(100);
+ await wait(()=>input()&&!input().disabled&&!root.querySelector('.history:not([data-preparation-surface])').hidden);await pause(100);
  type('/');await wait(()=>options().length===3);check(!menu().querySelector('.avatar,svg'),'Skills have no icons');check(options().every(option=>option.getBoundingClientRect().height<=44),'Compact rows remain at most 44px');check(!menu().textContent.includes('forbidden'),'Slash excludes machines and labels');
  press('Escape');await pause(30);check(menu().hidden,'Escape stays dismissed after keyup');
  type('/nothing-matches');await wait(()=>!menu().hidden&&options().length===0);press('Enter');check(sends.length===0,'Empty results cannot accidentally send a slash query');
@@ -138,7 +138,7 @@ async function run(){
  const result=document.createElement('output');result.textContent=document.title;result.style.cssText='position:fixed;top:0;right:0;background:#fff;color:#000;font-size:11px;z-index:999';document.body.append(result);
 }
 async function review(){
- await wait(()=>input()&&!input().disabled&&!root.querySelector('.history').hidden);await pause(100);
+ await wait(()=>input()&&!input().disabled&&!root.querySelector('.history:not([data-preparation-surface])').hidden);await pause(100);
  type('请 @');await wait(()=>options().length===5);
  // Retire only local/research in the fake source after its search result is
  // visible. The exact same fixture runs against the before and after sources.

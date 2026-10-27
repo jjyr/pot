@@ -57,7 +57,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     if(model?.kind==='receive'&&model.count>1)title.append(document.createTextNode(t('messageCount').replace('{count}',model.count.toLocaleString(locale()))));
     title.title=title.textContent;return true;
   }
-  const remember=()=>{if(!building&&live())memory.set(key,{...memory.get(key),open:root.open,raw:raw.open});};root.addEventListener('toggle',()=>{if(!live())return;remember();refreshStatus();if(current)update(current,options);});raw.addEventListener('toggle',()=>{if(!live())return;remember();if(current)update(current,options);});
+  const remember=()=>{if(!building&&live())memory.set(key,{...memory.get(key),open:root.open,raw:raw.open});};root.addEventListener('toggle',()=>{if(!live())return;remember();if(root.closest('.prepared-row'))return;refreshStatus();if(current)update(current,options);});raw.addEventListener('toggle',()=>{if(!live())return;remember();if(current)update(current,options);});
   // Populate on activation, before a second click can target an empty disclosure
   // whose position will change when its deferred toggle event renders content.
   function disclose(field,node){
@@ -66,7 +66,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
       memory.set(key,{...memory.get(key),[field]:!(memory.get(key)?.[field]??node.open)});
       root.dispatchEvent(new CustomEvent('pot:prepare-resize',{bubbles:true}));return;
     }
-    node.open=!node.open;remember();refreshStatus();if(current)update(current,options);
+    node.open=!node.open;remember();if(root.closest('.prepared-row'))return;refreshStatus();if(current)update(current,options);
   }
   summary.addEventListener('click',event=>{if(event.defaultPrevented||event.target.closest('button,a,input,select,textarea'))return;event.preventDefault();disclose('open',root);});
   // Commit before ResizeObserver/virtual-window recycling can detach this row.
@@ -130,12 +130,12 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     root.dataset.phase=phase;root.dataset.callId=tool.id;root.dataset.turnId=tool.turn_id||'';
     const start=script?tool.started_at_ms:phase==='waiting_approval'?(tool.waiting_at_ms||tool.started_at_ms):(tool.running_at_ms||tool.started_at_ms);
     // Live clocks run only while a visible operation needs one, and honor backend time.
-    const end=tool.finished_at_ms||(activeTool(tool)?Date.now():null),elapsed=start&&end?Math.max(0,(end-start)/1000):null;
+    const end=tool.finished_at_ms||(activeTool(tool)?currentPreparedRender()?.context.now??Date.now():null),elapsed=start&&end?Math.max(0,(end-start)/1000):null;
     duration.textContent=elapsed===null?'':`${phase==='waiting_approval'&&!script?t('waited')+' ':''}${elapsed<1?elapsed.toFixed(1):Math.floor(elapsed)}s`;
     const targetLabel=tool.target?.runtime_id?machineLabel(tool.target.runtime_id):'';
     context.textContent=[targetLabel,tool.workdir,tool.execution_mode==='host'?t('hostExecution'):tool.execution_mode==='sandbox'?t('sandboxExecution'):''].filter(Boolean).join(' · ');context.hidden=!activeTool(tool)||!context.textContent;
     const error=tool.diagnostic||(tool.failurePhase?t(tool.failurePhase):['failed','denied','unknown'].includes(phase)?String(toolFailure(tool)||t(phase)).split('\n')[0]:'');failure.textContent=String(error).split('\n')[0];failure.hidden=!error;
-    failure.onclick=script?event=>{event.preventDefault();root.open=true;onLocate?.(tool.failureID||script.failureID,tool.turn_id);}:null;
+    failure.onclick=script?event=>{event.preventDefault();if(root.closest('.prepared-row')){memory.set(key,{...memory.get(key),open:true});root.dispatchEvent(new CustomEvent('pot:prepare-resize',{bubbles:true}));}else root.open=true;onLocate?.(tool.failureID||script.failureID,tool.turn_id);}:null;
     if(script&&error){failure.tabIndex=0;failure.setAttribute('role','button');failure.onkeydown=event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();failure.click();}};}else{failure.removeAttribute('tabindex');failure.removeAttribute('role');failure.onkeydown=null;}
     const channels=model?[...new Set(model.messages.map(mail=>t(!mail.from?.node_id||!mail.to?.node_id?'channelUnknown':mail.from.node_id===mail.to.node_id?'channelLocal':'channelLink')))].join(', '):'';
     const nextSignature=JSON.stringify([tool.name,tool.target,tool.workdir,tool.execution_mode,targetLabel,channels,locale()]);
@@ -161,6 +161,18 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     const calls=tool.process?.calls||script?.calls||[tool],rawValue=JSON.stringify([locale(),calls]);
     if(rawSignature!==rawValue){rawSignature=rawValue;rawBody.replaceChildren(metadata);for(const call of calls){rawBody.append(n('p','tool-call-id',`${call.name} · ${call.id}`),n('p','tool-call-time',call.started_at_ms?new Date(call.started_at_ms).toLocaleString(locale()):''));for(const [label,value]of [[t('arguments'),call.args],[t('result'),call.result],[t('output'),call.output]])if(value!==undefined){const text=pretty(value),head=n('div','tool-section-heading');head.append(n('strong','',label),copyButton(t('copyJSON'),()=>text));rawBody.append(head,n('pre','tool-code',text.slice(0,LIMIT)));if(text.length>LIMIT)rawBody.append(n('p','tool-truncated',t('displayTruncated')));}}}
   }
-  function tick(){if(!root.isConnected||!activeTool(current?.tool))return false;if(document.hidden)return true;const tool=current.tool,waiting=options.approval||tool.phase==='waiting_approval',start=tool.script?tool.started_at_ms:waiting?(tool.waiting_at_ms||tool.started_at_ms):tool.running_at_ms||tool.started_at_ms;if(start)duration.textContent=`${waiting&&!tool.script?t('waited')+' ':''}${Math.max(0,Math.floor((Date.now()-start)/1000))}s`;return true;}
+  function tick(){
+    if(!root.isConnected||!activeTool(current?.tool))return false;
+    if(document.hidden||!live())return true;
+    const tool=current.tool,waiting=options.approval||tool.phase==='waiting_approval',start=tool.script?tool.started_at_ms:waiting?(tool.waiting_at_ms||tool.started_at_ms):tool.running_at_ms||tool.started_at_ms;
+    if(start){
+      const text=`${waiting&&!tool.script?t('waited')+' ':''}${Math.max(0,Math.floor((Date.now()-start)/1000))}s`;
+      if(duration.textContent!==text){
+        if(root.closest('.prepared-row'))root.dispatchEvent(new CustomEvent('pot:prepare-resize',{bubbles:true}));
+        else duration.textContent=text;
+      }
+    }
+    return true;
+  }
   return {element:root,children,update};
 }

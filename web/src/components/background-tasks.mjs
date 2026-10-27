@@ -15,13 +15,13 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
   const element=node('section','background-tasks'),states=new Map();
   const id=`background-tasks-${crypto.randomUUID()}`;
   let current=null,signature='';
-  function update(scope,tasks,needsApproval,target=element) {
+  function update(scope,tasks,needsApproval,target=element,now=Date.now()) {
     let state=states.get(scope);
     target.hidden=!tasks.length;
     if(!tasks.length){const changed=current===scope&&signature!=='';target.replaceChildren();if(target===element){states.delete(scope);current=null;signature='';}return changed;}
     if(!state){state={expanded:false,order:[]};states.set(scope,state);}
     taskIdentities.register(tasks);
-    const nextSignature=JSON.stringify([scope,locale(),state.expanded,tasks.map(task=>[taskKey(task),task.address,taskIdentities.short(task),task.title,task.phase,task._stale,task.started_at_ms,task.finished_at_ms,task.agent_link,needsApproval(task.id,task.phase)])]);
+    const nextSignature=JSON.stringify([scope,locale(),state.expanded,tasks.map(task=>[taskKey(task),task.address,taskIdentities.short(task),task.title,task.phase,task._stale,task.started_at_ms,task.finished_at_ms,taskElapsed(task.started_at_ms,taskClockEnd(task,now),locale(),true),task.agent_link,needsApproval(task.id,task.phase)])]);
     if(target===element&&current===scope&&signature===nextSignature)return false;
     const byID=new Map(tasks.map(task=>[taskKey(task),task]));
     state.order=state.order.filter(key=>byID.has(key));
@@ -46,7 +46,7 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
       const source=taskAgentSource(task,locale());if(source)description.append(node('span','',source.getAttribute('aria-label')+' · '));
       const activity=node('span','task-activity-dot');activity.setAttribute('aria-hidden','true');activity.dataset.phase=task._stale?'unknown':waiting?'waiting_approval':task.phase;
       meta.append(activity,node('span','background-task-status',t(status)));
-      const time=task._stale?'':taskElapsed(task.started_at_ms,taskClockEnd(task),locale(),true);
+      const time=task._stale?'':taskElapsed(task.started_at_ms,taskClockEnd(task,now),locale(),true);
       if(time){
         const separator=node('span','','·');separator.setAttribute('aria-hidden','true');
         const elapsed=node('span','background-task-elapsed',time);elapsed.dataset.startedAt=task.started_at_ms;elapsed.dataset.compact='true';if(!['queued','running','waiting','waiting_approval'].includes(task.phase))elapsed.dataset.finishedAt=task.finished_at_ms||0;elapsed.setAttribute('role','timer');elapsed.setAttribute('aria-live','off');elapsed.title=t('tasks.elapsedDescription');
@@ -67,8 +67,8 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
     reconcile(target,projection);return true;
   }
   return {element,update,region(scope,tasks,needsApproval){
-    tasks=structuredClone(tasks);
+    tasks=structuredClone(tasks);const now=Date.now();
     const decisions=new Map(tasks.map(task=>[task.id,needsApproval(task.id,task.phase)]));
-    return {key:'background-tasks',host:element,revision:JSON.stringify([scope,locale(),states.get(scope)?.expanded||false,tasks,[...decisions]]),render:target=>update(scope,tasks,id=>decisions.get(id),target)};
+    return {key:'background-tasks',host:element,revision:JSON.stringify([scope,locale(),states.get(scope)?.expanded||false,tasks,tasks.map(task=>taskElapsed(task.started_at_ms,taskClockEnd(task,now),locale(),true)),[...decisions]]),render:target=>update(scope,tasks,id=>decisions.get(id),target,now)};
   },close(){}};
 }

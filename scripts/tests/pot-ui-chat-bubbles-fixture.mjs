@@ -61,7 +61,7 @@ window.chatBubbles={errors,scenario,prose,get sendCount(){return sendCount;},get
   for(let i=0;i<180&&!document.querySelector('.message');i++)await frame();
   if(!document.querySelector('.message'))throw Error('Chat did not mount');
   await document.fonts.ready;await frame();
-  const history=document.querySelector('.history');history.dispatchEvent(new WheelEvent('wheel',{deltaY:-10000,bubbles:true}));history.scrollTop=0;history.dispatchEvent(new Event('scroll'));await frame();
+  const history=document.querySelector('.history:not([data-preparation-surface])');history.dispatchEvent(new WheelEvent('wheel',{deltaY:-10000,bubbles:true}));history.scrollTop=0;history.dispatchEvent(new Event('scroll'));await frame();
   return {scenario,errors};
 },async stream(text='Streaming synthetic reply…',status='streaming'){
   messages=messages.filter(m=>m.id!=='stream');messages.push({id:'stream',role:'assistant',reply_to:'request',status,text,sequence:String(messages.length+1),version:++version});receive(snapshot());await frame();

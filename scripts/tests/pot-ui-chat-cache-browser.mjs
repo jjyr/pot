@@ -28,7 +28,7 @@ const client={chatCacheName:name,production:true,runtime:{runtime_id:'persistent
   if(url.pathname==='/api/v1/assistants')return {items:[{id:'alpha',name:'Alpha'},{id:'beta',name:'Beta'}].map(item=>({...item,capabilities:{version:1,operations:['chat.read','chat.send','assistant.configure']}}))};
   return {items:[],pending:[],policy:{}};
  }};
-const h=()=>root.querySelector('.history');
+const h=()=>root.querySelector('.history:not([data-preparation-surface])');
 const shown=()=>h()&&getComputedStyle(h()).visibility!=='hidden'&&!h().hidden&&!root.classList.contains('show-directory');
 const last=()=>root.querySelector(`[data-message-id="${scope.owner}-${scope.owner==='alpha'?140:12}"]`);
 const atLatest=()=>h().scrollHeight-h().clientHeight-h().scrollTop<2&&!!last();

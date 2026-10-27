@@ -16,7 +16,7 @@ async (page,{origin=new URL(page.url()).origin,witness}={})=>{
   const wheel=async delta=>{
     const before=await page.evaluate(()=>continuity.sample());
     await page.mouse.wheel(0,delta);
-    await page.waitForFunction(({top,delta})=>{const h=document.querySelector('.history');return h.scrollTop!==top||(delta<0?h.scrollTop===0:h.scrollHeight-h.clientHeight-h.scrollTop<=1);},{top:before.top,delta});
+    await page.waitForFunction(({top,delta})=>{const h=document.querySelector('.history:not([data-preparation-surface])');return h.scrollTop!==top||(delta<0?h.scrollTop===0:h.scrollHeight-h.clientHeight-h.scrollTop<=1);},{top:before.top,delta});
     await settle();
   };
   page.on('pageerror',error=>errors.push(error.message));
@@ -51,7 +51,7 @@ async (page,{origin=new URL(page.url()).origin,witness}={})=>{
         },
       };
       const dispose=mountApp(document.querySelector('#app'),client);
-      const history=()=>document.querySelector('.history');
+      const history=()=>document.querySelector('.history:not([data-preparation-surface])');
       function sample(){
         const h=history(),top=h.getBoundingClientRect().top,bottom=top+h.clientHeight;
         const mounted=[...h.querySelectorAll('article.message')];
@@ -73,7 +73,7 @@ async (page,{origin=new URL(page.url()).origin,witness}={})=>{
       window.addEventListener('pagehide',()=>{dispose();cache.close();indexedDB.deleteDatabase(name);URL.revokeObjectURL(imageURL);},{once:true});
     });
     if(width<720)await page.getByRole('button',{name:'Scroll fixture',exact:true}).click();
-    await page.locator('.history [data-message-id="m240"]').waitFor();
+    await page.locator('.history:not([data-preparation-surface]) [data-message-id="m240"]').waitFor();
     await settle();
     await page.mouse.move(width-35,400);
     const {steps,worstDrift:worst,worstSample,maxMounted}=await witness({page,sample:()=>page.evaluate(()=>continuity.sample()),wheel:async delta=>{await wheel(delta);return page.evaluate(()=>continuity.sample());},width,ids:Array.from({length:19},(_,i)=>i+221),label:'Chat',bounded:80});
@@ -86,7 +86,7 @@ async (page,{origin=new URL(page.url()).origin,witness}={})=>{
     const saved=await page.evaluate(()=>continuity.sample().anchor);
     await page.evaluate(()=>continuity.append());
     await page.waitForFunction(async()=>(await continuity.persisted()).at(-1)==='241');await settle();
-    const anchorOffset=()=>page.evaluate(id=>{const h=document.querySelector('.history'),row=h.querySelector(`[data-message-id="${id}"]`);return row?.getBoundingClientRect().top-h.getBoundingClientRect().top;},saved.id);
+    const anchorOffset=()=>page.evaluate(id=>{const h=document.querySelector('.history:not([data-preparation-surface])'),row=h.querySelector(`[data-message-id="${id}"]`);return row?.getBoundingClientRect().top-h.getBoundingClientRect().top;},saved.id);
     assert(Math.abs(await anchorOffset()-saved.offset)<=3,`${width}px new output preserves reading`);
     if(width<720)await page.getByRole('button',{name:'Conversation actions',exact:true}).click();
     await page.getByRole('button',{name:'Settings',exact:true}).first().click();
@@ -101,16 +101,16 @@ async (page,{origin=new URL(page.url()).origin,witness}={})=>{
     await page.mouse.move(width-35,400);
     for(let i=0;i<6;i++)await wheel(-36);
     const imageAnchor=await page.evaluate(()=>continuity.sample().anchor);
-    await page.evaluate(()=>continuity.imageReady());await page.locator('.history pot-file-image[data-state="ready"]').waitFor();await settle();
-    const imageOffset=await page.evaluate(id=>{const h=document.querySelector('.history');return h.querySelector(`[data-message-id="${id}"]`).getBoundingClientRect().top-h.getBoundingClientRect().top;},imageAnchor.id);
+    await page.evaluate(()=>continuity.imageReady());await page.locator('.history:not([data-preparation-surface]) pot-file-image[data-state="ready"]').waitFor();await settle();
+    const imageOffset=await page.evaluate(id=>{const h=document.querySelector('.history:not([data-preparation-surface])');return h.querySelector(`[data-message-id="${id}"]`).getBoundingClientRect().top-h.getBoundingClientRect().top;},imageAnchor.id);
     assert(Math.abs(imageOffset-imageAnchor.offset)<=3,`${width}px asynchronous image growth preserves reading`);
     await page.locator('.latest-button').click();await settle();
     current=await page.evaluate(()=>continuity.sample());assert(current.height-current.viewport-current.top<=2,`${width}px Latest reveals the loaded image`);
     await page.evaluate(()=>continuity.nested());
-    const group=page.locator('.history .work-record-group[data-anchor-message-id="m242"]');await group.waitFor();
+    const group=page.locator('.history:not([data-preparation-surface]) .work-record-group[data-anchor-message-id="m242"]');await group.waitFor();
     assert(await group.getAttribute('data-sequence')==='242'&&await group.getAttribute('data-sequence-before')==='242'&&await group.getAttribute('data-sequence-after')==='274','A collapsed group represents one native record and exposes its exact member range');
-    await group.locator(':scope > details > summary').click();await page.locator('.history [data-message-id="m242"]').waitFor();await settle();
-    const parent=page.locator('.history [data-message-id="m242"]').locator('details.tool-call > summary').first();
+    await group.locator(':scope > details > summary').click();await page.locator('.history:not([data-preparation-surface]) [data-message-id="m242"]').waitFor();await settle();
+    const parent=page.locator('.history:not([data-preparation-surface]) [data-message-id="m242"]').locator('details.tool-call > summary').first();
     await parent.click();await settle();
     assert(await group.locator('.work-record-body article.message').count()===33,`${width}px grouped nested tools retain all native members`);
     await page.mouse.move(width-35,400);

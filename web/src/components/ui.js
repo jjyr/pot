@@ -118,7 +118,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   history.setAttribute('role', 'log');
   history.setAttribute('aria-label', t('chat'));
   const messageColumn = el('div', 'message-column');
-  const taskClock=bindTaskClock(messageColumn,{locale:()=>locale,active:()=>!disposed&&route==='chat'&&!root.classList.contains('show-directory')});
+  const taskClock=bindTaskClock(messageColumn,{locale:()=>locale,active:()=>!disposed&&route==='chat'&&!root.classList.contains('show-directory'),prepare:()=>requestMessageRender(false)});
   const historyStatus=el('button','history-page-status text-button');historyStatus.type='button';
   const windowHost=el('div','message-window');
   const emptyChat=el('p','empty-chat');emptyChat.hidden=true;
@@ -921,7 +921,6 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if(!retained.has(messageWindow.position.anchors[0].key))messageWindow.locate({key:'background-tasks-heading',align:'nearest'});
     }
     pendingTaskToggle=null;
-    if(!viewportOnly)taskClock.refresh();
     if(!viewportOnly)pages?.renderApprovals();
     if(!chatApprovals.hidden&&locateApprovals===JSON.stringify(client.scope?.())){
       locateApprovals='';cancelChatPosition();messageWindow.locate({key:'chat-approvals',align:'nearest'});
@@ -932,7 +931,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const regions=[{key:'chat-history-status',host:historyStatus,revision:JSON.stringify(historyChrome),render:target=>{target.hidden=historyChrome.hidden;target.disabled=historyChrome.disabled;target.textContent=historyChrome.label;}},
       {key:'chat-empty',host:emptyChat,revision:JSON.stringify(empty),render:target=>{target.hidden=empty.hidden;target.textContent=empty.text;}},
       ...(client.production?[backgroundTaskView.region(JSON.stringify(client.scope()),tasks,(id,phase)=>pages.taskNeedsApproval(id,phase)),pages.approvalRegion()]:[])];
-    messageWindow.setMessages(roots,{parents,regions,layoutEpoch:[layoutKey(),snapshot?.runtime_id,snapshot?.boot_id,snapshot?.owner_id,snapshot?.conversation_id,selectedAssistant?.name,selectedAssistant?.avatar,snapshot?.agent?.attachments,toolOffline,canRetrySend],renderContext:{snapshot,sending,forest,scope:{...client.scope?.()},assistant:selectedAssistant,t,offline:toolOffline,canRetrySend}});
+    messageWindow.setMessages(roots,{parents,regions,afterCommit:()=>taskClock.refresh(),layoutEpoch:[layoutKey(),snapshot?.runtime_id,snapshot?.boot_id,snapshot?.owner_id,snapshot?.conversation_id,selectedAssistant?.name,selectedAssistant?.avatar,snapshot?.agent?.attachments,toolOffline,canRetrySend],renderContext:{snapshot,sending,forest,scope:{...client.scope?.()},assistant:selectedAssistant,t,offline:toolOffline,canRetrySend}});
     if(navigation&&snapshot&&!historyLoading&&navigation.kind!=='message')chatPosition=null;
     latest.hidden=messageWindow.following;
     state.uiAnchor=messageWindow.following?null:selectedSequence()||messageWindow.anchor?.sequence||null;

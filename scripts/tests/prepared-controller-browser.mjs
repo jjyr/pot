@@ -1,3 +1,4 @@
+import {preparedIndex} from './prepared-index-browser.mjs';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {sourceServer,launchBrowser,isolatedPage,contract} from './browser-harness.mjs';
@@ -13,5 +14,5 @@ try{
   const result=await contract('pot-ui-conversation-controller-browser.js',page,{origin:server.origin});
   return {nativeScrollend:native,capability:await page.evaluate(()=>({available:'onscrollend' in window,userAgent:navigator.userAgent})),...result};
  }));
- console.log(JSON.stringify({passed:true,results}));
+ const index=await preparedIndex(browser,server.origin);console.log(JSON.stringify({passed:true,results,index}));
 }finally{await browser.close();await server.close();}

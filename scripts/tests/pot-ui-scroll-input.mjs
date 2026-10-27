@@ -57,7 +57,7 @@ try{
  for(const os of ['iPhone','Android']){
   for(const order of ['dom-first','measure-first']){
    const f=fixture(os),v=f.virtualizer;let actualTop=1000,requested=0;
-   const row={dataset:{scrollAnchor:'message:m',messageId:'m',sequence:'11'},getBoundingClientRect:()=>({top:actualTop-f.history.scrollTop-v._holdOffset,bottom:actualTop-f.history.scrollTop-v._holdOffset+200,height:200})};
+   const row={closest:()=>null,dataset:{scrollAnchor:'message:m',messageId:'m',sequence:'11'},getBoundingClientRect:()=>({top:actualTop-f.history.scrollTop-v._holdOffset,bottom:actualTop-f.history.scrollTop-v._holdOffset+200,height:200})};
    f.history.querySelectorAll=()=>[row];
    const notifications=[];
    const c=createConversationController({scroller:f.history,virtualizer:v,requestLayout:()=>requested++,scrolled:delta=>notifications.push({delta,published:c.api.snapshot().position?.anchor?.offset,actual:row.getBoundingClientRect().top})});f.attach(c);

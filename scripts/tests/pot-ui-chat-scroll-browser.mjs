@@ -38,7 +38,7 @@ const client={chatCacheName:'pot-scroll-'+crypto.randomUUID(),production:true,ru
   },
 };
 if(new URLSearchParams(location.search).get('contract')!=='window')mountApp(root,client);
-const history=()=>root.querySelector('.history');
+const history=()=>root.querySelector('.history:not([data-preparation-surface])');
 function scroll(top){const h=history();h.scrollTop=top;h.dispatchEvent(new Event('scroll'));}
 const check=(value,label)=>{results.textContent+=`${value?'PASS':'FAIL'} ${label}\n`;};
 async function run(){

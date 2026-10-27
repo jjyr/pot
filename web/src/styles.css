@@ -830,8 +830,6 @@ pot-resource{display:block;min-width:0;max-width:100%;margin:14px 0;border:1px s
 pot-message-file.prepared-frame[data-block="false"] { display:inline-block; inline-size:var(--prepared-width); vertical-align:bottom; }
 pot-message-file.prepared-frame[data-block="true"] { display:block; margin-block:12px; }
 .message-body:has(pot-message-file.prepared-frame[data-block="true"]) { width:100%; }
-.prepared-row { box-sizing:border-box; block-size:var(--prepared-row-height); min-block-size:var(--prepared-row-height); max-block-size:var(--prepared-row-height); overflow:auto; }
-.prepared-region { box-sizing:border-box; block-size:var(--prepared-region-height); min-block-size:var(--prepared-region-height); max-block-size:var(--prepared-region-height); overflow:auto; }
 .prepared-row,.prepared-region { margin-top:var(--prepared-margin-top)!important; margin-bottom:var(--prepared-margin-bottom)!important; }
 .resource-heading{display:flex;align-items:center;gap:12px;padding:13px 15px;background:var(--navigation)}
 .resource-type{font-size:11px;letter-spacing:.04em;font-weight:650;color:var(--muted);border:1px solid var(--divider);border-radius:6px;padding:4px 6px;flex-shrink:0}

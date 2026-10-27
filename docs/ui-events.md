@@ -318,8 +318,10 @@ an unrelated assistant's cleanup failure does not complete the selected draft's
 preparation.
 Hidden rows do not overwrite measured heights. The destination remains visually
 hidden through mounting, measurement and position restoration; only the prepared
-viewport is exposed. Persisted height hints are qualified by width, locale, theme
-and font revision; content changes remeasure mounted rows. Explicit message/Latest actions supersede prior positioning, and
+viewport is exposed. Persisted height hints do not authorize offsets in a new layout. The complete
+loaded collection must have measurements for its current width, fonts, locale
+and render props before the list publishes its canvas; content changes replace
+the affected measurements through preparation. Explicit message/Latest actions supersede prior positioning, and
 navigation or deliberate upward reading retires an in-flight locate so its late
 response cannot replace the current history window or move the reader.
 An explicit message destination stays anchored through delayed preview loading;
@@ -361,12 +363,29 @@ an explicit Latest command does.
 
 The same reconciliation handles prepend, trimming, reorder, width reflow,
 external header/composer layout and asynchronous image or disclosure sizes.
-Newly mounted or updated rows have synchronous initial measurements, including
-during native scrolling; later ResizeObserver batches update the same geometry.
+New, changed and remounted rows first render in a connected, visually hidden
+surface with the actual ancestor CSS and available client width. The surface
+preserves the scroller's CSS inheritance, including relative line heights. Each
+component recursively reaches readiness or receives its five-second component
+frame before its parent is measured. Preparation uses batches of at most 96
+rows and admits at most 32 concurrent resource loads. It covers the entire
+loaded collection, while preserving the existing backend page boundaries.
+Only a complete measured index is installed into the engine. The prepared real
+nodes then move into the live tree in the same geometry transaction. Row and
+region containers retain natural flow; only bounded component frames isolate
+late resource content. Live activity, elapsed-time text and disclosure changes
+use this same preparation entry point. Width and font changes retain the old
+committed layout until the replacement measurements are ready. Live observer
+callbacks cannot insert unprepared sizes into the index.
 A delayed or repeated measurement of an already accounted height yields zero
 remaining displacement. Independent height changes can receive independent
-corrections. Reading state is published after the resulting geometry settles,
-rather than by a separate cursor's layout-finally callback.
+corrections. The controller records requested and actual native landings. When
+the native scroller cannot represent a fractional CSS-pixel destination, it
+retains that residual in the intended anchor offsets and suppresses repeated
+identical commands. Publication may adopt a newly visible native anchor without
+erasing the residual. Actual readback also synchronizes the engine's offset.
+Reading state is published after the resulting geometry settles, rather than
+by a separate cursor's layout-finally callback.
 
 TanStack retains native touch ownership and executes deferred corrections through
 contact, dragging and the momentum tail. The controller accounts for a held
@@ -383,10 +402,22 @@ with twelve overscan items on each side. Native scroll notifications commit the
 range synchronously. Held touch corrections may require a negative leading
 spacer margin. Each DOM replacement temporarily reserves the host extent until
 all rows and spacers are in place, preventing native clamping against an
-intermediate shorter list. Initial measurement and subsequent bounded range
-commits avoid scanning or rendering the whole transcript. Item margins are
-included in sizes; width changes invalidate mounted measurements, and each
-cached owner retains bounded height hints.
+intermediate shorter list. A layout generation measures the complete loaded
+collection in bounded batches, retaining numeric measurements while disposing
+offscreen candidate DOM and leases. Only the current virtual range, pinned
+reading nodes and bounded preparation cohorts retain DOM. Item margins are
+included in every measured size. Recent valid measurements may be reused across
+page windows in the same layout generation; unknown or invalid values never
+become canvas offsets.
+
+If a native jump outruns materialization, the list can temporarily hold its last
+readable real nodes while the measured destination is prepared. These nodes
+keep their original message IDs and sequences. The explicitly marked hold is
+excluded from reading-position capture, resolution and persistence, never
+represents the new range, and is removed atomically with the ready destination.
+Its rectangles remain actual DOM rectangles; no projected rectangle is used as
+a readable witness or measurement. The hold does not write scrollTop or replace
+the controller's latest input and navigation intent.
 
 Expanded tools have range-only child virtualizers sharing the chat scroller;
 only the root controller owns reading intent and scroll compensation. Child

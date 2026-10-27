@@ -17,20 +17,21 @@ export function taskElapsed(start,end,locale='en',compact=false){
 }
 
 // One presentation timer per mounted view; no projection reads or DOM rebuilds.
-export function bindTaskClock(root,{locale,active}){
+export function bindTaskClock(root,{locale,active,prepare}){
   let timer=0,disposed=false;
   function refresh(){
     clearTimeout(timer);timer=0;
     if(disposed||document.hidden||!active())return;
-    const now=Date.now();let delay=Infinity;
+    const now=Date.now();let delay=Infinity,changed=false;
     for(const node of root.querySelectorAll('[data-started-at]')){
       const start=Number(node.dataset.startedAt),finished=node.hasAttribute('data-finished-at'),end=finished?Number(node.dataset.finishedAt):now;
       const text=taskElapsed(start,end,locale(),node.dataset.compact==='true');
-      if(node.textContent!==text)node.textContent=text;
+      if(node.textContent!==text){if(prepare)changed=true;else node.textContent=text;}
       if(!text||finished)continue;
       const elapsed=Math.max(0,now-start),unit=elapsed<3600000?1000:60000;
       delay=Math.min(delay,unit-elapsed%unit);
     }
+    if(changed)prepare();
     if(Number.isFinite(delay))timer=setTimeout(refresh,delay);
   }
   document.addEventListener('visibilitychange',refresh);

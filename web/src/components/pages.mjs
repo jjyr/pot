@@ -1066,8 +1066,8 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       {
         const capturedKey=approvalOwner,capturedScope={...approvalScope()};
         entries.push({id:approval.id,revision:JSON.stringify([value,options]),
-          prepare:()=>{const candidate=createApprovalCard({locale,machineLabel:id=>machineInfo.label(id,capturedScope,locale()),onDecision:async(original,decision)=>{if(approvalContext()!==capturedKey)throw Error(translate(locale(),'approvals.contextChanged'));await decideApproval(original,decision);}});candidate.update(value,options);candidate.element.open=card.element.open;return candidate.element;},
-          commit:()=>{card.update(value,options);return card.element;},
+          prepare:()=>{const candidate=createApprovalCard({locale,machineLabel:id=>machineInfo.label(id,capturedScope,locale()),onDecision:async(original,decision)=>{if(approvalContext()!==capturedKey)throw Error(translate(locale(),'approvals.contextChanged'));await decideApproval(original,decision);}});candidate.update(value,options);candidate.element.open=card.element.open;candidate.element.preparedApprovalCard=candidate;return candidate.element;},
+          commit:prepared=>{if(prepared?.preparedApprovalCard){card.invalidate();approvalCards.set(key,prepared.preparedApprovalCard);return prepared;}card.update(value,options);return card.element;},
         });
       }
     }

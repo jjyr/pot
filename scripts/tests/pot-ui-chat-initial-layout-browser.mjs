@@ -26,7 +26,7 @@ const client={production:true,chatCacheName:'initial-layout-'+crypto.randomUUID(
 let dispose;
 try{
   dispose=mountApp(root,client);
-  const history=()=>root.querySelector('.history'),visible=()=>getComputedStyle(history()).visibility!=='hidden'&&!history().hidden;
+  const history=()=>root.querySelector('.history:not([data-preparation-surface])'),visible=()=>getComputedStyle(history()).visibility!=='hidden'&&!history().hidden;
   const select=async owner=>{if(matchMedia('(max-width:719px)').matches&&!root.classList.contains('show-directory'))root.querySelector('.narrow-navigation').click();root.querySelector(`[data-view-key='["layout","${owner}"]']`).click();await wait(()=>scope.owner===owner);};
   await wait(()=>releases.length===1);for(let i=0;i<8;i++)await frame();
   check(!visible(),'Initial history remains hidden while its image has no final dimensions');
