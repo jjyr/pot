@@ -74,6 +74,17 @@ performed. Non-SQL persisted-format changes must change the marker. See [Updates
 
 ## Checks and isolated previews
 
+For native image preview checks, serve the repository on loopback and open
+`/scripts/tests/fixtures/image-viewer.html`. It mounts the real saved-resource,
+uploaded-attachment and Markdown image components with synthetic originals and
+no backend writes. Use **Run component checks** for its in-page assertions.
+`scripts/tests/pot-ui-image-viewer-capture.mjs` accepts the origin, an optional
+before-tree URL prefix and an output directory. With the existing Playwright
+module and Chromium configured through `POT_PLAYWRIGHT_MODULE` and
+`POT_CHROMIUM_EXECUTABLE`, it exercises native mouse/wheel/keyboard input at
+1280, 390 and 320 pixels in both locales/themes and exports paired screenshots.
+Touch scrolling and native desktop WebViews still require device testing.
+
 ```sh
 mise run lint
 mise run check:go
