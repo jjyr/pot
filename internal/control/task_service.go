@@ -163,9 +163,21 @@ func (s *Service) taskLoop() {
 		s.taskLife.wg.Add(1)
 		go func(source *core.Subscription) {
 			defer s.taskLife.wg.Done()
+			var seenRuns, seenOutput uint64
 			for {
-				if _, err := source.Next(s.ctx); err != nil {
+				topics, err := source.Next(s.ctx)
+				if err != nil {
 					return
+				}
+				if source == runSub {
+					if topics["runner"] != seenOutput {
+						seenOutput = topics["runner"]
+						s.Changes.Notify("runner")
+					}
+					if topics["runs"] == seenRuns {
+						continue
+					}
+					seenRuns = topics["runs"]
 				}
 				s.Changes.Notify("tasks")
 				s.Changes.Notify("assistant-mail")

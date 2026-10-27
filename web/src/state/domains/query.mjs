@@ -2,7 +2,7 @@
 export function createQueryRegistry(resources){
   const queries=new Map();let closed=false;
   const state=(data,status='ready',freshness='fresh',error=null)=>({data,status,freshness,error,lastConfirmed:status==='ready'&&freshness==='fresh'?Date.now():0});
-  function define(key,load,{topics=[],space='',paths=[],maxAge=5000,invalidationForce=true,subscribe}={}){
+  function define(key,load,{topics=[],space='',owner,paths=[],maxAge=5000,invalidationForce=true,subscribe}={}){
     if(queries.has(key))return queries.get(key);
     let snapshot=state(undefined,'idle','unknown'),flight,queued,version=0;
     const listeners=new Set();let stopExternal;
@@ -34,6 +34,10 @@ export function createQueryRegistry(resources){
       watch(listener){listeners.add(listener);if(listeners.size===1)stopExternal=subscribe?.(()=>query.requery());listener(eligible());query.refresh().catch(()=>{});return()=>{listeners.delete(listener);if(!listeners.size){stopExternal?.();stopExternal=null;}};},
       async value(force=false){return (await query.refresh(force)).data;},
       matches(meta){return (!space||!meta.space||space===meta.space)&&(paths.includes(meta.path)||!meta.topics?.length||meta.topics?.some(topic=>topics.includes(topic)));},
+      // Commits announce one concrete resource, while invalidations announce
+      // business topics. Shared topic labels do not make two resources the same
+      // dependency. Collection query strings share their declared base path.
+      matchesResource(meta){return paths.length&&meta.path?(!space||!meta.space||space===meta.space)&&(owner===undefined||meta.owner===undefined||owner===meta.owner)&&paths.includes(meta.path.split('?')[0]):query.matches(meta);},
       invalidationForce,active(){return listeners.size>0;},get pending(){return !!flight;},invalidate(){version++;if(snapshot.data!==undefined)publish({...snapshot,freshness:'stale'});},
       dispose(){stopExternal?.();stopExternal=null;listeners.clear();},
     };queries.set(key,query);for(const [oldKey,old]of queries){if(queries.size<=128)break;if(!old.active()&&!old.pending&&old!==query){old.dispose();queries.delete(oldKey);}}return query;
@@ -41,7 +45,7 @@ export function createQueryRegistry(resources){
   // Reassemble the entire query after an event (including earlier pages), while
   // letting each resource reuse IO that already crossed its invalidation fence.
   const notify=(topics,source={})=>Promise.allSettled([...queries.values()].filter(query=>query.active()&&query.matches({...source,topics})).map(query=>{query.invalidate();return query.refresh(query.invalidationForce?'invalidated':false);}));
-  const stop=resources.subscribe((meta,error)=>{for(const query of queries.values())if(query.active()&&query.matches(meta)){if(error)query.fail(error);else query.requery();}});
+  const stop=resources.subscribe((meta,error)=>{for(const query of queries.values())if(query.active()&&query.matchesResource(meta)){if(error)query.fail(error);else query.requery();}});
   const stopInvalidation=resources.subscribeInvalidation(notify);
   return {define,notify,dispose(){closed=true;stop();stopInvalidation();for(const query of queries.values())query.dispose();queries.clear();}};
 }

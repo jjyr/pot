@@ -1178,8 +1178,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if(source.boot&&state.snapshot&&(!source.space||source.space===client.scope().space)&&state.snapshot.boot_id!==source.boot)loadSnapshot(true);
       if(source.reset){notifications?.refresh({reset:true,space:source.space});loadDirectory();}
       else if(relevantChange(keys,['task-outcomes','permissions']))notifications?.refresh({topics:keys,space:source.space});
-      if(relevantChange(keys,['spaces','assistants','assistant-mail','agent-links','conversation','runtime','permissions','tasks','runner']))loadDirectory();
-      if(relevantChange(keys,['tasks','runner'],client.scope().space,source))refreshBackgroundTasks();
+      if(relevantChange(keys,['spaces','assistants','assistant-mail','agent-links','conversation','runtime','permissions','tasks']))loadDirectory();
+      if(relevantChange(keys,['tasks'],client.scope().space,source))refreshBackgroundTasks();
       pages.refresh(keys,{...source,domainNotified:true});if(relevantChange(keys,['permissions','spaces','runtime'],pages.approvalSpace,source))pages.permissions();
     },{space:''});
   }

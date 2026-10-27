@@ -34,6 +34,15 @@ refresh catalogue `pending_approvals` counts for every assistant independently o
 reply identity and unread baselines. They also refresh the selected owner's
 transient Chat approval region; duplicate request IDs do not repeat its notice.
 Mutations publish after persistence; no-op reads do not produce invalidations.
+Task journal `text_delta` and `tool_output` commits publish `runner` only. They
+advance the same durable transcript cursor without invalidating the assistant
+directory, active Task cards, Task catalogue or permission projections. Open
+Task details consume `runner` to read incremental events. State-bearing events,
+including `tool_state`, `turn_finished` and unknown event types, retain the Task
+lifecycle invalidation path; cancellation, approval and capability changes still
+require current authoritative state. Expiring an empty permission set does not
+publish a permission change; removing an actual pending request, denial or grant
+does.
 The global subscription remains active even when no assistant exists, so an
 assistant created by another client appears without reloading the page.
 
@@ -45,6 +54,17 @@ values. Storage failure retains the prior projection and retries the pending
 invalidation before another refresh.
 
 Shared domain queries serialize reads and coalesce changes into one later read.
+Resource commit notifications and business invalidations have separate matching
+rules. Queries declaring resource dependencies reassemble after commits to those
+concrete paths in their declared Space and owner scope. Path matching strips the
+query string, so a committed collection page wakes the collection consumer.
+Sharing a business topic with another resource does not make its commit a
+dependency. Cross-tab commits follow the same rule after reading committed
+storage. Business invalidations continue matching topics and Space, immediately
+fencing stale projections; explicit refresh bypasses commit matching. The global
+directory declares spaces, assistants, runtime and Agent Links as dependencies
+across its constituent scopes. Active and detail Task queries capture their
+owner and Space when created; switching selection watches the new scoped query.
 Event batches use blocking `authoritative: 'invalidated'` resource reads: they
 wait for each invalidated resource, reusing a committed read that already crossed
 that resource's version fence. The later query still reassembles all resources
