@@ -31,26 +31,24 @@ func (a *MCPAccess) directory(ctx context.Context) (agentlink.Directory, error) 
 	if a.options.Local == nil {
 		return directory, nil
 	}
-	local, e := (potLinkBackend{a.options.Local}).Directory(ctx)
+	definitions, e := a.options.Local.Registry.Definitions(ctx)
 	if e != nil {
 		return directory, e
 	}
-	for _, endpoint := range local.Targets {
-		operations := []agentlink.Operation{}
-		// Project only implemented collaboration tools, never Describe's owner scope.
-		for _, op := range []agentlink.Operation{agentlink.ChatRead, agentlink.ChatReceipt, agentlink.ChatSend, agentlink.TaskSubmit, agentlink.TaskRead, agentlink.TaskCancel} {
-			if endpoint.Capabilities.Supports(op) {
-				operations = append(operations, op)
-			}
+	for _, definition := range definitions {
+		identity, e := a.options.Local.agentLinkIdentity(ctx, definition.ID)
+		if e != nil {
+			return directory, e
 		}
-		// This describes the original directing human's once-only review
-		// extension, never the general owner Approvals operation/model tool.
-		if a.options.HumanReview != nil && endpoint.Identity.Address.Kind == "assistant" && endpoint.Capabilities.Supports(agentlink.TaskSubmit) {
+		identity.Avatar = definition.Avatar
+		// Explicit MCP targets never read or initialize the legacy default setting.
+		operations := []agentlink.Operation{agentlink.ChatRead, agentlink.ChatReceipt, agentlink.ChatSend, agentlink.TaskSubmit, agentlink.TaskRead, agentlink.TaskCancel}
+		if a.options.HumanReview != nil {
 			operations = append(operations, agentlink.Approvals)
 		}
-		endpoint.Capabilities = agentlink.Description{Version: 1, Scope: "peer", Operations: operations}
-		directory.Targets = append(directory.Targets, endpoint)
+		directory.Targets = append(directory.Targets, agentlink.Endpoint{Identity: identity, Capabilities: agentlink.Description{Version: 1, Scope: "peer", Operations: operations}})
 	}
+
 	return directory, nil
 }
 func (a *MCPAccess) submit(ctx context.Context, c agentlink.MCPCaller, input agentlink.MCPSubmitInput) (MCPTaskAcceptance, error) {

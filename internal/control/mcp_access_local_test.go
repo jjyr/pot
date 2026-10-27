@@ -161,3 +161,23 @@ func TestMCPAccessUncertainLocalMutationOnlyReconciles(t *testing.T) {
 		t.Fatal("conflicting retry dispatched", e)
 	}
 }
+
+func TestMCPDirectoryDoesNotSelectLegacyDefault(t *testing.T) {
+	f := mcpLocalAccessFixture(t)
+	ctx := context.Background()
+	var before int
+	if e := f.access.options.Local.integrationDB.QueryRow("SELECT count(*) FROM agent_link_node_settings").Scan(&before); e != nil || before != 0 {
+		t.Fatal(before, e)
+	}
+	session := f.session(t, f.grant(t, false))
+	var directory agentlink.Directory
+	fixtureCall(t, session, "pot_directory", map[string]any{}, &directory)
+	if directory.DefaultTarget != nil || len(directory.Targets) != 2 {
+		t.Fatal("explicit MCP catalogue selected a default", directory)
+	}
+	var after int
+	if e := f.access.options.Local.integrationDB.QueryRow("SELECT count(*) FROM agent_link_node_settings").Scan(&after); e != nil || after != 0 {
+		t.Fatal("MCP read initialized legacy settings", after, e)
+	}
+	_ = ctx
+}
