@@ -25,7 +25,7 @@ import (
 
 const maxBytes = 16 * 1024 * 1024
 
-var Common = []string{"openai", "anthropic", "google", "deepseek", "openrouter", "opencode", "opencode-go", "groq"}
+var Common = []string{"openai", "anthropic", "google", "deepseek", "openrouter", "opencode", "opencode-go", "xai"}
 
 type Limits struct {
 	Context uint64 `json:"context"`
@@ -154,7 +154,7 @@ func endpoint(id string, p provider, m *model) (string, string, bool) {
 	}
 	protocol := ""
 	switch npm {
-	case "@ai-sdk/openai-compatible", "@openrouter/ai-sdk-provider", "@ai-sdk/groq", "@ai-sdk/cerebras", "@ai-sdk/deepinfra":
+	case "@ai-sdk/openai-compatible", "@openrouter/ai-sdk-provider", "@ai-sdk/xai", "@ai-sdk/cerebras", "@ai-sdk/deepinfra":
 		protocol = "openai_chat"
 	case "@ai-sdk/openai":
 		protocol = "openai_responses"
@@ -166,7 +166,7 @@ func endpoint(id string, p provider, m *model) (string, string, bool) {
 		return "", "", false
 	}
 	if api == nil {
-		value := map[string]string{"openai": "https://api.openai.com/v1", "anthropic": "https://api.anthropic.com/v1", "google": "https://generativelanguage.googleapis.com/v1beta", "groq": "https://api.groq.com/openai/v1", "cerebras": "https://api.cerebras.ai/v1", "deepinfra": "https://api.deepinfra.com/v1/openai"}[id]
+		value := map[string]string{"openai": "https://api.openai.com/v1", "anthropic": "https://api.anthropic.com/v1", "google": "https://generativelanguage.googleapis.com/v1beta", "xai": "https://api.x.ai/v1", "cerebras": "https://api.cerebras.ai/v1", "deepinfra": "https://api.deepinfra.com/v1/openai"}[id]
 		if value == "" {
 			return "", "", false
 		}
@@ -217,7 +217,11 @@ func (d *Directory) Options() []ProviderOption {
 		if !validLogo(logo) {
 			logo = ""
 		}
-		out = append(out, ProviderOption{id, p.Name, ep, protocol, p.Doc, slices.Contains(Common, id), logo, models})
+		name := p.Name
+		if id == "xai" {
+			name = "Grok"
+		}
+		out = append(out, ProviderOption{id, name, ep, protocol, p.Doc, slices.Contains(Common, id), logo, models})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		a, b := slices.Index(Common, out[i].ID), slices.Index(Common, out[j].ID)
