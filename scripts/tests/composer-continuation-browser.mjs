@@ -1,3 +1,4 @@
+import {waitForDraftSaved} from './draft-persistence-browser.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
@@ -27,7 +28,7 @@ export async function composerContinuationBrowser(browser,{sourceOrigin,baseline
     await control({continuation,messages:[source]});
     await page.goto(fixture.origin+'/?locale=en&assistant_id=alpha');await ready();
     if(baseline)await page.locator('.turn-continuation').waitFor();else await play();
-    if(captureDir){await page.waitForFunction(()=>!document.querySelector('.draft-storage-status')||document.querySelector('.draft-storage-status').textContent==='Draft saved on this device');await page.locator('[data-reference-source]').waitFor({state:'visible'});await page.evaluate(()=>document.fonts.ready);await mkdir(captureDir,{recursive:true});await page.screenshot({path:captureDir+'/'+name+'-'+(baseline?'before':'after')+'.png'});}
+    if(captureDir){await waitForDraftSaved(page);await page.locator('[data-reference-source]').waitFor({state:'visible'});await page.evaluate(()=>document.fonts.ready);await mkdir(captureDir,{recursive:true});await page.screenshot({path:captureDir+'/'+name+'-'+(baseline?'before':'after')+'.png'});}
     if(baseline){results.push({viewport,baseline:true});continue;}
     assert.equal(await page.locator('.turn-continuation').count(),0);
     assert.equal(await page.locator('.turn-continuation-error').isVisible(),false);

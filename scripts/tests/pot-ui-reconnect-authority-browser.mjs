@@ -1,3 +1,4 @@
+import {waitForDraftSaved} from './draft-persistence-browser.mjs';
 // Real production bootstrap, HTTP/SSE and IndexedDB with synthetic identities.
 // Never submits a message, creates an assistant, or contacts a product service.
 import assert from 'node:assert/strict';
@@ -19,7 +20,7 @@ try{
   const context=await browser.newContext({viewport}),page=await context.newPage();page.setDefaultTimeout(15000);
   page.on('pageerror',error=>report.errors.push(error.message));
   const editor=page.locator('textarea.composer-input'),send=page.locator('.send-button');
-  const select=async name=>{if(viewport.width<500&&await page.getByRole('button',{name:'Back to Assistants',exact:true}).count())await page.getByRole('button',{name:'Back to Assistants',exact:true}).click();await page.getByText(name,{exact:true}).first().click();await editor.waitFor();await page.waitForFunction(name=>document.querySelector('.history')?.innerText.includes(name.split(' ')[1].toUpperCase()+' cached message 90.'),name);await page.getByText('Draft saved on this device',{exact:false}).waitFor();};
+  const select=async name=>{if(viewport.width<500&&await page.getByRole('button',{name:'Back to Assistants',exact:true}).count())await page.getByRole('button',{name:'Back to Assistants',exact:true}).click();await page.getByText(name,{exact:true}).first().click();await editor.waitFor();await page.waitForFunction(name=>document.querySelector('.history')?.innerText.includes(name.split(' ')[1].toUpperCase()+' cached message 90.'),name);await waitForDraftSaved(page);};
   const waitHeld=async group=>page.waitForFunction(async group=>(await(await fetch('/__fixture')).json()).pending.includes(group),group);
   const capture=async name=>{const value=await page.evaluate(()=>({text:document.body.innerText,draft:document.querySelector('textarea.composer-input')?.value,sendDisabled:document.querySelector('.send-button')?.disabled,sendLabel:document.querySelector('.send-button')?.getAttribute('aria-label'),buttons:[...document.querySelectorAll('button')].map(button=>({label:button.getAttribute('aria-label')||button.textContent,disabled:button.disabled})),inert:[...document.querySelectorAll('[inert]')].map(node=>node.className)}));report.observations.push({name,width:viewport.width,...value,fixture:await config({})});return value;};
   const locked=async name=>{assert(await send.isDisabled(),name);const value=await capture(name);for(const label of ['Tasks','Settings','Add assistant'])assert(value.buttons.filter(button=>button.label===label).every(button=>button.disabled),label+' opened early');};

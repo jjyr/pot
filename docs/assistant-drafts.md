@@ -19,11 +19,11 @@ Reload --> conversation check --> editor + File previews + upload validation
 Text and reference edits save after 300 ms. Switching assistants flushes the
 previous draft, and attachment changes save promptly. Hidden-page events only
 supplement these saves. Metadata and original Blobs commit in one IndexedDB
-transaction; later text edits do not rewrite stored image bytes. The composer
-shows whether it is loading, still unsaved, saved, or unable to save. Storage
-errors retain the in-memory draft with an explicit Retry action and diagnostic
-details. A failed load cannot replace typing made while that load or its retry
-was pending. Closing a page before an unsaved write completes can still lose
+transaction; later text edits do not rewrite stored image bytes. Routine loading
+and saving do not show a text status below the composer. Storage errors appear
+on demand and retain the in-memory draft with an explicit Retry action and
+diagnostic details. A failed load cannot replace typing made while that load or
+its retry was pending. Closing a page before an unsaved write completes can still lose
 those edits; clearing site storage or browser storage eviction also removes
 local drafts.
 
