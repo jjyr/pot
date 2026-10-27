@@ -30,7 +30,7 @@ const (
 // when a persisted thread cannot be resumed.
 type Session struct {
 	Adapter, Model, Effort, HostRoot string
-	JobID                            string
+	JobID, RunID                     string
 	AssistantID                      string
 	Binary                           string
 	Workspace                        string
@@ -437,7 +437,7 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 	defer cancel()
 	cmd := exec.CommandContext(processCtx, binary, "app-server", "--listen", "stdio://")
 	cmd.Dir = s.Workspace
-	cmd.Env = append(os.Environ(), "POT_AGENT_ASSISTANT_ID="+s.AssistantID, "POT_AGENT_JOB_ID="+s.JobID)
+	cmd.Env = nativeEnvironment(os.Environ(), s)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stderr = io.Discard
 	input, err := cmd.StdinPipe()

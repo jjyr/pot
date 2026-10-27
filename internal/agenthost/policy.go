@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// A global plugin hook is inert in ordinary Antigravity conversations. The host
+// The independent receiver support hook is inert in ordinary Antigravity conversations. The host
 // binds the execution identity and scope through the supervised child's env.
 func agyPolicy(in io.Reader, out io.Writer) error {
 	var payload struct {
@@ -31,7 +31,9 @@ func agyPolicy(in io.Reader, out io.Writer) error {
 			if tool == "" {
 				tool, _ = payload.ToolCall.Args["tool_name"].(string)
 			}
-			if (server == "pot" || server == "pot_pot") && (tool == "pot_connections" || tool == "pot_assistants" || tool == "pot_send" || tool == "pot_message_receipt") {
+			if server == "pot_receiver" && tool == "pot_execution_context" && os.Getenv("POT_AGENT_RUN_ID") != "" {
+				decision = "auto_approve"
+			} else if (server == "pot" || server == "pot_pot") && (tool == "pot_connections" || tool == "pot_assistants" || tool == "pot_send" || tool == "pot_message_receipt") {
 				decision = "auto_approve"
 			} else if os.Getenv("POT_AGENT_MODE") == "read-only" {
 				decision = "deny"

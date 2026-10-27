@@ -17,7 +17,7 @@ func main() {
 		return
 	}
 	if len(os.Args) > 1 && os.Args[1] == "plugin" {
-		fmt.Println(`[{"name":"pot","enabled":true,"hooks":["pot-execution-scope"],"mcpServers":["pot"]}]`)
+		fmt.Println(`[{"name":"pot-receiver","enabled":true,"hooks":["pot-execution-scope"],"mcpServers":["pot_receiver"]}]`)
 		return
 	}
 	flags := map[string]string{}

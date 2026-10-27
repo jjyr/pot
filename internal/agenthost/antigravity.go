@@ -70,7 +70,7 @@ func runAgyTurn(ctx context.Context, s Session, prompt string, events turnEvents
 	defer stop()
 	cmd := exec.CommandContext(processCtx, binary, args...)
 	cmd.Dir = s.Workspace
-	cmd.Env = append(os.Environ(), "POT_AGENT_ASSISTANT_ID="+s.AssistantID, "POT_AGENT_JOB_ID="+s.JobID, "POT_AGENT_MODE="+s.Mode, "POT_AGENT_HOST_ROOT="+s.HostRoot)
+	cmd.Env = nativeEnvironment(os.Environ(), s)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	logs := &boundedLog{}
 	cmd.Stderr = logs
@@ -187,9 +187,11 @@ func runAgyTurn(ctx context.Context, s Session, prompt string, events turnEvents
 					}
 				}
 				result.ThreadID = e.Conversation
-				result.TurnID = s.JobID
+				// AGY exposes a conversation, not a native turn ID. RunID remains
+				// the Host execution fence and must not masquerade as a native ID.
+				result.TurnID = ""
 				if events.Started != nil {
-					if err = events.Started(s.JobID); err != nil {
+					if err = events.Started(""); err != nil {
 						result.Error = "antigravity_state_persistence_failed"
 						return
 					}
@@ -252,7 +254,7 @@ func (b *backend) agyModels(ctx context.Context) ([]agentlink.ExecutionModel, er
 	return models, nil
 }
 
-// Read-only guarantees depend on the native hook actually being installed and
+// Read-only guarantees depend on the execution support actually being installed and
 // enabled. Refuse admission rather than quietly running without that boundary.
 func verifyAgyPlugin(ctx context.Context, binary string) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -274,9 +276,9 @@ func verifyAgyPlugin(ctx context.Context, binary string) error {
 		return errors.New("antigravity_plugin_unavailable")
 	}
 	for _, p := range plugins {
-		if p.Name == "pot" && p.Enabled && slices.Contains(p.Hooks, "pot-execution-scope") && slices.Contains(p.MCP, "pot") {
+		if p.Name == "pot-receiver" && p.Enabled && slices.Contains(p.Hooks, "pot-execution-scope") && slices.Contains(p.MCP, "pot_receiver") {
 			return nil
 		}
 	}
-	return errors.New("antigravity_plugin_required")
+	return errors.New("antigravity_receiver_support_required")
 }
