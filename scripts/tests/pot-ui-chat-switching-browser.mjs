@@ -129,7 +129,7 @@ run().catch(error=>results.textContent+='FAIL '+error.message+'\n'+error.stack+'
 async function navigationFrames({root,client,select,snapshot,historyReads,emit}){
   const history=()=>root.querySelector('.history');
   const visible=()=>!history().hidden&&getComputedStyle(history()).visibility!=='hidden'&&!root.classList.contains('show-directory');
-  const row=id=>[...root.querySelectorAll('article.message')].find(node=>node.dataset.messageId===id);
+  const row=id=>[...history().querySelectorAll('article.message')].find(node=>node.dataset.messageId===id);
   const offset=id=>row(id)?.getBoundingClientRect().top-history().getBoundingClientRect().top;
   const capture=()=>{const top=history().getBoundingClientRect().top;const node=[...history().querySelectorAll('article.message')].find(node=>{const box=node.getBoundingClientRect();return box.height&&box.bottom>top&&box.top<top+history().clientHeight;});return {id:node?.dataset.messageId,offset:node?.getBoundingClientRect().top-top};};
   async function frames(label,action,validate){
@@ -196,11 +196,12 @@ async function navigationFrames({root,client,select,snapshot,historyReads,emit})
   }
   root.querySelector('.latest-button').click();await settle();
   const target=`${client.scope().owner}-2`;
-  await frames('Reference jump mounts and centers its target in one frame',async()=>{
+  const beforeReference=capture();
+  await frames('Reference jump retains the old reading frame until its prepared target commits centered',async()=>{
     root.querySelector('.message-reference-open').click();
     await wait(()=>!!row(target));
   },()=>{
-    if(!row(target))throw Error('Reference destination is not mounted');
+    if(!row(target)){atAnchor(beforeReference)();return;}
     const box=row(target).getBoundingClientRect(),h=history().getBoundingClientRect();
     if(Math.abs((box.top+box.bottom-h.top-h.bottom)/2)>2)throw Error('Reference destination is not centered');
   });
@@ -237,7 +238,8 @@ async function navigationFrames({root,client,select,snapshot,historyReads,emit})
   root.querySelector('.latest-button').click();await settle();
   const projected=snapshot(client.scope().owner);projected.cursor='100';projected.messages.at(-2).references=[{message_id:'missing-target',quote:'Delayed target'}];
   emit(projected);await openReference('Delayed target');await wait(()=>!!release);
-  await frames('Delayed reference mounts its destination before positioning',async()=>{release();await wait(()=>!!row('missing-target'));},()=>{if(!row('missing-target'))throw Error('Fetched reference destination is not mounted');});
+  const beforeDelayed=capture();
+  await frames('Delayed reference retains the old frame until its prepared destination mounts',async()=>{release();await wait(()=>!!row('missing-target'));},()=>{if(!row('missing-target'))atAnchor(beforeDelayed)();});
   root.querySelector('.latest-button').click();await settle();atLatest();
   projected.cursor='101';projected.messages.at(-2).references=[{message_id:'superseded-target',quote:'Superseded target'}];emit(projected);release=null;await openReference('Superseded target');await wait(()=>!!release);
   await frames('Latest supersedes an in-flight reference lookup',async()=>{root.querySelector('.latest-button').click();release();await settle();},atLatest);

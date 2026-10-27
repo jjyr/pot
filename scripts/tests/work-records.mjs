@@ -52,4 +52,27 @@ assert.equal(createWorkRecordProjection()([tool('cmd'),tool('input','write_stdin
 const batch=receive('batch',[envelope,{...envelope,id:'second',from:peer}]);
 rows=createWorkRecordProjection()([a,batch],{actor});assert.equal(rows[0].work.messages,2);assert.equal(rows[0].members[1].workMail.length,1);assert.deepEqual(rows[0].work.participants,[task,peer]);
 for(const boundary of [tool('stopped','exec_command',{phase:'stopped'}),{id:'compact-failed',compaction:{state:'failed'}}])assert.equal(createWorkRecordProjection()([a,boundary,b],{actor}).length,3);
+const sequenced=createWorkRecordProjection(),one={...tool('one'),sequence:'10'},two={...tool('two'),sequence:'11'},older={...tool('older'),sequence:'9'};
+rows=sequenced([one,two]);const sequenceKey=rows[0].viewKey;
+assert.deepEqual(rows[0].sourceAnchor,{id:'one',sequence:'10',before:'10',after:'11'});
+for(let update=0;update<2;update++){
+ rows=sequenced([older,one,two]);assert.equal(rows[0].viewKey,sequenceKey);
+ assert.deepEqual(rows[0].sourceAnchor,{id:'one',sequence:'10',before:'9',after:'11'},'A stable group keeps one native representative while exposing its actual source range');
+}
+const running=tool('live','exec_command',{phase:'running'}),input={id:'input',viewKey:'input',role:'user',request_id:'turn'},activity={id:'waiting:input',viewKey:'activity:turn',role:'assistant',text:'',phase:'tools',activity:true,inputID:'input'};
+rows=createWorkRecordProjection()([input,running,activity]);
+assert.equal(rows.at(-1),activity,'Tool grouping cannot remove the independent execution activity row');
+assert.equal(rows[1].work.active,null,'The same execution has one activity owner');
+assert.equal(createWorkRecordProjection()([running,{...activity,activity:undefined}])[0].work.active.name,'exec_command','Task callers without an independent owner retain group activity');
+rows=sequenced([older,two],{anchor:'two'});
+assert.deepEqual(rows[0].sourceAnchor,{id:'two',sequence:'11',before:'9',after:'11'},'Clipping the representative selects a real retained member');
+const separated=sequenced([older,{id:'separate',role:'assistant',text:'A prose boundary'},two],{anchor:'two'});
+for(const row of separated.filter(row=>row.members))assert(row.members.some(member=>member.id===row.sourceAnchor.id),'A split cannot retain a representative outside its current group');
+const largeA={...tool('large-a'),sequence:'900719925474099299999'},largeB={...tool('large-b'),sequence:'900719925474099300000'};
+assert.deepEqual(createWorkRecordProjection()([largeB,largeA])[0].sourceAnchor,{id:'large-b',sequence:largeB.sequence,before:largeA.sequence,after:largeB.sequence},'Native string sequence ranges retain precision beyond Number');
+assert.deepEqual(createWorkRecordProjection()([{...tool('task-a'),sequence:17},{...tool('task-b'),sequence:20}])[0].sourceAnchor,{id:'task-a',sequence:'17',before:'17',after:'20'},'Safe Task event bookmarks become exact DOM anchor strings');
+assert.equal(createWorkRecordProjection()([older,one,two],{anchor:'two'})[0].sourceAnchor.id,'two','A fresh projection selects the saved native anchor when its virtual group key changes');
+const otherExecution={...running,id:'other-live',viewKey:'other-live',tool:{...running.tool,id:'other-live',turn_id:'other-execution'}};
+rows=createWorkRecordProjection()([input,running,activity,otherExecution]);
+assert.equal(rows[1].work.active,null);assert.equal(rows.at(-1).work.active.id,'other-live','An execution without its own independent slot retains its group indicator');
 console.log('Work records: mixed order, boundaries, count ownership, exact mail correlation, stable group identity and counterparts passed');

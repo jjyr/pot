@@ -3,6 +3,7 @@ import {addressKey} from './task-identity.mjs';
 import {activeTool} from './tool-calls.mjs';
 
 const callKey=tool=>JSON.stringify([tool?.turn_id||'',tool?.id]);
+const nativeSequence=value=>typeof value==='string'&&/^[0-9]+$/.test(value)?value:Number.isSafeInteger(value)&&value>=0?String(value):undefined;
 export const failedWork=tool=>!!tool&&(!!tool.failurePhase||['failed','denied'].includes(tool.phase));
 // Virtual rows index groups; references and failure links still name original
 // records. Keep logical ancestry inside a group and connect each root to its
@@ -34,9 +35,11 @@ export function mailIdentity(mail){
 // movement across prose or grouping across turns. Folded polls have already
 // updated their original execution in projectScriptRuns.
 export function createWorkRecordProjection(){
-  let previous=new Map();
+  let previous=new Map(),representatives=new Map();
   return (messages,{blocked,anchor,actor}={})=>{
-    const result=[],next=new Map(),used=new Set(),seenMail=new Set();
+    const result=[],next=new Map(),nextRepresentatives=new Map(),used=new Set(),seenMail=new Set();
+    const inputs=new Map(messages.filter(message=>message.role==='user'||message.role==='system'&&!message.compaction).map(message=>[message.id,message.request_id||message.id]));
+    const activityOwners=new Set(messages.filter(message=>message.activity===true).map(message=>inputs.get(message.inputID)||message.inputID).filter(Boolean));
     const children=new Set(messages.filter(m=>m.tool?.parent_id).map(m=>JSON.stringify([m.tool.turn_id||'',m.tool.parent_id])));
     const anchoredGroup=previous.get(messages.find(message=>message.id===anchor)?.viewKey);
     let run=[],turn=null,contextTurn=null;
@@ -56,21 +59,28 @@ export function createWorkRecordProjection(){
         // location, with raw evidence; do not repeat their message body/count.
         return fresh.length===model.messages.length?message:{...message,workMail:fresh,workReceipt:!fresh.length};
       });
-      result.push({id:key,viewKey:key,role:'tool',members,work:workRecordSummary(members,{actor,children})});
+      const representative=run.find(message=>message.id===representatives.get(key))||run.find(message=>message.id===anchor)||retained||run[0];
+      nextRepresentatives.set(key,representative.id);
+      const sequences=run.map(message=>nativeSequence(message.sequence)).filter(value=>value!==undefined);
+      const before=sequences.reduce((a,b)=>a===undefined||BigInt(b)<BigInt(a)?b:a,undefined),after=sequences.reduce((a,b)=>a===undefined||BigInt(b)>BigInt(a)?b:a,undefined);
+      const sourceAnchor={id:representative.id,sequence:nativeSequence(representative.sequence),before,after};
+      const work=workRecordSummary(members,{actor,children});if(activityOwners.has(turn))work.active=null;
+      result.push({id:key,viewKey:key,role:'tool',members,work,sourceAnchor});
       for(const message of run)next.set(message.viewKey,key);
       run=[];
     };
     for(const message of messages){
       if(message.role==='user'||message.role==='system'&&!message.compaction)contextTurn=message.request_id||message.id;
       const identity=message.tool?.turn_id||message.turn_id||contextTurn;
-      // The running tool group already supplies this one activity indicator.
-      if(message.role==='assistant'&&!message.text&&!message.error&&!message.presentation&&message.phase==='tools'&&run.some(m=>activeTool(m.tool)))continue;
+      // Task callers without an independent lifecycle row use the group's
+      // activity. Execution-owned Chat rows retain their identity through tools.
+      if(message.activity!==true&&message.role==='assistant'&&!message.text&&!message.error&&!message.presentation&&message.phase==='tools'&&run.some(m=>activeTool(m.tool)))continue;
       if(processRecord(message,blocked)){
         if(run.length&&identity!==turn)flush();
         turn=identity;contextTurn=identity;run.push(message);
       }else{flush();result.push(message);}
     }
-    flush();previous=next;return result;
+    flush();previous=next;representatives=nextRepresentatives;return result;
   };
 }
 

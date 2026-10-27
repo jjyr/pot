@@ -1,3 +1,5 @@
+import {currentPreparedRender,preparedPreviousRoot} from './prepared-render.mjs';
+import {moveConversationNode} from './conversation-dom.mjs';
 import {createMessageFile} from './message-file.mjs';
 import {agentFailureKey} from '../state/agent-links.mjs';
 import {icon} from './icons.mjs';
@@ -14,7 +16,7 @@ export function createReplyBubble(host) {
   const content=node('div','reply-content'),status=node('div','reply-status');
   status.setAttribute('aria-live','polite');
   host.classList.add('reply-bubble');host.append(content,status);
-  const markdown=createMarkdownView(content);
+  const markdown=createMarkdownView(content,{slot:'reply'});
   const activityLine=node('div','reply-status-title'),activityIcon=node('span','reply-activity-icon'),activityLabel=node('span');
   const dots=node('span','waiting-dots'),dot=node('span','activity-dot'),clock=icon('clock');
   dots.setAttribute('aria-hidden','true');dots.append(node('i'),node('i'),node('i'));activityIcon.setAttribute('aria-hidden','true');activityIcon.append(dots,dot,clock);activityLine.append(activityIcon,activityLabel);
@@ -26,10 +28,10 @@ export function createReplyBubble(host) {
       if(text!==version){const shown=new Set();markdown.update(message.text,{downloadFile,acquireFileImage,revision:complete,renderFileReference:messageFiles?reference=>{
         const normalized=reference.href.replace(/:[1-9][0-9]*$/,'');
         if(reference.block&&shown.has(normalized))reference={...reference,block:false};if(reference.block)shown.add(normalized);
-        return complete?createMessageFile(reference,message.id,{messageFiles,retryMessageFile,acquireResource,downloadResource,previewClaims}):Object.assign(document.createElement('span'),{textContent:reference.label||reference.href});
+        return createMessageFile(reference,message.id,{messageFiles,retryMessageFile,acquireResource,downloadResource,previewClaims,pending:!complete});
       }:undefined});text=version;}
       const nextResource=JSON.stringify(message.presentation||null);
-      if(resourceKey!==nextResource){resourceNode?.remove();resourceNode=null;resourceKey=nextResource;if(message.presentation){resourceNode=createResourceView(message.presentation,{acquireResource,downloadResource});content.append(resourceNode);}}
+      if(resourceKey!==nextResource){resourceNode?.remove();resourceNode=null;resourceKey=nextResource;if(message.presentation){resourceNode=createResourceView(message.presentation,{acquireResource,downloadResource});moveConversationNode(content,resourceNode);}}
       content.hidden=!message.text&&!message.presentation;
       const next=JSON.stringify([message.phase,message.error,t('replyFailed'),message.local,canRetrySend,message.activity]);
       if(signature===next)return;signature=next;
@@ -43,7 +45,7 @@ export function createReplyBubble(host) {
         activityLabel.textContent=t(({sending:'sending',streaming:'replyStreaming',tools:'tool.executing',approval:'tool.awaitingApproval',awaiting:'replyAwaiting',queued:'replyQueued',cancelling:'replyCancelling',waiting:'replyWaiting',paused:'replyPaused',reconnecting:'tool.reconnecting'})[message.phase]||'working');
         return;
       }
-      const expanded=!!status.querySelector('details')?.open;
+      const preparation=currentPreparedRender(),expanded=!!status.querySelector('details')?.open||preparation?.context.phase==='prepare'&&!!preparedPreviousRoot(preparation.context,preparation.member)?.querySelector('.reply-status details')?.open;
       status.replaceChildren();host.classList.toggle('is-failed',message.phase==='failed');
       host.classList.toggle('is-waiting',['sending','thinking','awaiting','queued','cancelling','tools','approval'].includes(message.phase));
       host.classList.toggle('is-streaming',message.phase==='streaming');

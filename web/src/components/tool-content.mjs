@@ -1,7 +1,7 @@
 import {translate} from '../locales/messages.mjs';
 import {activeTool} from '../state/tool-calls.mjs';
 import {toolArgs,toolKind,toolLabels,patchGroups} from '../state/tool-presentation.mjs';
-import {renderMarkdown} from './markdown.mjs';
+import {updateMarkdown} from './markdown.mjs';
 const n=(tag,cls='',text)=>{const node=document.createElement(tag);node.className=cls;if(text!==undefined)node.textContent=text;return node;};
 const pretty=value=>typeof value==='string'?value:JSON.stringify(value??null,null,2);
 const LIMIT=24000,MAX_NODES=240;
@@ -59,7 +59,7 @@ export function createToolContent({locale=()=> 'en',downloadFile,acquireFileImag
     if(signature!==item.signature){
       item.signature=signature;item.displayed=shown;const top=item.content.scrollTop;
       if(structured)item.content.replaceChildren(renderValue(value));
-      else if(markdown)item.content.replaceChildren(renderMarkdown(shown,{downloadFile,acquireFileImage}));
+      else if(markdown)updateMarkdown(item.content,shown,{downloadFile,acquireFileImage,renderSlot:'tool-content:'+id});
       else item.content.textContent=shown;
       if(output&&item.following)item.content.scrollTop=item.content.scrollHeight;else item.content.scrollTop=top;
     }

@@ -1,3 +1,4 @@
+import {currentPreparedRender,preparedAsset,preparedIsland,deferPreparedConnection} from './prepared-render.mjs';
 import {translate} from '../locales/messages.mjs';
 import {renderMarkdown} from './markdown.mjs';
 import {openImageViewer} from './image-viewer.mjs';
@@ -22,6 +23,7 @@ function register(){
   customElements.define('pot-resource',class extends HTMLElement{
     generation=0;
     connectedCallback(){
+      if(this.preparationSurrogate||this.started)return;if(deferPreparedConnection(this,()=>this.connectedCallback()))return;this.started=true;
       const generation=++this.generation,{resource,mode,caption}=this.presentation,preview=resourcePreviewKind(resource),kind=this.line&&preview==='html'?'text':preview;
       const t=key=>translate(document.documentElement.lang,`resource.${key}`);
       this.dataset.kind=kind;this.dataset.mode=mode;
@@ -38,7 +40,7 @@ function register(){
       const ready=()=>{if(!current())return;this.dataset.state='ready';status.hidden=true;};
       refresh();window.addEventListener('pot:locale',refresh);this.stopLocale=()=>window.removeEventListener('pot:locale',refresh);
       download.onclick=async()=>{download.disabled=true;saveStatus.hidden=true;try{await this.downloadResource(resource);}catch{if(current()){saveStatus.textContent=t('downloadFailed');saveStatus.hidden=false;}}finally{if(current())download.disabled=false;}};
-      expand.onclick=()=>{this.classList.toggle('is-expanded');refresh();};
+      expand.onclick=()=>{this.classList.toggle('is-expanded');refresh();this.dispatchEvent(new CustomEvent('pot:prepare-resize',{bubbles:true}));};
       expand.hidden=kind==='audio';
       if(mode==='download'||kind==='file'){body.hidden=expand.hidden=status.hidden=true;this.dataset.state='ready';return;}
       if(!lease){fail();return;}
@@ -59,18 +61,21 @@ function register(){
       }else if(kind==='audio'||kind==='video'){
         const media=node(kind,'resource-media');media.controls=true;media.preload='metadata';media.setAttribute('aria-label',caption||resource.name);if(kind==='video')media.playsInline=true;media.onloadedmetadata=ready;media.onerror=fail;setURL(media,lease.url(resource.entry));body.append(media);
       }else if(kind==='pdf'){
-        const frame=node('iframe','resource-document');frame.title=caption||resource.name;frame.onload=ready;frame.onerror=fail;setURL(frame,lease.url(resource.entry));body.append(frame);
+        const frame=node('iframe','resource-document');frame.title=caption||resource.name;frame.onerror=fail;
+        // An attached iframe without its requested URL can load about:blank.
+        // That event is not PDF readiness while the authenticated URL waits.
+        Promise.resolve(lease.url(resource.entry)).then(url=>{if(current()){frame.onload=ready;frame.src=url;body.append(frame);}}).catch(fail);
       }else if(kind==='markdown'){
         const prose=node('div','resource-markdown message-body'),pre=node('pre','resource-text'),toggle=node('button','resource-action');
         toggle.type='button';toggle.disabled=true;pre.hidden=true;body.append(prose,pre);actions.prepend(toggle);
         let source=!!this.line;prose.hidden=source;pre.hidden=!source;
         const refreshToggle=()=>{toggle.textContent=t(source?'showMarkdown':'showSource');toggle.setAttribute('aria-pressed',String(source));};
-        toggle.onclick=()=>{source=!source;prose.hidden=source;pre.hidden=!source;refreshToggle();};
+        toggle.onclick=()=>{source=!source;prose.hidden=source;pre.hidden=!source;refreshToggle();this.dispatchEvent(new CustomEvent('pot:prepare-resize',{bubbles:true}));};
         refreshToggle();window.addEventListener('pot:locale',refreshToggle);const stop=this.stopLocale;this.stopLocale=()=>{stop();window.removeEventListener('pot:locale',refreshToggle);};
         lease.read(resource.entry).then(blob=>blob.text()).then(text=>{if(current()){
           // No workspace image/download adapters: raw HTML stays literal, remote
           // images stay links, and undeclared relative paths cannot fetch bytes.
-          sourceText(pre,text,this.line);prose.append(renderMarkdown(text));toggle.disabled=false;ready();
+          sourceText(pre,text,this.line);prose.append(renderMarkdown(text,{markdownSlot:'resource:'+resource.id}));toggle.disabled=false;ready();
         }}).catch(fail);
       }else if(kind==='text'){
         const pre=node('pre','resource-text');body.append(pre);lease.read(resource.entry).then(blob=>blob.text()).then(text=>{if(current()){sourceText(pre,text,this.line);ready();}}).catch(fail);
@@ -92,7 +97,10 @@ function register(){
         frame.onerror=fail;frame.onload=()=>{this.loadTimer=setTimeout(()=>{if(current()&&this.dataset.state==='loading')fail();},250);};frame.src=lease.renderURL(token);
       }
     }
-    disconnectedCallback(){
+    disconnectedCallback(){queueMicrotask(()=>{if(!this.isConnected)this.retireRendering();});}
+    retireRendering(){
+      this.preparationTicket?.release();
+      if(!this.started)return;this.started=false;
       ++this.generation;this.viewer?.close();this.stopLocale?.();this.stopMessages?.();clearTimeout(this.loadTimer);
       for(const media of this.querySelectorAll('audio,video')){media.pause();media.removeAttribute('src');media.load();}
       for(const image of this.querySelectorAll('img'))image.removeAttribute('src');
@@ -103,5 +111,7 @@ function register(){
 }
 
 export function createResourceView(presentation,options={}){
-  register();const element=document.createElement('pot-resource');Object.assign(element,{presentation,...options});return element;
+  register();const slot=options.renderSlot||'resource',source=JSON.stringify([presentation,options.line,options.noticeKey]);
+  const element=preparedAsset(slot,source,()=>{const value=document.createElement('pot-resource');Object.assign(value,{presentation,...options,renderSlot:slot});return preparedIsland(value);});
+  return currentPreparedRender()?.context.phase==='prepare'?element:element.preparationOriginal||element;
 }

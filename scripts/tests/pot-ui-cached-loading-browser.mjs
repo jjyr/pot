@@ -97,7 +97,8 @@ async function chatChecks(){
   select('Beta');await wait(()=>host.querySelector('.message-column').textContent.includes('a beta confirmed'));select('Alpha');await pause(40);
   check(host.querySelector('.message-column').textContent.includes('a alpha confirmed'),'Chat restores confirmed cached messages before subscription');
   check(host.querySelector('.connection-status').textContent.includes('Connecting'),'Cached chat waits for an authoritative snapshot');
-  await pause(300);deliver(3,'newer stream');await pause(30);deliver(2,'old stream');await pause(30);check(host.querySelector('.message-column').textContent.includes('newer stream'),'Older snapshots cannot roll back streaming content');
+  await pause(300);let rolledBack=false;const column=host.querySelector('.message-column'),observer=new MutationObserver(()=>{rolledBack ||= column.textContent.includes('old stream');});observer.observe(column,{subtree:true,childList:true,characterData:true});
+  deliver(3,'newer stream');await pause(30);deliver(2,'old stream');await wait(()=>column.textContent.includes('newer stream')&&!column.querySelector('.message-window[aria-busy]'));observer.disconnect();check(!rolledBack&&column.textContent.includes('newer stream'),'Older snapshots cannot roll back streaming content');
   select('Remote Alpha');await wait(()=>host.querySelector('.message-column').textContent.includes('b alpha confirmed'));select('Alpha');await pause(40);check(host.querySelector('.message-column').textContent.includes('a newer stream'),'Identical assistant IDs stay isolated by Space');await pause(300);
   check(snapshotReads===0&&subscriptions===5,'Initial subscription eliminates duplicate snapshot GETs');
   const before={...directoryReads};change(['assistants'],{space:'a',boot:'boot'});await pause(200);

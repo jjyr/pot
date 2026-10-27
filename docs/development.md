@@ -345,6 +345,20 @@ selects an extracted source tree. Pass `--baseline` directly to
 `node scripts/tests/chat-scroll-http-browser.mjs` to record the known send and
 draft-layout regressions in that tree while retaining the other assertions.
 
+`mise run test:ui-prepared-layout` exercises connected off-flow rendering with
+the same existing Playwright/Chromium prerequisites. It covers the native and
+fallback scroll-end branches, recursive readiness, stable component deadlines,
+load admission, same-node resource transfer, streaming HTTP/SSE output, mixed
+image/PDF/HTML/Markdown previews through real history pagination, cached initial
+layout and virtual remount, native group aliases across pagination/cold IndexedDB/remount, and a trusted mobile
+touch gesture during an incomplete Mermaid fence's completion. The fixtures
+use synthetic loopback data and reject product writes. They do not qualify
+physical iOS/Safari behavior. `POT_PREPARED_OUTPUT`, `POT_HISTORY_RESOURCES_OUTPUT`, `POT_ALIAS_OUTPUT` and
+`POT_TOUCH_OUTPUT` select untracked evidence directories. The touch runner accepts
+`--baseline` with `POT_TOUCH_SOURCE` pointing to an extracted source tree; that
+mode requires the temporary-source/shrink failure rather than reporting it as a
+passing fix.
+
 `mise run test:ui-chat-activity` uses the same isolated browser prerequisites to
 check lifecycle activity through reconnects, empty model/tool rounds, long
 output, parallel inputs and terminal outcomes. It samples row/status identity,

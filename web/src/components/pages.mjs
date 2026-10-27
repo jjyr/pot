@@ -48,7 +48,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
   let pendingApprovals=[],approvalFresh=false,notificationSettings=null;
   const domains=domainsFor(client),releaseDomains=domains.retain(),taskDomain=domains.tasks,ownerDisclosures=new Map();
   const providerAllowanceMemory=new Map(),toolMemory=new Map(),usageOffsets=new Map(),approvalCards=new Map(),taskNames=new Map();
-  const chatApprovals=createChatApprovals({host:chatApprovalHost,locale,visible:chatVisible});
+  const chatApprovals=createChatApprovals({host:chatApprovalHost,locale,visible:chatVisible,deferred:true});
   const cached = new Map(),machineDrafts=new Map(),editorParents=[],taskDrafts=new Map(),taskDraftVersions=new Map();
   let extensionUI=null;const extensionMemory={};
   let pageView=null,currentViewKey='',viewReady=false,shortcutOpen=null,approvalOwner='',topologySelection='',agentOwnerSpace='';
@@ -636,7 +636,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
   function taskPhaseLabel(phase){return translate(locale(),phase==='waiting'?'tasks.stage.waiting':`schedule.state.${phase}`);}
   async function decideApproval(approval,action){
     const captured={...approvalScope()};
-    if(disposed||!approvalFresh||approvalOwner!==approvalContext()||approval.request.owner!==captured.owner||(taskView&&approval.request.task!==taskView.task.id)||!pendingApprovals.some(item=>item.id===approval.id))throw Error(tr('Approval context changed.','授权上下文已改变。'));
+    if(disposed||!approvalFresh||approvalOwner!==approvalContext()||approval.request.owner!==captured.owner||(taskView&&approval.request.task!==taskView.task.id)||!pendingApprovals.some(item=>item.id===approval.id))throw Error(translate(locale(),'approvals.contextChanged'));
     await request('/api/v1/permissions',{...captured,method:'POST',body:{id:approval.id,action}});
     await permissions();
   }
@@ -1049,28 +1049,31 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
   const approvalContext=()=>JSON.stringify([approvalScope(),taskView?.task.id||'']);
   function renderApprovals() {
     const chatContext=JSON.stringify(scope());
-    if(disposed||approvalOwner!==approvalContext()){approvalHost.replaceChildren();chatApprovals.update(chatContext,[]);return;}
-    const nodes=[],entries=[],retained=new Set();
+    if(disposed||approvalOwner!==approvalContext()){approvalHost.replaceChildren();chatApprovals.update(chatContext,[]);taskView?.ui.setApprovals([]);return;}
+    const entries=[],retained=new Set();
     for(const approval of pendingApprovals) {
-      const toolRoot=taskView?[...taskView.transcript.querySelectorAll('.tool-call')].find(node=>node.dataset.callId===approval.request.call_id&&node.dataset.turnId===approval.request.turn):null;
+      const toolRoot=taskView?.state?.messages.some(message=>message.tool?.id===approval.request.call_id&&message.tool.turn_id===approval.request.turn);
       if(toolRoot){continue;}
       const key=JSON.stringify([approvalOwner,approval.id]);retained.add(key);
       if(!approvalCards.has(key)) {
         const capturedKey=approvalOwner;
         approvalCards.set(key,createApprovalCard({locale,machineLabel:id=>machineInfo.label(id,approvalScope(),locale()),onDecision:async(original,decision)=>{
-          if(approvalContext()!==capturedKey)throw Error(tr('Approval context changed.','授权上下文已改变。'));
+          if(approvalContext()!==capturedKey)throw Error(translate(locale(),'approvals.contextChanged'));
           await decideApproval(original,decision);
         }}));
       }
-      const card=approvalCards.get(key);card.update({...approval,fresh:approvalFresh},{taskTitle:taskNames.get(taskNameKey(approvalScope(),approval.request.task))});
-      if(taskView)nodes.push(card.element);else entries.push({id:approval.id,element:card.element});
+      const card=approvalCards.get(key),value={...structuredClone(approval),fresh:approvalFresh},options={taskTitle:taskNames.get(taskNameKey(approvalScope(),approval.request.task))};
+      {
+        const capturedKey=approvalOwner,capturedScope={...approvalScope()};
+        entries.push({id:approval.id,revision:JSON.stringify([value,options]),
+          prepare:()=>{const candidate=createApprovalCard({locale,machineLabel:id=>machineInfo.label(id,capturedScope,locale()),onDecision:async(original,decision)=>{if(approvalContext()!==capturedKey)throw Error(translate(locale(),'approvals.contextChanged'));await decideApproval(original,decision);}});candidate.update(value,options);candidate.element.open=card.element.open;return candidate.element;},
+          commit:()=>{card.update(value,options);return card.element;},
+        });
+      }
     }
-    chatApprovals.update(chatContext,entries);
+    chatApprovals.update(chatContext,taskView?[]:entries);taskView?.ui.setApprovals(entries);
     for(const key of approvalCards.keys())if(!retained.has(key))approvalCards.delete(key);
-    const target=taskView?.ui.approvalHost||approvalHost;
-    if(taskView)approvalHost.replaceChildren();
-    for(const node of [...target.childNodes])if(!nodes.includes(node))node.remove();
-    nodes.forEach((node,index)=>{if(target.childNodes[index]!==node)target.insertBefore(node,target.childNodes[index]||null);});
+    approvalHost.replaceChildren();
   }
   let approvalQueue=null,approvalQueueKey='';
   function permissions(){
@@ -1118,6 +1121,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
   const preference=()=>{if(assistantLoad){renderAssistantLoad();return;}if(extensionUI){heading(translate(locale(),'extensions.title'));return;}if(editor){editor.lifecycle.locale?.();for(const status of editor.root.querySelectorAll('[data-error-key]')){const span=status.querySelector(':scope>span');if(span)span.textContent=translate(locale(),status.dataset.errorKey);const summary=status.querySelector('details>summary');if(summary)summary.textContent=translate(locale(),'agentLinks.diagnostics');}return;}if(route==='add-assistant'&&assistantStartRefresh){assistantStartRefresh().catch(()=>notify(translate(locale(),'assistantStart.refreshFailed')));return;}if(route==='settings'&&filter.settingsTab==='integrations'&&!editor){heading(translate(locale(),'settings'));for(const node of host.querySelectorAll('[data-settings-i18n]'))node.textContent=translate(locale(),node.dataset.settingsI18n);return;}if(taskView){taskDetail(taskView.task,{recordHistory:false,returnTo:taskView.returnTo});return;}if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner,force:true});};
   window.addEventListener('beforeunload',beforeUnload);window.addEventListener('pot:locale',preference);
   return {get authorityReady(){return editorAuthorityReady();},get title(){return title;},get editing(){return !!editor;},get approvalSpace(){return approvalScope().space;},get notificationContext(){return taskView?{space:taskView.scope.space,owner:taskView.scope.owner,task:taskView.task.id}:null;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!assistantLoad||!!editor||detailParent||!!usageOwner||route==='add-assistant'&&!host.hidden;},show,assistant,setupAI,leave,back,permissions,syncApprovals:renderApprovals,taskMenu(){taskView?.ui.openMenu();},handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalQueue?.close();approvalQueue=null;approvalQueueKey='';approvalGate.close();approvalOwner='';approvalFresh=false;pendingApprovals=[];approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);},approvalFor,decideApproval,taskNeedsApproval,rememberTasks,renderApprovals,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,options={}){route='tasks';return taskDetail(task,options);},
+    approvalRegion:()=>chatApprovals.region(),
     showProviders(){filter.settingsTab='providers';return show('settings');},
     refresh(topics=[],source={}){
       const changed=source.domainNotified?Promise.resolve():domains.changed(topics,source);if(pageView?.domain||taskView||taskListView)return changed;

@@ -74,6 +74,13 @@ model correspondence or model history, and original file bytes never become mode
 input. Old messages without captured provenance remain unavailable; the UI cannot
 supply replacement paths or manufacture a source binding.
 
+The conversation UI can show a pending reference and query its binding metadata
+while a reply is streaming. This never initiates a source read or authorizes an
+unbound path. A ready binding can prepare its saved preview before the reply
+ends; missing bindings retain the bounded preparation frame while metadata is
+pending. Completing the reply retires stale metadata-read completions and applies
+the terminal binding state inside that same frame.
+
 ```text
 execution completion -> explicit Markdown nodes -> provenance + pending references
                                                          |

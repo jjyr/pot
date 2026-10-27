@@ -1,15 +1,25 @@
+import {currentPreparedRender,withPreparedRender,createPreparedRender,createPreparationBudget,createPreparationSurface,settlePreparedTree,preparedLayoutRect,framePreparedElement} from './prepared-render.mjs';
 import {moveConversationNode} from './conversation-dom.mjs';
-import {Virtualizer, observeElementRect, observeElementOffset, defaultRangeExtractor} from '../vendor/tanstack-virtual-core.mjs';
+import {Virtualizer, observeElementRect, defaultRangeExtractor} from '../vendor/tanstack-virtual-core.mjs';
 import {createConversationController} from './conversation-controller.mjs';
+import {hasOpenMermaidFence} from './markdown.mjs';
 
 // The controller owns intent and compensation; this adapter commits its measured
 // flow ranges. Child adapters share that controller and never write the scroller.
 export function createMessageWindow({scroller, host, render, dispose, requestRender, controller:parentController, active, interact, upward, downward, scrolled, canReadEarlier, earlierBoundary, onEarlierVisible, heights = new Map(), nested = false}) {
   let rows = [], mounted = new Map(), closed = false, suspended = false, updating = false, dirty = false;
-  let width = 0, margin = 0, reportRect, reportOffset, owner, controller=parentController, frame=0;
-  const pending = new Set(), spacers = [];
+  let width = 0, margin = 0, reportRect, reportOffset, owner, controller=parentController, frame=0,inputStarted=()=>{};
+  const pending = new Set(), spacers = [],regionRevisions=new Map();
+  let requested=rows,requestedRevision='[]',committedRevision='[]',requestedOptions={},flight=null,layoutEpoch=0,layoutFingerprint='',committing=null,measuredOptions={},layoutReframe=false,queueUpdating=false;
+  const deadlines=new Map();
+  const preparationBudget=createPreparationBudget();
+  const inheritedPreparation=currentPreparedRender();
   const indexesByKey = new Map(), indexesByID = new Map();
   const margins = new WeakMap(), sources = new WeakMap();
+  function retireDeadlines(record,retained){
+    const message=sources.get(record),members=[message?.id,...(message?.members||[]).map(member=>member.id)].filter(id=>id&&!retained.has(id));
+    for(const key of deadlines.keys())if(members.some(member=>key.startsWith(member+':')))deadlines.delete(key);
+  }
   function navigationIndex() {
     if(controller?.following)return rows.length-1;
     const id=controller?.destination?.id||controller?.anchor?.id;
@@ -54,12 +64,25 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     observeElementRect(instance,callback){reportRect=callback;return observeElementRect(instance,callback);},
     observeElementOffset(instance,callback){
       reportOffset=callback;
-      return observeElementOffset(instance,(offset,scrolling)=>{
+      const element=instance.scrollElement,view=element.ownerDocument.defaultView,supportsScrollend='onscrollend' in view;
+      let idleTimer=0,endFrame=0,inputGeneration=0;
+      const deliver=scrolling=>{
         // Capture reader movement before TanStack commits a different DOM range.
         if(!nested)owner?.nativeScroll();
-        callback(offset,scrolling);
+        callback(element.scrollTop,scrolling);
         if(!nested&&!scrolling)owner?.idle();
-      });
+      };
+      const armIdle=()=>{const generation=++inputGeneration;view.clearTimeout(idleTimer);view.cancelAnimationFrame(endFrame);endFrame=0;if(!supportsScrollend)idleTimer=view.setTimeout(()=>{if(generation===inputGeneration)deliver(false);},instance.options.isScrollingResetDelay);};
+      inputStarted=armIdle;
+      const scroll=()=>{armIdle();deliver(true);},end=()=>{
+        // A geometry write can enqueue scrollend while a native key animation
+        // still has a compositor frame to deliver. Validate that end against
+        // the next rendering step; newer scroll/input generations retire it.
+        const generation=inputGeneration,offset=element.scrollTop;view.clearTimeout(idleTimer);view.cancelAnimationFrame(endFrame);
+        endFrame=view.requestAnimationFrame(()=>{endFrame=0;if(generation!==inputGeneration)return;if(Math.abs(element.scrollTop-offset)>.5){armIdle();deliver(true);}else deliver(false);});
+      };
+      element.addEventListener('scroll',scroll,{passive:true});if(supportsScrollend)element.addEventListener('scrollend',end,{passive:true});
+      return ()=>{view.clearTimeout(idleTimer);view.cancelAnimationFrame(endFrame);inputStarted=()=>{};element.removeEventListener('scroll',scroll);element.removeEventListener('scrollend',end);};
     },
     indexAttribute:'data-virtual-index', measureElement:sizeOf,
     useAnimationFrameWithResizeObserver:true,
@@ -76,7 +99,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     onChange(_instance, sync) {
       if (closed || suspended) return;
       dirty = true;
-      if (!updating) {
+      if (!updating&&!queueUpdating) {
         // Native scrolling and resize corrections must commit their ranges in
         // the same frame as the offset change, retaining existing nodes.
         if (sync && rows.length && host.isConnected && host.getClientRects().length) update();
@@ -86,7 +109,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
   });
   if(nested)virtualizer.shouldAdjustScrollPositionOnItemSizeChange=()=>false;
   const unmount = virtualizer._didMount();
-  if(!nested){owner=createConversationController({scroller,virtualizer,requestLayout:invalidate,syncOffset:offset=>reportOffset?.(offset,true),active,interact,upward,downward,scrolled,canReadEarlier,earlierBoundary,onEarlierVisible});controller=owner.api;}
+  if(!nested){owner=createConversationController({scroller,virtualizer,requestLayout:invalidate,intentChanged:()=>requestRender?.(),syncOffset:offset=>reportOffset?.(offset,true),inputStarted:()=>inputStarted(),active,interact,upward,downward,scrolled,canReadEarlier,earlierBoundary,onEarlierVisible});controller=owner.api;}
   const geometryObserver=nested?null:new ResizeObserver(invalidate);
   geometryObserver?.observe(scroller);if(host.parentElement)geometryObserver?.observe(host.parentElement);
 
@@ -106,7 +129,21 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       if(start>offset+.5||!layout.length&&start<-.5)layout.push({gap:start-offset});
       const message=rows[item.index], old=mounted.get(item.key);
       const changed=!old||sources.get(old)!==message;
-      const record=render(message,old);
+      let record=old;
+      const preparing=currentPreparedRender();
+      if(nested&&preparing)record=withPreparedRender(preparing.context,message.id,()=>render(message,old));
+      else if(committing?.has(item.key)){
+        const job=committing.get(item.key);job.context.phase='commit';
+        for(const [element,clone]of job.context.frames){const box=clone.getBoundingClientRect();framePreparedElement(element,box.height,element.matches('pot-message-file[data-block="false"]')?box.width:undefined);}
+        record=withPreparedRender(job.context,message.id,()=>old?render(message,old):job.record.commit?.(message)||job.record);
+        record.preparedSignature=job.signature;job.context.phase='live';
+        record.row.preparedContext=job.context.connectionContext;
+        margins.delete(record.row);
+        record.row.classList.add('prepared-row');record.row.style.setProperty('--prepared-row-height',job.measurement.height+'px');
+        record.row.style.setProperty('--prepared-margin-top',job.measurement.marginTop+'px');record.row.style.setProperty('--prepared-margin-bottom',job.measurement.marginBottom+'px');
+        if(old)dispose(job.record);committing.delete(item.key);
+      }
+      if(!record){layout.push({gap:item.size});offset=item.end-margin;continue;}
       sources.set(record,message);
       record.row.dataset.windowKey=item.key;record.row.dataset.virtualIndex=String(item.index);
       // Stable reading identity belongs to the list contract, including callers
@@ -117,9 +154,10 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     }
     const total=virtualizer.getTotalSize();
     if(total>offset+.5)layout.push({gap:total-offset});
+    const retainedMembers=new Set(items.flatMap(item=>[rows[item.index].id,...(rows[item.index].members||[]).map(member=>member.id)]));
     for(const [key,record]of mounted)if(!selected.has(key)){
       virtualizer.observer.unobserve(record.row);virtualizer.elementsCache.delete(key);
-      mounted.delete(key);pending.delete(record);dispose(record);
+      mounted.delete(key);pending.delete(record);retireDeadlines(record,retainedMembers);dispose(record);
     }
     let index=0;
     for(const part of layout){
@@ -147,7 +185,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     pending.clear();return changed;
   }
   function configure(next) {
-    const viewport=scroller.getBoundingClientRect(),box=host.getBoundingClientRect();
+    const viewport=scroller.getBoundingClientRect(),box=preparedLayoutRect(host);
     const nextMargin=scroller.scrollTop+box.top-viewport.top;
     const nextWidth=host.clientWidth;
     const rect={width:scroller.clientWidth,height:scroller.clientHeight};
@@ -163,13 +201,169 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       virtualizer.setOptions({...virtualizer.options,count:list.length,getItemKey:index=>list[index].viewKey,estimateSize:index=>heights.get(list[index].viewKey)??(list[index].role==='user'?120:list[index].role==='tool'?70:180),rangeExtractor:range=>pinnedIndexes(range),scrollMargin:margin});
       rows=next;
       const available=new Set(rows.map(item=>item.viewKey));
-      for(const [key,record]of mounted)if(!available.has(key)){virtualizer.observer.unobserve(record.row);virtualizer.elementsCache.delete(key);mounted.delete(key);pending.delete(record);dispose(record);}
       for(const key of virtualizer.itemSizeCache.keys())if(!available.has(key))virtualizer.itemSizeCache.delete(key);
     }
   }
   function marginsForMounted(){for(const record of mounted.values())margins.delete(record.row);}
-  function update(next=rows,options={}) {
-    if(closed||updating)return;
+  const fontChanged=()=>{layoutFingerprint='';layoutReframe=true;if(!nested)invalidate();};
+  const interaction=event=>{if(event.type==='click'&&!event.target.closest?.('summary'))return;layoutEpoch++;layoutReframe=true;layoutFingerprint='';queueMicrotask(invalidate);};
+  if(!nested){scroller.addEventListener('click',interaction,true);scroller.addEventListener('pot:prepare-resize',interaction);}
+  if(!nested)host.ownerDocument.fonts?.addEventListener('loadingdone',fontChanged);
+  function discardPreparation(){
+    if(!flight)return;
+    for(const job of flight.jobs.values()){job.wait?.cancel();dispose(job.record);job.surface.close();}
+    for(const job of flight.regions.values()){job.wait.cancel();job.surface.close();}
+    flight=null;host.removeAttribute('aria-busy');
+  }
+  function selectedPreparation(next){
+    const indexes=new Set(),critical=new Set(),byKey=new Map(next.map((message,index)=>[message.viewKey,index]));
+    for(const item of virtualizer.getVirtualItems()){const index=byKey.get(item.key);if(index!==undefined)indexes.add(index);}
+    let target=controller?.following?next.length-1:next.findIndex(message=>message.id===(controller?.destination?.id||controller?.anchor?.id)||message.viewKey===controller?.position?.anchors?.[0]?.key?.replace(/^message:/,'')||message.members?.some(member=>member.id===(controller?.destination?.id||controller?.anchor?.id)));
+    if(target<0&&!indexes.size)target=0;
+    if(target>=0)critical.add(target);
+    const selection=getSelection();
+    for(const [key,record]of mounted){
+      if(record.row.contains(document.activeElement)||selection?.rangeCount&&!selection.isCollapsed&&(record.row.contains(selection.anchorNode)||record.row.contains(selection.focusNode))){
+        const index=byKey.get(key);if(index!==undefined){indexes.add(index);critical.add(index);}
+      }
+    }
+    if(target>=0)for(let index=Math.max(0,target-12);index<=Math.min(next.length-1,target+12);index++)indexes.add(index);
+    // Forecast the post-measurement range before touching the live engine. A
+    // large estimate correction must not commit spacers into the visible range
+    // and only then discover that more content needed preparation.
+    const size=message=>flight?.sizes.get(message.viewKey)??heights.get(message.viewKey)??(message.role==='user'?120:message.role==='tool'?70:180);
+    const start=target<0?0:next.slice(0,target).reduce((sum,message)=>sum+size(message),margin),total=next.reduce((sum,message)=>sum+size(message),margin);
+    let offset=scroller.scrollTop;
+    if(controller?.following)offset=Math.max(0,total-scroller.clientHeight);
+    else if(target>=0&&controller?.anchor)offset=Math.max(0,start-controller.anchor.offset);
+    const forecast=new Virtualizer({count:next.length,getScrollElement:()=>null,getItemKey:index=>next[index].viewKey,estimateSize:index=>size(next[index]),initialRect:{width:scroller.clientWidth,height:scroller.clientHeight},initialOffset:offset,overscan:12,scrollMargin:margin,scrollToFn:()=>{}});
+    for(const item of forecast.getVirtualItems())indexes.add(item.index);
+    // A viewport plus its navigation overscan is a finite preparation cohort.
+    // Prefer the pinned destination if an extremely dense range exceeds it.
+    return [...indexes].sort((a,b)=>Number(critical.has(b))-Number(critical.has(a))||Math.abs(a-target)-Math.abs(b-target)).slice(0,96).sort((a,b)=>a-b);
+  }
+  function signature(message){return layoutEpoch+':'+JSON.stringify(message);}
+  function refreshActivity(){
+    // A committed execution slot has a fixed outer frame and no prose/assets.
+    // Keep nonterminal connection/work semantics current while its associated
+    // body is preparing. Terminal removal/diagnostics still join the body batch.
+    for(const message of requested){
+      if(message.activity!==true||message.text||message.error||message.presentation||['complete','failed','stopped','cancelled'].includes(message.phase))continue;
+      const record=mounted.get(message.viewKey);if(!record?.row.classList.contains('prepared-row'))continue;
+      const context=createPreparedRender({renderContext:requestedOptions.renderContext});context.phase='live';
+      withPreparedRender(context,message.id,()=>render(message,record));
+    }
+  }
+  function estimatedStart(next,index){let offset=0;for(let i=0;i<index;i++)offset+=flight?.sizes.get(next[i].viewKey)??heights.get(next[i].viewKey)??(next[i].role==='user'?120:next[i].role==='tool'?70:180);return offset;}
+  function update(next,options){
+    if(closed)return;
+    const inherited=currentPreparedRender()||inheritedPreparation?.context.phase==='prepare'&&inheritedPreparation;
+    if(nested){
+      if(inherited?.context.alive&&['prepare','commit'].includes(inherited.context.phase))return withPreparedRender(inherited.context,inherited.member,()=>{if(inherited.context.phase==='commit')options?.beforeCommit?.();updateMeasured(next||rows,options||{});if(inherited.context.phase==='commit')options?.afterCommit?.();});
+      requestRender();return;
+    }
+    if(next!==undefined){const revision=JSON.stringify(next);if(revision!==requestedRevision){requested=next;requestedRevision=revision;}requestedOptions=options||requestedOptions;suspended=false;}
+    refreshActivity();
+    if(queueUpdating)return;queueUpdating=true;
+    try{
+    if(!host.isConnected||!host.clientWidth||!scroller.clientWidth||!scroller.clientHeight){discardPreparation();return;}
+    if(requestedOptions.parents)owner?.setParents(requestedOptions.parents);
+    const style=getComputedStyle(scroller),fingerprint=JSON.stringify([host.clientWidth,style.font,style.lineHeight,style.letterSpacing,host.ownerDocument.documentElement.lang,requestedOptions.layoutEpoch,controller?.destination]);
+    if(fingerprint!==layoutFingerprint){layoutReframe||=!!layoutFingerprint;layoutFingerprint=fingerprint;layoutEpoch++;discardPreparation();}
+    if(flight&&flight.revision!==requestedRevision){
+      const pending=[...flight.jobs.values()].flatMap(job=>[...job.context.incompleteSources.values()]);
+      if(pending.length){
+        const strings=[],visit=value=>{if(typeof value==='string')strings.push(value);else if(value&&typeof value==='object')for(const child of Object.values(value))visit(child);};visit(requested);
+        if(pending.some(block=>strings.some(source=>source.startsWith(block.source)&&!hasOpenMermaidFence(source))))discardPreparation();
+      }
+    }
+    // Forecast overscan may prepare one more row than the measured live range
+    // ultimately needs. That candidate is retired after commit. A later layout
+    // check must reuse the already committed flow instead of repeatedly preparing
+    // and retiring that offscreen row, which would keep initial reveal unready.
+    const liveItems=virtualizer.getVirtualItems();
+    if(!flight&&requestedRevision===committedRevision&&!layoutReframe&&
+      (liveItems.length||!requested.length)&&liveItems.every(item=>mounted.get(item.key)?.preparedSignature===signature(rows[item.index]))&&
+      (requestedOptions.regions||[]).every(region=>regionRevisions.get(region.key)===layoutEpoch+':'+region.revision)){
+      requestedOptions.beforeCommit?.();updateMeasured(rows,requestedOptions);requestedOptions.afterCommit?.();return;
+    }
+    if(!requested.length&&!requestedOptions.regions?.length){discardPreparation();requestedOptions.beforeCommit?.();updateMeasured(requested,requestedOptions);committedRevision=requestedRevision;requestedOptions.afterCommit?.();return;}
+    if(!flight){
+      const renderContext=requestedOptions.renderContext&&Object.fromEntries(Object.entries(requestedOptions.renderContext).map(([key,value])=>[key,typeof value==='function'?value:structuredClone(value)]));
+      flight={rows:structuredClone(requested),revision:requestedRevision,options:{...requestedOptions,renderContext},jobs:new Map(),sizes:new Map(),regions:new Map(),epoch:layoutEpoch,reframe:layoutReframe};
+    }
+    const current=flight,indexes=selectedPreparation(current.rows),selected=new Set(indexes.map(index=>current.rows[index].viewKey));let waiting=false;
+    // Reader movement can retire an offscreen candidate while a slow preview
+    // waits. Its identity deadline survives; its DOM/resources do not accumulate.
+    for(const [key,job]of current.jobs)if(!selected.has(key)){job.wait.cancel();dispose(job.record);job.surface.close();current.jobs.delete(key);}
+    host.setAttribute('aria-busy','true');
+    for(const region of current.options.regions||[]){
+      const stamp=layoutEpoch+':'+region.revision;if(regionRevisions.get(region.key)===stamp)continue;
+      let job=current.regions.get(region.key);
+      if(!job){
+        const surface=createPreparationSurface(scroller,region.host),context=createPreparedRender({previousRoot:region.host,renderContext:current.options.renderContext,deadlines,reframe:current.reframe,budget:preparationBudget});
+        surface.host.preparedContext=context.connectionContext;
+        surface.host.classList.remove('prepared-region');
+        job={region,signature:stamp,surface,context};current.regions.set(region.key,job);
+        withPreparedRender(context,region.key,()=>region.render(surface.host));context.root=surface.host;
+        job.wait=settlePreparedTree(surface.host,context,{valid:()=>!closed&&flight===current&&layoutEpoch===current.epoch});
+        job.wait.promise.then(measurement=>{if(flight!==current||closed)return;job.measurement=measurement;invalidate();}).catch(reason=>{if(reason.name!=='AbortError')queueMicrotask(()=>{throw reason;});});
+      }
+      if(!job.measurement)waiting=true;
+    }
+    for(const index of indexes){
+      const message=current.rows[index],key=message.viewKey,stamp=signature(message),old=mounted.get(key);
+      if(old?.preparedSignature===stamp)continue;
+      let job=current.jobs.get(key);
+      if(!job){
+        const surface=createPreparationSurface(scroller,host),context=createPreparedRender({previousRoot:old?.row,renderContext:current.options.renderContext,deadlines,reframe:current.reframe,budget:preparationBudget});
+        context.liveTop=()=>scroller.getBoundingClientRect().top+margin+estimatedStart(current.rows,index)-scroller.scrollTop;
+        job={message,signature:stamp,surface,context};current.jobs.set(key,job);
+        job.record=withPreparedRender(context,message.id,()=>render(message,undefined));context.root=job.record.row;job.record.row.preparedContext=context.connectionContext;surface.host.append(job.record.row);
+        job.wait=settlePreparedTree(job.record.row,context,{valid:()=>!closed&&flight===current&&layoutEpoch===current.epoch,layout:()=>withPreparedRender(context,message.id,()=>render(message,job.record))});
+        job.wait.promise.then(measurement=>{if(flight!==current||closed)return;job.measurement=measurement;current.sizes.set(key,measurement.size);while(current.sizes.size>1280)current.sizes.delete(current.sizes.keys().next().value);invalidate();}).catch(reason=>{if(reason.name!=='AbortError')queueMicrotask(()=>{throw reason;});});
+      }
+      if(!job.measurement)waiting=true;
+    }
+    if(waiting)return;
+    // Replacing a native touch target can prevent its touchend from reaching
+    // the scroller. Keep that live tree until contact is released. During the
+    // native tail, a shorter canvas must also wait if it would clamp scrollTop
+    // before the controller/engine can arbitrate the geometry transaction.
+    if(controller?.touching)return;
+    if(virtualizer.isTouchScrolling){
+      const total=current.rows.reduce((sum,message)=>sum+(current.sizes.get(message.viewKey)??heights.get(message.viewKey)??(message.role==='user'?120:message.role==='tool'?70:180)),0);
+      const regionsDelta=[...current.regions.values()].reduce((sum,job)=>{const style=getComputedStyle(job.region.host);return sum+job.measurement.size-(style.display==='none'?0:job.region.host.getBoundingClientRect().height+parseFloat(style.marginTop||0)+parseFloat(style.marginBottom||0));},0);
+      if(scroller.scrollHeight+total-virtualizer.getTotalSize()+regionsDelta<scroller.scrollTop+scroller.clientHeight-.5)return;
+    }
+    // All entering/changed rows in this bounded range are ready. Feed their
+    // known sizes to the engine before the single flow/geometry transaction.
+    committing=new Map();
+    for(const [key,size]of current.sizes)heights.set(key,size);
+    while(heights.size>1280)heights.delete(heights.keys().next().value);
+    current.rows.forEach((message,index)=>{const job=current.jobs.get(message.viewKey);if(job?.measurement){committing.set(message.viewKey,job);heights.set(message.viewKey,job.measurement.size);}});
+    current.options.beforeCommit?.();owner?.beforeLayout();
+    for(const job of current.regions.values()){
+      for(const [element,clone]of job.context.frames){const box=clone.getBoundingClientRect();framePreparedElement(element,box.height,element.matches('pot-message-file[data-block="false"]')?box.width:undefined);}
+      job.context.phase='commit';withPreparedRender(job.context,job.region.key,()=>job.region.render(job.region.host));job.context.phase='live';
+      job.region.host.preparedContext=job.context.connectionContext;
+      job.region.host.classList.add('prepared-region');job.region.host.style.setProperty('--prepared-region-height',job.measurement.height+'px');regionRevisions.set(job.region.key,job.signature);job.surface.close();
+      job.region.host.style.setProperty('--prepared-margin-top',job.measurement.marginTop+'px');job.region.host.style.setProperty('--prepared-margin-bottom',job.measurement.marginBottom+'px');
+    }
+    configure(current.rows);
+    for(const [key,size]of current.sizes){const index=indexesByKey.get(key);if(index!==undefined)virtualizer.resizeItem(index,size);}
+    updateMeasured(current.rows,current.options);
+    // New records must leave the connected surface before it is retired; doing
+    // this inside drawRows would destroy their live leases/diagram instances
+    // immediately before the actual same-node flow transfer.
+    for(const [key,job]of current.jobs){if(committing.has(key)){job.wait.cancel();dispose(job.record);}job.surface.close();}
+    committing=null;flight=null;committedRevision=current.revision;layoutReframe=false;host.removeAttribute('aria-busy');current.options.afterCommit?.();
+    refreshActivity();
+    if(requestedRevision!==current.revision||JSON.stringify(requestedOptions.regions?.map(region=>[region.key,region.revision]))!==JSON.stringify(current.options.regions?.map(region=>[region.key,region.revision])))invalidate();
+    }finally{queueUpdating=false;}
+  }
+  function updateMeasured(next=rows,options={}) {
+    if(closed||updating)return;measuredOptions=options;
     suspended=false;updating=true;
     try{
       owner?.beforeLayout();if(options.parents)owner?.setParents(options.parents);
@@ -183,20 +377,28 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       if(changed||dirty){dirty=false;draw();measure();}
       virtualizer._willUpdate();
       if(owner){
-        for(let pass=0;pass<3&&owner.reconcile();pass++){draw();if(measure())draw();}
+        // A held touch adjustment changes the engine's flow offsets without a
+        // native scroll write. Materialize that known range in this commit;
+        // the controller still makes exactly one geometry decision.
+        if(owner.reconcile())draw();
         owner.publish();
       }
     }finally{updating=false;}
   }
-  return Object.assign(Object.create(controller||null),{setMessages:update,measure,suspend(){
+  return Object.create(controller||null,Object.getOwnPropertyDescriptors({setMessages:update,measure,commitPrepared(){
+    const environment=currentPreparedRender();if(!environment)return;measuredOptions.beforeCommit?.();
+    for(const message of rows){const record=mounted.get(message.viewKey);if(record){withPreparedRender(environment.context,message.id,()=>record.commit?.());record.preparing=false;}}
+    measuredOptions.afterCommit?.();
+  },reset(){discardPreparation();deadlines.clear();requested=[];requestedRevision='[]';committedRevision=null;requestedOptions={};regionRevisions.clear();controller?.reset();},get prepared(){return !flight&&requestedRevision===committedRevision&&(requestedOptions.regions||[]).every(region=>regionRevisions.get(region.key)===layoutEpoch+':'+region.revision);},suspend(){
+    discardPreparation();
     cancelAnimationFrame(frame);frame=0;
     owner?.suspend();
     suspended=true;virtualizer.cancelScroll();unmount();
     for(const record of mounted.values())record.childrenWindow?.suspend();
   },close(){
-    closed=true;cancelAnimationFrame(frame);geometryObserver?.disconnect();owner?.close();virtualizer.cancelScroll();unmount();
+    closed=true;discardPreparation();scroller.removeEventListener('click',interaction,true);scroller.removeEventListener('pot:prepare-resize',interaction);host.ownerDocument.fonts?.removeEventListener('loadingdone',fontChanged);cancelAnimationFrame(frame);geometryObserver?.disconnect();owner?.close();virtualizer.cancelScroll();unmount();
     for(const record of mounted.values())dispose(record);
     mounted.clear();pending.clear();indexesByKey.clear();indexesByID.clear();
     for(const spacer of spacers)spacer.remove();
-  }});
+  }}));
 }

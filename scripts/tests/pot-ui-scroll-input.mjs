@@ -79,6 +79,7 @@ try{
     const beforeInput=row.getBoundingClientRect().top;actualTop+=25;
     const event=new Event(kind);Object.assign(event,kind==='wheel'?{deltaY:-36,deltaX:0}:{key:'ArrowUp'});
     f.history.closest=()=>null;f.history.dispatchEvent(event);
+    assert.equal(c.api.snapshot().mode,'reading','A pending render cannot expose an older Latest intent to context/cache consumers');
     if(kind==='keydown')c.idle(); // The preceding wheel's idle can arrive first.
     f.scroll(f.history.scrollTop-36);
     v.resizeItem(3,v.getMeasurements()[3].size+25);commit();

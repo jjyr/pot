@@ -110,6 +110,12 @@ async (page,{origin=new URL(page.url()).origin}={})=>{
   const trimmed=await sample();assert(trimmed.state.mode==='reading','Geometry clamping at the boundary does not enable following');
   assert(trimmed.top===0&&trimmed.offset===30,'A short trimmed list clamps at zero; the header makes the original zero offset unreachable');
   assert(trimmed.mounted===2,'Trimming retires removed rows');
+  await phase('boundary without movement');await page.locator('.controlled-history').focus();
+  await page.keyboard.press('ArrowUp');await page.waitForTimeout(220);await page.evaluate(()=>controllerScene.repeat());await settle();
+  const boundary=await sample();
+  assert(boundary.top===0&&boundary.state.mode==='reading'&&(await page.evaluate(()=>controllerScene.writes.length))===0,'Boundary keyboard input settles without inventing movement or navigation');
+  await page.evaluate(()=>controllerScene.list.scrollToLatest());await settle();await page.keyboard.press('ArrowDown');await page.waitForTimeout(220);await page.evaluate(()=>controllerScene.repeat());await settle();
+  assert((await sample()).state.mode==='latest'&&(await page.evaluate(()=>controllerScene.writes.length))===0,'No-movement input at Latest retires without a geometry write');
   assert(errors.length===0,errors.join('; '));
   await page.evaluate(()=>controllerScene.list.close());
   return {passed:true,timeline,restores,boundary:{top:trimmed.top,expectedTop:0,offset:trimmed.offset,expectedOffset:30,height:trimmed.height,mode:trimmed.state.mode},errors};

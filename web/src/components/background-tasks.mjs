@@ -15,14 +15,14 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
   const element=node('section','background-tasks'),states=new Map();
   const id=`background-tasks-${crypto.randomUUID()}`;
   let current=null,signature='';
-  function update(scope,tasks,needsApproval) {
+  function update(scope,tasks,needsApproval,target=element) {
     let state=states.get(scope);
-    if(!tasks.length){const changed=current===scope&&signature!=='';states.delete(scope);element.remove();current=null;signature='';return changed;}
+    target.hidden=!tasks.length;
+    if(!tasks.length){const changed=current===scope&&signature!=='';target.replaceChildren();if(target===element){states.delete(scope);current=null;signature='';}return changed;}
     if(!state){state={expanded:false,order:[]};states.set(scope,state);}
     taskIdentities.register(tasks);
     const nextSignature=JSON.stringify([scope,locale(),state.expanded,tasks.map(task=>[taskKey(task),task.address,taskIdentities.short(task),task.title,task.phase,task._stale,task.started_at_ms,task.finished_at_ms,task.agent_link,needsApproval(task.id,task.phase)])]);
-    if(current===scope&&signature===nextSignature)return false;
-    signature=nextSignature;
+    if(target===element&&current===scope&&signature===nextSignature)return false;
     const byID=new Map(tasks.map(task=>[taskKey(task),task]));
     state.order=state.order.filter(key=>byID.has(key));
     for(const key of byID.keys())if(!state.order.includes(key))state.order.push(key);
@@ -63,8 +63,12 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
       toggle.onclick=()=>{state.expanded=!state.expanded;onToggle({expanded:state.expanded});};projection.append(toggle);
     }
     // A different conversation must not inherit another owner's keyed DOM.
-    if(current!==scope)element.replaceChildren();current=scope;
-    reconcile(element,projection);return true;
+    if(target===element){if(current!==scope)element.replaceChildren();current=scope;signature=nextSignature;}
+    reconcile(target,projection);return true;
   }
-  return {element,update,close(){}};
+  return {element,update,region(scope,tasks,needsApproval){
+    tasks=structuredClone(tasks);
+    const decisions=new Map(tasks.map(task=>[task.id,needsApproval(task.id,task.phase)]));
+    return {key:'background-tasks',host:element,revision:JSON.stringify([scope,locale(),states.get(scope)?.expanded||false,tasks,[...decisions]]),render:target=>update(scope,tasks,id=>decisions.get(id),target)};
+  },close(){}};
 }

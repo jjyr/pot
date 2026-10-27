@@ -826,6 +826,13 @@ pot-file-image[data-state="error"] .file-image-status { color: var(--danger); }
 /* Shared resource presentations: previews and explicit downloads are distinct. */
 pot-resource{display:block;min-width:0;max-width:100%;margin:14px 0;border:1px solid var(--divider);border-radius:14px;overflow:hidden;background:var(--surface);color:var(--text)}
 .message-body:has(pot-resource,pot-message-file.initial-layout-slot[data-block="true"]){width:100%}.reply-bubble:has(pot-resource){padding:0;background:transparent}
+.prepared-frame { box-sizing:border-box; block-size:var(--prepared-height)!important; min-block-size:var(--prepared-height)!important; max-block-size:var(--prepared-height)!important; overflow:auto; }
+pot-message-file.prepared-frame[data-block="false"] { display:inline-block; inline-size:var(--prepared-width); vertical-align:bottom; }
+pot-message-file.prepared-frame[data-block="true"] { display:block; margin-block:12px; }
+.message-body:has(pot-message-file.prepared-frame[data-block="true"]) { width:100%; }
+.prepared-row { box-sizing:border-box; block-size:var(--prepared-row-height); min-block-size:var(--prepared-row-height); max-block-size:var(--prepared-row-height); overflow:auto; }
+.prepared-region { box-sizing:border-box; block-size:var(--prepared-region-height); min-block-size:var(--prepared-region-height); max-block-size:var(--prepared-region-height); overflow:auto; }
+.prepared-row,.prepared-region { margin-top:var(--prepared-margin-top)!important; margin-bottom:var(--prepared-margin-bottom)!important; }
 .resource-heading{display:flex;align-items:center;gap:12px;padding:13px 15px;background:var(--navigation)}
 .resource-type{font-size:11px;letter-spacing:.04em;font-weight:650;color:var(--muted);border:1px solid var(--divider);border-radius:6px;padding:4px 6px;flex-shrink:0}
 .resource-identity{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}.resource-name{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.resource-details{font-size:11px;color:var(--muted);overflow-wrap:anywhere}

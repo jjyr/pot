@@ -2,13 +2,18 @@ import {node as n} from './primitives.mjs';
 import {translate} from '../locales/messages.mjs';
 
 // A transient UI projection, deliberately separate from conversation messages.
-export function createChatApprovals({host,locale,visible}) {
+export function createChatApprovals({host,locale,visible,deferred=false}) {
   host.setAttribute('aria-live','off');
   const notice=n('p','approval-notice'),cards=n('div','approval-list'),announcer=n('span','visually-hidden');
   announcer.setAttribute('role','status');announcer.setAttribute('aria-live','polite');announcer.setAttribute('aria-atomic','true');
   host.append(notice,cards,announcer);host.hidden=true;
   const observed=new Map();
+  let pending={context:'',entries:[]};
   function update(context,entries) {
+    if(deferred){pending={context,entries};return;}
+    commit(context,entries);
+  }
+  function commit(context,entries) {
     host.hidden=!entries.length;
     host.setAttribute('aria-label',translate(locale(),'tool.pendingApprovals'));
     const text=translate(locale(),'tool.pendingApprovalCount').replace('{count}',String(entries.length));
@@ -27,5 +32,13 @@ export function createChatApprovals({host,locale,visible}) {
     }
     if(!entries.length)announcer.textContent='';
   }
-  return {update};
+  return {update,region(){
+    const {context,entries}=pending;
+    return {key:'chat-approvals',host,revision:JSON.stringify([context,locale(),entries.map(entry=>[entry.id,entry.revision])]),render:target=>{
+      if(target===host){commit(context,entries.map(entry=>({id:entry.id,element:entry.commit()})));return;}
+      target.hidden=!entries.length;target.setAttribute('aria-label',translate(locale(),'tool.pendingApprovals'));
+      const label=n('p','approval-notice',translate(locale(),'tool.pendingApprovalCount').replace('{count}',String(entries.length))),list=n('div','approval-list');
+      for(const entry of entries)list.append(entry.prepare());target.replaceChildren(label,list,n('span','visually-hidden'));
+    }};
+  }};
 }

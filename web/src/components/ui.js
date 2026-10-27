@@ -1,3 +1,4 @@
+import {currentPreparedRender} from './prepared-render.mjs';
 import {domainsFor} from '../state/domains/index.mjs';
 import {machinePresentation} from '../state/machine-identity.mjs';
 import {storedPreference} from '../state/preferences.mjs';
@@ -24,7 +25,7 @@ import {messages,translate} from '../locales/messages.mjs';
 import {acceptSnapshot, beginSend, beginSubscription, createConversationState, draft, draftReferences, setDraftReferences, ownerKey, setDraft, validSnapshot} from '../state/conversation.mjs';
 import {bindComposer} from './composer.mjs';
 import {createAttachmentComposer,renderMessageAttachments,failedMessageInput} from './attachments.mjs';
-import {renderMarkdown} from './markdown.mjs';
+import {updateMarkdown} from './markdown.mjs';
 import {createPages} from './pages.mjs';
 import {createReplies,replyKey} from '../state/replies.mjs';
 import {bindCompletions} from './completions.mjs';
@@ -94,7 +95,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let assistants = [], spaces = [], selectedAssistant = null, pendingSelection = null;
   let unsubscribe = () => {}, stopChanges = () => {};
   let directoryEpoch = 0, directorySignature = '';
-  let activeView=null,viewWrite=Promise.resolve(),viewTimer,chatSession=null,selectionGeneration=0;
+  let activeView=null,viewWrite=Promise.resolve(),viewTimer,chatSession=null,selectionGeneration=0,chatHydration=0;
   let chatPreparing=false,initialIntent=null;
   let chatShown=false,pendingTaskToggle=null;
   let chatPosition=null,chatNavigation=0;
@@ -120,7 +121,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const taskClock=bindTaskClock(messageColumn,{locale:()=>locale,active:()=>!disposed&&route==='chat'&&!root.classList.contains('show-directory')});
   const historyStatus=el('button','history-page-status text-button');historyStatus.type='button';
   const windowHost=el('div','message-window');
-  messageColumn.append(historyStatus,windowHost,chatApprovals);
+  const emptyChat=el('p','empty-chat');emptyChat.hidden=true;
+  messageColumn.append(historyStatus,windowHost,chatApprovals,emptyChat);
   history.append(messageColumn);
   const latest = button('down', t('latest'), 'latest-button');
   latest.hidden = true;
@@ -267,7 +269,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   async function jumpToMessage(id,{expand=false}={}){
     const ticket=positionChat({kind:'message',id,expand});
     let message=state.snapshot?.messages.find(message=>message.id===id&&!message.context_only);
-    if(!message){prepareChat();if(!await readHistory({around:id},{around:true,positionTicket:ticket})){if(currentChatPosition(ticket))chatPosition=null;return;}message=state.snapshot?.messages.find(message=>message.id===id);}
+    if(!message){if(!await readHistory({around:id},{around:true,positionTicket:ticket})){if(currentChatPosition(ticket))chatPosition=null;return;}message=state.snapshot?.messages.find(message=>message.id===id);}
     if(!currentChatPosition(ticket))return;
     if(!message){chatPosition=null;historyFailure='history.missing';renderMessages();return;}
     state.uiAnchor=message.sequence;
@@ -548,7 +550,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     clearTimeout(viewTimer);
     if(!state.snapshot||chatPreparing)return viewWrite;
     while(toolMemory.size>1280)toolMemory.delete(toolMemory.keys().next().value);
-    activeView={position:messageWindow.snapshot(),layout:layoutKey(),heights:[...windowHeights],tools:[...toolMemory]};
+    activeView={position:messageWindow.snapshot(),layout:layoutKey(),heights:messageWindow.prepared?[...windowHeights]:[],tools:[...toolMemory]};
     const savedScope=client.scope?.();
     if(chatSession)viewWrite=chatSession.saveView(activeView).then(()=>client.rememberStartup?.(savedScope,viewSurface)).catch(reason=>{if(!disposed){error=t('chatCache.positionFailed');console.error('Chat view storage:',reason);updateControls();}});
     return viewWrite;
@@ -562,7 +564,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   // cached history arrives. Include that geometry in the hidden first layout.
   const draftLayoutReady=()=>{const status=assistantDrafts?.status(editorOwner);return !assistantDrafts||assistantDrafts.ready(editorOwner)||!!status?.error&&!status.cleanup;};
   const initialLayout=createInitialChatLayout({history,
-    ready:()=>!disposed&&chatPreparing&&!!state.snapshot&&!historyLoading&&chatShown&&draftLayoutReady(),
+    ready:()=>!disposed&&chatPreparing&&!!state.snapshot&&!historyLoading&&chatShown&&draftLayoutReady()&&messageWindow.prepared,
     layout:()=>{editor.resize();renderMessagesNow(true);},
     position:()=>{if(initialIntent)applyChatPosition(initialIntent);},
     fontFallback:()=>root.classList.add('chat-font-fallback'),
@@ -807,14 +809,16 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     downloadFile:client.downloadFile?async({task,path})=>{try{await client.downloadFile(task,path,scope);}catch(reason){error=reason.message;updateControls();}}:undefined,
   });
   const renderMessage=(message,existing)=>{
-    const snapshot=renderingSnapshot,sending=renderingSending,forest=renderingForest;
+    const context=currentPreparedRender()?.context.renderContext||{snapshot:renderingSnapshot,sending:renderingSending,forest:renderingForest,scope:client.scope?.(),assistant:selectedAssistant,t,offline:connection==='offline'||disconnected,canRetrySend:connection==='connected'&&!pendingSend()&&draft(state)===renderingSending?.request.text};
+    const {snapshot,sending,forest}=context;
     let record = existing;
     if (!record) {
       const row = el('article', `message role-${message.role}`);
       const bubble = el('div', 'message-body');
       row.append(bubble);
       record = {row, bubble};
-      messageNodes.set(message.viewKey, record);
+      record.commit=()=>{messageNodes.set(message.viewKey,record);record.childrenWindow?.commitPrepared();return record;};
+      if(currentPreparedRender()?.context.phase!=='prepare')record.commit();
     }
     const {row, bubble} = record;
     row.classList.toggle('is-activity',!!message.activity);
@@ -824,30 +828,30 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
  if(!record.compact){record.compact=createCompaction({locale:()=>locale});bubble.append(record.compact.element);}
  record.compact.update(message);
  }else if(message.role==='tool'&&message.tool){
-      const scope=client.scope?.()||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
+      const scope=context.scope||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
       if(!record.tool){record.tool=createToolCall({messageActor:()=>messageIdentities(client).actor(scope),resolveTask:id=>projectedTasks(scope).find(task=>task.id===id),onOpenTask:task=>openChatTask(task,scope),resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key,locale:()=>locale,machineLabel:id=>machinePresentation(client).label(id,scope,locale),onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>messageWindow.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
-      record.tool.update(message,{offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
+      record.tool.update(message,{expanded:messageWindow.revealing&&messageWindow.visibilityPath.has(message.id)||messageWindow.destination?.expand&&messageWindow.destination.id===message.id,offline:context.offline,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
     }else if(message.role==='assistant'){
       record.reply ||= createReplyBubble(bubble);
-      const scope=client.scope?.();
+      const scope=context.scope;
       record.reply.update(message,{t,...markdownFiles(scope),
         onSettings:async()=>{if(!await pages?.leave())return;route='settings';await pages.showProviders();renderShell();},
-        onRetrySend:submit,canRetrySend:connection==='connected'&&!pendingSend()&&draft(state)===sending?.request.text});
+        onRetrySend:submit,canRetrySend:context.canRetrySend});
       record.text=message.text;record.role=message.role;
     }else if (record.text !== message.text || record.role !== message.role) {
       bubble.replaceChildren();
       if (message.role === 'tool') bubble.append(el('pre','',message.text));
       else if (message.role === 'system') bubble.textContent = message.text;
-      else {const scope=client.scope?.(),prose=el('div','message-prose');prose.append(renderMarkdown(message.text,{...markdownFiles(scope)}));bubble.append(prose);}
+      else {const scope=context.scope,prose=el('div','message-prose');updateMarkdown(prose,message.text,{...markdownFiles(scope),renderSlot:'user-prose'});bubble.append(prose);}
       record.text = message.text; record.role = message.role;
       row.className = `message role-${message.role}`;
     }
     if(message.role==='assistant'&&!message.activity){
-      const name=selectedAssistant?.name||'Pot',image=selectedAssistant?.avatar;
+      const name=context.assistant?.name||'Pot',image=context.assistant?.avatar;
       if(!record.speaker||record.speakerName!==name||record.speakerImage!==image){
         record.speaker?.remove();record.speakerName=name;record.speakerImage=image;
         record.speaker=el('div','message-speaker');
-        record.speaker.append(assistantAvatar(selectedAssistant,25),el('span','',name));
+        record.speaker.append(assistantAvatar(context.assistant,25),el('span','',name));
         row.prepend(record.speaker);
       }
     }else if(record.speaker){record.speaker.remove();record.speaker=null;}
@@ -858,10 +862,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       record.referenceNode?.remove();record.referenceSignature=referenceSignature;
       if(message.references?.length){record.referenceNode=renderMessageReferences(message.references,{messages:snapshot?.messages||[],locale:()=>locale,onJump:jumpToMessage});bubble.prepend(record.referenceNode);}
     }
-    const attachmentSignature=JSON.stringify([message.attachments||[],state.snapshot?.agent?.attachments]);
+    const attachmentSignature=JSON.stringify([message.attachments||[],snapshot?.agent?.attachments]);
     if(message.role==='user'&&(record.attachmentSignature!==attachmentSignature||!record.attachmentNode?.isConnected)){
       record.attachmentNode?.dispose?.();record.attachmentNode?.remove();record.attachmentSignature=attachmentSignature;
-      if(message.attachments?.length){record.attachmentNode=renderMessageAttachments(message.attachments,{client,caps:state.snapshot?.agent?.attachments,scope:{...client.scope()},locale:()=>locale,onError:reason=>{error=reason.message;updateControls();}});bubble.append(record.attachmentNode);}
+      if(message.attachments?.length){record.attachmentNode=renderMessageAttachments(message.attachments,{client,caps:snapshot?.agent?.attachments,scope:{...context.scope},locale:()=>locale,onError:reason=>{error=reason.message;updateControls();}});bubble.append(record.attachmentNode);}
     }
     if ((message.role === 'assistant'||message.role==='user') && message.text && !record.copy) {
       const copy = button('copy',t('copy'),'copy-message');
@@ -888,7 +892,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const viewportObserver=new ResizeObserver(()=>requestMessageRender(true));viewportObserver.observe(history);
   function renderMessages(viewportOnly=false){fullRender ||= !viewportOnly;if(disposed||renderFrame)return;renderFrame=requestAnimationFrame(()=>{renderFrame=0;const viewportOnly=!fullRender;fullRender=false;renderMessagesNow(viewportOnly);});}
   function renderMessagesNow(viewportOnly=false) {
-    if(!chatShown)return;
+    // A missing/offline directory can replace the conversation with its own
+    // recovery view. Its retired row/region hosts are no longer a layout target.
+    // Selecting a confirmed assistant reconnects the normal column together.
+    if(!chatShown||windowHost.parentElement!==messageColumn)return;
     const navigation=chatPosition?.epoch===epoch?chatPosition:null;
     const anchor=messageWindow.anchor;
     const snapshot=state.snapshot;
@@ -903,31 +910,29 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     const {messages:visibleMessages,forest,roots,parents}=chatProjection;
     renderingSnapshot=snapshot;renderingSending=sending;renderingForest=forest;
-    historyStatus.hidden=!chatSession?.hasHistory||!snapshot;
-    historyStatus.disabled=historyLoading||!historyFailure&&!snapshot?.history?.has_more;
-    historyStatus.textContent=t(historyLoading?'history.loading':historyFailure|| (snapshot?.history?.has_more?'history.earlier':'history.start'));
+    const historyChrome={hidden:!chatSession?.hasHistory||!snapshot,disabled:historyLoading||!historyFailure&&!snapshot?.history?.has_more,label:t(historyLoading?'history.loading':historyFailure|| (snapshot?.history?.has_more?'history.earlier':'history.start'))};
     const tasks=client.production?projectedTasks(client.scope()):[];
-    if(client.production&&!viewportOnly)backgroundTaskView.update(JSON.stringify(client.scope()),tasks,(id,phase)=>pages.taskNeedsApproval(id,phase));
-    // The task region stays outside recycled message rows and shares the chat scroller.
-    if(client.production&&tasks.length){
+    // Regions outside recycled rows join the same prepared geometry transaction.
+    if(client.production){
       if(backgroundTaskView.element.parentElement!==messageColumn)messageColumn.insertBefore(backgroundTaskView.element,chatApprovals);
-    }else backgroundTaskView.element.remove();
+    }
     if(pendingTaskToggle&&!pendingTaskToggle.expanded&&messageWindow.position?.anchors[0]?.key.startsWith('task:')){
       const retained=new Set([...backgroundTaskView.element.querySelectorAll('[data-scroll-anchor]')].map(node=>node.dataset.scrollAnchor));
       if(!retained.has(messageWindow.position.anchors[0].key))messageWindow.locate({key:'background-tasks-heading',align:'nearest'});
     }
     pendingTaskToggle=null;
     if(!viewportOnly)taskClock.refresh();
-    if (snapshot && !visibleMessages.length) {
-      if(!messageColumn.querySelector('.empty-chat'))messageColumn.append(el('p', 'empty-chat', t('first')));
-    }else if(visibleMessages.length){
-      messageColumn.querySelector('.empty-chat')?.remove();
-    }
     if(!viewportOnly)pages?.renderApprovals();
     if(!chatApprovals.hidden&&locateApprovals===JSON.stringify(client.scope?.())){
       locateApprovals='';cancelChatPosition();messageWindow.locate({key:'chat-approvals',align:'nearest'});
     }
-    messageWindow.setMessages(roots,{parents});
+    const empty={hidden:!snapshot||!!visibleMessages.length,text:t('first')};
+    const toolOffline=connection==='offline'||disconnected;
+    const canRetrySend=connection==='connected'&&!pendingSend()&&draft(state)===sending?.request.text;
+    const regions=[{key:'chat-history-status',host:historyStatus,revision:JSON.stringify(historyChrome),render:target=>{target.hidden=historyChrome.hidden;target.disabled=historyChrome.disabled;target.textContent=historyChrome.label;}},
+      {key:'chat-empty',host:emptyChat,revision:JSON.stringify(empty),render:target=>{target.hidden=empty.hidden;target.textContent=empty.text;}},
+      ...(client.production?[backgroundTaskView.region(JSON.stringify(client.scope()),tasks,(id,phase)=>pages.taskNeedsApproval(id,phase)),pages.approvalRegion()]:[])];
+    messageWindow.setMessages(roots,{parents,regions,layoutEpoch:[layoutKey(),snapshot?.runtime_id,snapshot?.boot_id,snapshot?.owner_id,snapshot?.conversation_id,selectedAssistant?.name,selectedAssistant?.avatar,snapshot?.agent?.attachments,toolOffline,canRetrySend],renderContext:{snapshot,sending,forest,scope:{...client.scope?.()},assistant:selectedAssistant,t,offline:toolOffline,canRetrySend}});
     if(navigation&&snapshot&&!historyLoading&&navigation.kind!=='message')chatPosition=null;
     latest.hidden=messageWindow.following;
     state.uiAnchor=messageWindow.following?null:selectedSequence()||messageWindow.anchor?.sequence||null;
@@ -988,6 +993,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   async function loadSnapshot(reattach = false) {
     if (disposed) return;
+    // Startup confirmation can arrive while the selected session queries IDB.
+    // That selection will attach with the latest connection authority after
+    // hydration. Reattaching here would retire its epoch and discard the only
+    // cached snapshot while the backend's initial frame is still unavailable.
+    if(reattach&&chatHydration===selectionGeneration)return;
     if(reattach){const retained=state.snapshot;historyGeneration++;historyLoading=false;epoch=beginSubscription(state);if(retained)acceptSnapshot(state,retained,epoch,{committed:true});disconnected=false;return attach();}
     const receivedEpoch = epoch;
     connection = 'connecting'; error = ''; connectionError = ''; updateControls();
@@ -1035,6 +1045,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     messageWindow.setMessages([]);windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);messageNodes.clear();windowHeights.clear();toolMemory.clear();
     historyGeneration++;historyLoading=false;historyFailure='';state.uiAnchor=null;error='';chatCacheFailed=false;connectionError='';disconnected=false;connection='connecting';
     renderShell();
+    chatHydration=selection;
     try{
       const cached=await chatSession.query();
       if(disposed||selection!==selectionGeneration||receivedEpoch!==epoch)return;
@@ -1043,12 +1054,14 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       for(const [key,value]of activeView?.tools||[])toolMemory.set(key,value);
       restoreSavedPosition(activeView?.position);
       if(cached?.snapshot){acceptSnapshot(state,cached.snapshot,epoch,{committed:true});syncEditor();}
+      chatHydration=0;
       if(client.production&&record)saveNavigation('chat',initial);
       renderShell();attach();pages?.permissions();refreshBackgroundTasks();
       const anchor=messageWindow.anchor;
       if(anchor&&!state.snapshot?.messages.some(message=>message.id===anchor.id))await readHistory({around:anchor.id},{around:true});
       else if(messageWindow.following&&state.snapshot?.history?.has_newer)await readHistory({},{around:true});
     }catch(reason){if(!disposed&&receivedEpoch===epoch){cacheFailure(reason);}}
+    finally{if(chatHydration===selection)chatHydration=0;}
   }
   function creationSpace(){return selectedAssistant?spaces.find(space=>space.id===selectedAssistant.space_id):spaces.find(space=>space.kind==='local')||spaces[0];}
   function clearSelectedAssistant() {

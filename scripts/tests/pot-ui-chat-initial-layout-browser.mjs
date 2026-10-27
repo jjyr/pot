@@ -4,19 +4,19 @@ import {createInitialChatLayout} from '../../web/src/components/initial-chat-lay
 import {createMessageFile} from '../../web/src/components/message-file.mjs';
 const root=document.querySelector('#app'),results=document.querySelector('#results');
 const frame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
-const wait=async test=>{for(let i=0;i<400;i++){if(test())return;await frame();}throw Error('Timed out: '+test);};
+const wait=async test=>{for(let i=0;i<400;i++){if(test())return;await frame();}throw Error('Timed out: '+test+' '+JSON.stringify({scope,releases:releases.map(release=>({owner:release.owner,at:release.at})),trace:leaseTrace}));};
 const check=(value,label)=>{if(!value)throw Error(label);results.textContent+='PASS '+label+'\n';};
 localStorage.setItem('pot-system-notifications-browser-v1','false');
 document.documentElement.dataset.platform='browser';
 const canvas=document.createElement('canvas');canvas.width=480;canvas.height=280;canvas.getContext('2d').fillRect(0,0,480,280);
 const image=URL.createObjectURL(await new Promise(resolve=>canvas.toBlob(resolve)));
 let scope={space:'layout',owner:'alpha'},receive,version=1;
-const releases=[];
+const releases=[],leaseTrace=[];
 const snapshot=()=>({kind:'reset',runtime_id:'layout',boot_id:'boot',owner_id:JSON.stringify(['layout',scope.owner]),conversation_id:scope.owner,cursor:String(version),replies:[],running:false,turn_id:null,
   messages:Array.from({length:24},(_,index)=>({id:scope.owner+'-'+index,sequence:String(index+1),role:index%2?'assistant':'user',...(index%2?{reply_to:scope.owner+'-'+(index-1)}:{}),text:index%2?'## Measured reply\n\n'+('A paragraph with **Markdown**. '.repeat(index%5+1))+'\n\n```js\nconst ready = true;\n```':'Short question',status:'complete',...(index===22?{attachments:[{id:'image',name:'image.png',mime_type:'image/png',size:1,width:480,height:280}]}:{})})),history:{before:'1',after:'24',has_more:false,has_newer:false}});
 const client={production:true,chatCacheName:'initial-layout-'+crypto.randomUUID(),runtime:{runtime_id:'layout',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>scope={...scope,...value},changes:()=>()=>{},
   subscribe(callback,status){receive=callback;queueMicrotask(()=>{status('connected');callback(snapshot());});return()=>{};},
-  attachmentURL:()=>new Promise((resolve,reject)=>{const release=()=>resolve(image);release.fail=()=>reject(Error('Offline fixture'));releases.push(release);}),downloadAttachment:async()=>{},
+  attachmentURL:(attachment,captured)=>new Promise((resolve,reject)=>{const owner=captured?.owner||scope.owner;leaseTrace.push({owner,at:performance.now()});const release=()=>resolve(image);release.owner=owner;release.at=performance.now();release.fail=()=>reject(Error('Offline fixture'));releases.push(release);}),downloadAttachment:async()=>{},
   async request(path){const url=new URL(path,location.href);
     if(url.pathname==='/api/v1/spaces')return {active_space_id:'layout',items:[{id:'layout',name:'Fixture',control_id:'layout',connected:true}]};
     if(url.pathname==='/api/v1/assistants')return {items:[{id:'alpha',name:'Alpha'},{id:'beta',name:'Beta'}]};

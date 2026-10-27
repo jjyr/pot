@@ -32,7 +32,7 @@ export async function referenceCancellation(page,origin){
   const choose=async name=>{
     if(phone)await page.locator('.narrow-navigation').click();
     await page.locator('.assistant-row').filter({hasText:name}).click();
-    await page.waitForFunction(owner=>document.querySelector('[data-reference-source]')?.dataset.referenceSource===owner+'-source',name.toLowerCase());
+    await page.waitForFunction(owner=>{const h=document.querySelector('.history');return h&&getComputedStyle(h).visibility==='visible'&&!h.hasAttribute('aria-busy')&&!h.querySelector('.message-window[aria-busy]')&&h.querySelector('[data-reference-source]')?.dataset.referenceSource===owner+'-source';},name.toLowerCase());
   };
   await choose('Beta');await input.fill('Beta draft');await select();
   await page.evaluate(()=>referenceFixture.accept());

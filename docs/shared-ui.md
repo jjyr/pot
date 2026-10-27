@@ -52,7 +52,9 @@ component. Unloaded identities use a neutral placeholder.
 [`components/markdown.mjs`](../web/src/components/markdown.mjs) renders closed
 `mermaid` fences through [`components/mermaid.mjs`](../web/src/components/mermaid.mjs)
 in Chat, Task details and Markdown tool results. Other fences and incomplete
-streamed fences remain code. The component loads the pinned, bundled Pele ESM
+streamed fences whose type is not yet Mermaid remain code. A known Mermaid fence
+waits for closure and diagram readiness before publication, with the bounded
+fallback described below. The component loads the pinned, bundled Pele ESM
 module only when a diagram enters the document; no CDN is needed.
 
 Each `pot-mermaid` element owns its Pele mount and destroys it on disconnection,
@@ -137,27 +139,60 @@ The UI never provides an IO callback or receives a cache/key. Each surface has i
 own reading intent. Closing one leaves shared history IO available to another;
 retire, scope change and deletion fence late publication and cache resurrection.
 
-Initial Chat history, including a return from the assistant directory, keeps its
-layout width while hidden. Before revealing it, the UI waits for the mounted
-history's font, image, resource and diagram states, then commits the virtual
-range and initial reading position until their measured geometry is stable.
-The original navigation intent is reapplied after resource readiness so a
-temporarily shorter row cannot replace the saved reading anchor.
-Markdown and code formatting are synchronous; resource previews and diagrams
-participate through their loading/ready/error states. Preparation is cancelled
-on navigation or disposal, so an old resource completion cannot reveal a new Chat.
-It does not hide subsequent streamed output or ordinary history pagination.
+Chat and Task output use one preparation path for new output, history pages,
+cached initial content, virtual remounts and expanded work records. A candidate
+renders in a connected, inert surface outside the live history, with the actual
+column width, captured data and renderer props. Recursive component readiness,
+image decoding and font readiness precede measurement. The candidate's border
+size and margins are known before the batch enters the live flow. Background
+tasks, approvals, history notices, the Task goal and Task files join that batch.
+The previous visible version remains usable while a candidate waits. Only the
+initial Chat/Task reveal waits behind a hidden layout of the real width; ordinary
+updates and pagination keep the history visible.
 
-Preparation allows five seconds for resources. Unresolved previews then retain a
-fixed, scrollable slot, so a slow or offline resource cannot hide Chat indefinitely
-or change its row height when it finishes. Explicit expansion can resize that
-slot. If the web font is still loading, the surface retains a system font until
-the next preparation. This stabilizes the initial history; live business updates,
-user expansion, viewport changes and interactive resource contents remain dynamic.
-Pending block file references reserve the preview slot before their binding
-arrives; inline file links retain their measured link box instead. A preview's
-Expand action also releases a containing file-reference slot, and Collapse
-restores its reserved height.
+A window prepares at most 96 rows at once and admits at most 32 component loads
+at once. It retains one running snapshot and the newest pending revision, so
+continuous tokens do not indefinitely replace an otherwise publishable batch.
+Width, font, locale, scope and navigation changes retire incompatible candidates.
+Logical component slots carry their original five-second deadline across token
+updates and candidate replacement. A known Mermaid fence remains unready until
+it closes and its diagram renders; its temporary long source is not a preview.
+Closing the fence can replace that waiting candidate without restarting its
+deadline. Other Markdown parsing and code formatting finish synchronously in the
+candidate.
+
+At the deadline an unresolved block receives a fixed, scrollable outer frame of
+at least 240 pixels; an inline reference keeps its measured link box. Binding,
+bytes, decoding, diagram completion and interactive-document resizes may update
+the interior later without changing the committed canvas. A Mermaid fence that
+closes after this fallback also retains the frame. A reader's explicit expansion,
+source disclosure or width/font change requests another measured layout epoch.
+Streaming file references may query binding metadata before the reply finishes;
+only a ready saved-resource binding authorizes a byte preview.
+
+Preparation measures static surrogates for unchanged live resources rather than
+moving or restarting them. Commit patches the original Markdown views and moves
+new prepared nodes into place, preserving completed paragraphs, selection, code
+scrolling, leases and diagram instances. Surfaces retire after the actual nodes
+have transferred. Atomic DOM moves are preferred; the fallback restores focus
+and selection and defers disconnect cleanup to distinguish a move from removal.
+Real removal retires the component generation and releases its resources.
+
+One conversation controller chooses the geometry correction for the entire
+batch; nested adapters never write the native scroller. Its context snapshots
+expose the newest reading intent while subscribers receive measured positions.
+This prevents a delayed body from restoring an older Latest command. Native
+contact retains its original live touch target through `touchend`. A shorter
+canvas that would clamp a moving native scroller waits for the inertia tail to
+settle. Native `scrollend` ends input ownership where available after its generation
+survives the next rendering step; a geometry write's queued end cannot retire a
+newer native frame. The fallback
+retires its idle timer on every new input generation and scroll event.
+
+Saved height hints describe a committed layout, not preparation evidence. A
+pending layout saves the existing native reading position without height hints.
+The persisted view/message formats are unchanged; preparation state and component
+slots are transient UI data.
 
 UI components keep focus, unsaved values, expanded disclosures, filters and the
 history sentinel. They pass business inputs to typed commands instead of building
@@ -425,7 +460,15 @@ read. No group elapsed total is calculated by summing concurrent calls.
 The adapter retains group keys by membership and reading anchor, and original
 record nodes across append, prepend and splits. Disclosure state survives virtual
 recycling within the existing conversation-scoped memory; it is not a persisted
-history field. The existing virtualizer/controller alone owns scrolling. Task
+history field. A collapsed group exposes one real member's native message ID and
+sequence as its reading representative, plus the exact first/last native sequence
+of its current members. Appending/prepending retains a valid representative;
+clipping or splitting selects a member still in that group. A fresh projection
+prefers the saved native reading ID, so restoration can resolve the header alias
+even when the virtual group key changes. The range does not make all collapsed
+members readable. These fields are derived only in the UI; saved positions reuse
+the existing native anchor fields and raw message records stay unchanged.
+The existing virtualizer/controller alone owns scrolling. Task
 inputs whose API provides only a scalar sender keep their existing independent
 reference/guidance projection rather than inventing a full endpoint. Adapters
 without individual tool or plan events do not acquire synthesized progress.

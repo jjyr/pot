@@ -45,7 +45,7 @@ else {
         if(name==='machines')return contract('pot-ui-machines-browser.js',page,{origin:server.origin});
         if(/^(assistant-start|first-connection|settings|composer|usage)-/.test(name)||name==='linked-approvals'||name==='patch-approvals')return focused(page,name,server.origin);
         if(name==='controller')return contract('pot-ui-conversation-controller-browser.js',page,{origin:server.origin});
-        if(fixtures[name])return fixture(page,server.origin,name,fixtures[name]);
+        if(fixtures[name]){const result=await fixture(page,server.origin,name,fixtures[name]);return name==='chat-cache-ui.html'?{...result,readiness:await page.evaluate(()=>window.cacheViewportEvidence)}:result;}
         if(name==='scroll-components')return fixture(page,server.origin,'chat-scroll.html?contract=window','DONE scrolling checks');
         if(name==='task-continuity')return taskContinuity(page,{origin:server.origin});
         if(name==='task-history')return taskHistoryBrowser(page,{origin:server.origin});
@@ -70,7 +70,8 @@ else {
           await page.waitForFunction(()=>document.querySelector('.assistant-profile-trigger')?.getAttribute('aria-expanded')==='false');
           if(await trigger.getAttribute('aria-expanded')!=='false'||await composer.inputValue()!==draft)throw Error('Assistant menu dismissal lost its accessible state or draft');
           return {...state,shell,menuKeyboardAndOutsideDismissal:true,menuLocaleAndTarget:true};
-          }finally{await page.evaluate(()=>window.chatSwitchingDispose?.());}
+          }catch(error){await page.evaluate(()=>{const h=document.querySelector('.history');window.switchingFailure={probe:window.shellInputProbe,history:h&&{top:h.scrollTop,extent:h.scrollHeight,height:h.clientHeight,busy:h.getAttribute('aria-busy'),visibility:getComputedStyle(h).visibility,latestHidden:document.querySelector('.latest-button')?.hidden}};});throw error;}
+          finally{await page.evaluate(()=>window.chatSwitchingDispose?.());}
         }
         // The CLI expression derives its origin without loading the application.
         return contract('pot-ui-chat-continuity-browser.js',page,{origin:server.origin,witness:witnessMessages});
@@ -83,7 +84,14 @@ else {
 // Representative fixture configurations, not full locale/theme/viewport products.
 async function shellRetention(page){
   const history=page.locator('.history'),composer=page.locator('#pot-composer'),search=page.getByRole('searchbox',{name:'Search assistants',exact:true}),list=page.locator('.assistant-list');
-  const before=await history.evaluate(node=>node.scrollTop);await history.hover();await page.mouse.wheel(0,-180);
+  await page.waitForFunction(()=>{const h=document.querySelector('.history');if(!h||h.hasAttribute('aria-busy')||getComputedStyle(h).visibility!=='visible'||h.querySelector('.message-window[aria-busy]'))return false;const viewport=h.getBoundingClientRect();return [...h.querySelectorAll('article.message')].some(row=>{const box=row.getBoundingClientRect();return Math.min(box.bottom,viewport.bottom)-Math.max(box.top,viewport.top)>=24;});});
+  if(await page.locator('.latest-button').isVisible())await page.locator('.latest-button').click();
+  await page.waitForFunction(()=>{const h=document.querySelector('.history');return getComputedStyle(h).visibility==='visible'&&!h.hasAttribute('aria-busy')&&!h.querySelector('.message-window[aria-busy]')&&h.scrollHeight-h.clientHeight-h.scrollTop<=1;});
+  const before=await history.evaluate(node=>node.scrollTop),historyBox=await history.boundingBox();
+  await page.evaluate(({before,box})=>{const h=document.querySelector('.history'),hit=document.elementFromPoint(box.x+box.width-12,box.y+box.height/2);window.shellInputProbe={before,box,hit:hit?.outerHTML.slice(0,500),events:[]};for(const type of ['wheel','scroll'])h.addEventListener(type,event=>shellInputProbe.events.push({type,trusted:event.isTrusted,top:h.scrollTop,delta:event.deltaY,latestHidden:document.querySelector('.latest-button')?.hidden}));},{before,box:historyBox});
+  // Exercise the conversation scroller's gutter. A centered wheel can belong
+  // to a scrollable code/tool/fallback interior and correctly leave it still.
+  await page.mouse.move(historyBox.x+historyBox.width-12,historyBox.y+historyBox.height/2);await page.mouse.wheel(0,-180);
   await page.waitForFunction(top=>document.querySelector('.history').scrollTop<top&&!document.querySelector('.latest-button').hidden,before);
   await page.evaluate(async()=>{let previous,stable=0;for(let i=0;i<90;i++){await new Promise(requestAnimationFrame);const h=document.querySelector('.history'),value=[h.scrollTop,h.scrollHeight].join(':');stable=value===previous?stable+1:0;previous=value;if(stable===3)return;}throw Error('Reading geometry did not settle before folding');});
   const capture=()=>page.evaluate(()=>{const h=document.querySelector('.history'),top=h.getBoundingClientRect().top;const row=[...h.querySelectorAll('article.message')].find(node=>{const r=node.getBoundingClientRect();return r.height&&r.bottom>top&&r.top<top+h.clientHeight;});return {id:row?.dataset.messageId,offset:row?.getBoundingClientRect().top-top};});
@@ -151,13 +159,14 @@ async function focused(page,name,origin){
   }
   await page.goto(origin+'/scripts/tests/fixtures/linked-approvals.html?assistant_id=main&locale=zh-CN&theme=light');
   if(name==='patch-approvals')return contract('pot-ui-patch-approvals-browser.js',page,{origin});
-  await page.locator('.approval-card summary').click();
-  if(await page.locator('.approval-actions button').count()!==2)throw Error('Approval broader than one operation');
-  if(!(await page.locator('.approval-arguments').first().innerText()).includes('ssh deployment-host hostname'))throw Error('Missing exact command');
+  const chatApprovals=page.locator('.history .chat-approvals');
+  await chatApprovals.locator('.approval-card summary').click();
+  if(await chatApprovals.locator('.approval-actions button').count()!==2)throw Error('Approval broader than one operation');
+  if(!(await chatApprovals.locator('.approval-arguments').first().innerText()).includes('ssh deployment-host hostname'))throw Error('Missing exact command');
   await page.evaluate(()=>linkedApprovalFixture.language('en'));
-  await page.getByRole('button',{name:'Deny',exact:true}).click();await page.locator('.chat-approvals').waitFor({state:'hidden'});
-  if(await page.locator('.approval-actions button').count())throw Error('Stale decision remains');
-  await page.evaluate(()=>linkedApprovalFixture.reset());await page.locator('.approval-card summary').click();
+  await page.getByRole('button',{name:'Deny',exact:true}).click();await chatApprovals.waitFor({state:'hidden'});
+  if(await chatApprovals.locator('.approval-actions button').count())throw Error('Stale decision remains');
+  await page.evaluate(()=>linkedApprovalFixture.reset());await chatApprovals.locator('.approval-card summary').click();
   await page.getByRole('button',{name:'Allow once',exact:true}).click();await page.waitForFunction(()=>!linkedApprovalFixture.pending);
   const state=await page.evaluate(()=>({calls:linkedApprovalFixture.calls,errors:linkedApprovalFixture.errors}));
   if(JSON.stringify(state.calls.map(call=>call.action))!==JSON.stringify(['deny','allow_once'])||state.errors.length)throw Error(JSON.stringify(state));

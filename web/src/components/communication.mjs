@@ -1,6 +1,6 @@
 import {translate} from '../locales/messages.mjs';
 import {communicationKey} from '../state/communication.mjs';
-import {renderMarkdown} from './markdown.mjs';
+import {updateMarkdown} from './markdown.mjs';
 import {avatar} from './avatar.mjs';
 import {icon} from './icons.mjs';
 import {taskIdentities} from '../state/task-identity.mjs';
@@ -76,7 +76,7 @@ export function createCommunication({locale,resolveIdentity,downloadFile,acquire
       }
       const text=mail.text;
       entry.content.hidden=text===null;
-      if(entry.text!==text){entry.text=text;entry.content.replaceChildren(...(text===null?[]:[renderMarkdown(text,{downloadFile,acquireFileImage})]));}
+      if(entry.text!==text){entry.text=text;updateMarkdown(entry.content,text||'',{downloadFile,acquireFileImage,renderSlot:'communication:'+index});}
       entry.fallback.hidden=text!==null;entry.fallback.textContent=t(preparing?'messagePreparing':'messageUnavailable');
     }
     if(!model.messages.length){let empty=entries.get('empty');if(!empty){empty={box:n('p','communication-fallback')};entries.set('empty',empty);body.append(empty.box);}empty.box.hidden=false;empty.box.textContent=t('messageUnavailable');}

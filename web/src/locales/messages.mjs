@@ -789,6 +789,7 @@ export const messages = {
     'tasks.savedState':'Saved state',
     'tasks.cachedState':'Showing saved output · Confirming current state',
     'approvals.unverified':'Waiting for current approval status',
+    'approvals.contextChanged':'Approval context changed.',
     'tasks.historyFailed':'Could not load earlier output.',
     'tasks.cachedOutputBounded':'Showing bounded cached output. Complete original output remains on the execution owner.',
     'history.earlier':'Load earlier messages', 'history.loading':'Loading messages…', 'history.start':'Beginning of chat', 'history.failed':'Could not load messages. Retry', 'history.missing':'Original message unavailable',
@@ -844,7 +845,7 @@ export const messages = {
     'loading.stale':'Refresh failed. Previously loaded data is still shown.',
 
 
-    'markdown.diagramSource':'Mermaid source', 'markdown.diagramUnavailable':'Could not render this diagram. The source is available below.',
+    'markdown.diagramSource':'Mermaid source', 'markdown.diagramLoading':'Rendering diagram…', 'markdown.diagramUnavailable':'Could not render this diagram. The source is available below.',
     "imageViewer.close":"Close preview",
     "imageViewer.download":"Download image",
     "imageViewer.downloadFailed":"Could not download this image. Try again.",
@@ -1954,6 +1955,7 @@ export const messages = {
     'tasks.savedState':'已保存状态',
     'tasks.cachedState':'显示已保存输出 · 正在确认当前状态',
     'approvals.unverified':'等待确认当前审批状态',
+    'approvals.contextChanged':'授权上下文已改变。',
     'tasks.historyFailed':'无法加载更早输出。',
     'tasks.cachedOutputBounded':'当前显示有限的缓存输出，完整原始输出仍保留在执行节点。',
     'history.earlier':'加载更早消息', 'history.loading':'正在加载消息…', 'history.start':'已到聊天开头', 'history.failed':'消息加载失败，点击重试', 'history.missing':'原消息不可用',
@@ -2009,7 +2011,7 @@ export const messages = {
     'loading.stale':'刷新失败，继续显示之前加载的数据。',
 
 
-    'markdown.diagramSource':'Mermaid 源码', 'markdown.diagramUnavailable':'无法渲染此图表，可在下方查看源码。',
+    'markdown.diagramSource':'Mermaid 源码', 'markdown.diagramLoading':'正在渲染图表……', 'markdown.diagramUnavailable':'无法渲染此图表，可在下方查看源码。',
     "imageViewer.close":"关闭预览",
     "imageViewer.download":"下载图片",
     "imageViewer.downloadFailed":"图片下载失败，请重试。",

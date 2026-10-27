@@ -73,7 +73,7 @@ async (page,{origin=new URL(page.url()).origin,witness}={})=>{
       window.addEventListener('pagehide',()=>{dispose();cache.close();indexedDB.deleteDatabase(name);URL.revokeObjectURL(imageURL);},{once:true});
     });
     if(width<720)await page.getByRole('button',{name:'Scroll fixture',exact:true}).click();
-    await page.locator('[data-message-id="m240"]').waitFor();
+    await page.locator('.history [data-message-id="m240"]').waitFor();
     await settle();
     await page.mouse.move(width-35,400);
     const {steps,worstDrift:worst,worstSample,maxMounted}=await witness({page,sample:()=>page.evaluate(()=>continuity.sample()),wheel:async delta=>{await wheel(delta);return page.evaluate(()=>continuity.sample());},width,ids:Array.from({length:19},(_,i)=>i+221),label:'Chat',bounded:80});
@@ -101,15 +101,18 @@ async (page,{origin=new URL(page.url()).origin,witness}={})=>{
     await page.mouse.move(width-35,400);
     for(let i=0;i<6;i++)await wheel(-36);
     const imageAnchor=await page.evaluate(()=>continuity.sample().anchor);
-    await page.evaluate(()=>continuity.imageReady());await page.locator('pot-file-image[data-state="ready"]').waitFor();await settle();
+    await page.evaluate(()=>continuity.imageReady());await page.locator('.history pot-file-image[data-state="ready"]').waitFor();await settle();
     const imageOffset=await page.evaluate(id=>{const h=document.querySelector('.history');return h.querySelector(`[data-message-id="${id}"]`).getBoundingClientRect().top-h.getBoundingClientRect().top;},imageAnchor.id);
     assert(Math.abs(imageOffset-imageAnchor.offset)<=3,`${width}px asynchronous image growth preserves reading`);
     await page.locator('.latest-button').click();await settle();
     current=await page.evaluate(()=>continuity.sample());assert(current.height-current.viewport-current.top<=2,`${width}px Latest reveals the loaded image`);
-    await page.evaluate(()=>continuity.nested());await page.locator('[data-message-id="m242"]').waitFor();await settle();
-    const parent=page.locator('[data-message-id="m242"]').locator('details.tool-call > summary').first();
+    await page.evaluate(()=>continuity.nested());
+    const group=page.locator('.history .work-record-group[data-anchor-message-id="m242"]');await group.waitFor();
+    assert(await group.getAttribute('data-sequence')==='242'&&await group.getAttribute('data-sequence-before')==='242'&&await group.getAttribute('data-sequence-after')==='274','A collapsed group represents one native record and exposes its exact member range');
+    await group.locator(':scope > details > summary').click();await page.locator('.history [data-message-id="m242"]').waitFor();await settle();
+    const parent=page.locator('.history [data-message-id="m242"]').locator('details.tool-call > summary').first();
     await parent.click();await settle();
-    assert(await page.locator('.tool-children article.message').count()>0,`${width}px nested tools render their child window`);
+    assert(await group.locator('.work-record-body article.message').count()===33,`${width}px grouped nested tools retain all native members`);
     await page.mouse.move(width-35,400);
     let nestedPrevious=await page.evaluate(()=>continuity.sample()),nestedWorst=0,nestedWorstSample=null;
     for(let step=0;step<40;step++){
@@ -127,8 +130,8 @@ async (page,{origin=new URL(page.url()).origin,witness}={})=>{
       }
       nestedPrevious=next;
     }
-    const childID=await page.locator('.tool-children article.message').last().getAttribute('data-message-id');
-    const child=page.locator(`[data-message-id="${childID}"]`).locator('details.tool-call').first();
+    const childID=await group.locator('.work-record-body article.message').last().getAttribute('data-message-id');
+    const child=page.locator(`.history [data-message-id="${childID}"]`).locator('details.tool-call').first();
     await child.locator(':scope > summary').click();await settle();
     assert((await child.locator('.tool-body').textContent()).includes('Nested output.'),`${width}px expanding a child reveals its long output`);
     await child.locator(':scope > summary').click();

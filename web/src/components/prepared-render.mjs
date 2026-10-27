@@ -1,0 +1,211 @@
+// A preparation is local to one render transaction. It carries no backend or
+// persisted state. Async component work stays owned by its candidate DOM tree.
+import {translate} from '../locales/messages.mjs';
+const components='pot-resource,pot-message-file,pot-mermaid,pot-file-image';
+let rendering;
+const componentKey=element=>JSON.stringify([element.localName,element.renderSlot||'',
+  element.identity||element.sourceText&&[element.sourceText,element.closed]||element.file&&[element.file,element.label]||
+  element.presentation&&[element.presentation,element.line,element.noticeKey]]);
+const deadlineKey=element=>element.localName==='pot-mermaid'&&element.renderSlot?JSON.stringify([element.localName,element.renderSlot]):componentKey(element);
+
+export function currentPreparedRender(){return rendering;}
+export function createPreparationBudget(limit=32){
+  let active=0,scheduled=false;const queue=[];
+  const schedule=()=>{if(!scheduled){scheduled=true;queueMicrotask(()=>{scheduled=false;while(active<limit&&queue.length){const entry=queue.shift();if(entry.cancelled||!entry.element.isConnected||!entry.context.alive){entry.release();continue;}active++;entry.active=true;entry.start();}});}};
+  return {enqueue(entry){entry.release=()=>{if(entry.cancelled)return;entry.cancelled=true;entry.observer?.disconnect();entry.placeholder.remove();entry.element.preparationTicket=null;entry.element.preparationAdmitted=false;if(entry.active)active--;schedule();};queue.push(entry);schedule();}};
+}
+export function deferPreparedConnection(element,start){
+  if(element.preparationAdmitted)return false;
+  let context;for(let parent=element;parent&&!context;parent=parent.parentElement)context=parent.preparedContext;
+  if(!context?.alive)return false;
+  if(element.preparationTicket)return true;
+  const placeholder=element.ownerDocument.createElement('span');placeholder.className='resource-status';placeholder.setAttribute('role','status');placeholder.textContent=translate(element.ownerDocument.documentElement.lang,'resource.loading');element.append(placeholder);element.dataset.state='loading';
+  const entry={element,context,placeholder,start(){
+    placeholder.remove();element.preparationAdmitted=true;
+    entry.observer=new MutationObserver(()=>{if(element.dataset.state!=='loading')entry.release();});entry.observer.observe(element,{attributes:true,attributeFilter:['data-state']});start();
+    if(element.dataset.state!=='loading')entry.release();
+  }};element.preparationTicket=entry;context.budget.enqueue(entry);return true;
+}
+export function preparedLayoutRect(node){
+  const box=node.getBoundingClientRect(),context=rendering?.context;
+  if(context?.phase!=='prepare'||!context.root||context.liveTop===undefined)return box;
+  const top=(typeof context.liveTop==='function'?context.liveTop():context.liveTop)+box.top-context.root.getBoundingClientRect().top;
+  return {top,bottom:top+box.height,left:box.left,right:box.right,width:box.width,height:box.height};
+}
+export function withPreparedRender(context,member,work){
+  const previous=rendering;rendering={context,member};
+  try{return work();}finally{rendering=previous;}
+}
+
+export function createPreparedRender({previousRoot,renderContext,deadlines=new Map(),reframe=false,budget=createPreparationBudget()}={}){
+  const context={phase:'prepare',previousRoot,previousRoots:new Map(),registeredRoots:new WeakSet(),renderContext,deadlines,budget,connectionContext:{budget,alive:true},localDeadlines:new Map(),reframe,frames:new Map(),islands:new Map(),slots:new Map(),incompleteSources:new Map(),assets:new Map(),used:new Map(),alive:true};
+  registerPreparedRoot(context,previousRoot);return context;
+}
+export function preparedPreviousRoot(context,member){return context.previousRoots.get(member)||context.previousRoot;}
+export function registerPreparedRoot(context,root){
+  if(!root||context.registeredRoots.has(root))return;context.registeredRoots.add(root);
+  for(const row of [root,...root.querySelectorAll('article[data-message-id]')])if(row.dataset.messageId)context.previousRoots.set(row.dataset.messageId,row);
+  for(const element of root.querySelectorAll(components)){
+    const member=element.closest('article[data-message-id]')?.dataset.messageId||'';
+    const key=member+':'+componentKey(element);
+    if(!context.islands.has(key))context.islands.set(key,[]);if(!context.islands.get(key).includes(element))context.islands.get(key).push(element);
+    context.slots.set(member+':'+deadlineKey(element),element);
+  }
+}
+
+// Surrogates never acquire resources or run custom-element connection work.
+// The old island remains live, including its selection/media/viewer state.
+export function staticPreparationClone(source){
+  const clone=source.cloneNode(true),originals=[source,...source.querySelectorAll('*')],copies=[clone,...clone.querySelectorAll('*')];
+  for(let index=0;index<copies.length;index++){
+    const next=copies[index],old=originals[index];
+    next.removeAttribute('id');next.removeAttribute('autofocus');
+    if(next.localName.includes('-')){
+      const environment=currentPreparedRender();
+      if(environment?.context.phase==='prepare'&&environment.context.reframe){next.classList.remove('prepared-frame','initial-layout-slot');environment.context.frames.set(old,next);}
+      next.preparationSurrogate=true;next.preparationOriginal=old.preparationOriginal||old;
+      for(const key of ['identity','sourceText','closed','file','label','presentation','line','noticeKey','renderSlot'])next[key]=old[key];
+    }
+    if(['img','iframe','audio','video','source'].includes(next.localName)){
+      const box=old.getBoundingClientRect();next.removeAttribute('src');next.removeAttribute('srcset');next.removeAttribute('srcdoc');next.removeAttribute('autoplay');
+      // Replaced elements have intrinsic content which cloning cannot prepare
+      // without duplicating media or running another interactive document.
+      next.style.width=box.width+'px';next.style.height=box.height+'px';
+      next.preparationMedia=true;
+    }
+  }
+  return clone;
+}
+
+export function preparedIsland(element){
+  if(!rendering||rendering.context.phase!=='prepare')return element;
+  const {context,member}=rendering,key=member+':'+componentKey(element),index=context.used.get(key)||0;
+  context.used.set(key,index+1);
+  const old=context.islands.get(key)?.[index];
+  if(old){const copy=staticPreparationClone(old);if(element.localName==='pot-message-file')copy.preparationUpdates={reference:element.reference,message:element.message,options:element.options};return copy;}
+  const previous=context.slots.get(member+':'+deadlineKey(element));
+  if(!context.reframe&&previous?.dataset.preparedFallback==='true'){
+    framePreparedElement(element,previous.getBoundingClientRect().height);element.dataset.preparedFallback='true';
+  }
+  return element;
+}
+
+export function consumePreparationSurrogates(root){
+  for(const element of [...root.childNodes]){
+    if(element.preparationOriginal)element.replaceWith(element.preparationOriginal);
+    else if(element.nodeType===1)consumePreparationSurrogates(element);
+  }
+  return root;
+}
+
+// Each caller supplies a stable slot within its logical record. Parsing calls
+// cannot be matched merely by source text: identical text can occur at different
+// nesting widths, and retained views can skip different calls on the next pass.
+export function preparedAsset(slot,source,create){
+  if(!rendering)return create();
+  const {context,member}=rendering,key=member+':'+slot;
+  if(context.phase==='prepare'){
+    const value=create();context.assets.set(key,{source,value,nodes:value.nodeType===11?[...value.childNodes]:null});return value;
+  }
+  if(context.phase==='commit'){
+    const entry=context.assets.get(key);
+    if(!entry||entry.source!==source)throw Error('Prepared render slot does not match its committed revision: '+key);
+    context.assets.delete(key);if(!entry.nodes)return entry.value;
+    const fragment=entry.value.ownerDocument.createDocumentFragment();
+    for(const node of entry.nodes){const copy=staticPreparationClone(node);copy.preparedNode=node;fragment.append(copy);}
+    return fragment;
+  }
+  return create();
+}
+
+export function retirePreparedTree(root){
+  // Retire while still connected too: connection alone does not prove that a
+  // candidate belongs to the current owner/conversation/layout generation.
+  for(const element of [root,...root.querySelectorAll(components)])element.retireRendering?.();
+  root.remove();
+}
+
+export function framePreparedElement(element,height,width){
+  element.style.setProperty('--prepared-height',height+'px');if(width!==undefined)element.style.setProperty('--prepared-width',width+'px');element.classList.add('prepared-frame');
+}
+function frame(element,fallback){
+  // Reframed surrogates also need the committed component's overflow/box rules.
+  // Measuring their unframed margin collapse and framing only the original at
+  // commit changes line boxes (notably several adjacent saved-file blocks).
+  const box=element.getBoundingClientRect();if(!box.height)return;
+  const inline=element.matches('pot-message-file[data-block="false"]');
+  const unresolvedFallback=fallback||element.preparationSurrogate&&element.dataset.preparedFallback==='true'&&element.dataset.state==='loading';
+  const height=unresolvedFallback&&!inline?Math.max(240,box.height):box.height;
+  element.style.setProperty('--prepared-height',height+'px');
+  if(inline)element.style.setProperty('--prepared-width',box.width+'px');
+  element.classList.add('prepared-frame');
+  if(fallback)element.dataset.preparedFallback='true';
+}
+
+export function settlePreparedTree(root,context,{valid=()=>true,layout=()=>{},timeout=5000}={}){
+  const view=root.ownerDocument.defaultView;let animation,timer,observer,cancelRun,closed=false;
+  const finish=()=>{closed=true;view.cancelAnimationFrame(animation);view.clearTimeout(timer);observer.disconnect();};
+  const promise=new Promise((resolve,reject)=>{
+    let previous,fontWaiting=false;const decoded=new WeakMap();
+    const deadlineFor=key=>{
+      let deadline=context.localDeadlines.get(key)??context.deadlines.get(key);
+      if(deadline===undefined)deadline=performance.now()+timeout;
+      context.localDeadlines.set(key,deadline);context.deadlines.delete(key);context.deadlines.set(key,deadline);
+      while(context.deadlines.size>2048)context.deadlines.delete(context.deadlines.keys().next().value);
+      return deadline;
+    };
+    const cancel=()=>{if(closed)return;finish();reject(new DOMException('Prepared render retired','AbortError'));};cancelRun=cancel;
+    function check(){
+      animation=0;if(closed)return;
+      if(!context.alive||!valid())return cancel();
+      if(!root.isConnected)return schedule();
+      layout();observer.takeRecords();
+      const now=performance.now(),all=[...root.querySelectorAll(components)],pending=[];
+      for(const element of all){
+        if(element.preparationSurrogate||element.closest('[hidden]')||!element.getBoundingClientRect().height||element.dataset.state!=='loading')continue;
+        const member=element.closest('article[data-message-id]')?.dataset.messageId||'',key=member+':'+deadlineKey(element);
+        const deadline=deadlineFor(key);
+        if(now>=deadline)frame(element,true);else pending.push({element,deadline});
+      }
+      for(const image of root.querySelectorAll('img')){
+        if(image.preparationMedia||image.closest('[hidden]')||decoded.get(image)==='ready'||image.complete&&!image.naturalWidth)continue;
+        if(!decoded.has(image)){decoded.set(image,'loading');image.decode().catch(()=>{}).then(()=>{decoded.set(image,'ready');schedule();});}
+        const key='image:'+image.closest('article[data-message-id]')?.dataset.messageId+':'+image.getAttribute('src'),deadline=deadlineFor(key);
+        if(now>=deadline)frame(image,true);else pending.push({element:image,deadline});
+      }
+      if(root.ownerDocument.fonts?.status==='loading'&&now<deadlineFor('fonts')){
+        if(!fontWaiting){fontWaiting=true;root.ownerDocument.fonts.ready.then(schedule);}
+        pending.push({element:root,deadline:deadlineFor('fonts')});
+      }
+      const unresolved=pending.filter(({element})=>!element.classList.contains('prepared-frame'));
+      if(unresolved.length){
+        previous=undefined;view.clearTimeout(timer);timer=view.setTimeout(check,Math.max(0,Math.min(...unresolved.map(item=>item.deadline))-performance.now()));return;
+      }
+      // Freeze inner frames before measuring their parent. An already-ready
+      // Markdown resource can still contain a later iframe/diagram update.
+      for(const element of all.reverse())frame(element,false);
+      const geometry=JSON.stringify([root.getBoundingClientRect().width,root.getBoundingClientRect().height,
+        ...all.map(element=>{const box=element.getBoundingClientRect();return [box.width,box.height];})]);
+      if(geometry!==previous){previous=geometry;return schedule();}
+      const box=root.getBoundingClientRect(),style=getComputedStyle(root);
+      const marginTop=style.display==='none'?0:parseFloat(style.marginTop||0),marginBottom=style.display==='none'?0:parseFloat(style.marginBottom||0);
+      finish();resolve({height:box.height,size:box.height+marginTop+marginBottom,marginTop,marginBottom});
+    }
+    function schedule(){if(!closed&&!animation)animation=view.requestAnimationFrame(check);}
+    observer=new MutationObserver(schedule);observer.observe(root,{subtree:true,childList:true,attributes:true,characterData:true});schedule();
+  });
+  return {promise,cancel(){context.alive=false;context.connectionContext.alive=false;cancelRun();}};
+}
+
+export function createPreparationSurface(scroller,host){
+  const document=host.ownerDocument,root=document.createElement('div'),style=getComputedStyle(scroller);
+  root.className='prepared-conversation';root.dataset.preparationSurface='';root.inert=true;root.setAttribute('aria-hidden','true');
+  root.style.cssText='position:fixed;left:-100000px;top:0;visibility:hidden;pointer-events:none;box-sizing:border-box;';
+  root.style.width=scroller.clientWidth+'px';root.style.paddingLeft=style.paddingLeft;root.style.paddingRight=style.paddingRight;
+  root.style.font=style.font;root.style.lineHeight=style.lineHeight;root.style.letterSpacing=style.letterSpacing;
+  const path=[];for(let parent=host;parent&&parent!==scroller;parent=parent.parentElement)path.unshift(parent);
+  let target=root;
+  for(const parent of path){const copy=parent.cloneNode(false);copy.removeAttribute('id');if(parent!==host){copy.style.minHeight='';copy.style.height='';}target.append(copy);target=copy;}
+  (scroller.closest('.pot-app')||scroller.parentElement||document.body).append(root);
+  return {root,host:target,close:()=>retirePreparedTree(root)};
+}

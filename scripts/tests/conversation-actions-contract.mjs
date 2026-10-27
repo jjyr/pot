@@ -7,7 +7,7 @@ import {conversationMenuRefreshContract} from './conversation-menu-refresh-contr
 // DOM disabled/removal so these assertions exercise execution-time authority.
 export async function conversationActionsContract(report=()=>{}){
   const check=(value,label)=>{if(!value)throw Error(label);report('PASS '+label);};
-  const wait=async test=>{for(let i=0;i<500;i++){if(test())return;await new Promise(done=>setTimeout(done,10));}throw Error('Conversation actions timed out');};
+  const wait=async test=>{for(let i=0;i<500;i++){if(test())return;await new Promise(done=>setTimeout(done,10));}const history=root.querySelector('.history'),host=root.querySelector('.message-window');throw Error('Conversation actions timed out '+JSON.stringify({root:root.getBoundingClientRect().toJSON(),history:history&&{width:history.clientWidth,height:history.clientHeight,hidden:history.hidden,busy:history.getAttribute('aria-busy')},host:host&&{width:host.clientWidth,busy:host.getAttribute('aria-busy')},text:root.textContent.slice(-300)}));};
   const root=document.createElement('div'),name='pot-conversation-actions-'+crypto.randomUUID();document.body.append(root);
   const operations=['chat.read','chat.send','chat.cancel','chat.control','assistant.profile','assistant.usage'];
   let scope={space:'local',owner:'a'},failing=false,connected=true,freshness='fresh',capabilities=operations,conversationBoot='boot',cursor=0,receive,status;

@@ -1,4 +1,5 @@
 import {activeTool,toolResult,toolSummary,toolFailure} from '../state/tool-calls.mjs';
+import {currentPreparedRender} from './prepared-render.mjs';
 import {translate} from '../locales/messages.mjs';
 import {createToolContent} from './tool-content.mjs';
 import {toolKind,presentationLabel,presentationPreview} from '../state/tool-presentation.mjs';
@@ -56,12 +57,23 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
   const remember=()=>{if(!building)memory.set(key,{...memory.get(key),open:root.open,raw:raw.open});};root.addEventListener('toggle',()=>{remember();refreshStatus();if(current)update(current,options);});raw.addEventListener('toggle',()=>{remember();if(current)update(current,options);});
   // Populate on activation, before a second click can target an empty disclosure
   // whose position will change when its deferred toggle event renders content.
-  summary.addEventListener('click',event=>{if(event.defaultPrevented||event.target.closest('button,a,input,select,textarea'))return;event.preventDefault();root.open=!root.open;remember();refreshStatus();if(current)update(current,options);});
+  function disclose(field,node){
+    if(root.closest('.prepared-row')){
+      memory.set(key,{...memory.get(key),[field]:!(memory.get(key)?.[field]??node.open)});
+      root.dispatchEvent(new CustomEvent('pot:prepare-resize',{bubbles:true}));return;
+    }
+    node.open=!node.open;remember();refreshStatus();if(current)update(current,options);
+  }
+  summary.addEventListener('click',event=>{if(event.defaultPrevented||event.target.closest('button,a,input,select,textarea'))return;event.preventDefault();disclose('open',root);});
   // Commit before ResizeObserver/virtual-window recycling can detach this row.
-  rawTitle.addEventListener('click',event=>{event.preventDefault();onInteract(event);raw.open=!raw.open;remember();if(current)update(current,options);});
+  rawTitle.addEventListener('click',event=>{event.preventDefault();onInteract(event);disclose('raw',raw);});
   function copyButton(label,get){const button=n('button','tool-action',label);button.type='button';button.onclick=async()=>{try{await navigator.clipboard.writeText(get());button.textContent=t('copied');}catch{button.textContent=t('copyFailed');}};return button;}
   function update(message,next={}){
     current=message;options=next;const tool=message.tool;if(!tool)return;
+    if(currentPreparedRender()){
+      const desired=memory.get(key);if(desired){root.open=desired.open;raw.open=desired.raw;}
+    }
+    if(next.expanded)root.open=true;
     root.classList.toggle('work-record-call',!!message.workRecord);
     summary.tabIndex=0;
     const result=tool.process?tool.process.result:toolResult(tool),pending=next.approval,script=tool.script;
