@@ -39,7 +39,9 @@ func mcpMissing(err error) error {
 }
 
 // Register checks the authenticated node against an effective driver description.
-// The caller must obtain actual from a trusted receiver configuration, not tool metadata.
+// actual is the server policy ceiling, supplied independently of tool metadata.
+// The authenticated, consented node owns driver capability truth; the policy
+// permits only its supported subset and never owner operations.
 func (q *MCPAccessQueue) Register(ctx context.Context, receiver agentlink.MCPReceiver, registration agentlink.MCPReceiverRegistration, actual agentlink.Description) error {
 	if q.CheckConnection != nil {
 		if e := q.CheckConnection(ctx, receiver.ConnectionID()); e != nil {
@@ -47,7 +49,7 @@ func (q *MCPAccessQueue) Register(ctx context.Context, receiver agentlink.MCPRec
 		}
 	}
 	for _, op := range registration.Capabilities.Operations {
-		if op != agentlink.TaskSubmit && op != agentlink.TaskRead && op != agentlink.TaskCancel && op != agentlink.TaskInput && op != agentlink.TaskEvents && op != agentlink.ChatSend && op != agentlink.ChatRead && op != agentlink.ChatReceipt && op != agentlink.Approvals {
+		if op != agentlink.AssistantManagement && op != agentlink.AssistantProfile && op != agentlink.AssistantDelete && op != agentlink.TaskSubmit && op != agentlink.TaskRead && op != agentlink.TaskCancel && op != agentlink.TaskInput && op != agentlink.TaskEvents && op != agentlink.ChatSend && op != agentlink.ChatRead && op != agentlink.ChatReceipt && op != agentlink.Approvals {
 			return agentlink.ErrUnsupported
 		}
 	}
@@ -59,6 +61,27 @@ func (q *MCPAccessQueue) Register(ctx context.Context, receiver agentlink.MCPRec
 			return e
 		}
 		address := mcpJSON(registration.Receiver.Address)
+		if _, e := tx.ExecContext(ctx, "UPDATE mcp_native_user_operations SET state='unknown' WHERE connection_id=? AND address=? AND epoch!=? AND state IN ('pending','claimed')", receiver.ConnectionID(), address, registration.Epoch); e != nil {
+			return e
+		}
+		var profile string
+		var deleted bool
+		e := tx.QueryRowContext(ctx, "SELECT profile,deleted FROM mcp_native_user_profiles WHERE connection_id=? AND address=?", receiver.ConnectionID(), address).Scan(&profile, &deleted)
+		if e != nil && !errors.Is(e, sql.ErrNoRows) {
+			return e
+		}
+		if deleted {
+			return agentlink.ErrNotFound
+		}
+		if profile != "" {
+			var saved agentlink.Profile
+			if e = mcpRead(profile, &saved); e != nil {
+				return e
+			}
+			registration.Receiver.Name = saved.Name
+			registration.Receiver.Avatar = saved.Avatar
+		}
+
 		var connection string
 		err := tx.QueryRowContext(ctx, "SELECT connection_id FROM mcp_receiver_endpoints WHERE address=?", address).Scan(&connection)
 		if err == nil && connection != receiver.ConnectionID() {

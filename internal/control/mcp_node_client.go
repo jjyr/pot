@@ -41,7 +41,7 @@ func (s *Service) runPotMCP(ctx context.Context, id string, live *potMCPLive) {
 				live.client = client
 				live.online = true
 				s.potMCP.mu.Unlock()
-				s.Changes.Notify("agent-links")
+				s.notifyMCPConnections()
 			}
 			backend := &potMCPReceiver{s: s, identity: identity, remote: client}
 			nextDirectory := time.Now().Add(15 * time.Second)
@@ -70,7 +70,7 @@ func (s *Service) runPotMCP(ctx context.Context, id string, live *potMCPLive) {
 			live.client = nil
 			s.potMCP.mu.Unlock()
 			client.Close()
-			s.Changes.Notify("agent-links")
+			s.notifyMCPConnections()
 		}
 		if ctx.Err() != nil {
 			return

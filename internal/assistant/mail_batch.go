@@ -32,7 +32,7 @@ const sameMailGroup = `b.direction='in' AND json_extract(b.envelope,'$.kind')='m
 
 // Confirmed failure is terminal history, not a lease over future correspondence.
 // Uncertain executions still require the owning conversation's recovery gate.
-const blockedMailGroup = ` AND NOT EXISTS(SELECT 1 FROM agent_messages b WHERE ` + sameMailGroup + ` AND
+const blockedMailGroup = ` AND (m.id NOT IN (SELECT id FROM retired_agent_link_work WHERE kind='message') OR json_extract(m.envelope,'$.from.node_id')=json_extract(m.envelope,'$.to.node_id')) AND NOT EXISTS(SELECT 1 FROM agent_messages b WHERE ` + sameMailGroup + ` AND
  (b.state IN ('processing','interrupted') OR b.state='waiting' AND
  COALESCE((SELECT batch FROM agent_delivery_items WHERE message=b.id),b.id)!=COALESCE((SELECT batch FROM agent_delivery_items WHERE message=m.id),m.id)))`
 

@@ -39,7 +39,6 @@ type job struct {
 // backend owns accepted work independently of link lifecycle. Its work queue is
 // independent for explicit tasks and serialized per assistant for messages.
 type backend struct {
-	approvalCommitted    func(context.Context, agentlink.ApprovalEvent) error
 	adapter              Runtime
 	db                   *sql.DB
 	nodeID, binary, root string
@@ -357,6 +356,9 @@ func (b *backend) update(ctx context.Context, id string, fn func(*job) error) er
 	})
 }
 func (b *backend) Cancel(ctx context.Context, from protocol.AgentRef, id string) (agentlink.Task, error) {
+	if e := b.requireCurrentWork(ctx, id); e != nil {
+		return agentlink.Task{}, e
+	}
 	if _, err := b.read(ctx, from, id); err != nil {
 		return agentlink.Task{}, err
 	}
@@ -386,7 +388,7 @@ func (b *backend) Cancel(ctx context.Context, from protocol.AgentRef, id string)
 // recover fences every accepted unfinished turn. Even a queued task is not
 // silently replayed after a daemon restart. Historical IDs remain retryable.
 func (b *backend) recover(ctx context.Context) error {
-	rows, err := b.db.QueryContext(ctx, "SELECT id,data FROM agent_adapter_jobs WHERE json_extract(data,'$.task.state') NOT IN ('completed','failed','cancelled')")
+	rows, err := b.db.QueryContext(ctx, "SELECT id,data FROM agent_adapter_jobs WHERE json_extract(data,'$.task.state') NOT IN ('completed','failed','cancelled') AND id NOT IN (SELECT id FROM retired_agent_link_work WHERE kind='job')")
 	if err != nil {
 		return err
 	}
@@ -431,7 +433,7 @@ func (b *backend) run(ctx context.Context) {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	for {
-		rows, queryErr := b.db.QueryContext(ctx, `SELECT data FROM agent_adapter_jobs WHERE assistant_id IS NULL AND json_extract(data,'$.task.state')='queued'`)
+		rows, queryErr := b.db.QueryContext(ctx, `SELECT data FROM agent_adapter_jobs WHERE assistant_id IS NULL AND id NOT IN (SELECT id FROM retired_agent_link_work WHERE kind='job') AND json_extract(data,'$.task.state')='queued'`)
 		var direct []job
 		if queryErr == nil {
 			for rows.Next() {
@@ -493,7 +495,7 @@ func (b *backend) runAssistant(ctx context.Context, id string) {
 			return
 		}
 		var raw string
-		err := b.db.QueryRowContext(ctx, "SELECT data FROM agent_adapter_jobs WHERE assistant_id=? AND json_extract(data,'$.task.state')='queued' AND NOT EXISTS(SELECT 1 FROM agent_adapter_jobs fenced WHERE fenced.assistant_id=? AND json_extract(fenced.data,'$.cleanup_uncertain')=1) ORDER BY sequence LIMIT 1", id, id).Scan(&raw)
+		err := b.db.QueryRowContext(ctx, "SELECT data FROM agent_adapter_jobs WHERE assistant_id=? AND id NOT IN (SELECT id FROM retired_agent_link_work WHERE kind='job') AND json_extract(data,'$.task.state')='queued' AND NOT EXISTS(SELECT 1 FROM agent_adapter_jobs fenced WHERE fenced.assistant_id=? AND json_extract(fenced.data,'$.cleanup_uncertain')=1) ORDER BY sequence LIMIT 1", id, id).Scan(&raw)
 		if err == nil {
 			var j job
 			if json.Unmarshal([]byte(raw), &j) == nil {
@@ -578,7 +580,7 @@ func (b *backend) executeSession(ctx context.Context, selected job, session Sess
 // receiveMessages admits each durable message to its assistant queue. A
 // message ID is its immutable request identity, including after a host restart.
 func (b *backend) receiveMessages(ctx context.Context) error {
-	rows, err := b.db.QueryContext(ctx, "SELECT envelope FROM agent_messages WHERE direction='incoming' AND state='queued' ORDER BY sequence LIMIT 32")
+	rows, err := b.db.QueryContext(ctx, "SELECT envelope FROM agent_messages WHERE direction='incoming' AND state='queued' AND id NOT IN (SELECT id FROM retired_agent_link_work WHERE kind='message') ORDER BY sequence LIMIT 32")
 	if err != nil {
 		return err
 	}
@@ -645,7 +647,7 @@ func messageReply(j job) *protocol.Envelope {
 
 // publishMessages commits a reply and marks processing in one transaction.
 func (b *backend) publishMessages(ctx context.Context) error {
-	rows, err := b.db.QueryContext(ctx, `SELECT j.data FROM agent_adapter_jobs j JOIN agent_messages m ON m.id=json_extract(j.data,'$.message.id') WHERE m.direction='incoming' AND m.state='read' AND json_extract(j.data,'$.task.state') IN ('completed','failed','cancelled') ORDER BY j.sequence LIMIT 32`)
+	rows, err := b.db.QueryContext(ctx, `SELECT j.data FROM agent_adapter_jobs j JOIN agent_messages m ON m.id=json_extract(j.data,'$.message.id') WHERE j.id NOT IN (SELECT id FROM retired_agent_link_work WHERE kind='job') AND m.id NOT IN (SELECT id FROM retired_agent_link_work WHERE kind='message') AND m.direction='incoming' AND m.state='read' AND json_extract(j.data,'$.task.state') IN ('completed','failed','cancelled') ORDER BY j.sequence LIMIT 32`)
 	if err != nil {
 		return err
 	}
@@ -702,4 +704,15 @@ func (b *backend) runMessages(ctx context.Context) {
 		case <-timer.C:
 		}
 	}
+}
+
+func (b *backend) requireCurrentWork(ctx context.Context, id string) error {
+	var retired bool
+	if e := b.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM retired_agent_link_work WHERE kind='job' AND id=?)", id).Scan(&retired); e != nil {
+		return e
+	}
+	if retired {
+		return agentlink.ErrUnsupported
+	}
+	return nil
 }

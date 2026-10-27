@@ -328,7 +328,7 @@ func TestPotMCPReceiverTaskLifecycleOneReachableEndpoint(t *testing.T) {
 		t.Fatal("cancel intent never terminal", next)
 	}
 	var legacy int
-	if e = b.integrationDB.QueryRow("SELECT COUNT(*) FROM agent_link_connections").Scan(&legacy); e != nil || legacy != 0 {
+	if e = b.integrationDB.QueryRow("SELECT COUNT(*) FROM agent_link_history").Scan(&legacy); e != nil || legacy != 0 {
 		t.Fatal("used legacy pairing", legacy, e)
 	}
 	if e = b.DisconnectPotMCP(t.Context(), connection.ID); e != nil {
@@ -469,7 +469,7 @@ func TestPotMCPBidirectionalAssistantTasksAndMail(t *testing.T) {
 	}
 	for _, s := range []*Service{a, b} {
 		var legacy int
-		if e = s.integrationDB.QueryRow("SELECT COUNT(*) FROM agent_link_connections").Scan(&legacy); e != nil || legacy != 0 {
+		if e = s.integrationDB.QueryRow("SELECT COUNT(*) FROM agent_link_history").Scan(&legacy); e != nil || legacy != 0 {
 			t.Fatal("legacy connection used", legacy, e)
 		}
 	}

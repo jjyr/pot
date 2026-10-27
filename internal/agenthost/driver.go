@@ -17,7 +17,7 @@ import (
 func (r Runtime) ReceiverCapabilities() agentlink.Description {
 	d := agentlink.Description{Version: 1, Scope: "caller", Operations: []agentlink.Operation{}}
 	if r.Kind == "codex" || r.Kind == "antigravity" {
-		d.Operations = []agentlink.Operation{agentlink.TaskSubmit, agentlink.TaskRead, agentlink.TaskCancel, agentlink.TaskInput, agentlink.TaskEvents}
+		d.Operations = []agentlink.Operation{agentlink.TaskSubmit, agentlink.TaskRead, agentlink.TaskCancel, agentlink.TaskInput, agentlink.TaskEvents, agentlink.AssistantManagement}
 	}
 	if r.Kind == "codex" {
 		d.Operations = append(d.Operations, agentlink.Approvals)

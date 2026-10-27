@@ -260,6 +260,6 @@ func (s *Service) savePotMCPGrant(ctx context.Context, id, endpoint string, toke
 	if previous != "" {
 		_ = s.integrationSecrets.Delete(ctx, previous)
 	}
-	s.Changes.Notify("agent-links")
+	s.notifyMCPConnections()
 	return nil
 }

@@ -46,7 +46,7 @@ func (s *Service) agentTarget(ctx context.Context, owner string) (context.Contex
 			return ctx, protocol.AgentRef{}, e
 		}
 		target := agentlink.AssistantTarget(c.RemoteNodeID, parts[1])
-		if c.Directory == nil || !c.Directory.Capabilities(target).Supports(agentlink.TaskRead) {
+		if c.Directory == nil || c.Directory.Capabilities(target).Version != 1 {
 			return ctx, protocol.AgentRef{}, agentlink.ErrNotFound
 		}
 		return context.WithValue(ctx, agentRouteKey{}, c.ID), target, nil
@@ -55,7 +55,7 @@ func (s *Service) agentTarget(ctx context.Context, owner string) (context.Contex
 	if err != nil {
 		return ctx, protocol.AgentRef{}, err
 	}
-	return context.WithValue(ctx, agentRouteKey{}, c.ID), agentlink.AssistantTarget(c.PeerHost.NodeID, parts[1]), nil
+	return context.WithValue(ctx, agentRouteKey{}, c.ID), agentlink.AssistantTarget(c.Peer.Address.NodeID, parts[1]), nil
 }
 func (s *Service) agentLinkRoute(ctx context.Context, target protocol.AgentRef) (string, error) {
 	if !agentlink.ValidTarget(target) {
@@ -81,7 +81,7 @@ func (s *Service) agentLinkRoute(ctx context.Context, target protocol.AgentRef) 
 		if err != nil {
 			return "", err
 		}
-		if c.PeerHost.NodeID != target.NodeID {
+		if c.Peer.Address.NodeID != target.NodeID {
 			return "", agentlink.ErrConflict
 		}
 		return c.ID, nil
@@ -100,7 +100,7 @@ func (s *Service) agentLinkRoute(ctx context.Context, target protocol.AgentRef) 
 	}
 	var route string
 	for _, c := range connections {
-		if c.State != "revoked" && c.PeerHost.NodeID == target.NodeID {
+		if c.State != "revoked" && c.Peer.Address.NodeID == target.NodeID {
 			if route != "" {
 				return "", agentlink.ErrConflict
 			}
@@ -240,26 +240,8 @@ func (p agentPort) Describe(ctx context.Context, target protocol.AgentRef) (agen
 	if err != nil {
 		return agentlink.Description{}, err
 	}
-	d := agentlink.Description{}
-	if c.State != "revoked" && c.Directory != nil {
-		d = c.Directory.Capabilities(target)
-	}
-	var retained bool
-	if err = p.s.integrationDB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_link_chat_sessions WHERE link_id=? AND assistant_id=?)", link, target.AgentID).Scan(&retained); err != nil {
-		return d, err
-	}
-	if d.Version != 1 && retained {
-		return agentlink.Description{Version: 1, Scope: "caller", Operations: []agentlink.Operation{agentlink.ChatRead, agentlink.ChatReceipt, agentlink.ChatSubscribe, agentlink.TaskRead, agentlink.TaskList, agentlink.TaskArchive, agentlink.TaskOutcomes}}, nil
-	}
-	if d.Version != 1 {
-		return d, agentlink.ErrNotFound
-	}
-	// Lists, archive and outcome reads project only this user's accepted tasks;
-	// they do not grant access to another user's remote task catalogue.
-	if d.Supports(agentlink.TaskSubmit) {
-		d.Operations = append(append([]agentlink.Operation{}, d.Operations...), agentlink.TaskList, agentlink.TaskArchive, agentlink.TaskOutcomes)
-	}
-	return d, nil
+	_ = c
+	return agentlink.Description{Version: 1, Scope: "caller", Operations: []agentlink.Operation{agentlink.ChatRead, agentlink.ChatReceipt, agentlink.ChatSubscribe, agentlink.TaskRead, agentlink.TaskList, agentlink.TaskArchive, agentlink.TaskOutcomes}}, nil
 }
 
 func (p agentPort) Call(ctx context.Context, target protocol.AgentRef, operation agentlink.Operation, call agentlink.Call) (any, error) {
@@ -451,7 +433,7 @@ func (p agentPort) linkedCall(ctx context.Context, target protocol.AgentRef, lin
 		if err := protocol.DecodeStrict(call.Body, &input); err != nil {
 			return nil, err
 		}
-		return s.agentLinks.service.DeleteAssistant(ctx, link, agentlink.DeleteAssistantRequest{From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: linkChatID(link, target.AgentID)}, AssistantID: target.AgentID, Revision: input.Revision})
+		return s.nativeUserCall(ctx, link, target, nil, &agentlink.DeleteAssistantRequest{AssistantID: target.AgentID, Revision: input.Revision}, nil)
 	}
 	if op == agentlink.AssistantProfile {
 		var input struct {
@@ -466,7 +448,7 @@ func (p agentPort) linkedCall(ctx context.Context, target protocol.AgentRef, lin
 		if action == "write" {
 			action = "update"
 		}
-		return s.agentLinks.service.Profile(ctx, link, agentlink.ProfileRequest{From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: linkChatID(link, target.AgentID)}, AssistantID: target.AgentID, Action: action, Name: input.Name, Avatar: input.Avatar, Revision: input.Revision})
+		return s.nativeUserCall(ctx, link, target, &agentlink.ProfileRequest{AssistantID: target.AgentID, Action: action, Name: input.Name, Avatar: input.Avatar, Revision: input.Revision}, nil, nil)
 	}
 	owner := linkChatID(link, target.AgentID)
 	if op == agentlink.TaskSubmit {

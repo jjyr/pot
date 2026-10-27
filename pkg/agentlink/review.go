@@ -39,26 +39,3 @@ func validReview(r ReviewRequest, node string) bool {
 		r.Caller.Kind == "assistant" && ((r.Action == "read" && r.ID == "") ||
 		((r.Action == "allow_once" || r.Action == "deny") && core.Identifier(r.ID)))
 }
-
-func (s *Service) Review(ctx context.Context, link string, r ReviewRequest) (ReviewState, error) {
-	if !s.enterRPC() {
-		return ReviewState{}, ErrUnavailable
-	}
-	defer s.rpcWG.Done()
-	if !validReview(r, s.options.HostIdentity.NodeID) {
-		return ReviewState{}, ErrUnauthorized
-	}
-	c, err := s.Get(ctx, link)
-	if err != nil {
-		return ReviewState{}, err
-	}
-	if c.Directory == nil || !c.Directory.Capabilities(NodeTarget(c.Directory.NodeID)).Supports(Approvals) {
-		return ReviewState{}, ErrUnsupported
-	}
-	var result ReviewState
-	err = s.callConnection(ctx, c, "execution.review", r, &result)
-	if err == nil && (result.NodeID != c.PeerHost.NodeID || len(result.Pending) > 32) {
-		return ReviewState{}, ErrConflict
-	}
-	return result, err
-}

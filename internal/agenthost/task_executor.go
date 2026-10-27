@@ -89,6 +89,9 @@ func (b *backend) submitTaskTx(ctx context.Context, tx *sql.Tx, r agentlink.Task
 }
 
 func (b *backend) Input(ctx context.Context, r agentlink.TaskGuidance) (agentlink.Task, error) {
+	if e := b.requireCurrentWork(ctx, r.ID); e != nil {
+		return agentlink.Task{}, e
+	}
 	if !validID(r.RequestID) || r.Text == "" || len(r.Text) > 24000 {
 		return agentlink.Task{}, agentlink.ErrInvalid
 	}

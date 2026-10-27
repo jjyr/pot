@@ -105,7 +105,7 @@ work becomes a known pre-execution failure; previously running work becomes a
 failure with uncertain cleanup. Neither is automatically launched again. Pending
 acknowledgements, admissions and events are reconciled under their original
 claim/Task/run. Explicit terminal continuation remains blocked when cleanup is
-uncertain. History, reports, artifacts and old pairing records are retained; the
+uncertain. History, reports, artifacts and minimal unsupported connection summaries are retained; the
 new receiver does not consume an old pending mailbox as newly authorized work.
 
 ## Driver and execution context boundary
@@ -138,4 +138,20 @@ intents are not replayed. See the shared contract for correlation and fences.
 
 Updated Pot and plugins/adapters require explicit MCP reconnection. Old P2P
 pairing is unsupported by this path, with no automatic migration or fallback.
-The coordinated cutover owns final deletion of obsolete entry points.
+The product no longer mounts the old pairing/listener entry points.
+
+## Human management of native assistants
+
+The native receiver retains the existing human-only profile, retirement and
+assistant-management catalogue. Pot's authenticated human UI can read/edit
+presentation or create/update assistants using the native backend's existing
+model choices and owner-registered workspace scope IDs. It cannot add raw paths,
+credentials or permission modes through that channel. The optional setup plugin
+never supplies this authority.
+
+The receiver journals human operations before entering the existing backend.
+Revision, busy, unknown-cleanup, immutable workspace and idempotent management
+receipt checks still apply. Unknown effects remain fenced after restart; completed
+responses can be reconciled. Retired assistant tombstones prevent stale directory
+registrations from reviving an identity. Old native jobs/messages remain saved at
+their last confirmed state and are excluded from execution recovery.

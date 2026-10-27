@@ -295,15 +295,11 @@ The API action retains the primary button emphasis in both themes.
 Subflows stay in the same region. Back restores the choices; returning to an
 existing conversation restores its draft and reading position without stopping
 background execution. Narrow layouts use the same content full-width with Back.
-Connecting Pot or Codex uses the same invitation editor, with source-specific
-instructions, without a detour through the topology. The receiver's sole or
-default chat-capable assistant opens after connection; multiple chat-capable
-assistants without a default offer a choice. Codex executor connections explain
-that tasks are delegated by the current assistant instead of opening a direct
-chat. An empty remote chat directory remains connected and offers refresh.
-Directory failures offer retry; disconnected conversations remain visible with
-reconnection controls. Deleting the last assistant returns to Add assistant and
-never automatically creates a replacement.
+Pot connections use URL entry and existing browser login/consent in the same
+editing region. Native connections show the updated receiver instructions and
+return to the runtime list after explicit receiver registration. Connecting does
+not open a default assistant; explicit selection or creation retains the actual
+returned identity.
 
 Every newly created assistant starts with a fixed welcome message in the creation
 UI's language, introducing its saved name and naturally pointing to settings for
@@ -590,14 +586,10 @@ them below the graph. Pot and Codex use their brand marks, machines use device
 glyphs, and full identities and operations appear on selection. Hover never changes
 selection. Keep the existing machine-policy editor and its dirty-exit protection.
 
-Copy connection address obtains one short-lived invitation. Paste it into the
-existing Add Agent editor on the other node, then connect; validation and identity
-preview stay within that editor. Success returns to Topology and selects the node.
-Invitations remain outside history and cached view data. Connections bind nodes;
-their assistants appear in the existing directory and Chat. The node inspector
-lists provided assistants and offers Open chat, Disconnect/Reconnect and Delete.
-Delete requires confirmation; history and accepted tasks remain. Neither action
-silently cancels execution.
+MCP connections show disconnect/reconnect, reauthorization and revocation.
+Legacy connections are read-only, labeled unsupported with update/reconnect
+instructions and their last confirmed state. There is no invitation picker.
+Accepted work and saved history remain visible after disconnect or revocation.
 
 Linked chat, task delegation and notifications use the existing surfaces, with
 source markers identifying the remote node. No separate binding wizard, task form

@@ -23,7 +23,7 @@ Code defines actual behavior.
 | Local execution and process lifetime | [Executor](executor.md), [Task workspace selection](task-workspaces.md) |
 | Backend responsibilities and API contracts | [Backend components](backend-components.md) |
 | Reusable Go packages and embedding a host | [Go libraries](go-libraries.md) |
-| Native cross-machine transport, identities and session recovery | [Peer protocol](peer-protocol.md) |
+| Reusable peer transport library and identity types | [Peer protocol](peer-protocol.md) |
 | Extension management UI, independent MCP servers and icons | [Extensions](extensions.md) |
 | MCP protocol component and SDK assets | [MCP](mcp.md) |
 | Shared MCP caller and receiver types, correlation and retry rules | [MCP collaboration contract C0](mcp-collaboration-contract.md) |

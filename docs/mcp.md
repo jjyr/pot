@@ -140,3 +140,22 @@ and `TokenInfoFromContext` expose the SDK bearer middleware through the same
 protocol facade. Business hosts supply credential verification, consent,
 revocation, audience and logical identity. They do not import the SDK auth package
 directly or place product authorization logic in this package.
+
+## Product HTTP publication
+
+`pot serve -ui` and `pot web-ui-server` mount the public resource at `/mcp` with
+OAuth discovery, dynamic public-client registration, browser authorization, S256
+PKCE exchange and revocation. The existing access/browser process forwards only
+fixed MCP/OAuth paths and methods over the private authenticated Control socket.
+It strips caller-supplied internal headers, attests only its verified human
+browser session for consent/revocation and never returns its IPC credential.
+MCPAccess still verifies the external bearer and connection on every request and
+tool entry. Standard MCP status/challenge, session/version headers, streaming and
+request cancellation survive the bridge.
+
+Each configured browser origin has its own resource audience and SDK sessions;
+publications share the existing Control queues and identities. An external
+bearer or cookie from another browser publication does not establish a local
+owner session. Non-browser MCP clients may omit Origin; explicit Origin and
+Host must match the deployer's configured public origin. No certificate or
+network automation is provided.

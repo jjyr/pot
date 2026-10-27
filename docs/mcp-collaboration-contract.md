@@ -370,3 +370,32 @@ with no model/tool-message path. It grants no reusable rule or owner policy.
 An empty read selector derives the authenticated ordinary caller; another user
 cannot be selected or converted into a node actor. The original human provenance
 remains separate from the authenticated collaboration caller.
+
+## Original-human native management
+
+`pot_receiver_user_poll` and `pot_receiver_user_result` are receiver-only tools.
+They carry typed `MCPNativeUserRequest` / `MCPNativeUserResult`, not model
+commands. Only the existing authenticated human API can enqueue requests.
+Ordinary OAuth/model callers have no enqueue operation, and a receiver SDK
+session cannot turn a user-kind caller into an owner.
+
+A request binds its immutable ID, consenting connection, receiver node, actual
+assistant/node address and receiver process epoch. It carries exactly one of the
+existing profile, delete or assistant-management DTOs. Server and receiver check
+those bindings again before result acceptance. Profile/delete advertisements
+describe the human channel; they do not expose those operations to ordinary
+MCP tools. Native management reuses only the previously supported catalogue,
+creation and revision-bound updates within preprovisioned model/workspace scopes.
+It does not configure credentials, raw paths, rules or owner permissions.
+
+The receiver durably marks an operation executing before the native backend. A
+crash between backend effects and the finished receipt remains unknown and must
+not replay. A saved finished response is immutable. Server restart or a changed
+receiver epoch invalidates unresolved requests; wrong connections, nodes, actors
+and epochs cannot consume another request. Profile projections preserve confirmed
+updates against stale registration. Successful retirement records a tombstone
+before removing the directory endpoint. It does not delete workspace/history.
+
+These are standalone human administration operations, not execution approvals.
+Task approval still requires its original Task/run/request/epoch and once-only
+PermissionStore decision; management never creates a Task grant or command rule.

@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jjyr/pot/internal/linkhost"
 	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/processscope"
@@ -364,53 +363,6 @@ func TestRunningCancelWaitsForInterruptedTurn(t *testing.T) {
 		t.Fatal(requested, err)
 	}
 	awaitTask(t, b, from, task.ID, "cancelled")
-}
-
-func TestSignedAgentLinkDelegatesToCodexDirectory(t *testing.T) {
-	local, _ := testHost(t)
-	defer local.close()
-	remote, _ := testHost(t)
-	defer remote.close()
-	remote.backend.binary = fakeBinary
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { remote.backend.run(ctx); close(done) }()
-	defer func() { cancel(); <-done }()
-	listener, err := linkhost.ListenPeer(ctx, "127.0.0.1:0", remote.peerServer())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
-	invitation, err := remote.links.Invite(ctx, "tcp://"+listener.Addr())
-	if err != nil {
-		t.Fatal(err)
-	}
-	connection, err := local.links.Connect(ctx, invitation.Address)
-	if err != nil {
-		t.Fatal(err)
-	}
-	directory, err := local.links.Directory(ctx, connection.ID)
-	if err != nil || directory.DefaultAssistant() != "codex" || len(directory.Assistants()) != 1 {
-		t.Fatal(directory, err)
-	}
-	request := agentlink.TaskRequest{RequestID: "signed-task", From: local.identity.Address, Text: "from signed link", Target: agentlink.NodeTarget(remote.identity.Address.NodeID)}
-	accepted, err := local.links.Submit(ctx, connection.ID, request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	awaitTask(t, remote.backend, request.From, accepted.ID, "completed")
-	final, err := local.links.Status(ctx, connection.ID, request.From, accepted.ID)
-	if err != nil || final.Result != "result: from signed link\n" {
-		t.Fatal(final, err)
-	}
-	if err = local.links.Disconnect(ctx, connection.ID); err != nil {
-		t.Fatal(err)
-	}
-	// Link lifecycle does not delete the receiver-owned task or its result.
-	final, err = remote.backend.Status(ctx, request.From, accepted.ID)
-	if err != nil || final.State != "completed" {
-		t.Fatal(final, err)
-	}
 }
 
 func TestAssistantsParallelButOwnSessionSerial(t *testing.T) {

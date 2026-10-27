@@ -126,6 +126,6 @@ func (a *Application) agentOperation(ctx context.Context, method string, u *url.
 	if op == "" {
 		return nil, nil, false
 	}
-	value, err := a.Control.CallAgent(ctx, owner, op, call)
+	value, err := a.Control.CallHumanAgent(ctx, owner, op, call)
 	return value, err, true
 }

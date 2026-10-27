@@ -67,12 +67,12 @@ class InstallTests(unittest.TestCase):
                 installer.subprocess, "run", side_effect=AssertionError("helper spawned process")
             ),
         ):
-            installer.install(Path(temporary) / "home", activate=False)
+            installer.install(Path(temporary).resolve() / "home", activate=False)
         self.assertEqual({key: os.environ.get(key) for key in keys}, before)
 
     def test_helper_upgrade_retains_history_and_independent_configuration(self):
         with tempfile.TemporaryDirectory() as temporary:
-            home = Path(temporary) / "home"
+            home = Path(temporary).resolve() / "home"
             helper = installer.install(home, activate=False)
             previous = json.loads((helper / ".pot-install.json").read_text())
             for name, data in {

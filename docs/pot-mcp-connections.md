@@ -119,8 +119,7 @@ capability-checked transfer path.
 
 Update both Pots and relevant adapters/plugins, then explicitly reconnect. There
 is no old P2P pairing compatibility, automatic old-connection migration or fallback
-from a failed MCP request to TCP. The coordinated cutover owns deletion of the
-old entry points. Existing historical Tasks, reports and artifacts remain with
+from a failed MCP request to TCP. The product no longer mounts the old entry points. Existing historical Tasks, reports and artifacts remain with
 their original identities. Unresolved old work must not be automatically cancelled,
 replayed or erased. An MCP connection never imports an old pending mailbox as new
 work.

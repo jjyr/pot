@@ -136,7 +136,7 @@ func (s *Service) DisconnectPotMCP(ctx context.Context, id string) error {
 		return agentlink.ErrNotFound
 	}
 	s.stopPotMCP(id)
-	s.Changes.Notify("agent-links")
+	s.notifyMCPConnections()
 	return nil
 }
 func (s *Service) ReconnectPotMCP(ctx context.Context, id string) error {
@@ -150,7 +150,7 @@ func (s *Service) ReconnectPotMCP(ctx context.Context, id string) error {
 	_, e = s.integrationDB.ExecContext(ctx, `UPDATE mcp_receiver_connections SET state='active',last_error='',revision=revision+1 WHERE id=? AND node_id=? AND state!='revoked'`, id, s.options.RuntimeID)
 	if e == nil {
 		s.startPotMCP(id)
-		s.Changes.Notify("agent-links")
+		s.notifyMCPConnections()
 	}
 	return e
 }
@@ -161,7 +161,7 @@ func (s *Service) RevokePotMCP(ctx context.Context, id string) error {
 			return agentlink.ErrUnavailable
 		}
 		e = a.options.OAuth.Revoke(ctx, id)
-		s.Changes.Notify("agent-links")
+		s.notifyMCPConnections()
 		return e
 	}
 
@@ -184,7 +184,7 @@ func (s *Service) RevokePotMCP(ctx context.Context, id string) error {
 		return e
 	}
 	_, e = s.integrationDB.ExecContext(ctx, `UPDATE mcp_receiver_connections SET state='revoked',last_error='',revision=revision+1 WHERE id=? AND node_id=?`, id, s.options.RuntimeID)
-	s.Changes.Notify("agent-links")
+	s.notifyMCPConnections()
 	return e
 }
 
@@ -365,4 +365,9 @@ func (s *Service) PotMCPConnectionView(ctx context.Context) ([]PotMCPConnection,
 		return nil, e
 	}
 	return append(outgoing, incoming...), nil
+}
+
+func (s *Service) notifyMCPConnections() {
+	s.Lifecycle.Publish(protocol.LifecycleEvent{Kind: "authority_changed"})
+	s.Changes.Notify("agent-links")
 }

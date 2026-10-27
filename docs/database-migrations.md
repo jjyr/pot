@@ -235,3 +235,17 @@ The separate rebuildable notification installation database uses
 a logout epoch and one pending navigation target. It does not share authentication
 storage or disposable business projection retention. Existing browser preference,
 onboarding, token and native authorization records remain intact.
+
+## MCP cutover
+
+`control/0008_mcp_cutover` converts saved old connections to version-1 minimal
+unsupported history records, including their last known state. It drops obsolete
+invitation, handshake, TCP endpoint and native pairing-key configuration. It
+neither imports an OAuth grant nor changes Task phases, reports, receipts or
+saved artifact content. Old encrypted pairing secrets are no longer read or
+converted by startup.
+
+`tasks/0010_mcp_native_user` adds the human-operation request/result journal and
+native profile/delete tombstones. It reuses the existing native backend checks.
+Startup and receiver epoch changes fence unfinished requests as unknown; neither
+reconnection nor a journal entry authorizes re-execution.

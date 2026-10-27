@@ -1,15 +1,19 @@
 # Peer protocol
 
-`pkg/peer` is Pot's shared native cross-machine transport. TLS uses Go's standard
+`pkg/peer` is a reusable Go transport library. Pot collaboration uses the
+[MCP interface](mcp.md) and no longer starts a dedicated peer listener.
+The library remains for public Go consumers and shared identity types. TLS uses Go's standard
 library; CBOR, Yamux and Zstd use dedicated libraries. A host supplies its stable
 Ed25519 identity, private key,
 service admission function and request handlers. It does not depend on Control,
 machine membership, assistant databases or plugin management.
 
 ```text
-Agent Link collaboration          Authenticated identity probes
- routes / durable ACK               identity proof
+Caller-owned service              Caller-owned identity probes
+ routes / admission                  identity proof
           |                              |
+          +------------------------------+
+                         |
           +------------------------------+
                          |
                          pkg/peer Session
@@ -34,14 +38,12 @@ environment variables have no effect. A listener's wildcard bind address is not
 a publishable endpoint.
 
 `Identity` contains `{node_id, public_key}`: a stable logical endpoint ID and
-base64url Ed25519 public key. Multiple logical nodes may share one machine. A copied
-invitation binds the expected identity to the endpoint. Discovery without a pin
+base64url Ed25519 public key. Multiple logical nodes may share one machine. A library consumer supplies its expected identity pin. Discovery without a pin
 proves possession of the discovered key but does not establish trust. Service
-admission must independently validate the invitation or saved binding. A key
+admission must independently validate the embedding application's credentials. A key
 authorizes no assistants, membership, execution methods or owner APIs by itself.
 
-TLS 1.3 encrypts all application traffic, including invitation previews and pair
-claims. Each connection receives an in-memory self-signed certificate for its
+TLS 1.3 encrypts all application traffic. Each connection receives an in-memory self-signed certificate for its
 existing Ed25519 identity key, with the node ID in its subject common name.
 Certificates expire after 24 hours; new connections generate fresh certificates.
 Certificates are not persisted, and renewal does not change the public-key pin.
@@ -57,22 +59,21 @@ fresh full handshake. Verification checks the exact expected node ID and public
 key, certificate validity, digital-signature usage and peer authentication usage.
 Public-key pins survive certificate replacement; a copied certificate or a copied
 public-key suffix on an unrelated private seed cannot authenticate a node.
-There is no plaintext, older TLS or former signed-protocol fallback. Both peers
-must upgrade; existing invitation and connection formats and key bindings remain
-unchanged.
+There is no plaintext, older TLS or former signed-protocol fallback. Library consumers own coordinated protocol upgrades. Product Agent Link
+pairings are retired and cannot connect through this library.
 
 Without an expected identity, `Dial` permits only the `identity` service with null
 admission data and no reverse handler. Such discovery proves key possession, not
 trust, and must never transmit a capability. Pinned callers verify TLS before
-sending any application identity, service admission data or invitation capability.
+sending any application identity, service admission data or credential.
 
 After TLS completes, the client sends a bounded CBOR hello containing protocol
 version, its identity, expected server identity, service name and admission data.
 The client identity must exactly match its authenticated TLS certificate. The
 server then calls service admission and returns its identity and decision, which
 the client also checks against the authenticated certificate. Possessing a key
-does not grant service access: first pairing still needs the single-use invitation,
-and existing connections still check the saved node/key binding and revocation.
+does not grant service access: the embedding service must check its own credential, node binding and
+revocation policy.
 TLS handles transcript authentication, directional keys, integrity and record
 replay protection; application packets carry no separate signatures.
 
@@ -178,4 +179,4 @@ event is only a resynchronizable hint, never an execution receipt or durable ACK
 
 Browser APIs, local IPC and external account integrations use their own
 interfaces and do not acquire peer authority by sharing a process. Codex
-collaboration uses the same Agent Link transport.
+collaboration uses the MCP receiver interface described in [Agent Link](agent-links.md).

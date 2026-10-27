@@ -86,6 +86,9 @@ func TestMCPUpgradePreservesHistory(t *testing.T) {
 				t.Fatal(e)
 			}
 			for name, ddl := range old {
+				if kind == ControlDatabase && (strings.HasPrefix(name, "agent_link_") && (name == "agent_link_connections" || name == "agent_link_invitations" || name == "agent_link_claim_digest_formats" || name == "agent_link_host" || name == "agent_link_endpoints" || name == "agent_link_active_route") || name == "agent_adapter_endpoints" || name == "agent_adapter_host" || name == "node_identity_secret_migration") {
+					continue
+				}
 				var got string
 				if e = db.QueryRow("SELECT sql FROM sqlite_schema WHERE name=?", name).Scan(&got); e != nil || got != ddl {
 					t.Fatalf("prior schema changed %s: %v", name, e)

@@ -59,37 +59,27 @@ The plugin starts its local Agent Link host automatically. Enabling or connectin
 the plugin does not itself start model work. No model request or sample task is
 needed to finish setup.
 
-## Get connection information and add it in Pot
+## Connect through MCP
 
-1. Start a new Codex chat after installation and run the plugin's `pot-setup`
-   entry. It opens the local connection page in Codex's in-app browser.
-   If needed, use the system-browser fallback in the
-   [integration guide](../integrations/codex/README.md#install-and-connect).
-2. Keep the temporary management URL private: it grants connection-management
-   access for 30 minutes. Pass it directly to the local browser; never print it
-   in chat, publish it, or capture it in screenshots or logs. Reopen setup if it
-   expires. Never ask the user to paste API keys or owner credentials into chat.
-3. Choose **Copy connection address**, then **Get connection address** for an
-   address reachable from Pot. Use loopback on the same computer, a LAN address
-   on the same private network, or a suitable public or Tailscale address across
-   computers. Discovery alone does not prove remote reachability. Review any
-   firewall or network changes with the user; follow the integration guide
-   instead of exposing the local owner HTTP listener.
-4. Let the user copy the complete connection information from the selected,
-   read-only field and paste it into Pot's **Add assistant > ＋ Connect a new Agent
-   > Codex** guide, then explicitly configure and create a new assistant. For a
-   connection only, use **Link > Add Agent**. A manual copy works
-   when browser clipboard access is unavailable. Treat the invitation as private
-   pairing information and keep it out of shared transcripts and screenshots.
-   Only one side needs a reachable address; traffic then flows both ways.
-5. Check that Pot shows the connected Codex node and its assistant directory.
-   If it does not, inspect plugin status and the chosen address before retrying.
-   Do not send a message or run a task just to demonstrate connectivity without
-   the user's authorization.
+For ordinary tool use, configure an independent MCP server with the user's Pot
+resource URL, such as `https://pot.example/mcp`. Complete the existing Pot browser
+login and confirm the connection. A local Pot Host is unnecessary. The optional
+setup plugin can help configure this server, but disabling or uninstalling that
+plugin does not remove independent MCP configuration; remove it separately.
+Never overwrite a same-named server without inspecting the conflict.
 
-The initial Codex assistant and task executor use an isolated read-only workspace.
-Connecting does not grant access to the user's project. If the user wants project
-work, establish the intended workspace and permission mode locally using the
-integration guide's assistant and executor configuration. Do not broaden scope
-as an implicit setup step. Models, credentials, workspaces and permissions remain
-owned by the Codex host.
+For schedulable Codex execution, install the updated adapter and explicitly run
+its receiver-connect and receiver-serve commands from the
+[Codex guide](../integrations/codex/README.md#install-and-connect). The receiver
+initiates its connection to Pot and registers its actual native capabilities.
+Pot's Add assistant page shows the connected receiver and its existing assistant
+management catalogue. Model and workspace choices stay within the receiver's
+preprovisioned scopes. A connection grants no new local project permissions.
+
+For another Pot, use the MCP URL and **Connect with browser** in connection
+settings. One published endpoint supports both directions of tasks and messages.
+
+Update both ends and explicitly reconnect. TCP invitations, pairing pages and
+the old local `connections` command are removed. Do not import old pairings or
+fall back to them. Historical records remain readable; old unfinished work keeps
+its last confirmed state. See [Pot MCP connections](pot-mcp-connections.md).

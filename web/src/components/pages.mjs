@@ -922,21 +922,21 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       picker.lifecycle.locale();
     }
     function openConnection(kind) {
-      let connectedID='';const lifetime=new AbortController();
-      const connections=createAgentLinks({root:n('div'),request,locale,scope:()=>captured,signal:lifetime.signal,
-        edit:({title,initial,fields,save,scope:context,submitLabel})=>{
-          const form=renderEditor(title,initial,fields,save,{capturedScope:context,submitLabel});
-          form.lifecycle.afterSave=openConnected;return form;
-        },onConnected:async result=>{connectedID=result?.id||result?.link?.id;}});
-      async function openConnected(){
-        if(!await leave())return;route='add-assistant';routeChanged('add-assistant');const list=body();heading(t('title'));list.classList.add('assistant-start');list.append(n('h1','',t('title')));
-        try{const snapshot=await request('/api/v1/agent-links',captured);if(disposed||host.firstElementChild!==list)return;const link=snapshot.items?.find(item=>item.id===connectedID);if(link?.directory?.targets?.some(item=>item.address?.kind==='node'&&item.capabilities?.operations?.includes('assistant.management'))){await linkedAssistantEditor(connectedID,captured.space,'',linkDisplayName(link),link.peer?.kind);}else{list.append(n('p','hint',t('unsupportedDescription')),action(t('manage'),()=>show('machines')),action(t('back'),()=>show('add-assistant',{force:true})));}}
-        catch{if(host.firstElementChild===list)list.append(n('p','inline-error',t('connectionsFailed')),action(translate(locale(),'retry'),openConnected));}
-      }
-      const form=connections.addAgent({kind,onChangeKind:()=>back()}),dispose=form.lifecycle.dispose;
+      const form=renderEditor(t('connectTitle'),{},[],()=>{}, {capturedScope:captured});
+      form.form.querySelector('.editor-actions .primary').hidden=true;
+      const fields=form.form.querySelector('.editor-fields'),lifetime=new AbortController(),dispose=form.lifecycle.dispose;
       form.lifecycle.dispose=()=>{dispose?.();lifetime.abort();};
+      if(kind==='pot'){
+        const connectionRoot=n('div');fields.append(connectionRoot);
+        const component=createAgentLinks({root:connectionRoot,request,locale,scope:()=>captured,signal:lifetime.signal});
+        component.load();
+      }else{
+        const guide=n('p','hint'),link=n('a');link.href=`https://github.com/jjyr/pot/blob/main/integrations/${kind}/README.md#install-and-connect`;link.target='_blank';link.rel='noopener noreferrer';fields.append(guide,link);
+        form.lifecycle.locale=()=>{guide.textContent=translate(locale(),'assistantStart.'+kind+'Guide');link.textContent=translate(locale(),'agentLinks.installGuide');};form.lifecycle.locale();
+      }
     }
   }
+
   async function machines(root,token) {
     const t=key=>translate(locale(),key);root.classList.add('topology-page');
     const toolbar=n('div','topology-toolbar'),connectionRoot=n('div','topology-connection'),storage=n('div','topology-machine-storage'),rows=n('div'),entries=new Map(),linkNotice=n('p','inline-error');storage.hidden=true;storage.append(rows);connectionRoot.className='agent-links-container';toolbar.append(connectionRoot);root.append(toolbar,linkNotice,storage);
@@ -1002,11 +1002,11 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
           for(const assistant of assistants)directory.append(action(t('agentLinks.editExecution')+' · '+assistant.name,()=>linkedAssistantEditor(node.link.id,node.space,assistant.address?.agent_id||assistant.id,linkDisplayName(node.link),node.link.peer?.kind)));
         }
         view.inspector.append(directory);
-        if(node.link){
+        if(node.link?.transport==='mcp'){
           const local=model.nodes.find(item=>item.self&&item.space===node.space);showQueues(node.link,local?.name||'',node.name);
           if(node.link.last_error==='agent_link_reconnect_required')view.inspector.append(n('p','hint',t('agentLinks.reconnectRequired')));
           const link={...node.link,_space:node.space},actions=n('div','topology-link-actions');
-          actions.append(action(t(paused?'agentLinks.reconnect':'agentLinks.disconnect'),()=>{(paused?connections.reconnect(link):connections.disconnect(link)).catch(()=>{});}),action(t('agentLinks.delete'),()=>connections.remove(link),{danger:true}));view.inspector.append(actions);
+          if(!link.inbound)actions.append(action(t(paused?'potMCP.reconnect':'potMCP.disconnect'),()=>{(paused?connections.reconnect(link):connections.disconnect(link)).catch(()=>{});}));actions.append(action(t('potMCP.revoke'),()=>connections.remove(link),{danger:true}));view.inspector.append(actions);
         }
       }
       view.inspector.append(related(node));restore();

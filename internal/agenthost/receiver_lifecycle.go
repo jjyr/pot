@@ -247,7 +247,10 @@ func (h *agentHost) receiverLoop(ctx context.Context, id string) error {
 			}
 			pump := &receiverPump{epoch: h.receiverEpoch, backend: h.backend, control: h.db, identity: identity, remote: client}
 			for err == nil && ctx.Err() == nil {
-				err = pump.step(ctx)
+				err = h.receiverUserStep(ctx, client, identity)
+				if err == nil {
+					err = pump.step(ctx)
+				}
 				if err == nil {
 					err = receiverPause(ctx, 100*time.Millisecond)
 				}
@@ -354,11 +357,11 @@ func (h *agentHost) registerReceiverAssistants(ctx context.Context, client *rece
 		return err
 	}
 	for _, endpoint := range directory.Targets {
-		if endpoint.Identity.Address.Kind != "assistant" || !endpoint.Capabilities.Supports(agentlink.ChatSend) {
+		if endpoint.Identity.Address.Kind != "assistant" {
 			continue
 		}
 		operations := []agentlink.Operation{}
-		for _, op := range []agentlink.Operation{agentlink.ChatSend, agentlink.ChatRead, agentlink.ChatReceipt} {
+		for _, op := range []agentlink.Operation{agentlink.ChatSend, agentlink.ChatRead, agentlink.ChatReceipt, agentlink.AssistantProfile, agentlink.AssistantDelete} {
 			if endpoint.Capabilities.Supports(op) {
 				operations = append(operations, op)
 			}

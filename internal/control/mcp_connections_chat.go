@@ -68,7 +68,7 @@ func (s *Service) sendPotMCPChat(ctx context.Context, link, assistant, request, 
 	_, e = s.integrationDB.ExecContext(ctx, "INSERT INTO agent_link_chat(id,link_id,assistant_id,request_id,role,text,created_at,sender,sender_kind) VALUES(?,?,?,?,'user',?,?,?,?) ON CONFLICT(id) DO NOTHING", message.ID, link, assistant, request, text, time.Now().UnixMilli(), message.From.AgentID, message.From.Kind)
 	if e == nil {
 		_, _ = s.integrationDB.ExecContext(ctx, "UPDATE agent_link_chat_sessions SET revision=revision+1 WHERE link_id=? AND assistant_id=?", link, assistant)
-		s.Changes.Notify("agent-links")
+		s.notifyMCPConnections()
 		s.wakeTasks()
 	}
 	return protocol.SendMessageAccepted{MessageID: message.ID, Duplicate: accepted.Receipt.Duplicate}, e
@@ -113,7 +113,7 @@ func (s *Service) syncPotMCPChats(ctx context.Context, c PotMCPConnection) {
 			if e == nil {
 				if n, _ := result.RowsAffected(); n == 1 {
 					_, _ = s.integrationDB.ExecContext(ctx, "UPDATE agent_link_chat_sessions SET revision=revision+1 WHERE link_id=? AND assistant_id=?", c.ID, item.assistant)
-					s.Changes.Notify("agent-links")
+					s.notifyMCPConnections()
 					s.publishReply("agent-link:"+c.ID+":"+item.assistant, protocol.Message{ID: message.ID, Text: message.Text})
 				}
 			}

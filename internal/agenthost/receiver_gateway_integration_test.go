@@ -62,7 +62,7 @@ func receiverGatewayPot(t *testing.T) (string, *control.Service, protocol.AgentR
 		if target.Kind == "node" {
 			return Codex().ReceiverCapabilities(), nil
 		}
-		return agentlink.Description{Version: 1, Scope: "peer", Operations: []agentlink.Operation{agentlink.ChatSend, agentlink.ChatRead, agentlink.ChatReceipt}}, nil
+		return agentlink.Description{Version: 1, Scope: "peer", Operations: []agentlink.Operation{agentlink.ChatSend, agentlink.ChatRead, agentlink.ChatReceipt, agentlink.AssistantProfile, agentlink.AssistantDelete}}, nil
 	})
 	if e != nil {
 		t.Fatal(e)

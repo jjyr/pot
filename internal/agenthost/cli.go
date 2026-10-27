@@ -19,7 +19,7 @@ func MainRuntime(adapter Runtime, args []string, in io.Reader, out io.Writer) er
 		return agyPolicy(in, out)
 	}
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(out, "usage: pot-"+adapter.Kind+"-agent host|connections --root PRIVATE_DIRECTORY; assistant --root PRIVATE_DIRECTORY --id ID --workspace DIRECTORY [--name NAME] [--model MODEL] [--effort LEVEL] [--mode read-only|workspace-write] [--default]; executor --root PRIVATE_DIRECTORY --workspace DIRECTORY [--mode read-only|workspace-write]")
+		fmt.Fprintln(out, "usage: pot-"+adapter.Kind+"-agent host --root PRIVATE_DIRECTORY; assistant --root PRIVATE_DIRECTORY --id ID --workspace DIRECTORY [--name NAME] [--model MODEL] [--effort LEVEL] [--mode read-only|workspace-write] [--default]; executor --root PRIVATE_DIRECTORY --workspace DIRECTORY [--mode read-only|workspace-write]")
 		fmt.Fprintln(out, "receiver-connect --root PRIVATE_DIRECTORY --url POT_MCP_URL [--connection ID]; receiver-serve|receiver-disconnect --root PRIVATE_DIRECTORY --connection ID")
 		return nil
 	}
@@ -65,19 +65,6 @@ func MainRuntime(adapter Runtime, args []string, in io.Reader, out io.Writer) er
 		return agentServe(*root, adapter)
 	case "host":
 		return hostMCP(in, out, *root, adapter)
-	case "connections":
-		client, err := ensureAgentHost(*root, adapter)
-		if err != nil {
-			return err
-		}
-		defer client.client.CloseIdleConnections()
-		var page struct {
-			URL string `json:"url"`
-		}
-		if err := client.call(context.Background(), "/api/v1/agent-host/browser", map[string]any{}, &page); err != nil {
-			return err
-		}
-		return openExternalURL(page.URL)
 	case "assistant":
 		client, err := ensureAgentHost(*root, adapter)
 		if err != nil {

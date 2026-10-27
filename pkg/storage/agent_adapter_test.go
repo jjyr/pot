@@ -56,9 +56,9 @@ func TestAgentAdapterUpgradePreservesCodexIdentityAndSessions(t *testing.T) {
 			}
 			defer db.Close()
 			if kind == ControlDatabase {
-				var id, key, adapter string
-				if err = db.QueryRow("SELECT node_id,peer_secret_ref,adapter FROM agent_adapter_host").Scan(&id, &key, &adapter); err != nil || id != "original-node" || key != "key-ref" || adapter != "codex" {
-					t.Fatal(id, key, adapter, err)
+				var id, adapter string
+				if err = db.QueryRow("SELECT node_id,adapter FROM agent_adapter_host").Scan(&id, &adapter); err != nil || id != "original-node" || adapter != "codex" {
+					t.Fatal(id, adapter, err)
 				}
 				if scenario.messageFiles {
 					var ref string

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/internal/mcppublic"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	"io"
@@ -33,6 +34,10 @@ func Handler(app *Application, token string) http.Handler {
 
 		if app.Maintenance != nil && app.Maintenance() && r.URL.Path != "/api/v1/updates" && r.URL.Path != "/api/v1/runtime" && r.URL.Path != "/api/v1/control" {
 			writeError(w, http.StatusServiceUnavailable, protocol.APIError{Code: "update_maintenance"})
+			return
+		}
+		if mcppublic.Route(r.URL.Path) {
+			app.Control.ServePublishedMCP(w, r)
 			return
 		}
 		if app.terminalSocket(w, r) {

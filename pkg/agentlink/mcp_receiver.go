@@ -70,9 +70,10 @@ func (r MCPReceiverRegistration) ValidateAgainst(ctx MCPReceiver, actual Descrip
 
 // This is the existing peer/caller collaboration boundary, not a configurable
 // grant/ACL system. Owner configuration and execution launch remain excluded.
-// Approvals describes a wired human channel, never receiver/model decision authority.
+// Approvals and native profile/delete describe wired human channels, never
+// receiver/model decision or management authority.
 func mcpCollaborationOperation(op Operation) bool {
-	return slices.Contains(PeerOperations(), op) || op == TaskInput || op == TaskEvents || op == TaskFiles || op == Approvals
+	return slices.Contains(PeerOperations(), op) || op == TaskInput || op == TaskEvents || op == TaskFiles || op == Approvals || op == AssistantProfile || op == AssistantDelete || op == AssistantManagement
 }
 
 // MCPDispatchBinding identifies stable caller-side work before the execution

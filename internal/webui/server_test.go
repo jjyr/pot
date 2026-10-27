@@ -302,7 +302,7 @@ func TestAgentLinkPublicationAllowlist(t *testing.T) {
 		{"POST", "/api/v1/agent-links/mcp", true},
 		{"DELETE", "/api/v1/agent-links/mcp", false},
 		{"POST", "/api/v1/agent-links/mcp/private", false},
-		{"POST", "/api/v1/agent-links/invitation", true},
+		{"POST", "/api/v1/agent-links/invitation", false},
 		{"GET", "/api/v1/agent-links/invitation", false},
 		{"DELETE", "/api/v1/agent-links", false},
 		{"POST", "/api/v1/agent-links/private", false},

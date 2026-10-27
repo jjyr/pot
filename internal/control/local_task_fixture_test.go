@@ -37,5 +37,3 @@ func taskControl(t *testing.T, id, url string) *Service {
 	}
 	return s
 }
-
-func controlPeerEndpoint(s *Service) string { return "tcp://" + s.PeerListenAddress() }

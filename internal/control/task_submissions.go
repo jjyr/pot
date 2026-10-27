@@ -48,7 +48,7 @@ func (s *Service) createTaskFrom(ctx context.Context, owner string, from protoco
 	r := agentlink.TaskRequest{Target: target, RequestID: request.RequestID, From: from, Text: request.Text, Workspace: request.Workspace.ProjectDir}
 	if target == self && from.Kind == "assistant" {
 		r.Configuration = &request
-		accepted, err := s.agentLinks.service.Submit(ctx, "", r)
+		accepted, err := (potLinkBackend{s}).Submit(ctx, r)
 		if err != nil {
 			return protocol.TaskInfo{}, err
 		}
@@ -73,11 +73,14 @@ func (s *Service) createTaskFrom(ctx context.Context, owner string, from protoco
 	if err != nil {
 		return protocol.TaskInfo{}, err
 	}
-	directory, err := s.agentLinks.service.Directory(ctx, link)
+	directory, err := (potLinkBackend{s}).Directory(ctx)
 	if err != nil {
 		return protocol.TaskInfo{}, err
 	}
 	if !directory.Capabilities(target).Supports(agentlink.TaskSubmit) {
+		return protocol.TaskInfo{}, agentlink.ErrUnsupported
+	}
+	if link != "" {
 		return protocol.TaskInfo{}, agentlink.ErrUnsupported
 	}
 	identity := agentlink.Identity{Address: agentlink.NodeTarget(s.options.RuntimeID), Adapter: "local", Name: "Pot"}
@@ -137,7 +140,7 @@ func (s *Service) guideTaskExecution(ctx context.Context, owner, id string, inpu
 	if s.isPotMCP(ctx, d.Info.AgentLink.LinkID) {
 		remote, err = s.potMCPTaskInput(ctx, d, input)
 	} else {
-		remote, err = s.agentLinks.service.Input(ctx, taskLinkID(d.Info.AgentLink.LinkID), agentlink.TaskGuidance{From: d.Execution.Request.From, ID: d.Execution.Receipt.ID, RequestID: input.RequestID, Text: input.Text})
+		return nil, agentlink.ErrUnsupported
 	}
 	if err != nil {
 		return nil, err
@@ -167,6 +170,9 @@ func (s *Service) StopTask(ctx context.Context, owner, id, mode string) error {
 	if mode != "cancel" {
 		return agentlink.ErrUnsupported
 	}
+	if d.Info.AgentLink != nil && d.Info.AgentLink.LinkID != "local" && !s.isPotMCP(ctx, d.Info.AgentLink.LinkID) {
+		return agentlink.ErrUnsupported
+	}
 	if e = s.Tasks.StopExecution(ctx, owner, id); e != nil {
 		return e
 	}
@@ -178,7 +184,7 @@ func (s *Service) StopTask(ctx context.Context, owner, id, mode string) error {
 		_, e = s.potMCPTaskCancel(ctx, d.Info.AgentLink.LinkID, d.Execution.Request, d.Execution.Receipt.ID, d.Execution.Receipt.RunID)
 		return e
 	}
-	_, e = s.agentLinks.service.Cancel(ctx, taskLinkID(d.Info.AgentLink.LinkID), d.Execution.Request.From, d.Execution.Receipt.ID)
+	_, e = (potLinkBackend{s}).Cancel(ctx, d.Execution.Request.From, d.Execution.Receipt.ID)
 	return e
 }
 func (s *Service) syncTaskExecutions(ctx context.Context) {
@@ -218,6 +224,9 @@ func (s *Service) syncTaskExecutions(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		if it.link != "local" && !s.isPotMCP(ctx, it.link) {
+			continue
+		}
 		d := it.d
 		expectedRun := d.Execution.Receipt.RunID
 		if terminalLinkTask(d.Execution.Receipt.State) && it.notified != 0 {
@@ -231,13 +240,13 @@ func (s *Service) syncTaskExecutions(ctx context.Context) {
 			if s.isPotMCP(ctx, it.link) {
 				remote, e = s.potMCPTaskSubmit(ctx, it.link, d.Execution.Request)
 			} else {
-				remote, e = s.agentLinks.service.Submit(ctx, taskLinkID(it.link), d.Execution.Request)
+				remote, e = (potLinkBackend{s}).Submit(ctx, d.Execution.Request)
 			}
 		} else {
 			if s.isPotMCP(ctx, it.link) {
 				remote, e = s.potMCPTaskRead(ctx, it.link, d.Execution.Request, d.Execution.Receipt.ID)
 			} else {
-				remote, e = s.agentLinks.service.Status(ctx, taskLinkID(it.link), d.Execution.Request.From, d.Execution.Receipt.ID)
+				remote, e = (potLinkBackend{s}).Status(ctx, d.Execution.Request.From, d.Execution.Receipt.ID)
 			}
 		}
 		if e != nil {
@@ -253,7 +262,7 @@ func (s *Service) syncTaskExecutions(ctx context.Context) {
 			if s.isPotMCP(ctx, it.link) {
 				cancelled, err = s.potMCPTaskCancel(ctx, it.link, d.Execution.Request, remote.ID, remote.RunID)
 			} else {
-				cancelled, err = s.agentLinks.service.Cancel(ctx, taskLinkID(it.link), d.Execution.Request.From, remote.ID)
+				cancelled, err = (potLinkBackend{s}).Cancel(ctx, d.Execution.Request.From, remote.ID)
 			}
 			if err == nil {
 				remote = cancelled
@@ -406,15 +415,13 @@ func (s *Service) taskExecutionCapabilities(ctx context.Context, record *tasks.R
 	var directory *agentlink.Directory
 	link := taskLinkID(record.Info.AgentLink.LinkID)
 	if link == "" {
-		if d, err := s.agentLinks.service.Directory(ctx, ""); err == nil {
+		if d, err := (potLinkBackend{s}).Directory(ctx); err == nil {
 			directory = &d
 		}
 	} else if s.isPotMCP(ctx, link) {
 		if c, e := s.PotMCPConnection(ctx, link); e == nil && c.State != "revoked" {
 			directory = c.Directory
 		}
-	} else if c, err := s.agentLinks.service.Get(ctx, link); err == nil && c.State != "revoked" {
-		directory = c.Directory
 	}
 	if directory == nil {
 		return result

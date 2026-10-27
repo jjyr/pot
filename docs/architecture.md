@@ -129,12 +129,22 @@ launches or new delegations. SQLite schemas and upgrades belong to
 
 ## Transport and presentation
 
-[Peer transport](peer-protocol.md) uses stable Ed25519 identities and mutually
-authenticated TLS 1.3 sessions. Service admission separately verifies the saved
-Agent Link. Unicast `tcp://host:port` endpoints use automatic self-signed
-certificates and public-key pins to authenticate and encrypt content. The listener
-exposes identity and collaboration services. Yamux multiplexes independent calls;
-CBOR describes each message and Zstd optionally compresses large bodies.
+The existing browser publication forwards a fixed MCP/OAuth surface through the
+private Control socket. MCPAccess verifies each external credential and keeps
+ordinary user-kind callers separate from consented own-node receivers.
+
+```text
+MCP client / receiver ---> browser publication ---> private Control socket
+                                  |                        |
+                           existing login             MCPAccess / OAuth
+                                                           |
+                                        existing Task / Mailbox / permissions
+```
+
+The receiver initiates one connection and claims both directions of work.
+There is no dedicated product TCP/P2P listener or pairing handshake. The reusable
+`pkg/peer` library remains for its public Go API and shared node identity types;
+its presence does not publish a product service.
 
 UI identity includes node, assistant and conversation. Drafts, history and
 notifications retain their owner; navigation generations reject late responses.

@@ -68,9 +68,6 @@ func (b *backend) awaitReview(ctx context.Context, j job, method string, params 
 	}); err != nil {
 		return "", err
 	}
-	if b.approvalCommitted != nil {
-		_ = b.approvalCommitted(ctx, agentlink.ApprovalEvent{To: j.Request.From, ID: p.value.ID, JobID: j.Task.ID, RequestID: j.Request.RequestID})
-	}
 	select {
 	case action := <-p.done:
 		// Decision consumes just this request; no session or policy grant is sent.

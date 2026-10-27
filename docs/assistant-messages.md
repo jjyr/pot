@@ -199,8 +199,8 @@ inspection rather than automatically replaying uncertain model requests.
 Local and remote collaboration use [Agent Link](agent-links.md). Connections bind
 nodes and expose their assistant directories, independently of App windows.
 Authenticated peer messages use the existing durable outbox and inbox, retaining
-full sender/recipient identities and immutable receipts. One private TCP endpoint
-establishes both directions. A connection cannot grant owner APIs, model proxying,
+full sender/recipient identities and immutable receipts. One published MCP endpoint and an outbound receiver connection
+establish both directions. A connection cannot grant owner APIs, model proxying,
 credentials or raw execution access. Task delegation goes through the same link's
 receiver-owned business port; it is distinct from ordinary peer text.
 

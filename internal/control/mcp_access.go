@@ -21,7 +21,7 @@ type MCPAccessOptions struct {
 	OAuth       *MCPOAuthServer
 	Queue       *MCPAccessQueue
 	Local       *Service
-	// ReceiverCapabilities supplies the provisioned driver's effective description.
+	// ReceiverCapabilities supplies an independent collaboration policy ceiling.
 	// A nil callback disables registration, rather than trusting an advertisement.
 	ReceiverCapabilities func(context.Context, agentlink.MCPReceiver, protocol.AgentRef) (agentlink.Description, error)
 }
@@ -34,28 +34,38 @@ type MCPAccess struct {
 	handler     http.Handler
 }
 
-func NewMCPAccess(o MCPAccessOptions) (*MCPAccess, error) {
+func NewMCPAccess(o MCPAccessOptions) (*MCPAccess, error) { return newMCPAccess(o, true) }
+func newMCPAccess(o MCPAccessOptions, bind bool) (*MCPAccess, error) {
 	if o.OAuth == nil || o.Queue == nil || o.Queue.DB == nil || o.Queue.Tasks == nil || o.Queue.Tasks.DB() != o.Queue.DB || o.Queue.NodeID != o.OAuth.options.NodeID {
 		return nil, agentlink.ErrInvalid
 	}
-	if o.Local != nil {
+	if bind && o.Local != nil {
 		if o.Local.mcpAccess.Load() != nil {
 			return nil, agentlink.ErrConflict
 		}
 	}
 	// Pending native channels cannot be reconstructed by a service restart.
-	if _, e := o.Queue.DB.Exec("UPDATE mcp_remote_approvals SET state='invalidated' WHERE state='pending'"); e != nil {
-		return nil, e
+	if bind {
+		if _, e := o.Queue.DB.Exec("UPDATE mcp_native_user_operations SET state='unknown' WHERE state IN ('pending','claimed')"); e != nil {
+			return nil, e
+		}
+		if _, e := o.Queue.DB.Exec("UPDATE mcp_remote_approvals SET state='invalidated' WHERE state='pending'"); e != nil {
+			return nil, e
+		}
 	}
 	if o.HumanReview == nil && o.Local != nil {
 		o.HumanReview, _ = any(o.Local).(agentlink.MCPHumanReviewBackend)
 	}
-	o.Queue.CheckConnection = o.OAuth.CheckConnection
+	if bind {
+		o.Queue.CheckConnection = o.OAuth.CheckConnection
+	}
 	a := &MCPAccess{options: o, sdk: mcp.NewServer(&mcp.Implementation{Name: "pot", Version: "1"}, nil), receiverSDK: mcp.NewServer(&mcp.Implementation{Name: "pot", Version: "1"}, nil)}
-	if o.Local != nil {
+	if bind && o.Local != nil {
 		o.Local.mcpAccess.Store(a)
 	}
-	o.Queue.messageResult = a.messageResultTx
+	if bind {
+		o.Queue.messageResult = a.messageResultTx
+	}
 	a.tools()
 	a.executionTools()
 	a.approvalTools()
@@ -64,6 +74,7 @@ func NewMCPAccess(o MCPAccessOptions) (*MCPAccess, error) {
 	a.nodeSubmitTool()
 	a.nodeTaskTools()
 	a.reverseHumanReviewTools()
+	a.nativeUserTools()
 	transport := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		info := mcp.TokenInfoFromContext(r.Context())
 		if info != nil {
@@ -322,6 +333,9 @@ func (a *MCPAccess) tools() {
 		}
 		if e = a.options.Queue.Register(ctx, receiver, input, actual); e != nil {
 			return nil, e
+		}
+		if a.options.Local != nil {
+			a.options.Local.notifyMCPConnections()
 		}
 		return map[string]string{"connection_id": receiver.ConnectionID(), "node_id": receiver.NodeID()}, nil
 	})

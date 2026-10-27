@@ -69,36 +69,3 @@ type AssistantManagementResult struct {
 type AssistantManagementBackend interface {
 	ManageAssistant(context.Context, AssistantManagementRequest) (AssistantManagementResult, error)
 }
-
-func (s *Service) ManageAssistant(ctx context.Context, link string, input AssistantManagementRequest) (AssistantManagementResult, error) {
-	if !s.enterRPC() {
-		return AssistantManagementResult{}, ErrUnavailable
-	}
-	defer s.rpcWG.Done()
-	if !input.From.Valid() || input.From.Kind != "user" || input.From.NodeID != s.options.HostIdentity.NodeID {
-		return AssistantManagementResult{}, ErrUnauthorized
-	}
-	c, err := s.Get(ctx, link)
-	if err != nil {
-		return AssistantManagementResult{}, err
-	}
-	var result AssistantManagementResult
-	err = s.callConnection(ctx, c, string(AssistantManagement), input, &result)
-	if err == nil {
-		valid := func(value ManagedAssistant) bool {
-			return value.Address.Valid() && value.Address.NodeID == c.PeerHost.NodeID && value.Address.Kind == "assistant" && value.Address.AgentID == value.ID && value.Revision > 0
-		}
-		for _, value := range result.Assistants {
-			if !valid(value) {
-				return AssistantManagementResult{}, ErrConflict
-			}
-		}
-		if input.Action != "catalog" && (result.Assistant == nil || !valid(*result.Assistant) || (input.Action == "update" && result.Assistant.Address.AgentID != input.ID)) {
-			return AssistantManagementResult{}, ErrConflict
-		}
-	}
-	if err == nil && input.Action != "catalog" {
-		_, _ = s.Directory(ctx, link)
-	}
-	return result, err
-}

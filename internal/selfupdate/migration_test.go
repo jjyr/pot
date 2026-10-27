@@ -3,6 +3,7 @@ package selfupdate
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -76,7 +77,11 @@ INSERT INTO update_fixture_receipt VALUES('converted',1);
 INSERT INTO fixture_ready VALUES('converted');
 -- +migrate StatementEnd
 `
-	if err := os.WriteFile(filepath.Join(copyRoot, "pkg/storage/migrations/tasks/0005_update_fixture.sql"), []byte(sql), 0600); err != nil {
+	current, e := storage.Schemas()
+	if e != nil {
+		t.Fatal(e)
+	}
+	if err := os.WriteFile(filepath.Join(copyRoot, fmt.Sprintf("pkg/storage/migrations/tasks/%04d_update_fixture.sql", len(current[storage.TasksDatabase])+1)), []byte(sql), 0600); err != nil {
 		t.Fatal(err)
 	}
 	binary := filepath.Join(copyRoot, "target-test")
@@ -273,7 +278,11 @@ func TestWorkerRealMigrationAndForwardRecovery(t *testing.T) {
 					var n int
 					db.QueryRow("SELECT count(*) FROM pot_migrations").Scan(&n)
 					db.Close()
-					if n != 4 {
+					current, e := storage.Schemas()
+					if e != nil {
+						t.Fatal(e)
+					}
+					if n != len(current[storage.TasksDatabase]) {
 						t.Fatal("failed database partially committed", n)
 					}
 					continue
