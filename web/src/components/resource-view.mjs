@@ -24,9 +24,13 @@ function register(){
   customElements.define('pot-resource',class extends HTMLElement{
     generation=0;
     queuePreparedState(change){
-      this.resourceRenderState={...this.resourceRenderState,...change,revision:(this.resourceRenderState?.revision||0)+1};
-      const iframe=this.querySelector('iframe'),hidden=!!this.closest('[data-preparation-surface]'),managed=hidden||this.closest('.prepared-row,.prepared-region');
+      const iframe=this.querySelector('iframe'),boundedResize=change.resize!==undefined&&(this.dataset.preparedFallback==='true'||iframe?.nativePreparation?.fixedHeight!==undefined);
+      // A deadline viewport already has measured geometry. Pure height reports
+      // cannot invalidate a result/notice transaction or reopen its preparation.
+      this.resourceRenderState={...this.resourceRenderState,...change,revision:(this.resourceRenderState?.revision||0)+(boundedResize?0:1)};
+      const hidden=!!this.closest('[data-preparation-surface]'),managed=hidden||this.closest('.prepared-row,.prepared-region');
       if(change.resize!==undefined&&(hidden||iframe?.nativePreparation||this.dataset.preparedFallback==='true'))iframe?.style.setProperty('--resource-height',change.resize+'px');
+      if(boundedResize)return;
       if(hidden||!managed){this.projectPreparedState(this);if(hidden){let parent=this;while(parent&&!parent.preparedContext)parent=parent.parentElement;const context=parent?.preparedContext;if(context?.alive)context.changed?.();}return;}
       if(change.resize!==undefined&&iframe?.nativePreparation&&!iframe.nativePreparation.context.ready)return;
       this.dispatchEvent(new CustomEvent('pot:prepare-resize',{bubbles:true}));

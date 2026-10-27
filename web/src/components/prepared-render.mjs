@@ -136,7 +136,7 @@ function stageNativeIslands(context){
     if(entry.projection&&box.width===oldBox.width&&box.height===oldBox.height&&entry.projection.clientWidth===original.clientWidth&&entry.projection.clientHeight===original.clientHeight)continue;
     original.nativePresentation?.cancel();
     owner.nativeReflowDeadline??=performance.now()+5000;
-    entry.style=original.getAttribute('style');entry.popover=original.getAttribute('popover');entry.inert=original.inert;entry.hidden=original.getAttribute('aria-hidden');entry.tabindex=original.getAttribute('tabindex');entry.focus=document.activeElement===original;
+    entry.style=original.getAttribute('style');entry.framed=original.classList.contains('prepared-frame');entry.popover=original.getAttribute('popover');entry.inert=original.inert;entry.hidden=original.getAttribute('aria-hidden');entry.tabindex=original.getAttribute('tabindex');entry.focus=document.activeElement===original;
     entry.home=original.ownerDocument.createElement('div');entry.home.className=original.className;entry.home.style.cssText='box-sizing:border-box;width:'+oldBox.width+'px;height:'+oldBox.height+'px;max-width:100%';entry.home.inert=true;entry.home.setAttribute('aria-hidden','true');entry.home.dataset.conversationHold='';entry.home.dataset.nativePreparationPlaceholder='';
     // Prepare the temporary status in the same connected hidden surface. The
     // old measured frame is a hold, never ready content or a reading anchor.
@@ -160,7 +160,12 @@ function nativeIslandsPending(context,deadlineFor,now){
     entry.stable=next===entry.previous?entry.stable+1:0;entry.previous=next;
     if(entry.stable<3){
       const deadline=owner.dataset.state==='ready'?owner.nativeReflowDeadline:deadlineFor(componentDeadlineKey(owner,context.member));
-      if(now>=deadline)frame(projection.closest('pot-resource')||owner,true);
+      if(now>=deadline){
+        // Bound the actual child viewport too. Late document-height reports
+        // then update its scrollable interior, not its native input surface.
+        entry.fixedHeight=box.height;framePreparedElement(original,entry.fixedHeight);
+        frame(projection.closest('pot-resource')||owner,true);
+      }
       else pending=true;
     }
   }
@@ -192,11 +197,12 @@ function presentNativeIsland(entry){
     if(closed)return;
     if(original.nativePresentation!==presentation||!original.isConnected||owner.generation!==generation||original.getAttribute('src')!==source||original.contentWindow!==window)return finish();
     if(original.closest('[data-preparation-surface]')){previous=undefined;stable=0;animation=view.requestAnimationFrame(check);return;}
-    const box=original.getBoundingClientRect(),next=JSON.stringify([box.x,box.y,box.width,box.height,original.clientWidth,original.clientHeight,owner.nativeResizeRevision||0]);
+    const box=original.getBoundingClientRect(),next=JSON.stringify([box.x,box.y,box.width,box.height,original.clientWidth,original.clientHeight,entry.fixedHeight===undefined?owner.nativeResizeRevision||0:0]);
     stable=next===previous?stable+1:0;previous=next;
     // RAF runs before rendering. Two matching subsequent callbacks leave a
     // full rendering opportunity after the final flow/child viewport update;
-    // a layout or native resize revision restarts this presentation boundary.
+    // a layout or unbounded native resize restarts this presentation boundary.
+    // Reports inside a fixed viewport still require matching real box/client sizes.
     if(stable>=2)return finish();
     animation=view.requestAnimationFrame(check);
   }
@@ -206,12 +212,14 @@ export function finishPreparedNative(context,{commit=false,preparedOnly=false}={
   for(const entry of [...context.nativeIslands.values()]){
     const {original,home,projection}=entry;
     if(preparedOnly&&!context.root.contains(original))continue;
-    if(commit)delete entry.owner.nativeReflowDeadline;
+    // A commit only ends this transaction. The original component keeps its
+    // budget through later content/resize revisions until retireRendering.
     if(!home)continue;
     const height=original.style.getPropertyValue('--resource-height');
     if(original.matches(':popover-open'))original.hidePopover();
     if(entry.popover===null)original.removeAttribute('popover');else original.setAttribute('popover',entry.popover);
     if(entry.style===null)original.removeAttribute('style');else original.setAttribute('style',entry.style);
+    if(entry.fixedHeight!==undefined){if(commit)framePreparedElement(original,entry.fixedHeight);else if(!entry.framed)original.classList.remove('prepared-frame');}
     if(commit&&height)original.style.setProperty('--resource-height',height);
     if(commit&&projection.closest('pot-resource')?.dataset.preparedFallback==='true')entry.owner.dataset.preparedFallback='true';
     original.inert=entry.inert;if(entry.hidden===null)original.removeAttribute('aria-hidden');else original.setAttribute('aria-hidden',entry.hidden);

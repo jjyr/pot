@@ -208,8 +208,13 @@ transition. An unfocused returning iframe is temporarily excluded from sequentia
 Tab navigation; a focused document keeps its current keyboard target. New hidden
 candidates remain inside the inert preparation surface. A new viewport handoff,
 reset, suspension or owner retirement cancels the previous presentation wait.
-Cancellation retains the unfinished native reflow budget until commit;
-this does not renew an unresolved component's content deadline. Resize, result
+Cancellation and commit retain the original component's native reflow deadline
+until that component is retired. Continuous document resizes cannot renew its
+five-second budget; at expiry they continue inside its measured fixed frame.
+The fallback also fixes the actual iframe viewport at its measured height;
+later document-height reports cannot resize that viewport or reopen preparation.
+Its presentation still waits for matching real geometry across rendering updates.
+This does not renew an unresolved component's content deadline. Resize, result
 and dependency notices carry resource revisions through
 the same preparation batch; a late revision invalidates an older measurement.
 
