@@ -23,6 +23,55 @@ META_DESCRIPTION_KEY = html.unescape(
 )
 INSTALL = json.loads((ROOT / "install.json").read_text())
 REFERENCE = CATALOGS["en"]
+
+RELEASES = [
+    {
+        "tag": "v0.0.4",
+        "date": "2026-10-27",
+        "badge": "Latest Release",
+        "title": "Pot 0.0.4 — Offline startup, chat recovery and local drafts",
+        "items": [
+            "Reopen an installed PWA from its complete cached shell, assistant directory, conversations, reading position and drafts while runtime checks run in the background.",
+            "Restore one local draft per assistant (including text, references and original attachment files) and continue interrupted turns from the composer button.",
+            "Recover stalled browser chat streams and cancelled access probes; unify local file delivery, add lifecycle notifications and optional PWA Web Push.",
+            "Repair native update simulation discovery and preserve writable Task workspaces when the Runtime state root uses a filesystem alias.",
+        ],
+    },
+    {
+        "tag": "v0.0.3",
+        "date": "2026-10-26",
+        "badge": "",
+        "title": "Pot v0.0.3 — Conversation continuity, committed data reads and update discovery",
+        "items": [
+            "Chat and Task views share a conversation list controller that preserves reading position and stable message anchors while scrolling, refreshing, and loading older history.",
+            "Frontend views render committed local data through shared repositories and bounded queries, revoking stale menu actions before execution.",
+            "Updates are easier to discover from shared navigation and Settings, with migration lineage validation and transactional database migration batches.",
+        ],
+    },
+    {
+        "tag": "v0.0.2",
+        "date": "2026-10-25",
+        "badge": "",
+        "title": "Pot 0.0.2 — Assistant setup, Agent connections, task continuity and desktop updates",
+        "items": [
+            "Create assistants directly on existing Runtime connections with guided Codex and Antigravity setup, and add Antigravity Agent Link support.",
+            "Bind Task continuation to its original workspace and Git association so resumed work retains context, and preserve the latest chat messages when switching assistants.",
+            "Repair the native macOS App update lifecycle and add an independent macOS Homebrew CLI Formula (pot-cli).",
+        ],
+    },
+    {
+        "tag": "v0.0.1",
+        "date": "2026-10-24",
+        "badge": "",
+        "title": "Pot 0.0.1 — Initial release",
+        "items": [
+            "Persistent assistant conversations, asynchronous background Tasks, Cron schedules, and GitHub notification routing.",
+            "Agent Link peer-to-peer collaboration with verified Codex session and task delegation.",
+            "SRT native sandboxing (macOS Seatbelt and Linux bubblewrap), exact command approvals, and AES-256-GCM encrypted secret storage.",
+        ],
+    },
+]
+
 # Every meaningful template string must have an explicit catalog entry or be a brand.
 BRANDS = {
     "Pot",
@@ -119,15 +168,32 @@ def payload(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
 
 
+def render_releases():
+    blocks = []
+    for rel in RELEASES:
+        url = f"https://github.com/jjyr/pot/releases/tag/{rel['tag']}"
+        badge = f'<span class="pill">{esc(rel["badge"])}</span>' if rel["badge"] else ""
+        bullets = "".join(f"<li>{esc(item)}</li>" for item in rel["items"])
+        blocks.append(
+            f'<article class="release-item">'
+            f'<div class="release-meta">'
+            f'<a class="release-tag" href="{url}" target="_blank" rel="noopener">{esc(rel["tag"])} <span aria-hidden="true">↗</span></a>'
+            f'<time datetime="{esc(rel["date"])}">{esc(rel["date"])}</time>'
+            f"{badge}"
+            f"</div>"
+            f'<h3><a class="release-title-link" href="{url}" target="_blank" rel="noopener">{esc(rel["title"])}</a></h3>'
+            f"<ul>{bullets}</ul>"
+            f"</article>"
+        )
+    return "\n".join(blocks)
+
+
 def initial_demo(catalog, prefix):
-    p = catalog["page"]
     d = catalog["demo"]
     a = d["agentTalk"][0]
     icon = f'<span class="agent-icon codex" aria-hidden="true"><img src="{prefix}assets/codex.png" alt=""></span>'
     conversation = f'<div class="conversation-user">{esc(a[0])}</div><div class="conversation-reply">{icon}<div><b>Codex</b><p>{esc(a[1])}</p></div></div><div class="conversation-result"><span>↳</span><div>{esc(a[2])}<small>{esc(d["directExample"])}</small></div></div>'
-    number = d["flowNumber"].replace("{n}", "01")
-    flow = f'<div class="flow-heading"><span>{esc(d["flowEyebrows"][0])}</span><span>{esc(number)}</span></div><div class="flow-user">{esc(d["flowUsers"][0])}</div><div class="flow-message"><img src="{prefix}assets/pot.png" alt="" aria-hidden="true"><div><b>Pot</b><p>{esc(d["flowReplies"][0])}</p></div></div><div class="flow-route"><b>{esc(d["flowRoute"][0])}</b><span>→</span><b>{esc(d["flowRoute"][1])}</b></div>'
-    return conversation, flow
+    return conversation
 
 
 def render(code, prefix="../", root=False):
@@ -150,6 +216,11 @@ def render(code, prefix="../", root=False):
         return m[1] + '="' + esc(texts.get(key, key)) + '"'
 
     page = re.sub(r'(aria-label|alt|content)="([^"]*)"', attribute, page)
+    if code not in ("zh-CN", "zh-TW"):
+        page = page.replace(
+            'href="https://jjylab.com/posts/why-agent-coding-is-exhausting/"',
+            'href="https://jjylab.com/en/posts/why-agent-coding-is-exhausting/"',
+        )
     page = page.replace(
         '<html lang="zh-CN">',
         f'<html lang="{code}"' + (" data-detect-language" if root else "") + ">",
@@ -179,19 +250,16 @@ def render(code, prefix="../", root=False):
         "server-command": "server",
     }.items():
         page = page.replace("<!--" + marker + "-->", esc(install[key]))
+    page = page.replace("<!--changelog-releases-->", render_releases())
     config = {**catalog, "install": install, "locale": code, "assetBase": prefix}
     scripts = f'<script src="{prefix}locale.js"></script><script id="pot-data" type="application/json">{payload(config)}</script><script src="{prefix}app.js" defer></script>'
     page = page.replace('<script src="app.js" defer></script>', alternatives + scripts)
-    conversation, flow = initial_demo(catalog, prefix)
+    conversation = initial_demo(catalog, prefix)
     page = page.replace(
         '<div id="agent-conversation" class="agent-conversation" aria-live="polite"></div>',
         '<div id="agent-conversation" class="agent-conversation" aria-live="polite">'
         + conversation
         + "</div>",
-    )
-    page = page.replace(
-        '<div class="flow-panel" id="flow-panel" aria-live="polite"></div>',
-        '<div class="flow-panel" id="flow-panel" aria-live="polite">' + flow + "</div>",
     )
     fallback = (
         '<noscript><nav class="language-fallback" aria-label="'
