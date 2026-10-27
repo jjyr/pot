@@ -144,6 +144,11 @@ func (a *MCPAccess) localMutation(ctx context.Context, c agentlink.MCPCaller, op
 	err = storage.Transaction(ctx, a.options.Queue.DB, func(tx *sql.Tx) error {
 		var old, state, receipt string
 		e := tx.QueryRowContext(ctx, "SELECT digest,state,receipt FROM mcp_local_mutations WHERE connection_id=? AND actor=? AND operation=? AND request_id=?", c.ConnectionID(), mcpJSON(c.Actor()), op, request).Scan(&old, &state, &receipt)
+		if op == agentlink.TaskSubmit && (e == nil || errors.Is(e, sql.ErrNoRows)) {
+			if err := bindMCPOriginalHumanTx(ctx, tx, c, request, e == nil); err != nil {
+				return err
+			}
+		}
 		if e == nil {
 			if old != digest {
 				return agentlink.ErrConflict

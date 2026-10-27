@@ -300,10 +300,7 @@ func (s *Service) taskExecutionNotification(ctx context.Context, id, owner strin
 	if run == "" {
 		run = linkRunID(id)
 	}
-	eventID := id
-	if d.Execution.Request.Target.Kind == "node" {
-		eventID, _ = core.HashJSON([]string{id, run})
-	}
+	eventID, _ := core.HashJSON([]string{id, run})
 	result := protocol.TaskResultEvent{TaskID: id, RunID: run, Title: d.Info.Title, Phase: d.Info.Phase, Text: d.Execution.Receipt.Result, Error: d.Execution.Receipt.Error, Origin: protocol.TaskOrigin{Kind: "manual"}}
 	envelope := protocol.Envelope{ID: eventID, Kind: "task_result", From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "runtime", AgentID: "agent-link"}, To: d.Execution.Request.From, ConversationID: run, Text: d.Execution.Receipt.Result, Result: &result}
 	if envelope.Text == "" {

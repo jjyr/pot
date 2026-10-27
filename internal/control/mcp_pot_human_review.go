@@ -91,7 +91,7 @@ func (s *Service) MCPHumanReviews(ctx context.Context, receiver agentlink.MCPRec
 	return state, nil
 }
 func (s *Service) MCPHumanDecision(ctx context.Context, receiver agentlink.MCPReceiver, caller agentlink.MCPCaller, input agentlink.MCPHumanReviewDecision) error {
-	if input.Caller != caller.Actor() || input.Epoch != s.options.BootID || input.User.Kind != "user" || input.User.NodeID != receiver.NodeID() || (input.Action != "allow_once" && input.Action != "deny") {
+	if input.Caller != caller.Actor() || input.Epoch != s.options.BootID || (input.Action != "allow_once" && input.Action != "deny") {
 		return agentlink.ErrUnauthorized
 	}
 	owner, task, request, e := s.localMCPHumanTask(ctx, receiver, caller, input.TaskID)
@@ -99,6 +99,13 @@ func (s *Service) MCPHumanDecision(ctx context.Context, receiver agentlink.MCPRe
 		return e
 	}
 	if input.RequestID != request || input.ExecutionTask != (protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "task", AgentID: task}) {
+		return agentlink.ErrUnauthorized
+	}
+	human, e := s.originalMCPHuman(ctx, receiver, caller, request)
+	if e != nil {
+		return e
+	}
+	if input.User != human {
 		return agentlink.ErrUnauthorized
 	}
 	permissions := s.Permissions

@@ -11,6 +11,14 @@ import (
 type MCPHumanReviewRead struct {
 	Caller protocol.AgentRef `json:"caller" required:"true"`
 }
+
+// MCPHumanTaskSubmit is owning-Control provenance for its persisted user Task
+// submission. It does not change the ordinary OAuth business caller. Models and
+// ordinary MCP clients cannot supply this receiver-only metadata.
+type MCPHumanTaskSubmit struct {
+	User  protocol.AgentRef `json:"user" required:"true"`
+	Input MCPSubmitInput    `json:"input" required:"true"`
+}
 type MCPHumanReview struct {
 	Caller        protocol.AgentRef `json:"caller" required:"true"`
 	RequestID     string            `json:"request_id" required:"true"`

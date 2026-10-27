@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -532,130 +533,137 @@ func TestPotMCPLocalExecutionIdentityAndWorkerRestrictions(t *testing.T) {
 }
 
 func TestPotMCPReceiverOnlyOriginHumanCanApproveOnce(t *testing.T) {
-	a, _ := potMCPControl(t, "pot-review-a")
-	b, _ := potMCPControl(t, "pot-review-b")
-	server := potMCPServer(t, a)
-	connection := potMCPAuthorize(t, b, server, "")
-	client := potMCPClient(t, b, connection.ID)
-	potMCPExposeClient(t, b, connection.ID, client)
-	identity, _ := agentlink.NewMCPReceiver(connection.ID, b.options.RuntimeID)
-	receiver := &potMCPReceiver{s: b, identity: identity, remote: client}
-	ctx := t.Context()
-	target := agentlink.AssistantTarget(b.options.RuntimeID, "main")
-	accepted, e := a.CreateTask(ctx, "main", protocol.CreateTask{RequestID: "review-task", Text: "safe fake approval", Target: &target})
-	if e != nil {
-		t.Fatal(e)
-	}
-	potMCPStep(t, client, receiver)
-	potMCPStep(t, client, receiver)
-	if e = b.Tasks.Tick(ctx); e != nil {
-		t.Fatal(e)
-	}
-	potMCPStep(t, client, receiver)
-	records, e := receiver.Records(ctx)
-	if e != nil || len(records) != 1 {
-		t.Fatal(records, e)
-	}
-	mapping := records[0]
-	record, e := b.Tasks.Get(ctx, "main", mapping.Admission.Binding.Task.AgentID)
-	if e != nil {
-		t.Fatal(e)
-	}
-	if e = b.Permissions.Enroll("machine", "epoch"); e != nil {
-		t.Fatal(e)
-	}
-	request := hostRequest("pot-review-call")
-	request.Owner = "main"
-	request.Task = record.Info.ID
-	request.Turn = record.RunID
-	request.Generation = record.Generation
-	ready := make(chan struct{})
-	result := make(chan error, 1)
-	go func() {
-		mode, e := b.Permissions.authorize(ctx, request, func() error { close(ready); return nil })
-		if e == nil && mode != "host" {
-			e = errors.New("unexpected authorization mode")
-		}
-		result <- e
-	}()
-	select {
-	case <-ready:
-	case <-time.After(2 * time.Second):
-		t.Fatal("approval missing")
-	}
-	pending := b.Permissions.Pending("main")
-	if len(pending) != 1 {
-		t.Fatal(pending)
-	}
-	body, _ := json.Marshal(map[string]string{"id": pending[0].ID, "action": "allow_once"})
-	if _, e = b.ManageApproval(ctx, "main", body); !errors.Is(e, agentlink.ErrUnauthorized) {
-		t.Fatal("receiver human bypass", e)
-	}
-	if e = receiver.BeforeSnapshot(ctx, &mapping); e != nil {
-		t.Fatal(e)
-	}
-	reviews := server.access.humanReviews(ctx, "main")
-	if len(reviews) != 1 || reviews[0].Task != accepted.ID || reviews[0].Pending.Context.Binding.Actor.Kind != "task" {
-		t.Fatal("original review ownership", reviews)
-	}
-	originID := mcpHumanApprovalID(reviews[0])
-	body, _ = json.Marshal(map[string]string{"id": originID, "action": "allow_once"})
-	if _, e = a.ManageApproval(ctx, "main", body); e != nil {
-		t.Fatal(e)
-	}
-	potMCPStep(t, client, receiver)
-	controls, e := receiver.Records(ctx)
-	if e != nil || len(controls) != 2 || controls[1].Control == nil {
-		t.Fatal(controls, e)
-	}
-	for _, mutate := range []func(*agentlink.MCPControlDelivery){
-		func(c *agentlink.MCPControlDelivery) { c.Approval.Epoch = "previous-process-epoch" },
-		func(c *agentlink.MCPControlDelivery) { c.Binding.RunID = "previous-run" },
-		func(c *agentlink.MCPControlDelivery) { c.Approval.RequestID = "foreign-request" },
-		func(c *agentlink.MCPControlDelivery) { c.Caller.AgentID = "foreign-caller" },
-	} {
-		invalid := controls[1]
-		control := *invalid.Control
-		decision := *control.Approval
-		control.Approval = &decision
-		invalid.Control = &control
-		mutate(&control)
-		if e = receiver.Approval(ctx, &invalid); e == nil {
-			t.Fatal("mismatched receiver decision accepted", control)
-		}
-		select {
-		case e = <-result:
-			t.Fatal("mismatched decision consumed pending request", e)
-		default:
-		}
-	}
-	potMCPStep(t, client, receiver)
-	select {
-	case e = <-result:
-		if e != nil {
-			t.Fatal(e)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("human decision not applied")
-	}
-	if len(b.Permissions.grants) != 0 || len(b.Permissions.state.Rules) != 0 {
-		t.Fatal("once decision created broader permissions")
-	}
-	records, e = receiver.Records(ctx)
-	if e != nil || len(records) != 2 || !records[1].ControlApplied {
-		t.Fatal(records, e)
-	}
-	if e = receiver.Approval(ctx, &records[1]); e != nil {
-		t.Fatal("identical decision retry", e)
-	}
-	changed := records[1]
-	copyControl := *changed.Control
-	copyDecision := *copyControl.Approval
-	copyDecision.Action = "deny"
-	copyControl.Approval = &copyDecision
-	changed.Control = &copyControl
-	if e = receiver.Approval(ctx, &changed); e == nil {
-		t.Fatal("conflicting human decision accepted")
+	for _, action := range []string{"allow_once", "deny"} {
+		t.Run(action, func(t *testing.T) {
+			a, _ := potMCPControl(t, "pot-review-a")
+			b, _ := potMCPControl(t, "pot-review-b")
+			server := potMCPServer(t, a)
+			connection := potMCPAuthorize(t, b, server, "")
+			client := potMCPClient(t, b, connection.ID)
+			potMCPExposeClient(t, b, connection.ID, client)
+			identity, _ := agentlink.NewMCPReceiver(connection.ID, b.options.RuntimeID)
+			receiver := &potMCPReceiver{s: b, identity: identity, remote: client}
+			ctx := t.Context()
+			target := agentlink.AssistantTarget(b.options.RuntimeID, "main")
+			accepted, e := a.CreateTask(ctx, "main", protocol.CreateTask{RequestID: "review-task", Text: "safe fake approval", Target: &target})
+			if e != nil {
+				t.Fatal(e)
+			}
+			potMCPStep(t, client, receiver)
+			potMCPStep(t, client, receiver)
+			if e = b.Tasks.Tick(ctx); e != nil {
+				t.Fatal(e)
+			}
+			potMCPStep(t, client, receiver)
+			records, e := receiver.Records(ctx)
+			if e != nil || len(records) != 1 {
+				t.Fatal(records, e)
+			}
+			mapping := records[0]
+			record, e := b.Tasks.Get(ctx, "main", mapping.Admission.Binding.Task.AgentID)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if e = b.Permissions.Enroll("machine", "epoch"); e != nil {
+				t.Fatal(e)
+			}
+			request := hostRequest("pot-review-call")
+			request.Owner = "main"
+			request.Task = record.Info.ID
+			request.Turn = record.RunID
+			request.Generation = record.Generation
+			ready := make(chan struct{})
+			result := make(chan error, 1)
+			go func() {
+				mode, e := b.Permissions.authorize(ctx, request, func() error { close(ready); return nil })
+				if e == nil && mode != "host" {
+					e = errors.New("unexpected authorization mode")
+				}
+				result <- e
+			}()
+			select {
+			case <-ready:
+			case <-time.After(2 * time.Second):
+				t.Fatal("approval missing")
+			}
+			pending := b.Permissions.Pending("main")
+			if len(pending) != 1 {
+				t.Fatal(pending)
+			}
+			body, _ := json.Marshal(map[string]string{"id": pending[0].ID, "action": "allow_once"})
+			if _, e = b.ManageApproval(ctx, "main", body); !errors.Is(e, agentlink.ErrUnauthorized) {
+				t.Fatal("receiver human bypass", e)
+			}
+			if e = receiver.BeforeSnapshot(ctx, &mapping); e != nil {
+				t.Fatal(e)
+			}
+			reviews := server.access.humanReviews(ctx, "main")
+			if len(reviews) != 1 || reviews[0].Task != accepted.ID || reviews[0].Pending.Context.Binding.Actor.Kind != "task" {
+				t.Fatal("original review ownership", reviews)
+			}
+			originID := mcpHumanApprovalID(reviews[0])
+			body, _ = json.Marshal(map[string]string{"id": originID, "action": action})
+			if _, e = a.ManageApproval(ctx, "main", body); e != nil {
+				t.Fatal(e)
+			}
+			potMCPStep(t, client, receiver)
+			controls, e := receiver.Records(ctx)
+			if e != nil || len(controls) != 2 || controls[1].Control == nil {
+				t.Fatal(controls, e)
+			}
+			for _, mutate := range []func(*agentlink.MCPControlDelivery){
+				func(c *agentlink.MCPControlDelivery) { c.Approval.Epoch = "previous-process-epoch" },
+				func(c *agentlink.MCPControlDelivery) { c.Binding.RunID = "previous-run" },
+				func(c *agentlink.MCPControlDelivery) { c.Approval.RequestID = "foreign-request" },
+				func(c *agentlink.MCPControlDelivery) { c.Caller.AgentID = "foreign-caller" },
+			} {
+				invalid := controls[1]
+				control := *invalid.Control
+				decision := *control.Approval
+				control.Approval = &decision
+				invalid.Control = &control
+				mutate(&control)
+				if e = receiver.Approval(ctx, &invalid); e == nil {
+					t.Fatal("mismatched receiver decision accepted", control)
+				}
+				select {
+				case e = <-result:
+					t.Fatal("mismatched decision consumed pending request", e)
+				default:
+				}
+			}
+			potMCPStep(t, client, receiver)
+			select {
+			case e = <-result:
+				if action == "allow_once" && e != nil || action == "deny" && !errors.Is(e, ErrHostDenied) {
+					t.Fatal(e)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("human decision not applied")
+			}
+			if len(b.Permissions.grants) != 0 || len(b.Permissions.state.Rules) != 0 {
+				t.Fatal("once decision created broader permissions")
+			}
+			records, e = receiver.Records(ctx)
+			if e != nil || len(records) != 2 || !records[1].ControlApplied {
+				t.Fatal(records, e)
+			}
+			if e = receiver.Approval(ctx, &records[1]); e != nil {
+				t.Fatal("identical decision retry", e)
+			}
+			changed := records[1]
+			copyControl := *changed.Control
+			copyDecision := *copyControl.Approval
+			copyDecision.Action = "deny"
+			if action == "deny" {
+				copyDecision.Action = "allow_once"
+			}
+			copyControl.Approval = &copyDecision
+			changed.Control = &copyControl
+			if e = receiver.Approval(ctx, &changed); e == nil {
+				t.Fatal("conflicting human decision accepted")
+			}
+		})
 	}
 }
 
@@ -664,10 +672,10 @@ func TestPotMCPSameConnectionReverseHumanReview(t *testing.T) {
 		name     string
 		ordinary bool
 		action   string
-	}{{"root-assistant-once", false, "allow_once"}, {"direct-user-once", true, "allow_once"}, {"root-assistant-deny", false, "deny"}, {"direct-user-deny", true, "deny"}} {
+	}{{"root-assistant-once", false, "allow_once"}, {"direct-user-once", true, "allow_once"}, {"root-assistant-deny", false, "deny"}, {"direct-user-deny", true, "deny"}, {"root-assistant-terminal", false, "allow_once"}, {"direct-user-terminal", true, "allow_once"}} {
 		t.Run(test.name, func(t *testing.T) {
 			ordinary := test.ordinary
-			a, _ := potMCPControl(t, "pot-human-a")
+			a, driver := potMCPControl(t, "pot-human-a")
 			b, _ := potMCPControl(t, "pot-human-b")
 			server := potMCPServer(t, a)
 			connection := potMCPAuthorize(t, b, server, "")
@@ -720,10 +728,12 @@ func TestPotMCPSameConnectionReverseHumanReview(t *testing.T) {
 			host.Task = actualTask
 			host.Turn = actual.RunID
 			host.Generation = actual.Generation
+			permissionCtx, cancelPermission := context.WithCancel(ctx)
+			defer cancelPermission()
 			ready := make(chan struct{})
 			finished := make(chan error, 1)
 			go func() {
-				_, e := a.Permissions.authorize(ctx, host, func() error { close(ready); return nil })
+				_, e := a.Permissions.authorize(permissionCtx, host, func() error { close(ready); return nil })
 				finished <- e
 			}()
 			select {
@@ -763,6 +773,12 @@ func TestPotMCPSameConnectionReverseHumanReview(t *testing.T) {
 				decision.User = review.Caller
 			}
 			for _, mutate := range []func(*agentlink.MCPHumanReviewDecision){
+				func(d *agentlink.MCPHumanReviewDecision) { d.User.AgentID = "different-unassigned-human" },
+				func(d *agentlink.MCPHumanReviewDecision) { d.User.NodeID = "wrong-node" },
+				func(d *agentlink.MCPHumanReviewDecision) { d.User.Kind = "assistant" },
+				func(d *agentlink.MCPHumanReviewDecision) { d.ExecutionTask.AgentID = "foreign-task" },
+				func(d *agentlink.MCPHumanReviewDecision) { d.ApprovalID = "foreign-approval" },
+				func(d *agentlink.MCPHumanReviewDecision) { d.Action = "allow_always" },
 				func(d *agentlink.MCPHumanReviewDecision) { d.Epoch = "previous-process-epoch" },
 				func(d *agentlink.MCPHumanReviewDecision) { d.RunID = "previous-run" },
 				func(d *agentlink.MCPHumanReviewDecision) { d.Generation++ },
@@ -783,6 +799,26 @@ func TestPotMCPSameConnectionReverseHumanReview(t *testing.T) {
 				default:
 				}
 			}
+			if strings.HasSuffix(test.name, "-terminal") {
+				driver.complete(actual.RunID)
+				if e = a.Tasks.Tick(ctx); e != nil {
+					t.Fatal(e)
+				}
+				var response struct {
+					Accepted bool `json:"accepted"`
+				}
+				if e = client.Call(ctx, "pot_receiver_human_review_decide", decision, &response); e == nil {
+					t.Fatal("terminal task approved real pending")
+				}
+				select {
+				case e = <-finished:
+					t.Fatal("terminal decision consumed pending", e)
+				default:
+				}
+				cancelPermission()
+				<-finished
+				return
+			}
 			body, _ = json.Marshal(map[string]string{"id": item["id"].(string), "action": test.action})
 			if _, e = b.ManageApproval(ctx, owner, body); e != nil {
 				t.Fatal(e)
@@ -794,6 +830,23 @@ func TestPotMCPSameConnectionReverseHumanReview(t *testing.T) {
 				}
 			case <-time.After(2 * time.Second):
 				t.Fatal("reverse once decision missing")
+			}
+			var duplicate struct {
+				Accepted bool `json:"accepted"`
+			}
+			// A retained identical decision may reconcile, or the consumed pending
+			// may already be fenced. Neither can create another pending or effect.
+			_ = client.Call(ctx, "pot_receiver_human_review_decide", decision, &duplicate)
+			if len(a.Permissions.Pending("main")) != 0 {
+				t.Fatal("duplicate decision created a pending request")
+			}
+			conflict := decision
+			conflict.Action = "deny"
+			if test.action == "deny" {
+				conflict.Action = "allow_once"
+			}
+			if e = client.Call(ctx, "pot_receiver_human_review_decide", conflict, &duplicate); e == nil {
+				t.Fatal("conflicting decision accepted")
 			}
 			if len(a.Permissions.grants) != 0 || len(a.Permissions.state.Rules) != 0 {
 				t.Fatal("reverse once expanded permissions")

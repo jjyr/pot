@@ -45,7 +45,7 @@ func (a *MCPAccess) nodeExecutionTools() {
 	})
 }
 func (a *MCPAccess) admitNodeExecution(ctx context.Context, receiver agentlink.MCPReceiver, in agentlink.MCPNodeExecutionAdmission) error {
-	if !core.Identifier(in.ExecutionID) || in.Binding.Validate() != nil || in.Binding.Task.NodeID != receiver.NodeID() {
+	if receiver.NodeID() == a.options.Queue.NodeID || !core.Identifier(in.ExecutionID) || in.Binding.Validate() != nil || in.Binding.Task.NodeID != receiver.NodeID() {
 		return agentlink.ErrUnauthorized
 	}
 	return storage.Transaction(ctx, a.options.Queue.DB, func(tx *sql.Tx) error {
@@ -143,7 +143,7 @@ func (a *MCPAccess) registeredAssistant(ctx context.Context, r *mcp.CallToolRequ
 	if e != nil {
 		return agentlink.MCPCaller{}, e
 	}
-	if !actor.Valid() || actor.Kind != "assistant" || actor.NodeID != receiver.NodeID() {
+	if receiver.NodeID() == a.options.Queue.NodeID || !actor.Valid() || actor.Kind != "assistant" || actor.NodeID != receiver.NodeID() {
 		return agentlink.MCPCaller{}, agentlink.ErrUnauthorized
 	}
 	var registration string

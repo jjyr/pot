@@ -129,6 +129,9 @@ func (s *MCPOAuthServer) client(ctx context.Context, id string) (client mcpOAuth
 	err = s.options.DB.QueryRowContext(ctx, "SELECT metadata FROM mcp_oauth_clients WHERE id=?", id).Scan(&raw)
 	if err == nil {
 		err = mcpRead(raw, &client)
+		if err == nil && client.ReceiverNode == s.options.NodeID {
+			err = agentlink.ErrUnauthorized
+		}
 	}
 	return
 }
@@ -199,6 +202,10 @@ func (s *MCPOAuthServer) register(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	client.TokenEndpointAuthMethod = "none"
+	if client.ReceiverNode == s.options.NodeID {
+		mcpOAuthError(w, 400, "invalid_client_metadata")
+		return
+	}
 	client.GrantTypes = []string{"authorization_code"}
 	client.ResponseTypes = []string{"code"}
 	id := rand.Text()
@@ -310,6 +317,9 @@ func (s *MCPOAuthServer) consent(w http.ResponseWriter, r *http.Request) {
 		if e = mcpRead(raw, &client); e != nil {
 			return e
 		}
+		if client.ReceiverNode == s.options.NodeID {
+			return agentlink.ErrUnauthorized
+		}
 		connection := ""
 		// Reauthorization of this public client rotates credentials while keeping
 		// its logical caller and accepted receipts. A revoked connection is never
@@ -382,7 +392,7 @@ func (s *MCPOAuthServer) token(w http.ResponseWriter, r *http.Request) {
 		var expires int64
 		var consumed, revoked int
 		e := tx.QueryRowContext(r.Context(), `SELECT c.connection_id,c.client_id,c.redirect_uri,c.resource,c.challenge,c.expires_at,c.consumed,n.revoked_at,n.receiver_node FROM mcp_oauth_codes c JOIN mcp_oauth_connections n ON n.id=c.connection_id WHERE c.digest=?`, mcpCredentialDigest(v.Get("code"))).Scan(&id, &client, &redirect, &resource, &saved, &expires, &consumed, &revoked, &node)
-		if e != nil || consumed != 0 || revoked != 0 || expires <= time.Now().Unix() || client != v.Get("client_id") || redirect != v.Get("redirect_uri") || resource != v.Get("resource") || resource != s.resource || saved != challenge {
+		if e != nil || consumed != 0 || revoked != 0 || node == s.options.NodeID || expires <= time.Now().Unix() || client != v.Get("client_id") || redirect != v.Get("redirect_uri") || resource != v.Get("resource") || resource != s.resource || saved != challenge {
 			return agentlink.ErrUnauthorized
 		}
 		if _, e = tx.ExecContext(r.Context(), "UPDATE mcp_oauth_codes SET consumed=1 WHERE digest=?", mcpCredentialDigest(v.Get("code"))); e != nil {
@@ -410,7 +420,7 @@ func (s *MCPOAuthServer) Verify(ctx context.Context, token string, _ *http.Reque
 	var connection, resource, actorRaw, node string
 	var expires, revoked int64
 	e := s.options.DB.QueryRowContext(ctx, `SELECT t.connection_id,t.resource,t.expires_at,c.revoked_at,c.actor,c.receiver_node FROM mcp_oauth_tokens t JOIN mcp_oauth_connections c ON c.id=t.connection_id WHERE t.digest=?`, mcpCredentialDigest(token)).Scan(&connection, &resource, &expires, &revoked, &actorRaw, &node)
-	if e != nil || resource != s.resource || revoked != 0 || expires <= time.Now().Unix() {
+	if e != nil || resource != s.resource || revoked != 0 || node == s.options.NodeID || expires <= time.Now().Unix() {
 		return nil, mcp.ErrInvalidToken
 	}
 	var actor protocol.AgentRef
@@ -502,8 +512,9 @@ func (s *MCPOAuthServer) connections(w http.ResponseWriter, r *http.Request) {
 
 func (s *MCPOAuthServer) CheckConnection(ctx context.Context, id string) error {
 	var revoked int64
-	err := s.options.DB.QueryRowContext(ctx, "SELECT revoked_at FROM mcp_oauth_connections WHERE id=?", id).Scan(&revoked)
-	if errors.Is(err, sql.ErrNoRows) || revoked != 0 {
+	var node string
+	err := s.options.DB.QueryRowContext(ctx, "SELECT revoked_at,receiver_node FROM mcp_oauth_connections WHERE id=?", id).Scan(&revoked, &node)
+	if errors.Is(err, sql.ErrNoRows) || revoked != 0 || node == s.options.NodeID {
 		return agentlink.ErrUnauthorized
 	}
 	if err != nil {

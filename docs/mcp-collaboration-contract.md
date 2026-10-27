@@ -46,6 +46,10 @@ arguments from model tool input or treat an SDK session lookup as authentication
 | `NewMCPReceiver` | Independently authorized receiver participation for a node |
 
 A node cannot assert user/runtime/owner identities or another node's actors.
+An external receiver cannot declare the listening Pot's own node ID. Registration,
+consent, token exchange and each authenticated request reject that namespace,
+including previously saved invalid grants; local execution uses its owning
+Control's existing trusted invocation path.
 Task actors require an execution binding. Assistant actors may use existing node
 trust for peer correspondence; calls from a supervised execution must additionally
 bind the actual active Task/run. The boundary checks liveness again at dispatch.

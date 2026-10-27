@@ -67,7 +67,7 @@ func (b *backend) submitTaskTx(ctx context.Context, tx *sql.Tx, r agentlink.Task
 		return err
 	}
 	var count, total int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(json_extract(data,'$.task.state') NOT IN ('completed','failed','cancelled')),0) FROM agent_adapter_jobs`).Scan(&total, &count); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(json_extract(data,'$.task.state') NOT IN ('completed','failed','cancelled')),0) FROM agent_adapter_jobs WHERE id NOT IN (SELECT id FROM retired_agent_link_work WHERE kind='job')`).Scan(&total, &count); err != nil {
 		return err
 	}
 	if count >= 32 || total >= 256 {

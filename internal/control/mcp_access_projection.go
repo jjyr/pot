@@ -18,6 +18,13 @@ func (q *MCPAccessQueue) acceptCatalogue(ctx context.Context, tx *sql.Tx, c agen
 	return q.Tasks.AcceptExecutionTx(ctx, tx, tasks.Record{NodeID: q.NodeID, AssistantID: c.Actor().AgentID, Request: protocol.CreateTask{RequestID: request.RequestID, Text: request.Text, Target: &target}, Info: protocol.TaskInfo{ID: task.ID, AssistantID: c.Actor().AgentID, Address: &address, Title: string(title), Phase: protocol.TaskQueued, CreatedAtMS: task.CreatedAt.UnixMilli(), UpdatedAtMS: task.UpdatedAt.UnixMilli(), AgentLink: &protocol.AgentLinkOrigin{LinkID: c.ConnectionID(), NodeID: target.NodeID, AssistantID: target.AgentID, Kind: target.Kind, Name: task.Receiver.Name}}, Execution: &tasks.Execution{Request: request, Receipt: task}})
 }
 func (q *MCPAccessQueue) projectCatalogue(ctx context.Context, tx *sql.Tx, task agentlink.Task, binding agentlink.MCPRunBinding, expected string, result *protocol.TaskResultEvent) error {
+	var message bool
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM mcp_service_deliveries WHERE task_id=? AND work!='' AND json_type(work,'$.message')='object')", task.ID).Scan(&message); err != nil {
+		return err
+	}
+	if message {
+		return nil
+	}
 	var actorRaw string
 	if err := tx.QueryRowContext(ctx, "SELECT actor FROM mcp_service_tasks WHERE id=?", task.ID).Scan(&actorRaw); err != nil {
 		return err

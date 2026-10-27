@@ -74,7 +74,7 @@ func TestMCPReverseHumanReviewIsConditionalAndReceiverOnly(t *testing.T) {
 		t.Fatal("review provenance changed", state)
 	}
 	p := state.Pending[0]
-	decision := agentlink.MCPHumanReviewDecision{Caller: p.Caller, RequestID: p.RequestID, TaskID: p.TaskID, ExecutionTask: p.ExecutionTask, RunID: p.RunID, Generation: p.Generation, Epoch: p.Epoch, ApprovalID: p.Approval.ID, User: protocol.AgentRef{NodeID: g.identity.NodeID(), Kind: "user", AgentID: "original-human"}, Action: "allow_once"}
+	decision := agentlink.MCPHumanReviewDecision{Caller: p.Caller, RequestID: p.RequestID, TaskID: p.TaskID, ExecutionTask: p.ExecutionTask, RunID: p.RunID, Generation: p.Generation, Epoch: p.Epoch, ApprovalID: p.Approval.ID, User: protocol.AgentRef{NodeID: g.identity.NodeID(), Kind: "user", AgentID: linkChatID(g.identity.ConnectionID(), "operator")}, Action: "allow_once"}
 	wrong := decision
 	wrong.Caller = g.binding.Task
 	fixtureCallError(t, g.receiver, "pot_receiver_human_review_decide", wrong, agentlink.MCPUnauthorized)

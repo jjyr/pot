@@ -103,6 +103,25 @@ Both paths share the existing permission request; neither creates a second
 approval ledger. Ordinary MCP/model tools expose no human decision operation.
 User-kind callers remain separate from node assistant/Task actors.
 
+For a direct user Task executed on the listening Pot, the initiating Control
+uses receiver-only `pot_receiver_user_task_submit` with `MCPHumanTaskSubmit`.
+It derives the source human from the persisted original execution request,
+separately from the listening Pot's provisioned OAuth user caller. The source
+human is stored with that caller, logical connection and original request in the
+same transaction as submission intent. Exact retries retain it; conflicting
+human or submission data cannot overwrite it. Human decisions compare this exact
+source identity. Assistant delegations retain the owning Control's stable
+operator identity and existing authenticated `ManageApproval` entry point.
+The receiver credential attests this trusted Control boundary; a supplied user
+field alone is not proof of a human action. Models and ordinary OAuth clients
+cannot use these receiver tools.
+
+Tasks migration 0011 adds this provenance association without inferring it for
+existing work. A submission missing its original association cannot acquire it
+through a later retry or review. Its saved history and pending work remain;
+operators must resolve that work explicitly rather than guessing a human or
+replaying it as a new request.
+
 Only **allow once** and **deny** apply to these requests. A remote decision cannot
 create a Task grant, command rule or permanent permission. Completed, cancelled,
 restarted, revoked, stale-run or mismatched requests are fenced. A lost transport

@@ -294,13 +294,13 @@ func (b *backend) submitMessageTx(ctx context.Context, tx *sql.Tx, r agentlink.T
 		return err
 	}
 	var count int
-	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM agent_adapter_jobs WHERE json_extract(data,'$.task.state') IN ('queued','running','cancelling','waiting_approval')`).Scan(&count); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM agent_adapter_jobs WHERE id NOT IN (SELECT id FROM retired_agent_link_work WHERE kind='job') AND json_extract(data,'$.task.state') IN ('queued','running','cancelling','waiting_approval')`).Scan(&count); err != nil {
 		return err
 	}
 	if count >= 32 {
 		return agentlink.ErrCapacity
 	}
-	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM agent_adapter_jobs").Scan(&count); err != nil {
+	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM agent_adapter_jobs WHERE id NOT IN (SELECT id FROM retired_agent_link_work WHERE kind='job')").Scan(&count); err != nil {
 		return err
 	}
 	if count >= 256 {

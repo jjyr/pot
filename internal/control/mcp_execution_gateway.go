@@ -22,7 +22,7 @@ type mcpExecutionAuthority struct {
 // session can substitute for this lookup. The receiver has independently fenced
 // its real active native job immediately before forwarding these typed calls.
 func (a *MCPAccess) executionCaller(ctx context.Context, receiver agentlink.MCPReceiver, in agentlink.MCPExecutionContext) (caller agentlink.MCPCaller, parent *protocol.Envelope, err error) {
-	if in.Validate() != nil {
+	if receiver.NodeID() == a.options.Queue.NodeID || in.Validate() != nil {
 		return caller, nil, agentlink.ErrUnauthorized
 	}
 	if in.NodeExecutionID != "" {

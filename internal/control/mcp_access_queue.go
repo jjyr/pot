@@ -43,6 +43,9 @@ func mcpMissing(err error) error {
 // The authenticated, consented node owns driver capability truth; the policy
 // permits only its supported subset and never owner operations.
 func (q *MCPAccessQueue) Register(ctx context.Context, receiver agentlink.MCPReceiver, registration agentlink.MCPReceiverRegistration, actual agentlink.Description) error {
+	if receiver.NodeID() == q.NodeID {
+		return agentlink.ErrUnauthorized
+	}
 	if q.CheckConnection != nil {
 		if e := q.CheckConnection(ctx, receiver.ConnectionID()); e != nil {
 			return e
@@ -181,6 +184,9 @@ func (q *MCPAccessQueue) Submit(ctx context.Context, c agentlink.MCPCaller, in a
 	err = storage.Transaction(ctx, q.DB, func(tx *sql.Tx) error {
 		prior, found, e := mutationRetry(ctx, tx, c, agentlink.TaskSubmit, in.RequestID, digest)
 		if e != nil {
+			return e
+		}
+		if e = bindMCPOriginalHumanTx(ctx, tx, c, in.RequestID, found); e != nil {
 			return e
 		}
 		if found {
@@ -509,8 +515,14 @@ func (q *MCPAccessQueue) Ack(ctx context.Context, r agentlink.MCPReceiver, ack a
 			if e = mcpRead(taskRaw, &task); e != nil {
 				return e
 			}
-			if e = q.Tasks.RejectExecutionTx(ctx, tx, actor.AgentID, task.ID, string(ack.Error.Code)); e != nil {
+			var work agentlink.MCPWorkDelivery
+			if e = mcpRead(d.work, &work); e != nil {
 				return e
+			}
+			if work.Message == nil {
+				if e = q.Tasks.RejectExecutionTx(ctx, tx, actor.AgentID, task.ID, string(ack.Error.Code)); e != nil {
+					return e
+				}
 			}
 			task.State = string(protocol.TaskFailed)
 			task.Error = string(ack.Error.Code)

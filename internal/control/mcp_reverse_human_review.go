@@ -17,6 +17,24 @@ func (a *MCPAccess) reverseHumanReviewTools() {
 	if backend == nil {
 		return
 	}
+	a.tool("pot_receiver_user_task_submit", mcpContractSchema(agentlink.MCPHumanTaskSubmit{}), func(ctx context.Context, r *mcp.CallToolRequest, raw json.RawMessage) (any, error) {
+		var in agentlink.MCPHumanTaskSubmit
+		if agentlink.DecodeMCPContract(raw, &in) != nil || in.Input.Validate() != nil {
+			return nil, agentlink.ErrInvalid
+		}
+		receiver, e := mcpReceiver(r)
+		if e != nil {
+			return nil, e
+		}
+		if !in.User.Valid() || in.User.Kind != "user" || in.User.NodeID != receiver.NodeID() {
+			return nil, agentlink.ErrUnauthorized
+		}
+		caller, e := mcpCaller(r)
+		if e != nil {
+			return nil, e
+		}
+		return a.submit(context.WithValue(ctx, mcpOriginalHumanKey{}, in.User), caller, in.Input)
+	})
 	a.tool("pot_receiver_human_review_read", mcpContractSchema(agentlink.MCPHumanReviewRead{}), func(ctx context.Context, r *mcp.CallToolRequest, raw json.RawMessage) (any, error) {
 		var in agentlink.MCPHumanReviewRead
 		if agentlink.DecodeMCPContract(raw, &in) != nil {

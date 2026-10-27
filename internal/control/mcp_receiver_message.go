@@ -11,8 +11,9 @@ import (
 	"time"
 )
 
-// Correspondence uses the same Work/claim/admission/event path and the existing
-// native message backend. The Mailbox envelope remains the causal authority.
+// Correspondence uses the receiver delivery journal and the existing message
+// backend. The Mailbox envelope remains the causal authority; delivery alone
+// creates no business Task in the origin catalogue.
 func (q *MCPAccessQueue) enqueueMessageTx(ctx context.Context, tx *sql.Tx, c agentlink.MCPCaller, input MCPAccessMessageInput, message protocol.Envelope, digest string) error {
 	var connection, raw string
 	if e := tx.QueryRowContext(ctx, "SELECT connection_id,registration FROM mcp_receiver_endpoints WHERE address=?", mcpJSON(message.To)).Scan(&connection, &raw); e != nil {
@@ -31,9 +32,6 @@ func (q *MCPAccessQueue) enqueueMessageTx(ctx context.Context, tx *sql.Tx, c age
 	task := agentlink.Task{ID: id, RequestID: input.RequestID, Receiver: registration.Receiver, State: "queued", CreatedAt: now, UpdatedAt: now}
 	work := agentlink.MCPWorkDelivery{Version: agentlink.MCPContractVersion, DeliveryID: rand.Text(), Binding: agentlink.MCPDispatchBinding{Task: protocol.AgentRef{NodeID: q.NodeID, Kind: "task", AgentID: id}, Receiver: message.To}, Request: request, Message: &message}
 	if e := work.Validate(); e != nil {
-		return e
-	}
-	if e := q.acceptCatalogue(ctx, tx, c, request, task); e != nil {
 		return e
 	}
 	if _, e := tx.ExecContext(ctx, `INSERT INTO mcp_service_tasks(id,connection_id,actor,request_id,digest,submission,task) VALUES(?,?,?,?,?,?,?)`, id, c.ConnectionID(), mcpJSON(c.Actor()), input.RequestID, digest, mcpJSON(input), mcpJSON(task)); e != nil {

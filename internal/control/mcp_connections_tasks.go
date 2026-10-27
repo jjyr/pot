@@ -118,7 +118,14 @@ func (s *Service) potMCPTaskSubmit(ctx context.Context, id string, r agentlink.T
 		return agentlink.Task{}, agentlink.ErrUnauthorized
 	}
 	if r.From.Kind == "user" {
-		e := s.potMCPCall(ctx, id, "pot_task_submit", agentlink.MCPSubmitInput{RequestID: r.RequestID, Target: r.Target, Text: r.Text}, &accepted)
+		var persisted bool
+		if e := s.Tasks.DB().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM tasks WHERE json_extract(body,'$.info.agent_link.link_id')=? AND json_extract(body,'$.execution.request')=?)", id, mcpJSON(r)).Scan(&persisted); e != nil {
+			return agentlink.Task{}, e
+		}
+		if !persisted {
+			return agentlink.Task{}, agentlink.ErrUnauthorized
+		}
+		e := s.potMCPCall(ctx, id, "pot_receiver_user_task_submit", agentlink.MCPHumanTaskSubmit{User: r.From, Input: agentlink.MCPSubmitInput{RequestID: r.RequestID, Target: r.Target, Text: r.Text}}, &accepted)
 		return accepted.Task, e
 	}
 	e := s.potMCPCall(ctx, id, "pot_receiver_node_submit", agentlink.MCPNodeSubmit{Actor: r.From, Input: agentlink.MCPSubmitInput{RequestID: r.RequestID, Target: r.Target, Text: r.Text}}, &accepted)
@@ -131,7 +138,12 @@ func (s *Service) potMCPTaskRead(ctx context.Context, id string, r agentlink.Tas
 		if e != nil {
 			return remote, e
 		}
-		return a.options.Queue.Task(ctx, caller, task)
+		dispatch, e := localMCPDispatchTask(ctx, a.options.Queue, caller, r, task)
+		if e != nil {
+			return remote, e
+		}
+		remote, e = a.options.Queue.Task(ctx, caller, dispatch)
+		return localMCPExecutionReceipt(ctx, a.options.Queue, remote, e)
 	}
 	if r.From.Kind == "user" {
 		e := s.potMCPCall(ctx, id, "pot_task_read", map[string]string{"task_id": task}, &remote)
@@ -149,9 +161,13 @@ func (s *Service) potMCPTaskCancel(ctx context.Context, id string, r agentlink.T
 		if e != nil {
 			return agentlink.Task{}, e
 		}
-		request, _ := core.HashJSON([]string{"pot-mcp-cancel", id, task, run})
-		accepted, e := a.options.Queue.Control(ctx, caller, nil, &agentlink.MCPCancelInput{RequestID: request, TaskID: task, RunID: run})
-		return accepted.Task, e
+		dispatch, e := localMCPDispatchTask(ctx, a.options.Queue, caller, r, task)
+		if e != nil {
+			return agentlink.Task{}, e
+		}
+		request, _ := core.HashJSON([]string{"pot-mcp-cancel", id, dispatch, run})
+		accepted, e := a.options.Queue.Control(ctx, caller, nil, &agentlink.MCPCancelInput{RequestID: request, TaskID: dispatch, RunID: run})
+		return localMCPExecutionReceipt(ctx, a.options.Queue, accepted.Task, e)
 	}
 	request, _ := core.HashJSON([]string{"pot-mcp-cancel", id, task, run})
 	var accepted MCPTaskAcceptance
@@ -169,8 +185,12 @@ func (s *Service) potMCPTaskInput(ctx context.Context, d *tasks.Record, input pr
 		if e != nil {
 			return agentlink.Task{}, e
 		}
-		accepted, e := a.options.Queue.Control(ctx, caller, &agentlink.MCPTaskInput{RequestID: input.RequestID, TaskID: d.Execution.Receipt.ID, RunID: d.Execution.Receipt.RunID, Text: input.Text}, nil)
-		return accepted.Task, e
+		dispatch, e := localMCPDispatchTask(ctx, a.options.Queue, caller, d.Execution.Request, d.Execution.Receipt.ID)
+		if e != nil {
+			return agentlink.Task{}, e
+		}
+		accepted, e := a.options.Queue.Control(ctx, caller, &agentlink.MCPTaskInput{RequestID: input.RequestID, TaskID: dispatch, RunID: d.Execution.Receipt.RunID, Text: input.Text}, nil)
+		return localMCPExecutionReceipt(ctx, a.options.Queue, accepted.Task, e)
 	}
 	if d.Execution.Request.From.Kind == "user" {
 		e := s.potMCPCall(ctx, d.Info.AgentLink.LinkID, "pot_task_input", agentlink.MCPTaskInput{TaskID: d.Execution.Receipt.ID, RunID: d.Execution.Receipt.RunID, RequestID: input.RequestID, Text: input.Text}, &accepted)
@@ -178,6 +198,42 @@ func (s *Service) potMCPTaskInput(ctx context.Context, d *tasks.Record, input pr
 	}
 	e := s.potMCPCall(ctx, d.Info.AgentLink.LinkID, "pot_receiver_node_task_input", agentlink.MCPNodeInput{Actor: d.Execution.Request.From, Input: agentlink.MCPTaskInput{TaskID: d.Execution.Receipt.ID, RunID: d.Execution.Receipt.RunID, RequestID: input.RequestID, Text: input.Text}}, &accepted)
 	return accepted.Task, e
+}
+
+// The origin catalogue retains the real execution Task in its receipt. Queue
+// operations address the dispatch Task instead; resolve that association under
+// the immutable caller and original submission, never by an unowned Task ID.
+func localMCPDispatchTask(ctx context.Context, q *MCPAccessQueue, caller agentlink.MCPCaller, request agentlink.TaskRequest, task string) (string, error) {
+	var dispatch, raw string
+	if e := q.DB.QueryRowContext(ctx, "SELECT id,execution FROM mcp_service_tasks WHERE connection_id=? AND actor=? AND request_id=?", caller.ConnectionID(), mcpJSON(caller.Actor()), request.RequestID).Scan(&dispatch, &raw); e != nil {
+		return "", mcpMissing(e)
+	}
+	if task == dispatch {
+		return dispatch, nil
+	}
+	var binding agentlink.MCPRunBinding
+	if raw == "" || mcpRead(raw, &binding) != nil || binding.Validate() != nil || binding.Task.AgentID != task {
+		return "", agentlink.ErrUnauthorized
+	}
+	return dispatch, nil
+}
+
+func localMCPExecutionReceipt(ctx context.Context, q *MCPAccessQueue, task agentlink.Task, err error) (agentlink.Task, error) {
+	if err != nil {
+		return task, err
+	}
+	var raw string
+	if e := q.DB.QueryRowContext(ctx, "SELECT execution FROM mcp_service_tasks WHERE id=?", task.ID).Scan(&raw); e != nil {
+		return task, e
+	}
+	if raw != "" {
+		var binding agentlink.MCPRunBinding
+		if mcpRead(raw, &binding) != nil || binding.Validate() != nil {
+			return task, agentlink.ErrFenced
+		}
+		task.ID = binding.Task.AgentID
+	}
+	return task, nil
 }
 func projectPotMCPTaskReceipt(record *tasks.Record, remote agentlink.Task) {
 	projectTaskReceipt(record, remote)
