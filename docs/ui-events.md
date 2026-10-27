@@ -320,6 +320,9 @@ canvas space. Returned pages commit under the captured session and conversation
 before entering the same preparation pipeline. A superseded around request may
 fill the cache, but cannot replace the reader's current window or restore an old
 position after input. Cached output never confirms command or session authority.
+Successive reader intentions for the same missing target consume the shared
+historical network read independently; an older ticket cannot suppress a later
+explicit navigation to that target.
 An incomplete committed cache window reports a storage failure instead of
 presenting an empty conversation.
 All Chat entry paths share a scoped positioning intent: restore the saved reading

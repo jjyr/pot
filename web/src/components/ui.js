@@ -252,7 +252,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function readHistory(query,options={}){
     if(options.positionTicket&&!currentChatPosition(options.positionTicket))return Promise.resolve(false);
     if(!chatSession?.hasHistory||!state.snapshot)return Promise.resolve(false);
-    const requests=historyRequests,key=JSON.stringify([query,!!options.around]);
+    // Coalesce work only for the same reader intention. A later click on the
+    // same missing target must not inherit the first click's retired ticket;
+    // the domain independently shares the underlying historical HTTP request.
+    const ticket=options.positionTicket;
+    const requests=historyRequests,key=JSON.stringify([query,!!options.around,ticket?[ticket.epoch,ticket.generation]:null]);
     if(requests.has(key))return requests.get(key).promise;
     const request={remote:false};requests.set(key,request);
     request.promise=readHistoryNow(query,options,request).finally(()=>{
