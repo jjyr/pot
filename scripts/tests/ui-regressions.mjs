@@ -56,7 +56,7 @@ else {
           try{const running=fixture(page,server.origin,'chat-switching.html?conversation=alpha&locale=en&contract=navigation&trusted-parent-close=1','ALL CHECKS PASSED');
           await page.waitForFunction(()=>window.chatSwitchingParentClose?.ready||/FAIL|ERROR/.test(document.querySelector('#results')?.textContent||''));
           if(await page.evaluate(()=>!!window.chatSwitchingParentClose?.ready)){
-            await page.locator('.history:not([data-preparation-surface]) article[data-message-id="parent-tool"] details.tool-call > summary').click();
+            await page.locator('.history[role="log"]:not([data-preparation-surface]) article[data-message-id="parent-tool"] details.tool-call > summary').click();
             await page.evaluate(()=>chatSwitchingParentClose.resume());
           }
           const state=await running;
@@ -78,7 +78,7 @@ else {
           await page.waitForFunction(()=>document.querySelector('.assistant-profile-trigger')?.getAttribute('aria-expanded')==='false');
           if(await trigger.getAttribute('aria-expanded')!=='false'||await composer.inputValue()!==draft)throw Error('Assistant menu dismissal lost its accessible state or draft');
           return {...state,shell,menuKeyboardAndOutsideDismissal:true,menuLocaleAndTarget:true,referenceNavigation:await page.evaluate(()=>window.chatSwitchingReferenceEvidence),parentClose:await page.evaluate(()=>window.chatSwitchingParentCloseEvidence)};
-          }catch(error){await page.evaluate(()=>{const h=document.querySelector('.history:not([data-preparation-surface])');window.switchingFailure={probe:window.shellInputProbe,referenceNavigation:window.chatSwitchingReferenceEvidence,history:h&&{top:h.scrollTop,extent:h.scrollHeight,height:h.clientHeight,busy:h.getAttribute('aria-busy'),visibility:getComputedStyle(h).visibility,latestHidden:document.querySelector('.latest-button')?.hidden}};});throw error;}
+          }catch(error){await page.evaluate(()=>{const h=document.querySelector('.history[role="log"]:not([data-preparation-surface])');window.switchingFailure={probe:window.shellInputProbe,referenceNavigation:window.chatSwitchingReferenceEvidence,history:h&&{top:h.scrollTop,extent:h.scrollHeight,height:h.clientHeight,busy:h.getAttribute('aria-busy'),visibility:getComputedStyle(h).visibility,latestHidden:document.querySelector('.latest-button')?.hidden}};});throw error;}
           finally{await page.evaluate(()=>window.chatSwitchingDispose?.());}
         }
         // The CLI expression derives its origin without loading the application.
@@ -91,26 +91,26 @@ else {
 
 // Representative fixture configurations, not full locale/theme/viewport products.
 async function shellRetention(page){
-  const history=page.locator('.history:not([data-preparation-surface])'),composer=page.locator('#pot-composer'),search=page.getByRole('searchbox',{name:'Search assistants',exact:true}),list=page.locator('.assistant-list');
-  await page.waitForFunction(()=>{const h=document.querySelector('.history:not([data-preparation-surface])');if(!h||h.hasAttribute('aria-busy')||getComputedStyle(h).visibility!=='visible'||h.querySelector('.message-window[aria-busy]'))return false;const viewport=h.getBoundingClientRect();return [...h.querySelectorAll('article.message')].some(row=>{const box=row.getBoundingClientRect();return Math.min(box.bottom,viewport.bottom)-Math.max(box.top,viewport.top)>=24;});});
+  const history=page.locator('.history[role="log"]:not([data-preparation-surface])'),composer=page.locator('#pot-composer'),search=page.getByRole('searchbox',{name:'Search assistants',exact:true}),list=page.locator('.assistant-list');
+  await page.waitForFunction(()=>{const h=document.querySelector('.history[role="log"]:not([data-preparation-surface])');if(!h||h.hasAttribute('aria-busy')||getComputedStyle(h).visibility!=='visible'||h.querySelector('.message-window[aria-busy]'))return false;const viewport=h.getBoundingClientRect();return [...h.querySelectorAll('article.message')].some(row=>{const box=row.getBoundingClientRect();return Math.min(box.bottom,viewport.bottom)-Math.max(box.top,viewport.top)>=24;});});
   if(await page.locator('.latest-button').isVisible())await page.locator('.latest-button').click();
-  await page.waitForFunction(()=>{const h=document.querySelector('.history:not([data-preparation-surface])');return getComputedStyle(h).visibility==='visible'&&!h.hasAttribute('aria-busy')&&!h.querySelector('.message-window[aria-busy]')&&h.scrollHeight-h.clientHeight-h.scrollTop<=1;});
+  await page.waitForFunction(()=>{const h=document.querySelector('.history[role="log"]:not([data-preparation-surface])');return getComputedStyle(h).visibility==='visible'&&!h.hasAttribute('aria-busy')&&!h.querySelector('.message-window[aria-busy]')&&h.scrollHeight-h.clientHeight-h.scrollTop<=1;});
   const before=await history.evaluate(node=>node.scrollTop),historyBox=await history.boundingBox();
-  await page.evaluate(({before,box})=>{const h=document.querySelector('.history:not([data-preparation-surface])'),hit=document.elementFromPoint(box.x+box.width-12,box.y+box.height/2);window.shellInputProbe={before,box,hit:hit?.outerHTML.slice(0,500),events:[]};for(const type of ['wheel','scroll'])h.addEventListener(type,event=>shellInputProbe.events.push({type,trusted:event.isTrusted,top:h.scrollTop,delta:event.deltaY,latestHidden:document.querySelector('.latest-button')?.hidden}));},{before,box:historyBox});
+  await page.evaluate(({before,box})=>{const h=document.querySelector('.history[role="log"]:not([data-preparation-surface])'),hit=document.elementFromPoint(box.x+box.width-12,box.y+box.height/2);window.shellInputProbe={before,box,hit:hit?.outerHTML.slice(0,500),events:[]};for(const type of ['wheel','scroll'])h.addEventListener(type,event=>shellInputProbe.events.push({type,trusted:event.isTrusted,top:h.scrollTop,delta:event.deltaY,latestHidden:document.querySelector('.latest-button')?.hidden}));},{before,box:historyBox});
   // Exercise the conversation scroller's gutter. A centered wheel can belong
   // to a scrollable code/tool/fallback interior and correctly leave it still.
   await page.mouse.move(historyBox.x+historyBox.width-12,historyBox.y+historyBox.height/2);await page.mouse.wheel(0,-180);
-  await page.waitForFunction(top=>document.querySelector('.history:not([data-preparation-surface])').scrollTop<top&&!document.querySelector('.latest-button').hidden,before);
-  await page.evaluate(async()=>{let previous,stable=0;for(let i=0;i<90;i++){await new Promise(requestAnimationFrame);const h=document.querySelector('.history:not([data-preparation-surface])'),value=[h.scrollTop,h.scrollHeight].join(':');stable=value===previous?stable+1:0;previous=value;if(stable===3)return;}throw Error('Reading geometry did not settle before folding');});
-  const capture=()=>page.evaluate(()=>{const h=document.querySelector('.history:not([data-preparation-surface])'),top=h.getBoundingClientRect().top;const row=[...h.querySelectorAll('article.message')].find(node=>{const r=node.getBoundingClientRect();return r.height&&r.bottom>top&&r.top<top+h.clientHeight;});return {id:row?.dataset.messageId,offset:row?.getBoundingClientRect().top-top};});
+  await page.waitForFunction(top=>document.querySelector('.history[role="log"]:not([data-preparation-surface])').scrollTop<top&&!document.querySelector('.latest-button').hidden,before);
+  await page.evaluate(async()=>{let previous,stable=0;for(let i=0;i<90;i++){await new Promise(requestAnimationFrame);const h=document.querySelector('.history[role="log"]:not([data-preparation-surface])'),value=[h.scrollTop,h.scrollHeight].join(':');stable=value===previous?stable+1:0;previous=value;if(stable===3)return;}throw Error('Reading geometry did not settle before folding');});
+  const capture=()=>page.evaluate(()=>{const h=document.querySelector('.history[role="log"]:not([data-preparation-surface])'),top=h.getBoundingClientRect().top;const row=[...h.querySelectorAll('article.message')].find(node=>{const r=node.getBoundingClientRect();return r.height&&r.bottom>top&&r.top<top+h.clientHeight;});return {id:row?.dataset.messageId,offset:row?.getBoundingClientRect().top-top};});
   const anchor=await capture();if(!anchor.id)throw Error('Fold retention has no historical message identity');
   await search.fill('a');await list.hover();await page.mouse.wheel(0,180);await page.waitForFunction(()=>document.querySelector('.assistant-list').scrollTop>0);
   await page.evaluate(anchor=>{window.shellRetention={anchor,composer:document.querySelector('#pot-composer'),search:document.querySelector('.assistant-search'),list:document.querySelector('.assistant-list'),scroll:document.querySelector('.assistant-list').scrollTop};},anchor);
   const draft=await composer.inputValue(),reads=await page.evaluate(()=>chatSwitchingIO());
   let worstDrift=0;
   const retained=async(label,{scroll=true}={})=>{
-    await page.waitForFunction(saved=>{const h=document.querySelector('.history:not([data-preparation-surface])'),row=h.querySelector(`article.message[data-message-id="${saved.id}"]`);return row&&Math.abs(row.getBoundingClientRect().top-h.getBoundingClientRect().top-saved.offset)<=3;},anchor);
-    const state=await page.evaluate(()=>({composer:shellRetention.composer===document.querySelector('#pot-composer'),search:shellRetention.search===document.querySelector('.assistant-search'),list:shellRetention.list===document.querySelector('.assistant-list'),query:document.querySelector('.assistant-search').value,scroll:document.querySelector('.assistant-list').scrollTop,savedScroll:shellRetention.scroll,offset:document.querySelector(`article.message[data-message-id="${shellRetention.anchor.id}"]`).getBoundingClientRect().top-document.querySelector('.history:not([data-preparation-surface])').getBoundingClientRect().top}));
+    await page.waitForFunction(saved=>{const h=document.querySelector('.history[role="log"]:not([data-preparation-surface])'),row=h.querySelector(`article.message[data-message-id="${saved.id}"]`);return row&&Math.abs(row.getBoundingClientRect().top-h.getBoundingClientRect().top-saved.offset)<=3;},anchor);
+    const state=await page.evaluate(()=>({composer:shellRetention.composer===document.querySelector('#pot-composer'),search:shellRetention.search===document.querySelector('.assistant-search'),list:shellRetention.list===document.querySelector('.assistant-list'),query:document.querySelector('.assistant-search').value,scroll:document.querySelector('.assistant-list').scrollTop,savedScroll:shellRetention.scroll,offset:document.querySelector(`article.message[data-message-id="${shellRetention.anchor.id}"]`).getBoundingClientRect().top-document.querySelector('.history[role="log"]:not([data-preparation-surface])').getBoundingClientRect().top}));
     worstDrift=Math.max(worstDrift,Math.abs(state.offset-anchor.offset));
     if(!state.composer||!state.search||!state.list||state.query!=='a'||scroll&&state.scroll!==state.savedScroll||await composer.inputValue()!==draft)throw Error(label+': '+JSON.stringify({anchor,state}));
   };
@@ -167,10 +167,10 @@ async function focused(page,name,origin){
   }
   await page.goto(origin+'/scripts/tests/fixtures/linked-approvals.html?assistant_id=main&locale=zh-CN&theme=light');
   if(name==='patch-approvals')return contract('pot-ui-patch-approvals-browser.js',page,{origin});
-  const chatApprovals=page.locator('.history:not([data-preparation-surface]) .chat-approvals');
+  const chatApprovals=page.locator('.history[role="log"]:not([data-preparation-surface]) .chat-approvals');
   const expectedApproval={scope:JSON.stringify(['one','main']),id:'linked:fixture-request',command:'ssh deployment-host hostname'};
   const waitForOpenApproval=()=>page.waitForFunction(expected=>{
-    const history=document.querySelector('.history:not([data-preparation-surface])'),card=history?.querySelector('.chat-approvals .approval-card'),command=card?.querySelector('.approval-arguments');
+    const history=document.querySelector('.history[role="log"]:not([data-preparation-surface])'),card=history?.querySelector('.chat-approvals .approval-card'),command=card?.querySelector('.approval-arguments');
     if(document.querySelector('.assistant-row.is-selected')?.dataset.viewKey!==expected.scope||card?.dataset.approvalId!==expected.id||!card.open||command?.textContent!==expected.command||command.innerText!==expected.command)return false;
     const box=command.getBoundingClientRect(),viewport=history.getBoundingClientRect();
     return command.isConnected&&getComputedStyle(command).visibility==='visible'&&box.width>0&&Math.min(box.bottom,viewport.bottom)-Math.max(box.top,viewport.top)>=24;

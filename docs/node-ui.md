@@ -115,6 +115,14 @@ Other clients discover mutations through normal directory
 synchronization. The Link inspector reuses this form for creation and execution
 settings; names, avatars and deletion retain their existing profile/delete paths.
 
+Execution configuration can be saved while an assistant is running or has pending
+inbox messages. A native Codex or Antigravity execution captures its model and
+reasoning settings in its Session at launch; a saved change applies to the next
+execution that starts, including queued work that has not launched. Saving keeps
+the active Session, conversation, inbox order and queued jobs intact. Workspace
+and permission mode remain immutable for an existing native assistant. Deletion
+and uncertain-cleanup execution fences retain their independent safety checks.
+
 Browser language and appearance use `pot-ui-locale` and `pot-ui-theme` per origin.
 The browser service worker retains a complete, integrity-checked version of the
 embedded UI. See [Shared UI](shared-ui.md#browser-cold-start) for startup and

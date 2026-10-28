@@ -35,7 +35,8 @@ types. The plus control always stays visible. It is disabled when neither type i
 keyboard-focus explanation of the model limitation. If PDF alone is supported,
 the plus control remains enabled and the image menu item explains its disabled
 state. Capability changes retain incompatible
-draft attachments with an explanation and disable Send until they are removed.
+draft attachments with an explanation. Local Send can save them in the submitted
+message outbox; delivery waits for compatible current capabilities.
 Control repeats validation at upload, acceptance and model request construction.
 Active-turn guidance uses that turn's fixed execution configuration; pending
 configuration applies to the next fresh input. Historical files remain available
@@ -104,18 +105,22 @@ selection with an explanation; late chooser results are ignored. Closing the
 chooser also retires its intent. Selecting files creates visible cards and promptly queues original Blobs for
 local persistence. Upload eligibility is checked independently. Missing connection or upload permission
 retains the files with a waiting explanation. Restoring eligibility starts one
-upload attempt per waiting file; unsupported model types remain visible and block
-Send until removed or supported again. Upload failures expose an explicit retry;
+upload attempt per waiting file; unsupported model types remain visible. Explicit
+Send saves their originals with the message outbox, and background delivery
+requires compatible current capabilities. Upload failures expose an explicit retry;
 rendering progress does not erase selection-limit warnings.
 
 Uploads expose progress, cancellation/removal and retry with the same ID and
-confirmed offset. Removing a pending send's submitted original only changes the
-local draft; Control retains that immutable send snapshot. Its later confirmation
-clears only submitted IDs, preserving files selected afterwards. Reload reconstructs File objects and previews from the saved originals,
+confirmed offset. Explicit Send transfers local originals to the [message
+outbox](chat-outbox.md) before clearing the submitted cards; files selected
+afterwards remain in the draft. Removing a card during that save cannot alter
+the captured submission. Accepted originals leave local storage only after the
+acceptance projection commits; failed uploads retain the original for retry. Reload reconstructs File objects and previews from the saved originals,
 then validates ready uploads with their original IDs. A lost send receipt reconciles the same request identity.
 A confirmed provider rejection restores the latest attachment draft when it does
 not overwrite newer typing. Retrying unchanged input uses
 `POST /api/v1/turn/retry` to resume the original failed message and checkpoint;
 it creates neither another upload nor another user message. The retry receipt is
-idempotent. Unknown network/model outcomes retain the existing recovery fence
-and are never automatically replayed.
+idempotent. Unknown message acceptance reconciles its fixed request receipt before an
+identical retry. Unknown model outcomes retain the existing execution recovery
+fence and are never automatically replayed.

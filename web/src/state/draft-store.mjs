@@ -1,3 +1,4 @@
+import {enqueueOutbox} from './chat-outbox-store.mjs';
 import {createIndexedStore,idbRequest} from './indexed-store.mjs';
 
 export function assistantDraftKey(client,scope){
@@ -22,6 +23,7 @@ export function createDraftStore(options={}){
       if(record)tx.objectStore('composerDrafts').put({...record,key,schema_version:1});
       else tx.objectStore('composerDrafts').delete(key);
     }));},
+    enqueue(key,value,files){return serial(key,()=>store.transaction(['composerDrafts','composerFiles','chatOutbox','chatOutboxFiles'],'readwrite',tx=>enqueueOutbox(tx,key,value,files)));},
     remove(key){return this.write(key,null);},
     close(){Promise.allSettled([...tails.values()]).finally(()=>store.close());},
   };

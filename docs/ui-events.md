@@ -471,8 +471,10 @@ from the complete conversation catalogue/outbox, independently of UI windows.
 Returning to a visible window, restoring a page or regaining network connectivity
 also renews the conversation and change subscriptions and refreshes current
 projections. Paired focus/visibility events coalesce, and recovery reads do not
-overlap. Recovery retains drafts and in-flight send receipts without resending
-input; retired stream callbacks cannot overwrite the renewed subscription.
+overlap. Subscription recovery retains drafts and in-flight send receipts;
+retired stream callbacks cannot overwrite the renewed subscription. The separate
+[submitted-message outbox](chat-outbox.md) resumes explicit local submissions
+under their captured targets and durable request identities.
 
 The shared conversation state validates owner/Runtime/boot identity and rejects
 older cursors. Navigation generations fence late responses, including A → B → A.
@@ -489,7 +491,7 @@ message anchor unless the current explicit navigation replaces the window. When
 the complete conversation fits in the viewport,
 upward gestures leave it still, without history reads or a Latest action; new
 messages continue following. Only confirmation matching the captured request and
-owner clears a submitted attempt. A user message's `request_id` confirms an ordinary send; steer messages
+owner settles business acceptance. A user message's `request_id` confirms an ordinary send; steer messages
 carry independent `accepted_request_id` and `accepted_turn_id` fields, leaving
 `request_id`'s turn semantics unchanged. Reset/delta acceptance is checked before
 UI window filtering. It confirms persistence, not Agent consumption.
@@ -502,11 +504,12 @@ The response repeats that identity plus `runtime_id`, `owner_id` and `state`:
 means an absent steer targets a turn that no longer accepts guidance. Reads do
 not start or interrupt Agent work.
 
-The normal submit path waits only for its business response: success confirms
-immediately, and an explicit rejection retains the draft and reports the error.
-No receipt query runs while that POST is pending, including on foreground/online
-signals. A matching persisted SSE message may also confirm the same request
-without waiting for the POST; Agent execution completion is not required.
+Explicit Send first commits the outbox entry and local originals in the same
+transaction that transfers the submitted draft versions. Only transaction
+completion clears those matching composer versions; newer typing remains. A
+storage failure keeps the input. Delivery failure retains the submitted content
+in the outbox with its problem rather than restoring or replacing a newer draft.
+Business success confirms persistence without waiting for Agent execution.
 
 The production send adapter returns a valid acceptance response before local
 command projection saving completes. Its `committed` promise and `retryCommit`
@@ -516,6 +519,22 @@ after commit. A local save failure shows the existing accepted-action storage
 notice in the captured owner's Chat. Retry saves that response locally without
 another POST or receipt read; it cannot restore the submitted draft or erase a
 newer one. Other mutation commands retain their commit-before-return behavior.
+
+The outbox bounds each dispatch wait without treating timeout as network rollback.
+An expired or uncertain claim reconciles the saved receipt before an identical
+request-ID retry. A successor claim may overlap an earlier network request; local
+claim tokens fence late writers and the backend's durable content-bound request
+receipt prevents duplicate acceptance. See [Outbox delivery authority](chat-outbox.md#delivery-authority-and-retry-identity)
+for the immutable target, FIFO and retirement rules.
+
+### Legacy draft confirmation fences
+
+An earlier build may have saved a pending request in an ordinary draft. Its
+confirmation controller retains the following recovery contract independently
+of the outbox; migration does not convert that draft into a queued send.
+Success or a matching persisted SSE message confirms that original request.
+An explicit rejection retains the draft and reports the error. No receipt query
+runs while its POST is pending, including on foreground/online signals.
 
 A timeout, network failure or another inconclusive submit error makes the result
 unknown and enables receipt checks. Each HTTP wait is bounded to ten seconds.
@@ -535,6 +554,9 @@ renewals and navigation retain it in the mounted client; newer drafts, reference
 and attachments survive late or duplicate confirmation.
 [Assistant drafts](assistant-drafts.md) persist that immutable request fence across
 closing/reloading the app and restore it through read-only confirmation.
+
+### Execution activity projection
+
 Assistant messages bind to their input through `reply_to`; terminal failures retain
 their original diagnostic in the message's `error` field, including preparation
 failures before the first model event. Chat projects one independent execution

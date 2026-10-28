@@ -1,12 +1,14 @@
 import {translate} from '../../locales/messages.mjs';
 import {projectLinkedAssistants} from '../agent-links.mjs';
 import {machinePresentation} from '../machine-identity.mjs';
+import {createSettingsAccess} from '../settings-access.mjs';
 export function createDirectoryDomain(client,{resources,queries,commands}){
   let previous=[],previousGeneration;
+  const settingsAccess=createSettingsAccess(client);
   // A background directory read revokes command capabilities, but it is not an
   // execution-finished event. Retain activity only from this live connection's
   // prior projection. Cold/offline/reconnected caches cannot invent activity.
-  const retained=item=>({...item,executing:client.onlineReady!==false&&previousGeneration===client.connectionGeneration&&!!previous.find(old=>old.id===item.id&&old.space_id===item.space_id&&old.control_id===item.control_id&&!old.offline)?.executing,pending_approvals:0,capabilities:{version:1,operations:['chat.read']},retained:true});
+  const retained=item=>{settingsAccess.remember(item);return {...item,executing:client.onlineReady!==false&&previousGeneration===client.connectionGeneration&&!!previous.find(old=>old.id===item.id&&old.space_id===item.space_id&&old.control_id===item.control_id&&!old.offline)?.executing,pending_approvals:0,capabilities:{version:1,operations:['chat.read']},retained:true};};
   const local=(value,space,offline)=>{let items=value;if(typeof items==='string')items=JSON.parse(items);const fresh=!resources.state(value)||resources.state(value).freshness==='fresh';return (items?.items||items||[]).map(item=>({...(!fresh?retained({...item,space_id:space.id,control_id:space.control_id||space.id}):item),control_id:space.control_id||space.id,space_id:space.id,space_name:space.name,space_kind:space.kind,offline}));};
   const directory=queries.define('directory',async force=>{
     if(client.startup&&client.onlineReady!==false&&!client.operationsReady)force=true;

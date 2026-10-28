@@ -36,7 +36,7 @@ removes enough files; recovery never chooses which originals to discard.
 Restored originals become `File` objects and local preview URLs. Waiting and
 interrupted uploads resume only when the selected assistant has connection,
 transfer permission and a compatible model. Previously ready files validate
-through the same idempotent upload ID before Send becomes available; an expired
+through the same idempotent upload ID before network delivery; an expired
 unreferenced upload can be recreated from its local original. Failed uploads
 retain the original and expose an explicit retry with the same ID. Chooser
 intents retain their existing cancellation behavior: navigating away before a
@@ -52,30 +52,14 @@ local originals; unrelated assistants and databases are untouched.
 
 ## Submission and interrupted confirmation
 
-Before sending, Chat commits the immutable request ID, conversation/turn target,
-submitted text/reference versions and attachment IDs together with the current
-draft. A storage failure prevents that POST. This record is a confirmation fence,
-not an outbox: reopening Chat never automatically submits a message.
+Explicit Send uses the [submitted message outbox](chat-outbox.md). Its transaction
+transfers the submitted content and local originals before clearing matching
+editor versions. Reopening automatically delivers these explicit submissions;
+ordinary drafts remain unsent.
 
-Only confirmed business acceptance clears submitted content. New typing,
-reference edits and files added during submission survive the older response.
-Normal successful responses do not wait for Agent completion. Explicit rejection
-retains the draft, and an unknown result retains the fixed request identity.
-After reload, bounded, read-only receipt checks for that original request
-can resolve acceptance or rejection. An unresolved request continues to block
-another submission in that conversation.
-
-An interrupted save may have committed the request fence before any POST began.
-For a restored unresolved request, the explicit Check and retry action first
-checks the original receipt. Only an unconfirmed result resubmits the identical
-saved payload with its original request ID and scope. An accepted or rejected
-receipt resolves without another POST;
-a failed receipt check keeps the fence. Automatic recovery, including reload,
-focus and network recovery, remains read-only. New editor contents are never
-substituted into that retry.
-
-If acceptance cleanup cannot commit, the composer reports the unsaved state.
-The older disk record still carries its original request fence, so another
-reload reconciles that request rather than presenting its accepted text as a
-new send. Retry persists the latest editor contents and removes only originals
-that no longer belong to the current draft.
+Drafts saved by an earlier build may contain an immutable pending confirmation
+fence. Upgrade preserves these receipts independently of the outbox. They retain
+their read-only automatic checks and explicit Check and retry action for the
+original payload and request ID. An unresolved legacy fence blocks another
+submission in its conversation until its result is reconciled. Migration never
+converts ordinary draft text into an automatic send.

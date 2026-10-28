@@ -127,7 +127,9 @@ and clearing; see [Assistant drafts](assistant-drafts.md). The shared
 IndexedDB opener applies pending versions in the browser upgrade transaction;
 a failed upgrade rolls back its stores and converted values. Open clients close
 on `versionchange`, and a later open can retry an aborted upgrade. Existing
-databases upgrade in place without wiping unrelated browser state. The same
+databases upgrade in place without wiping unrelated browser state. `0007_chat_outbox.mjs` adds explicit submitted-message records and separate
+original-Blob records, preserving old drafts and confirmation receipts without
+automatically enqueuing them. See [Chat outbox](chat-outbox.md). The same
 schema serves the separate bounded Task transcript database. Retention, logout
 and failure behavior are described in
 [Shared UI](shared-ui.md#committed-local-projections).
@@ -227,8 +229,9 @@ registration/receipt protocol. This migration is new after the released Control
 Existing Control business tables and JSON records are unchanged. The native host
 uses its Control database; a standalone browser service keeps a Control database
 in its private service root. Lifecycle stream reconnection establishes a fresh
-access lifetime without storing business-source baselines or reading history. Browser interrupted sends become uncertain receipts, never an
-automatic resend. No retired Push store is imported.
+access lifetime without storing business-source baselines or reading history. Browser interrupted sends retain their request identity; explicit submitted
+messages reconcile durable receipts before an identical retry. Ordinary drafts
+never automatically send. No retired Push store is imported.
 
 The separate rebuildable notification installation database uses
 `ui-notifications/0001_installation.mjs`. It stores device identity/channel/intent,

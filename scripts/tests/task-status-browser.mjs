@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {mkdir} from 'node:fs/promises';
+import {waitForOutbox} from './outbox-persistence-browser.mjs';
 
 // Actual task rows/cache plus the production Chat capability guards, all using
 // synthetic records. No product API, model or persistent user data is accessed.
@@ -37,19 +38,33 @@ export async function taskStatusBrowser(browser,{sourceOrigin,output}={}){
   await page.evaluate(()=>{const f=taskCommunication,request=f.client.request.bind(f.client);f.attemptedWrites=[];f.client.request=(path,options={})=>{if(options.method&&options.method!=='GET')f.attemptedWrites.push(path);return request(path,options);};});
   for(const gate of [{operations:false},{online:false},{capability:false},{scopeReady:false}]){
    currentGate=gate;
+   await page.locator('#pot-composer').fill('Synthetic guarded draft '+JSON.stringify(gate));
    await page.evaluate(gate=>taskCommunication.gate(gate),gate);
-   await page.waitForFunction(()=>document.querySelector('.send-button')?.disabled&&document.querySelector('.background-task-elapsed')?.hasAttribute('data-finished-at'));
+   await page.waitForFunction(()=>!document.querySelector('.send-button')?.disabled&&document.querySelector('.background-task-elapsed')?.hasAttribute('data-finished-at'));
    assert.equal(await row.locator('.task-activity-dot').getAttribute('data-phase'),'waiting','temporary gate does not replace last task phase');
    assert.equal(await row.locator('.background-task-status').textContent(),'Waiting');
    const frozen=await row.locator('.background-task-elapsed').textContent();
-   await page.evaluate(async()=>{const send=document.querySelector('.send-button');send.disabled=false;send.click();send.disabled=true;for(let i=0;i<6;i++)await new Promise(requestAnimationFrame);});
-   // Real handler checks authority even if a caller tampers with disabled.
+   // A normal draft never becomes a submitted message without the click.
+   await waitForOutbox(page,value=>value[0].every(row=>row.state==='cancelled'));
+   // Send remains a local explicit submission while network authority is lost.
+   await send.click();
+   const committed=await waitForOutbox(page,gate.capability===false?value=>value[0].some(row=>(row.state==='queued'||row.state==='failed'&&row.problem==='permission')&&!row.started):value=>value[0].some(row=>row.state==='queued'&&!row.started));
+   const queued=committed.rows.find(row=>['queued','failed'].includes(row.state)&&!row.started);
+   if(gate.capability===false){if(queued.state==='failed')assert.equal(queued.problem,'permission','revoked capability retains the local submission without dispatch');}else assert.equal(queued.state,'queued','temporary unavailability retains a queued submission');
+   assert.equal(queued.request.text,'Synthetic guarded draft '+JSON.stringify(gate));
+   assert.equal(queued.target.owner,'pot');assert.equal(queued.target.space,'review-local');
+   assert.equal(queued.target.control,'review-local');assert.equal(queued.target.conversation,'main');
+   assert.equal(await page.locator('#pot-composer').inputValue(),'');
    assert.deepEqual(await page.evaluate(()=>taskCommunication.attemptedWrites),[]);
    assert.equal(await row.locator('.background-task-elapsed').textContent(),frozen);
+   // Retire this synthetic submission before restoring authority. The real
+   // store checks complete identity/revision and completes its transaction.
+   assert.equal(await page.evaluate(async queued=>{const {createChatOutboxStore}=await import('/state/chat-outbox-store.mjs');const store=createChatOutboxStore();try{return (await store.cancel(queued))?.state==='cancelled';}finally{store.close();}},queued),true);
+   await page.locator('#pot-composer').fill('Synthetic guarded draft');
    await page.evaluate(()=>taskCommunication.gate());
    await page.waitForFunction(()=>!document.querySelector('.send-button')?.disabled&&!document.querySelector('.background-task-elapsed')?.hasAttribute('data-finished-at'));
    assert.equal(await send.isEnabled(),true);
-   results.push({productionChatGate:gate,phase:'waiting',writes:0});
+   results.push({productionChatGate:gate,phase:'waiting',localQueued:true,writes:0});
   }
   assert.deepEqual(errors,[]);assert.deepEqual(await page.evaluate(()=>taskCommunication.errors),[]);
  }catch(error){
