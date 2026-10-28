@@ -187,7 +187,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       else{element=part.record.row;mounted.set(element.dataset.windowKey,part.record);}
       elements.push(element);
     }
-    const focused=elements.find(element=>element.contains(document.activeElement));
+    const focused=elements.find(element=>element.parentNode===host&&element.contains(document.activeElement));
     if(focused){
       // Atomic moves can synchronously scroll a focused row into view. Keep
       // that original row in place and arrange its neighbors around it; the

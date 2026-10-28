@@ -184,6 +184,10 @@ Ready media reflows from intrinsic dimensions and current ancestor CSS when the
 layout generation changes. A measurement surrogate must not carry its old rendered
 width or height into the new generation. The fixed deadline frame belongs to an
 unresolved component's lifetime and remains distinct from this ready-media reflow.
+An image surrogate decodes an inert local SVG containing only the original decoded
+image's intrinsic dimensions. This preserves native image sizing under current CSS
+without requesting the resource again; a source-less broken image is not equivalent
+to a decoded image with the same width and height attributes.
 Ready HTML uses its actual browsing context at the candidate width in a transparent
 top-layer viewport, retaining its DOM parent, document state and lease. An inert
 projection of the old measured frame shows the loading status during this bounded
@@ -250,6 +254,9 @@ order its measured neighbors around it. Moving that focused root can make the
 browser scroll it into view even during an atomic DOM move; it must not override
 the conversation controller's newer reading destination. Focus and the physical
 root order remain intact without another scroll writer.
+Only a root already parented directly by the live host can stay in place. A newly
+prepared root enters from its connected surface even if a native child has focus;
+it cannot serve as a live-host insertion reference before that transfer.
 
 One conversation controller chooses the geometry correction for the entire
 batch; nested adapters never write the native scroller. Its context snapshots

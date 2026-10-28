@@ -47,22 +47,33 @@ export async function preparedRevisionTransfers(page,origin){
 }
 
 export async function preparedResponsiveMedia(page,origin){
- await page.goto(origin+'/scripts/tests/fixtures/prepared-empty.html');
- const result=await page.evaluate(async()=>{
-  const {createMessageWindow}=await import('/components/message-window.mjs');const {createReplyBubble}=await import('/components/reply.mjs');
-  const {createPreparationSurface,settlePreparedTree,createPreparedRender,withPreparedRender,retirePreparedTree}=await import('/components/prepared-render.mjs');
-  document.body.replaceChildren();const sheet=document.createElement('link');sheet.rel='stylesheet';sheet.href='/styles.css';document.head.append(sheet);await new Promise(resolve=>sheet.onload=resolve);await document.fonts.ready;
-  const app=document.createElement('div');app.className='pot-app';app.style.cssText='display:block;height:650px';const scroller=document.createElement('div');scroller.className='history';scroller.style.cssText='height:600px;width:700px';const column=document.createElement('div');column.className='message-column';const host=document.createElement('div');host.className='message-window';column.append(host);scroller.append(column);app.append(scroller);document.body.append(app);
-  const canvas=document.createElement('canvas');canvas.width=960;canvas.height=640;canvas.getContext('2d').fillRect(0,0,960,640);const blob=await new Promise(resolve=>canvas.toBlob(resolve)),url=URL.createObjectURL(blob);let acquired=0,released=0,ui;
-  const resource={id:'responsive',name:'image.png',entry:'image.png',mime_type:'image/png',size:blob.size,files:[]},options={t:key=>key,acquireResource:()=>{acquired++;return {url:()=>url,release:()=>released++};},downloadResource:async()=>{}};
-  const rows=[{id:'row',viewKey:'row',role:'assistant',text:'',phase:'complete',status:'complete',presentation:{resource,mode:'preview'}}];
-  function render(message,old){if(!old){const row=document.createElement('article');row.className='message role-assistant';row.dataset.messageId=message.id;const body=document.createElement('div');body.className='message-body';row.append(body);old={row,reply:createReplyBubble(body)};}old.reply.update(message,options);return old;}
-  const draw=()=>ui.setMessages(rows),wait=async test=>{for(let i=0;i<600;i++){if(test())return;await new Promise(requestAnimationFrame);}throw Error('Responsive media did not settle '+JSON.stringify({prepared:ui.prepared,width:scroller.clientWidth,height:scroller.clientHeight,resource:host.querySelector('pot-resource')?.dataset.state,surfaces:document.querySelectorAll('[data-preparation-surface]').length,acquired,released,image:host.querySelector('img')?.outerHTML,natural:host.querySelector('img')?.naturalWidth}));};
-  ui=createMessageWindow({scroller,host,requestRender:draw,render,dispose:record=>retirePreparedTree(record.row)});
-  try{draw();await wait(()=>ui.prepared&&host.querySelector('img')?.naturalWidth);const original=host.querySelector('pot-resource');scroller.style.width='340px';draw();await wait(()=>ui.prepared);
-   const surface=createPreparationSurface(scroller,host),context=createPreparedRender(),fresh=withPreparedRender(context,'row',()=>render(rows[0]));surface.host.append(fresh.row);await settlePreparedTree(fresh.row,context).promise;
-   const parity=fresh.row.getBoundingClientRect().height-host.querySelector('article').getBoundingClientRect().height,sameOriginal=host.querySelector('pot-resource')===original;surface.close();ui.close();await Promise.resolve();return {parity,sameOriginal,acquired,released};
-  }finally{ui.close();URL.revokeObjectURL(url);}
- });
- assert(Math.abs(result.parity)<0.6,'Ready image reflow matches an independent current-width render');assert(result.sameOriginal);assert.equal(result.acquired,result.released);return result;
+ const results=[];
+ for(const [width,height]of [[1,1],[960,640],[280,960]]){
+  await page.goto(origin+'/scripts/tests/fixtures/prepared-empty.html');
+  const result=await page.evaluate(async({width,height})=>{
+   const {createMessageWindow}=await import('/components/message-window.mjs');const {createReplyBubble}=await import('/components/reply.mjs');
+   const {createPreparationSurface,settlePreparedTree,createPreparedRender,withPreparedRender,retirePreparedTree}=await import('/components/prepared-render.mjs');
+   document.body.replaceChildren();const sheet=document.createElement('link');sheet.rel='stylesheet';sheet.href='/styles.css';document.head.append(sheet);await new Promise(resolve=>sheet.onload=resolve);await document.fonts.ready;
+   const app=document.createElement('div');app.className='pot-app';app.style.cssText='display:block;height:650px';const scroller=document.createElement('div');scroller.className='history';scroller.style.cssText='height:600px;width:700px';const column=document.createElement('div');column.className='message-column';const host=document.createElement('div');host.className='message-window';column.append(host);scroller.append(column);app.append(scroller);document.body.append(app);
+   const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;canvas.getContext('2d').fillRect(0,0,width,height);const blob=await new Promise(resolve=>canvas.toBlob(resolve)),url=URL.createObjectURL(blob);let acquired=0,released=0,ui;
+   const resource={id:'responsive',name:'image.png',entry:'image.png',mime_type:'image/png',size:blob.size,files:[]},options={t:key=>key,acquireResource:()=>{acquired++;return {url:()=>url,release:()=>released++};},downloadResource:async()=>{}};
+   const rows=[{id:'row',viewKey:'row',role:'assistant',text:'',phase:'complete',status:'complete',presentation:{resource,mode:'preview'}}];
+   function render(message,old){if(!old){const row=document.createElement('article');row.className='message role-assistant';row.dataset.messageId=message.id;const body=document.createElement('div');body.className='message-body';row.append(body);old={row,reply:createReplyBubble(body)};}old.reply.update(message,options);return old;}
+   const draw=()=>ui.setMessages(rows),wait=async test=>{for(let i=0;i<600;i++){if(test())return;await new Promise(requestAnimationFrame);}throw Error('Responsive media did not settle '+JSON.stringify({prepared:ui.prepared,width:scroller.clientWidth,height:scroller.clientHeight,resource:host.querySelector('pot-resource')?.dataset.state,surfaces:document.querySelectorAll('[data-preparation-surface]').length,acquired,released,image:host.querySelector('img')?.outerHTML,natural:host.querySelector('img')?.naturalWidth}));};
+   ui=createMessageWindow({scroller,host,requestRender:draw,render,dispose:record=>retirePreparedTree(record.row)});
+   try{
+    draw();await wait(()=>ui.prepared&&host.querySelector('img')?.naturalWidth);const original=host.querySelector('pot-resource'),image=original.querySelector('img'),phases=[];
+    for(const [available,fontSize]of [[340,'16px'],[700,'18px']]){
+     const leases=acquired;scroller.style.width=available+'px';scroller.style.fontSize=fontSize;draw();await wait(()=>ui.prepared);
+     const reflow={available,fontSize,acquired:acquired-leases,sameOriginal:host.querySelector('pot-resource')===original,sameImage:original.querySelector('img')===image};
+     const surface=createPreparationSurface(scroller,host),context=createPreparedRender(),fresh=withPreparedRender(context,'row',()=>render(rows[0]));surface.host.append(fresh.row);await settlePreparedTree(fresh.row,context).promise;
+     const live=host.querySelector('article').getBoundingClientRect(),independent=fresh.row.getBoundingClientRect();phases.push({...reflow,parity:independent.height-live.height,liveHeight:live.height,freshHeight:independent.height,image:{width:image.clientWidth,height:image.clientHeight,naturalWidth:image.naturalWidth,naturalHeight:image.naturalHeight}});surface.close();
+    }
+    ui.close();await Promise.resolve();return {width,height,phases,acquired,released};
+   }finally{ui.close();URL.revokeObjectURL(url);}
+  },{width,height});
+  for(const phase of result.phases){assert(Math.abs(phase.parity)<0.6,'Ready image reflow matches an independent current-width render');assert(phase.sameOriginal&&phase.sameImage);assert.equal(phase.acquired,0,'Reflow retains the original resource lease');}
+  assert.equal(result.acquired,result.released);results.push(result);
+ }
+ return results;
 }

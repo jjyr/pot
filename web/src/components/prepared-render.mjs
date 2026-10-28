@@ -90,10 +90,16 @@ export function staticPreparationClone(source){
       // old rendered box is valid only while its layout generation is valid.
       // Keep documents/media inert: no second iframe, playback or resource lease.
       const intrinsicWidth=old.naturalWidth||old.videoWidth,intrinsicHeight=old.naturalHeight||old.videoHeight;
+      const intrinsicImage=reframing&&old.dataset.preparedFallback!=='true'&&next.localName==='img'&&intrinsicWidth&&intrinsicHeight;
       if(reframing&&old.dataset.preparedFallback!=='true'){
-        if(intrinsicWidth&&intrinsicHeight&&!old.hasAttribute('width')&&!old.hasAttribute('height')){next.setAttribute('width',String(intrinsicWidth));next.setAttribute('height',String(intrinsicHeight));}
+        // A source-less img uses broken-image sizing even with width/height
+        // attributes. Supply only the decoded source's intrinsic dimensions;
+        // current CSS still controls layout, without reading its bytes again.
+        if(intrinsicImage)next.src='data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${intrinsicWidth}" height="${intrinsicHeight}"></svg>`);
+        else if(intrinsicWidth&&intrinsicHeight&&!old.hasAttribute('width')&&!old.hasAttribute('height')){next.setAttribute('width',String(intrinsicWidth));next.setAttribute('height',String(intrinsicHeight));}
       }else{next.style.width=box.width+'px';next.style.height=box.height+'px';}
-      next.preparationMedia=true;
+      // Decode the inert intrinsic descriptor before measuring it too.
+      next.preparationMedia=!intrinsicImage;
     }
   }
   for(const [old,next]of pairs){old.projectPreparedState?.(next);const environment=currentPreparedRender();if(environment?.context.phase==='prepare'&&old.projectPreparedState)environment.context.resourceStates.set(old,next);if(environment?.context.phase==='prepare'&&environment.context.reframe&&old.localName==='pot-resource'&&old.dataset.kind==='html'&&old.dataset.state==='ready'&&old.dataset.preparedFallback!=='true'){const iframe=old.querySelector('iframe'),projection=next.querySelector('iframe');if(iframe&&projection)environment.context.nativeIslands.set(iframe,{context:environment.context,original:iframe,projection,owner:old,stable:0});}}
