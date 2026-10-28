@@ -195,6 +195,15 @@ only completion; executions without a receipt retain the existing uncertainty
 and recovery fences. A successfully acknowledged inbox batch may already be
 `interrupted` after a restart and is settled under its original batch identity.
 
+## Assistant Task model defaults
+
+`conversation/0003_task_default` initializes the optional Task model preference
+in assistant configuration intent and saved configuration responses.
+`control/0005_task_default` applies the same format to initial assistant intent.
+Existing assistants keep following their active model. Request hashes, generation
+and revision counters, pending specifications and existing Task snapshots remain
+unchanged; migration does not create or restart work.
+
 ## Shared native adapter storage
 
 `control/0003_agent_adapter` renames Codex host and endpoint tables to shared

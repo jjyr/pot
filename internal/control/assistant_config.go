@@ -15,12 +15,17 @@ import (
 // AssistantSelection is editable intent belonging to one assistant. It never
 // mutates a Provider profile or a persisted Task/running-turn specification.
 type AssistantSelection struct {
-	ProfileID       string  `json:"profile_id" required:"true"`
-	ProfileRevision uint64  `json:"profile_revision" required:"true"`
-	Model           string  `json:"model" required:"true"`
-	ContextWindow   *uint64 `json:"context_window"`
-	MaxOutputTokens *uint64 `json:"max_output_tokens"`
-	ReasoningEffort *string `json:"reasoning_effort"`
+	ProfileID       string              `json:"profile_id" required:"true"`
+	ProfileRevision uint64              `json:"profile_revision" required:"true"`
+	Model           string              `json:"model" required:"true"`
+	ContextWindow   *uint64             `json:"context_window"`
+	MaxOutputTokens *uint64             `json:"max_output_tokens"`
+	ReasoningEffort *string             `json:"reasoning_effort"`
+	TaskDefault     *TaskModelSelection `json:"task_default,omitempty"`
+}
+type TaskModelSelection struct {
+	ProfileID string `json:"profile_id" required:"true"`
+	Model     string `json:"model" required:"true"`
 }
 type SaveAssistantConfiguration struct {
 	RequestID          string             `json:"request_id" required:"true"`
@@ -39,6 +44,12 @@ type AssistantConfiguration struct {
 
 func normalizedSelection(value AssistantSelection) AssistantSelection {
 	value.Model = strings.TrimSpace(value.Model)
+	if value.TaskDefault != nil {
+		taskDefault := *value.TaskDefault
+		taskDefault.ProfileID = strings.TrimSpace(taskDefault.ProfileID)
+		taskDefault.Model = strings.TrimSpace(taskDefault.Model)
+		value.TaskDefault = &taskDefault
+	}
 	if value.ReasoningEffort != nil {
 		effort := strings.TrimSpace(*value.ReasoningEffort)
 		if effort == "" {
@@ -48,6 +59,12 @@ func normalizedSelection(value AssistantSelection) AssistantSelection {
 		}
 	}
 	return value
+}
+func (t TaskModelSelection) Validate() error {
+	if !core.Identifier(t.ProfileID) || strings.TrimSpace(t.Model) == "" || len(t.Model) > 256 {
+		return errors.New("task default requires a Provider and concrete model")
+	}
+	return nil
 }
 func (s AssistantSelection) Validate() error {
 	if !core.Identifier(s.ProfileID) || s.ProfileRevision == 0 || s.ProfileRevision > core.MaxSafeInteger || strings.TrimSpace(s.Model) == "" || len(s.Model) > 256 {
@@ -60,6 +77,11 @@ func (s AssistantSelection) Validate() error {
 	}
 	if s.ReasoningEffort != nil && len(*s.ReasoningEffort) > 128 {
 		return errors.New("reasoning effort exceeds supported length")
+	}
+	if s.TaskDefault != nil {
+		if err := s.TaskDefault.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -143,6 +165,30 @@ func (p *ProfileStore) ResolveAssistant(selection AssistantSelection) (core.Reso
 	err = spec.Rehash()
 	return spec, err
 }
+func (s *Service) resolveTaskDefault(ctx context.Context, selection TaskModelSelection) (core.ResolvedSpec, error) {
+	if err := selection.Validate(); err != nil {
+		return core.ResolvedSpec{}, err
+	}
+	var profile *core.Profile
+	for _, value := range s.Profiles.savedSnapshot().Profiles {
+		if value.ID == selection.ProfileID {
+			copy := value
+			profile = &copy
+			break
+		}
+	}
+	if profile == nil {
+		return core.ResolvedSpec{}, errors.New("Task default Provider is unavailable")
+	}
+	spec, err := s.Profiles.ResolveAssistant(AssistantSelection{ProfileID: profile.ID, ProfileRevision: profile.Revision, Model: selection.Model})
+	if err != nil {
+		return core.ResolvedSpec{}, err
+	}
+	if err := s.Profiles.sourceAvailable(ctx, spec.Provider); err != nil {
+		return core.ResolvedSpec{}, err
+	}
+	return spec, nil
+}
 func (s *Service) configurationView(state assistant.ConfigurationState) (AssistantConfiguration, error) {
 	view := AssistantConfiguration{Owner: state.Owner, Generation: state.Generation, Config: state.Config, Revision: state.Revision, Pending: state.Pending}
 	if len(state.Intent) > 0 && string(state.Intent) != "null" {
@@ -193,6 +239,11 @@ func (s *Service) SaveAssistantConfiguration(ctx context.Context, owner string, 
 		return AssistantConfiguration{}, err
 	} else if receipt != nil {
 		return s.configurationView(*receipt)
+	}
+	if request.Selection.TaskDefault != nil {
+		if _, err := s.resolveTaskDefault(ctx, *request.Selection.TaskDefault); err != nil {
+			return AssistantConfiguration{}, err
+		}
 	}
 	spec, err := s.Profiles.ResolveAssistant(request.Selection)
 	if err != nil {
@@ -322,6 +373,11 @@ func (s *Service) createAssistant(ctx context.Context, request CreateAssistant, 
 		var err error
 		definition, err = s.Registry.CreateWithIntent(ctx, request.RequestID, request.Name, binding, request.Text, intent, welcome, onlyFirst, func() (*core.ResolvedSpec, error) {
 			if request.Selection != nil {
+				if request.Selection.TaskDefault != nil {
+					if _, err := s.resolveTaskDefault(ctx, *request.Selection.TaskDefault); err != nil {
+						return nil, err
+					}
+				}
 				spec, err := s.Profiles.ResolveAssistant(*request.Selection)
 				return &spec, err
 			}
