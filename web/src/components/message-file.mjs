@@ -21,7 +21,7 @@ function register(){
       const read=this.readGeneration=(this.readGeneration||0)+1;
       const generation=this.generation,abort=this.abort,current=()=>this.isConnected&&this.started&&generation===this.generation&&read===this.readGeneration&&!abort.signal.aborted;
       try{
-        const rows=await this.options.messageFiles(this.message,{signal:abort.signal});if(!current())return;
+        const rows=await this.options.messageFiles(this.message,{signal:abort.signal,sourceText:this.options.sourceText});if(!current())return;
         const row=rows.find(row=>row.href===this.reference.href);this.row=row;
         // Completion can reach the UI just before the separate binding commit.
         // Poll metadata briefly; an absent binding never authorizes a path read.

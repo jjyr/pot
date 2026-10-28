@@ -1,9 +1,9 @@
-import {createIndexedStore} from './indexed-store.mjs';
+import {createIndexedStore,idbRequest} from './indexed-store.mjs';
 const channelName='pot-ui-cache-lifecycle';
 const clients=new Set();let channel;
 export function bindCacheLifecycle(retire){
   clients.add(retire);
-  if(!channel&&globalThis.BroadcastChannel){channel=new BroadcastChannel(channelName);channel.onmessage=event=>{if(event.data==='forget'){for(const close of [...clients])close();globalThis.window?.dispatchEvent(new Event('pot:cache-forgotten'));}};}
+  if(!channel&&globalThis.BroadcastChannel){channel=new BroadcastChannel(channelName);channel.unref?.();channel.onmessage=event=>{if(event.data==='forget'){for(const close of [...clients])close();globalThis.window?.dispatchEvent(new Event('pot:cache-forgotten'));}};}
   return ()=>{clients.delete(retire);if(!clients.size){channel?.close();channel=null;}};
 }
 export async function clearBusinessCaches({name='pot-chat-cache',indexedDB=globalThis.indexedDB}={}){
@@ -13,7 +13,7 @@ export async function clearBusinessCaches({name='pot-chat-cache',indexedDB=globa
   signal?.postMessage('forget');for(const close of [...clients])close();if(signal!==channel)signal?.close();
   for(const database of [name,name+'-tasks']){
     const store=createIndexedStore({name:database,indexedDB});
-    const caches=['conversations','messages','views','cacheStats','projections','epochs','taskCheckpoints','startup'];
-    try{await store.transaction(caches,'readwrite',tx=>{for(const name of caches)tx.objectStore(name).clear();});}finally{store.close();}
+    const caches=['conversations','messages','views','cacheStats','projections','epochs','taskCheckpoints','startup','resourceCopies','resourceScopes'];
+    try{await store.transaction(caches,'readwrite',async tx=>{const previous=await idbRequest(tx.objectStore('cacheStats').get('resourceAuthority'));for(const name of caches)tx.objectStore(name).clear();tx.objectStore('cacheStats').put({key:'resourceAuthority',generation:(previous?.generation||0)+1});});}finally{store.close();}
   }
 }

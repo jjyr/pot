@@ -5,6 +5,8 @@ import {createTopicVersions} from '../state/changes.mjs';
 import {createEventStream} from '../state/event-stream.mjs';
 import {validSnapshot} from '../state/conversation.mjs';
 import {createFileImages} from '../state/file-images.mjs';
+import {createResourceReader} from '../state/resource-reader.mjs';
+import {resourceScope} from '../state/resource-bytes.mjs';
 import {createDisplayResources} from '../state/display-resources.mjs';
 import {configurationIdentityCurrent} from '../state/settings-access.mjs';
 // Shared product transport. Every operation captures its Space/owner before IO.
@@ -59,13 +61,13 @@ export function mutationTopics(path,body,value) {
   if(path.startsWith('/api/v1/spaces'))return ['spaces','machines'];
   return [];
 }
-export async function createProductionClient({desktop = false, base = '', resourceStorage, startupIdentity} = {}) {
+export async function createProductionClient({desktop = false, base = '', resourceStorage, startupIdentity,resourceCopies} = {}) {
   let runtimeAPI;
   if (desktop) runtimeAPI = await import('/wails/runtime.js');
   const service = 'github.com/jjyr/pot/internal/desktop.Service';
   const invoke = (method, ...args) => runtimeAPI.Call.ByName(`${service}.${method}`, ...args);
   const context = {owner: '', space: ''};
-  let client,connectionAbort=new AbortController();const confirmedSessions=new Map();
+  let client,displayReader,connectionAbort=new AbortController();const confirmedSessions=new Map();
   const sessionKey=scope=>JSON.stringify([scope.space||'',scope.owner||'']);
   const acceptedCommands=new Map();
   async function commitCommand(path,method,body,value,capturedScope,signature){
@@ -142,7 +144,7 @@ export async function createProductionClient({desktop = false, base = '', resour
       try {
         const raw = await pending;
         if (signal?.aborted) throw signal.reason;
-        let value;try{value=decodeDesktopResponse(raw);}catch(error){throw localized(error);}configurationResult();if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);return value;
+        let value;try{value=decodeDesktopResponse(raw);}catch(error){throw localized(error);}configurationResult();if(method==='GET')await displayReader?.observe(path,value,capturedScope).catch(error=>{client.resourceCopiesError=error;});if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);return value;
       } finally { signal?.removeEventListener('abort', abort); }
     }
     const response = await fetch(`${base}${fullPath}`, {method, signal, credentials: 'same-origin',
@@ -152,6 +154,7 @@ export async function createProductionClient({desktop = false, base = '', resour
     if(method==='GET'&&generation!==client?.connectionGeneration)throw new DOMException('Connection retired','AbortError');
     if (!response.ok) throw localized(new APIError(response.status, value));
     configurationResult();
+    if(method==='GET')await displayReader?.observe(path,value,capturedScope).catch(error=>{client.resourceCopiesError=error;});
     if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);
     return value;
   }
@@ -159,7 +162,7 @@ export async function createProductionClient({desktop = false, base = '', resour
   if (!runtime || !(runtime.runtime_id || runtime.id)) throw Error('Runtime identity is unavailable');
   const readBaselines=desktop?await invoke('AssistantReads'):[];
   const attachmentURLs=new Map(),attachmentLeases=new Map();
-  const attachmentKey=(attachment,options)=>{const scope={...context,...options};return JSON.stringify([scope.expectedControl||'',scope.space,scope.owner,attachment.id]);};
+  const attachmentKey=(attachment,options)=>{const scope={...context,...options};return JSON.stringify([displayReader?resourceScope(displayReader.identity(scope)):'',attachment.id,attachment.size,attachment.mime_type]);};
   const onlineWaiters=new Set();
   const whenOnline=handler=>{onlineWaiters.add(handler);return()=>onlineWaiters.delete(handler);};
   async function resourceRequest(path,options={}){
@@ -191,9 +194,9 @@ export async function createProductionClient({desktop = false, base = '', resour
       connectionAbort.abort();connectionAbort=new AbortController();client.resources.resetConnection();
     },
     confirmStartup(value){if((value.runtime_id||value.id)!==runtime.runtime_id)throw Error('Startup identity changed');Object.assign(runtime,value);client.onlineReady=true;for(const handler of [...onlineWaiters])handler();onlineWaiters.clear();}, transport:request,request:resourceRequest,readBaselines,
-    messageFiles(message,options={}){return request(`/api/v1/message-files/${encodeURIComponent(message)}?${new URLSearchParams({task_id:options.task||''})}`,options);},
+    messageFiles(message,options={}){return displayReader.bindings(message,options);},
     retryMessageFile(message,ref,options={}){return request(`/api/v1/message-files/${encodeURIComponent(message)}/${encodeURIComponent(ref)}?${new URLSearchParams({task_id:options.task||''})}`,{...options,method:'POST'});},
-    acquireResource:createDisplayResources(request,()=>context,(resource,path,scope,operation='content',token='')=>desktop?`/pot-resource-content?${new URLSearchParams({id:resource.id,path,assistant_id:scope.owner,space_id:scope.space,render:operation==='render'?'1':'0',token})}`:`${base}${scopedPath(`/api/v1/resources/${encodeURIComponent(resource.id)}/${operation}?${new URLSearchParams({path,token})}`,scope)}`),
+
     async downloadResource(resource,options={}){
       const scope={...context,...options};
       if(desktop)return invoke('DownloadResource',resource.id,resource.download.path.split('/').at(-1),scope.owner,scope.space,'@download');
@@ -245,23 +248,18 @@ export async function createProductionClient({desktop = false, base = '', resour
       const scope={...context,...options},key=attachmentKey(attachment,scope);
       if(attachmentURLs.has(key))return attachmentURLs.get(key);
       const pending=(async()=>{
-        const parts=[];let offset=0;
-        while(offset<attachment.size){
-          const chunk=await request(`/api/v1/attachments/${encodeURIComponent(attachment.id)}?offset=${offset}`,scope);
-          if(chunk.offset!==offset||chunk.size!==attachment.size||chunk.revision!==attachment.id)throw Error('Attachment read changed');
-          const binary=atob(chunk.data),bytes=Uint8Array.from(binary,c=>c.charCodeAt(0));
-          if(!bytes.length||bytes.length>192*1024||offset+bytes.length>attachment.size)throw Error('Invalid attachment chunk');
-          parts.push(bytes);offset+=bytes.length;
-        }
-        return URL.createObjectURL(new Blob(parts,{type:attachment.mime_type}));
+        const source=displayReader.identity(scope),blob=await displayReader.attachment(attachment,scope);
+        if(!displayReader.current(source))throw new DOMException('Attachment released','AbortError');
+        return URL.createObjectURL(blob);
       })();
       attachmentURLs.set(key,pending);
-      pending.catch(()=>attachmentURLs.delete(key));
+      pending.catch(()=>{if(attachmentURLs.get(key)===pending)attachmentURLs.delete(key);});
       return pending;
     },
     async downloadAttachment(attachment,options={}){
       const scope={...context,...options};
       if(desktop)return invoke('DownloadAttachment',attachment.id,attachment.name,scope.owner,scope.space);
+      await request(`/api/v1/attachments/${encodeURIComponent(attachment.id)}?offset=0`,scope);
       const release=client.retainAttachment(attachment,scope);let url;try{url=await client.attachmentURL(attachment,scope);}catch(reason){release();throw reason;}const link=document.createElement('a');link.href=url;link.download=attachment.name;document.body.append(link);try{link.click();}finally{link.remove();setTimeout(release,1000);}
     },
     releaseAttachments(){for(const pending of attachmentURLs.values())pending.then(url=>URL.revokeObjectURL(url)).catch(()=>{});attachmentURLs.clear();},
@@ -329,6 +327,12 @@ export async function createProductionClient({desktop = false, base = '', resour
         events:{changed:deliver,changes:deliver,message:deliver},onStatus:guardReconnect(),terminal:terminalStreamFailure});
     },
   };
+  displayReader=createResourceReader(client,request,{base,desktop,...(resourceCopies?{copies:resourceCopies}:{})});
+  client.resourceCopies=displayReader.copies;
+  client.onResourceRetire=(scope,listener)=>{const key=resourceScope(displayReader.identity(scope));return displayReader.copies.subscribe(event=>{if(event.kind==='clear'||event.kind==='compact'||event.kind==='retire'&&event.scope===key)listener();});};
+  client.retireResourceCopies=scope=>displayReader.retire(displayReader.identity(scope));
+  client.acquireResource=createDisplayResources(displayReader.read,()=>context,(resource,path,scope,operation='content',token='')=>desktop?`/pot-resource-content?${new URLSearchParams({id:resource.id,path,assistant_id:scope.owner,space_id:scope.space,render:operation==='render'?'1':'0',token})}`:`${base}${scopedPath(`/api/v1/resources/${encodeURIComponent(resource.id)}/${operation}?${new URLSearchParams({path,token})}`,scope)}`,{copies:displayReader.copies,identity:displayReader.identity,current:displayReader.current});
+  displayReader.copies.subscribe(event=>{if(event.kind==='clear'||event.kind==='compact'||event.kind==='retire'){for(const [key,pending] of attachmentURLs){if(event.kind==='clear'||event.kind==='compact'||JSON.parse(key)[0]===event.scope){attachmentURLs.delete(key);pending.then(url=>URL.revokeObjectURL(url)).catch(()=>{});}}}});
   client.resources=createResourceReads(client,{storage:resourceStorage});
   client.read=(path,options)=>client.resources.read(path,options);
   return client;

@@ -1,9 +1,9 @@
-import {UI_CACHE_VERSION,migrateChatOutbox} from '../../../pkg/storage/migrations/ui-cache/0007_chat_outbox.mjs';
+import {UI_CACHE_VERSION,migrateResourceBytes} from '../../../pkg/storage/migrations/ui-cache/0008_resource_bytes.mjs';
 
 export const idbRequest=value=>new Promise((resolve,reject)=>{value.onsuccess=()=>resolve(value.result);value.onerror=()=>reject(value.error);});
 // Resolves work only at transaction completion. Never expose a put's success as
 // a committed projection. Each caller declares exactly the stores it touches.
-export function createIndexedStore({indexedDB=globalThis.indexedDB,name='pot-chat-cache',version=UI_CACHE_VERSION,migrate=migrateChatOutbox}={}){
+export function createIndexedStore({indexedDB=globalThis.indexedDB,name='pot-chat-cache',version=UI_CACHE_VERSION,migrate=migrateResourceBytes}={}){
   let opening,closed=false;
   function open(){
     if(closed)return Promise.reject(Error('chat_cache_closed'));

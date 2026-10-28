@@ -20,6 +20,9 @@ import (
 func (s *Service) resourceAssets(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "frame-src 'self' blob:; object-src 'none'")
+		if r.URL.Path == "/resource-document.html" {
+			w.Header().Set("Content-Security-Policy", resources.HTMLPolicy+" allow-same-origin")
+		}
 		if r.URL.Path != "/pot-resource-content" {
 			next.ServeHTTP(w, r)
 			return

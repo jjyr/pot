@@ -31,7 +31,7 @@ self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=
 self.addEventListener('fetch',event=>{
  const request=event.request,url=new URL(request.url);
  if(request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/')||url.pathname.startsWith('/access/')||url.pathname.startsWith('/wails/'))return;
- const path=request.mode==='navigate'?'/index.html':url.pathname;
+ const path=request.mode==='navigate'&&url.pathname!=='/resource-document.html'?'/index.html':url.pathname;
  if(!paths.has(path))return;
  // Repair an evicted member only from the exact installed version. Never
  // substitute another release's file, even when that server is reachable.

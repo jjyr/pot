@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {attachmentAllowed,attachmentProblem,failedMessageInput} from '../../web/src/components/attachments.mjs';
 import {createConversationState,beginSubscription,acceptSnapshot,setDraft,draft,beginSend,settleSend} from '../../web/src/state/conversation.mjs';
 import {projectChatReplies} from '../../web/src/state/chat-replies.mjs';
+import {createMemoryResourceCopies} from './resource-copies-memory.mjs';
 import {createProductionClient} from '../../web/src/adapters/production.mjs';
 
 const image={id:'image',name:'截图.png',mime_type:'image/png',size:123,width:2,height:3};
@@ -40,7 +41,7 @@ globalThis.fetch=async(url,options)=>{
   return {ok:true,status:200,json:async()=>data};
 };
 try{
-  const client=await createProductionClient({resourceStorage:createMemoryProjectionStore()});client.setScope({owner:'alice',space:'remote'});
+  const client=await createProductionClient({resourceStorage:createMemoryProjectionStore(),resourceCopies:createMemoryResourceCopies()});client.spaces=[{id:'remote',control_id:'runtime'}];client.setScope({owner:'alice',space:'remote'});
   await client.send({boot_id:'boot',conversation_id:'main',request_id:'guide',text:'',user_message_id:'turn',attachments:[image]});
   assert.match(requests.at(-1).url,/turn\/steer/);assert.deepEqual(JSON.parse(requests.at(-1).options.body).attachments,[image]);
   await client.send({request_id:'retry-original',retry_user_message_id:'original',text:'',attachments:[pdf]});

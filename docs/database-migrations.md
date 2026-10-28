@@ -238,3 +238,13 @@ The separate rebuildable notification installation database uses
 a logout epoch and one pending navigation target. It does not share authentication
 storage or disposable business projection retention. Existing browser preference,
 onboarding, token and native authorization records remain intact.
+
+`ui-cache/0008_resource_bytes.mjs` adds only independent `resourceCopies` and
+`resourceScopes` stores. Version-one copy rows bind complete display identities,
+kind/revision, Blob or bounded display DTO, digest, expiry and byte accounting;
+scope rows record revocation generations. Separate `cacheStats` keys hold resource
+capacity and the global compaction epoch. Pending browser upgrades apply this
+alongside preceding migrations in one upgrade transaction. Existing history,
+startup, views, composer originals and outbox originals remain in their existing
+stores. Display retention never changes their ownership or release rules; see
+[Display resources](display-resources.md#persistent-offline-display-copies).

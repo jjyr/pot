@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' data:; style-src 'unsafe-inline' data:; img-src data:; media-src data:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"></head><body><script>
+// Trusted shell only: author HTML is never inserted or evaluated here. The host
+// removes allow-same-origin BEFORE sending the committed document. Self-navigation
+// creates the author document with this resource CSP and an opaque iframe origin.
+const token=location.hash.slice(1);
+const receive=event=>{
+ if(event.source!==parent||event.origin!==location.origin||event.data?.type!=='pot-resource-document'||event.data.token!==token||typeof event.data.html!=='string'||event.data.html.length>9*1024*1024)return;
+ if(!frameElement||frameElement.sandbox.contains('allow-same-origin'))return;
+ removeEventListener('message',receive);
+ const url=URL.createObjectURL(new Blob([event.data.html],{type:'text/html'}));
+ parent.postMessage({type:'pot-resource-factory',action:'url',token,url},'*');
+ location.replace(url);
+};
+addEventListener('message',receive);
+parent.postMessage({type:'pot-resource-factory',action:'ready',token},'*');
+</script></body></html>
