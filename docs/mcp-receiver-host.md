@@ -99,6 +99,19 @@ creates the new run and mapping. It requires a terminal previous run, confirmed
 cleanup and its reconciled terminal event. A stale scheduler selection cannot
 launch a newer run. Input does not advertise live steering.
 
+Task input is an asynchronous durable mailbox. The queue verifies the original
+caller and expected run before enqueue; an active native turn does not cause a
+busy rejection. The Host acknowledges each journaled input without interrupting
+the turn, then consumes FIFO at the terminal, cleanup-confirmed and
+report-reconciled boundary. Each consumed input admits a separate continuation
+run. Multiple messages are never collapsed into the latest text; the original
+accepted run remains provenance while each continuation binds the actual current
+predecessor. Transport ACK, consumed input and execution completion have separate
+receipts. Pending messages survive a journal reopen and lost ACK/admission/input
+receipt responses reconcile without launching another turn. Cancellation intent
+keeps messages pending; confirmed cancellation discards the preceding unconsumed
+guidance. Later owner guidance can continue from the confirmed terminal run.
+
 Native submission and terminal continuation exclude retired jobs from capacity
 checks. Retired jobs retain their saved bytes and last state; current work still
 shares the existing 32-active-job limit, including continuations.
@@ -157,7 +170,12 @@ When a native interaction requires local review, the Task error retains
 `codex_approval_requires_local_review` with a known App Server protocol method
 and rejection reason. Unknown methods are recorded as `unrecognized`; interactive
 parameters and request content are omitted. This diagnosis does not enable
-additional interaction types: command/file review keeps its existing checks,
+additional interaction types. Elicitation diagnostics retain only known mode
+enums, field presence and thread/turn association states; they retain no message,
+URL, schema contents or credentials. The method alone does not distinguish native
+approval from server-initiated elicitation. `pot_execution_context` advertises its
+read-only behavior; other tools retain their own annotations and review rules.
+Command/file review keeps its existing checks,
 MCP elicitation is cancelled, and unsupported requests remain rejected.
 
 Updated Pot and plugins/adapters require explicit MCP reconnection. Old P2P

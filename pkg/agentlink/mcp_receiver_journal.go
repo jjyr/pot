@@ -15,6 +15,8 @@ type MCPReceiverRecord struct {
 	Admission             *MCPRunAdmission    `json:"admission,omitempty"`
 	AdmissionAcknowledged bool                `json:"admission_acknowledged"`
 	ControlApplied        bool                `json:"control_applied"`
+	InputReceipt          *MCPInputReceipt    `json:"input_receipt,omitempty"`
+	InputAcknowledged     bool                `json:"input_acknowledged"`
 	Sequence              uint64              `json:"sequence"`
 	LastPhase             protocol.TaskPhase  `json:"last_phase,omitempty"`
 	Outbox                *MCPExecutionEvent  `json:"outbox,omitempty"`
@@ -32,6 +34,7 @@ type MCPReceiverDelivery struct {
 type MCPReceiverReporter interface {
 	Ack(context.Context, MCPDeliveryAck) error
 	Admit(context.Context, MCPRunAdmission) error
+	InputReceipt(context.Context, MCPInputReceipt) error
 	Event(context.Context, MCPExecutionEvent) (MCPEventReceipt, error)
 }
 
@@ -72,6 +75,13 @@ func AdvanceMCPReceiver(ctx context.Context, remote MCPReceiverReporter, backend
 		}
 	}
 	if r.Admission == nil {
+		if r.InputReceipt != nil && !r.InputAcknowledged {
+			if err := remote.InputReceipt(ctx, *r.InputReceipt); err != nil {
+				return err
+			}
+			r.InputAcknowledged = true
+			return backend.Save(ctx, r)
+		}
 		return nil
 	}
 	if !r.AdmissionAcknowledged {
@@ -79,6 +89,21 @@ func AdvanceMCPReceiver(ctx context.Context, remote MCPReceiverReporter, backend
 			return err
 		}
 		r.AdmissionAcknowledged = true
+		if err := backend.Save(ctx, r); err != nil {
+			return err
+		}
+	}
+	if r.Control != nil && r.Control.Input != nil && !r.InputAcknowledged {
+		if r.InputReceipt == nil {
+			r.InputReceipt = &MCPInputReceipt{Claim: r.Claim, Binding: r.Admission.Binding, State: "consumed"}
+			if err := backend.Save(ctx, r); err != nil {
+				return err
+			}
+		}
+		if err := remote.InputReceipt(ctx, *r.InputReceipt); err != nil {
+			return err
+		}
+		r.InputAcknowledged = true
 		if err := backend.Save(ctx, r); err != nil {
 			return err
 		}

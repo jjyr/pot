@@ -300,36 +300,41 @@ func (s *Service) taskExecutionNotification(ctx context.Context, id, owner strin
 	if d.Execution.Request.From.Kind == "user" {
 		return s.userTaskExecutionNotification(ctx, id, owner, d)
 	}
-	// Receiver-owned task outcomes enter the same durable notification inbox as
-	// local outcomes. IDs and routing are fixed at submission, even if defaults change.
-	run := d.Info.RunID
-	if run == "" {
-		run = linkRunID(id)
-	}
-	eventID, _ := core.HashJSON([]string{id, run})
-	result := protocol.TaskResultEvent{TaskID: id, RunID: run, Title: d.Info.Title, Phase: d.Info.Phase, Text: d.Execution.Receipt.Result, Error: d.Execution.Receipt.Error, Origin: protocol.TaskOrigin{Kind: "manual"}}
-	envelope := protocol.Envelope{ID: eventID, Kind: "task_result", From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "runtime", AgentID: "agent-link"}, To: d.Execution.Request.From, ConversationID: run, Text: d.Execution.Receipt.Result, Result: &result}
-	if envelope.Text == "" {
-		envelope.Text = d.Info.Title
-	}
 	err := storage.Transaction(ctx, s.Tasks.DB(), func(tx *sql.Tx) error {
-		var exists bool
-		if e := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_messages WHERE id=?)", eventID).Scan(&exists); e != nil {
-			return e
-		}
-		if exists {
-			return nil
-		}
-		if e := inbox.EnqueueTx(ctx, tx, envelope, "in", "queued"); e != nil {
-			return e
-		}
-		return nil
+		return taskExecutionNotificationTx(ctx, tx, s.options.RuntimeID, d)
 	})
 	if err == nil {
 		s.Changes.Notify("task-outcomes")
 	}
 	return err
 }
+
+// Terminal mailbox runs may advance before the background notification scan.
+// Commit their completion envelope alongside the terminal Task projection.
+func taskExecutionNotificationTx(ctx context.Context, tx *sql.Tx, node string, d *tasks.Record) error {
+	run := d.Info.RunID
+	if run == "" {
+		run = linkRunID(d.Info.ID)
+	}
+	eventID, _ := core.HashJSON([]string{d.Info.ID, run})
+	result := protocol.TaskResultEvent{TaskID: d.Info.ID, RunID: run, Title: d.Info.Title, Phase: d.Info.Phase, Text: d.Execution.Receipt.Result, Error: d.Execution.Receipt.Error, Origin: protocol.TaskOrigin{Kind: "manual"}}
+	if d.Outcome != nil && d.Outcome.TaskID == d.Info.ID && d.Outcome.RunID == run {
+		result = *d.Outcome
+	}
+	envelope := protocol.Envelope{ID: eventID, Kind: "task_result", From: protocol.AgentRef{NodeID: node, Kind: "runtime", AgentID: "agent-link"}, To: d.Execution.Request.From, ConversationID: run, Text: d.Execution.Receipt.Result, Result: &result}
+	if envelope.Text == "" {
+		envelope.Text = d.Info.Title
+	}
+	var exists bool
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_messages WHERE id=?)", eventID).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	return inbox.EnqueueTx(ctx, tx, envelope, "in", "queued")
+}
+
 func (s *Service) TaskPage(ctx context.Context, owner string, q protocol.TaskQuery) (protocol.TaskPage, error) {
 	// The operator filter uses the directory key. Linked tasks are stored under
 	// their durable user-chat session, not the remote assistant ID or UI key.

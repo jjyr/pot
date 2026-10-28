@@ -64,7 +64,8 @@ driver's actual effective description. Actual capabilities must come from the
 execution implementation. Registration alone cannot prove support. Unknown
 operations, owner scope, approval management and configuration are rejected.
 Advertising files/events/input requires their real implementation. Input means
-terminal continuation; it does not claim live steering or native resume.
+durable asynchronous mailbox acceptance and continuation at a safe execution
+boundary; it does not claim live steering or native resume.
 
 ## Tool input and admission
 
@@ -72,9 +73,11 @@ terminal continuation; it does not claim live steering or native resume.
 They contain explicit destinations or resource IDs and request IDs, never `from`,
 owner, connection selector, execution policy, workspace or approval metadata.
 `Submit.Bind` injects the authenticated actor into the existing `TaskRequest`.
-`Input.Guidance` produces the existing `TaskGuidance` only for the expected run
-in a terminal state. It accepts both existing `complete` and Host `completed`
-receipts; it creates no new business phase. Existing cleanup fences still apply.
+`Input.Guidance` validates the expected run and produces the existing
+`TaskGuidance`. Active execution does not reject legal input: the gateway commits
+the immutable delivery and mutation receipt before returning acceptance. The
+receiver journals and acknowledges it while leaving the current turn running.
+Existing cleanup fences still apply when the input is eventually consumed.
 
 Before a mutation, the gateway resolves a saved exact retry, then checks current
 authorization, original caller ownership, target capability and admission. Input
@@ -110,14 +113,37 @@ accepted, but cannot report execution events until the real run is known and its
 admission mapping is committed. Do not invent a run from a task ID or native turn.
 An accepted ack does not imply a run already exists.
 
-For first execution, `PreviousRunID` is absent. For terminal continuation, the
-input targets the prior run, gets its own delivery/claim, and admission compares
-`PreviousRunID` with the stored prior execution before binding a distinct new run.
+For first execution, `PreviousRunID` is absent. Every mailbox input retains the
+run and phase verified at enqueue time. Inputs are consumed FIFO for the same
+owned Task, only after the current run ends, cleanup is confirmed and its terminal
+report is reconciled. Each input gets its own delivery/claim. Earlier accepted
+inputs may advance the run: admission compares `PreviousRunID` with the current
+stored execution before binding a distinct new run, without rewriting the
+original input's run provenance. A new request naming a stale run is fenced.
 The execution Task and receiver remain the same. Commit this comparison with the
 mapping; reconcile exact duplicate admissions before checking a new transition.
 The Host supplies the actual backend Task/run, not a caller-selected replacement.
 Cancellation creates no new execution run: its ack records intent, and terminal
 evidence is reported under the executing claim.
+
+`MCPInputReceipt` separates consumption from acceptance and completion. A
+`consumed` receipt binds the input to its admitted execution run; it does not
+prove a model turn completed. A `cancelled` receipt creates no run. Receiver-only
+`pot_receiver_input_receipt` reconciles these immutable dispositions against the
+saved claim/admission. The existing owned `pot_task_receipt` read returns
+`input_state` (`pending`, `consumed`, `cancelled` or `rejected`) and the typed
+receipt when available. Ordinary discovery does not expose receiver-only tools.
+Cancellation intent and disconnection do not discard accepted messages. After
+confirmed cancellation, unconsumed guidance accepted before that boundary is
+marked cancelled; new owner guidance accepted against the cancelled terminal run
+can continue after cleanup. Cancelled deliveries cannot later be admitted.
+
+Terminal receiver projections for assistant-directed Tasks enqueue their stable
+per-run completion envelope and notification receipt in the same Tasks
+transaction. An immediately consumed next input cannot hide the preceding run's
+result from the background notification scan. Completion envelopes retain the
+actual execution run identifier, including native hash identifiers; a non-UUID
+conversation identifier is accepted only when it equals that Task result's run.
 
 The queue commits `MCPClaim` before returning it. `ValidateAgainst` compares the
 exact stored claim, logical connection, delivery, dispatch Task and receiver against

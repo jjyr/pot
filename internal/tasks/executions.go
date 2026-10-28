@@ -174,6 +174,20 @@ func (s *Service) NotifyExecution(ctx context.Context, owner, id, run string) er
 	})
 }
 
+// NotifyExecutionTx records completion delivery in the caller's terminal-result
+// transaction. It never changes execution or consumes pending Task guidance.
+func (s *Service) NotifyExecutionTx(ctx context.Context, tx *sql.Tx, owner, id, run string) error {
+	r, err := read(ctx, tx, owner, id)
+	if err != nil {
+		return err
+	}
+	if r == nil || r.Execution == nil || r.Execution.Receipt.RunID != run {
+		return agentlink.ErrFenced
+	}
+	r.Execution.Notified = true
+	return write(ctx, tx, r)
+}
+
 // FindRequest resolves accepted intent before consulting mutable destinations.
 func (s *Service) FindRequest(ctx context.Context, owner string, request protocol.CreateTask) (*Record, error) {
 	var id, hash string

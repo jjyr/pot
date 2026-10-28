@@ -145,7 +145,11 @@ func TestUnsupportedNativeInteractionKeepsOnlyProtocolDiagnostic(t *testing.T) {
 			if method == "untrusted-secret-method" {
 				wantMethod = "unrecognized"
 			}
-			if a.result.Status != "failed" || a.result.Error != "codex_approval_requires_local_review: "+wantMethod+": unsupported_interaction" {
+			want := "codex_approval_requires_local_review: " + wantMethod + ": unsupported_interaction"
+			if method == "mcpServer/elicitation/request" {
+				want += "; mode=absent; request_mode=absent; thread=match; turn=match; schema_present=false; request_present=false; item_present=false"
+			}
+			if a.result.Status != "failed" || a.result.Error != want {
 				t.Fatal(a.result)
 			}
 			if strings.Contains(output.String(), "private-") || strings.Contains(a.result.Error, "private-") || strings.Contains(a.result.Error, "untrusted-secret") {
@@ -185,5 +189,25 @@ func TestAppServerKeepsOnlyAnswerAndStopsAtTurnCompletion(t *testing.T) {
 	a.read(strings.NewReader(stream.String()))
 	if a.result.Status != "completed" || a.result.Text != "answer\n" {
 		t.Fatalf("turn result included intermediate or later output: %+v", a.result)
+	}
+}
+
+func TestCodexElicitationShapeNeverRetainsInteractiveContent(t *testing.T) {
+	for _, mode := range []string{"form", "openai/form", "openaiForm", "url", "private-unknown-mode"} {
+		raw := json.RawMessage(`{"mode":"` + mode + `","request":{"mode":"form","url":"https://private-url.invalid"},"threadId":"private-other-thread","turnId":null,"message":"private-text","requestedSchema":{"private-key":"private-value"},"itemId":"private-item"}`)
+		got := codexElicitationShape(raw, "thread", "turn")
+		if strings.Contains(got, "private") || !strings.Contains(got, "thread=mismatch; turn=null; schema_present=true; request_present=true; item_present=true") {
+			t.Fatal(got)
+		}
+		want := mode
+		if strings.HasPrefix(mode, "private") {
+			want = "unrecognized"
+		}
+		if !strings.Contains(got, "mode="+want+"; request_mode=form;") {
+			t.Fatal(got)
+		}
+	}
+	if got := codexElicitationShape(json.RawMessage(`null`), "", ""); got != "; shape=invalid" {
+		t.Fatal(got)
 	}
 }

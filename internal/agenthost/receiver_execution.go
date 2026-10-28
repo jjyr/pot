@@ -33,7 +33,7 @@ func executionTools(in io.Reader, out io.Writer, root string, adapter Runtime) e
 
 func executionMCPServer(client hostClient, jobID, runID, assistantID string) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "pot-receiver-execution", Version: "1"}, nil)
-	mcp.AddTool(server, &mcp.Tool{Name: "pot_execution_context", Description: "Read this supervised execution's active actor, Task and run binding. This grants no owner or approval authority.", InputSchema: toolSchema(map[string]any{})}, func(ctx context.Context, _ *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(server, &mcp.Tool{Name: "pot_execution_context", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}, Description: "Read this supervised execution's active actor, Task and run binding. This grants no owner or approval authority.", InputSchema: toolSchema(map[string]any{})}, func(ctx context.Context, _ *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, any, error) {
 		var input struct{}
 		if err := agentlink.DecodeMCPContract(raw, &input); err != nil {
 			return toolResult(nil, "invalid_payload"), nil, nil

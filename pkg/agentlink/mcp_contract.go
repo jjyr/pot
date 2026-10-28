@@ -124,8 +124,8 @@ func (r MCPSubmitInput) Digest(c MCPCaller) (string, error) {
 	return mcpDigest(c, TaskSubmit, r)
 }
 
-// MCPTaskInput is terminal continuation where supported, not live steering.
-// RunID must match the stored task before passing Guidance to an existing backend.
+// MCPTaskInput enqueues owner guidance. RunID fences admission to the mailbox;
+// it does not require immediate steering or pin the later consumption run.
 type MCPTaskInput struct {
 	RequestID string `json:"request_id" required:"true"`
 	TaskID    string `json:"task_id" required:"true"`
@@ -148,11 +148,6 @@ func (r MCPTaskInput) Guidance(c MCPCaller, current Task) (TaskGuidance, error) 
 	}
 	if current.ID != r.TaskID || current.RunID != r.RunID {
 		return TaskGuidance{}, ErrFenced
-	}
-	switch current.State {
-	case "complete", "completed", "failed", "cancelled", "interrupted":
-	default:
-		return TaskGuidance{}, ErrConflict
 	}
 	return TaskGuidance{From: c.actor, ID: r.TaskID, RequestID: r.RequestID, Text: r.Text}, nil
 }

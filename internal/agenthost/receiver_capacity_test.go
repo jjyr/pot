@@ -69,7 +69,7 @@ func TestReceiverTerminalContinuationRetainsCurrentActiveCapacityLimit(t *testin
 	if _, err = p.backend.Input(ctx, agentlink.TaskGuidance{From: request.From, ID: j.Task.ID, RequestID: "over-active-input", Text: "continue"}); !errors.Is(err, agentlink.ErrCapacity) {
 		t.Fatal("native continuation bypassed current active limit", err)
 	}
-	control := agentlink.MCPControlDelivery{Version: 1, DeliveryID: "capacity-input", Dispatch: d.Claim.Binding, Binding: old.Admission.Binding, Caller: request.From, Input: &agentlink.MCPTaskInput{RequestID: "capacity-follow-up", TaskID: d.Claim.Binding.Task.AgentID, RunID: old.Admission.Binding.RunID, Text: "continue"}}
+	control := agentlink.MCPControlDelivery{Version: 1, DeliveryID: "capacity-input", Dispatch: d.Claim.Binding, Binding: old.Admission.Binding, Caller: request.From, InputPhase: protocol.TaskComplete, Input: &agentlink.MCPTaskInput{RequestID: "capacity-follow-up", TaskID: d.Claim.Binding.Task.AgentID, RunID: old.Admission.Binding.RunID, Text: "continue"}}
 	claim := agentlink.MCPClaim{ConnectionID: p.identity.ConnectionID(), DeliveryID: control.DeliveryID, ClaimID: "capacity-claim", Binding: d.Claim.Binding}
 	next := receiverDelivery{Claim: &claim, Control: &control}
 	remote.queue = append(remote.queue, next)

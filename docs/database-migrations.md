@@ -249,3 +249,9 @@ converted by startup.
 native profile/delete tombstones. It reuses the existing native backend checks.
 Startup and receiver epoch changes fence unfinished requests as unknown; neither
 reconnection nor a journal entry authorizes re-execution.
+
+`tasks/0012_mcp_input_mailbox` adds a separate input-disposition receipt and
+captures the phase at original mailbox admission. It updates saved claim replies
+and receiver journal controls together. Previously admitted inputs are marked
+consumed without executing them again; pending inputs remain pending. Original
+mutation receipts, Task/run identities and retired work tombstones are retained.

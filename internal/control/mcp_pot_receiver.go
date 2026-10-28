@@ -156,8 +156,18 @@ func (p *potMCPReceiver) Admit(ctx context.Context, r *agentlink.MCPReceiverReco
 		}
 	}
 	if r.Control != nil && r.Control.Input != nil {
-		proof, e = p.s.Tasks.ReceiverContinuationProof(ctx, r.Claim.Binding.Receiver.AgentID, r.Control.Binding.Task.AgentID, r.Control.Binding.RunID)
+		current, err := p.s.Tasks.Get(ctx, r.Claim.Binding.Receiver.AgentID, r.Control.Binding.Task.AgentID)
+		if err != nil || current == nil {
+			return err
+		}
+		if current.Info.Phase.Scope() == "active" {
+			return nil
+		}
+		proof, e = p.s.Tasks.ReceiverContinuationProof(ctx, r.Claim.Binding.Receiver.AgentID, r.Control.Binding.Task.AgentID, current.RunID)
 		if e != nil {
+			if errors.Is(e, core.ErrCleanupUnconfirmed) {
+				return nil
+			}
 			return e
 		}
 	}
@@ -199,19 +209,29 @@ func (p *potMCPReceiver) Admit(ctx context.Context, r *agentlink.MCPReceiverReco
 				return e
 			}
 		} else {
-			prior, e := p.prior(ctx, tx, r.Control)
-			if e != nil {
-				return e
-			}
-			previous = &prior.Admission.Binding
 			if r.Control.Input == nil {
 				return agentlink.ErrUnsupported
 			}
-			if prior.Outbox != nil || prior.Receipt == nil || !potMCPTerminal(prior.LastPhase) {
-				return agentlink.ErrFenced
+			current, e := p.s.Tasks.ReadReceiverTx(ctx, tx, owner, r.Control.Binding.Task.AgentID)
+			if e != nil || current == nil {
+				return e
 			}
+			if current.Info.Phase.Scope() == "active" || proof != nil && proof.Launch.RunID != current.RunID {
+				return nil
+			}
+			binding := agentlink.MCPRunBinding{Task: r.Control.Binding.Task, RunID: current.RunID, Receiver: r.Control.Binding.Receiver}
+			prior, e := mcpreceiver.InputPredecessor(ctx, tx, r, binding)
+			if e != nil || prior == nil {
+				return e
+			}
+			if current.Info.Phase == protocol.TaskCancelled && (r.Control.InputPhase.Scope() == "active" || r.Control.Binding.RunID != current.RunID) {
+				r.ControlApplied = true
+				r.InputReceipt = &agentlink.MCPInputReceipt{Claim: r.Claim, Binding: binding, State: "cancelled"}
+				return mcpreceiver.Save(ctx, tx, r)
+			}
+			previous = &prior.Admission.Binding
 			request, _ := core.HashJSON([]string{r.Claim.ConnectionID, r.Claim.DeliveryID})
-			record, e = p.s.Tasks.ContinueReceiverTx(ctx, tx, owner, r.Control.Binding.Task.AgentID, r.Control.Binding.RunID, request, r.Control.Input.Text, r.Control.Caller, proof)
+			record, e = p.s.Tasks.ContinueReceiverTx(ctx, tx, owner, r.Control.Binding.Task.AgentID, current.RunID, request, r.Control.Input.Text, r.Control.Caller, proof)
 			if e != nil {
 				return e
 			}

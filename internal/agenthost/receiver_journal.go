@@ -107,14 +107,17 @@ func (p *receiverPump) validateControl(ctx context.Context, tx *sql.Tx, c *agent
 		return agentlink.ErrUnauthorized
 	}
 	var raw string
-	if err = tx.QueryRowContext(ctx, "SELECT data FROM agent_adapter_jobs WHERE id=? AND caller=?", c.Binding.Task.AgentID, callerKey(caller)).Scan(&raw); err != nil {
+	if err = tx.QueryRowContext(ctx, "SELECT data FROM agent_adapter_jobs WHERE id=? AND caller=? AND id NOT IN (SELECT id FROM retired_agent_link_work WHERE kind='job')", c.Binding.Task.AgentID, callerKey(caller)).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return agentlink.ErrFenced
+		}
 		return err
 	}
 	var current job
 	if err = json.Unmarshal([]byte(raw), &current); err != nil {
 		return err
 	}
-	if current.Task.RunID != c.Binding.RunID {
+	if current.Task.RunID != c.Binding.RunID && c.Input == nil {
 		return agentlink.ErrFenced
 	}
 	if c.Approval != nil {
@@ -126,9 +129,6 @@ func (p *receiverPump) validateControl(ctx context.Context, tx *sql.Tx, c *agent
 		if !valid {
 			return agentlink.ErrFenced
 		}
-	}
-	if c.Input != nil && (!terminal(current.Task.State) || current.CleanupUncertain || prior.Outbox != nil || prior.Receipt == nil || !receiverTerminal(prior.LastPhase)) {
-		return agentlink.ErrFenced
 	}
 	return nil
 }
@@ -168,62 +168,82 @@ func (p *receiverPump) admit(ctx context.Context, r *receiverRecord) error {
 			}
 		} else {
 			c := r.Control
-			var delivery string
-			if err = tx.QueryRowContext(ctx, "SELECT delivery_id FROM mcp_receiver_journal WHERE connection_id=? AND execution_task=? AND execution_run=?", r.Claim.ConnectionID, c.Binding.Task.AgentID, c.Binding.RunID).Scan(&delivery); err != nil {
-				return agentlink.ErrFenced
-			}
-			prior, err := readReceiverRecord(ctx, tx, r.Claim.ConnectionID, delivery)
-			if err != nil {
-				return err
-			}
-			if prior.Admission == nil || prior.Admission.Binding != c.Binding || prior.Claim.Binding != c.Dispatch {
-				return agentlink.ErrFenced
-			}
-			caller := protocol.AgentRef{}
-			if prior.Work != nil {
-				caller = prior.Work.Request.From
-			} else if prior.Control != nil {
-				caller = prior.Control.Caller
-			}
-			if caller != c.Caller {
-				return agentlink.ErrUnauthorized
-			}
-			previous = &prior.Admission.Binding
 			if c.Input != nil {
-				// Keep the old terminal outbox until its receipt is durable. Input cannot
-				// erase terminal evidence still awaiting report reconciliation.
-				if prior.Outbox != nil || prior.Receipt == nil || !receiverTerminal(prior.LastPhase) {
-					return agentlink.ErrFenced
-				}
-				guidance := agentlink.TaskGuidance{From: caller, ID: c.Binding.Task.AgentID, RequestID: jobID(caller, r.Claim.ConnectionID+":"+r.Claim.DeliveryID), Text: c.Input.Text}
-				if err = p.backend.inputTx(ctx, tx, guidance, c.Binding.RunID, &accepted); err != nil {
-					return err
-				}
-			} else {
+				// Accepted guidance waits in the journal while the current native
+				// turn executes. It never interrupts or replaces that turn's input.
 				var raw string
-				if err = tx.QueryRowContext(ctx, "SELECT data FROM agent_adapter_jobs WHERE id=? AND caller=?", c.Binding.Task.AgentID, callerKey(caller)).Scan(&raw); err != nil {
+				if err = tx.QueryRowContext(ctx, "SELECT data FROM agent_adapter_jobs WHERE id=? AND caller=? AND id NOT IN (SELECT id FROM retired_agent_link_work WHERE kind='job')", c.Binding.Task.AgentID, callerKey(c.Caller)).Scan(&raw); err != nil {
 					return err
 				}
 				if err = json.Unmarshal([]byte(raw), &accepted); err != nil {
 					return err
 				}
-				if accepted.Task.RunID != c.Binding.RunID {
+				if !terminal(accepted.Task.State) || accepted.CleanupUncertain {
+					return nil
+				}
+				binding := agentlink.MCPRunBinding{Task: c.Binding.Task, RunID: accepted.Task.RunID, Receiver: c.Binding.Receiver}
+				prior, err := mcpreceiver.InputPredecessor(ctx, tx, r, binding)
+				if err != nil || prior == nil {
+					return err
+				}
+				if accepted.Task.State == "cancelled" && (c.InputPhase.Scope() == "active" || c.Binding.RunID != binding.RunID) {
+					r.ControlApplied = true
+					r.InputReceipt = &agentlink.MCPInputReceipt{Claim: r.Claim, Binding: binding, State: "cancelled"}
+					return saveReceiverRecord(ctx, tx, r)
+				}
+				previous = &prior.Admission.Binding
+				guidance := agentlink.TaskGuidance{From: c.Caller, ID: binding.Task.AgentID, RequestID: jobID(c.Caller, r.Claim.ConnectionID+":"+r.Claim.DeliveryID), Text: c.Input.Text}
+				if err = p.backend.inputTx(ctx, tx, guidance, binding.RunID, &accepted); err != nil {
+					return err
+				}
+			} else {
+				var delivery string
+				if err = tx.QueryRowContext(ctx, "SELECT delivery_id FROM mcp_receiver_journal WHERE connection_id=? AND execution_task=? AND execution_run=?", r.Claim.ConnectionID, c.Binding.Task.AgentID, c.Binding.RunID).Scan(&delivery); err != nil {
 					return agentlink.ErrFenced
 				}
-				if !terminal(accepted.Task.State) {
-					if accepted.Task.State == "queued" {
-						accepted.Task.State = "cancelled"
-					} else {
-						accepted.Task.State = "cancelling"
-					}
-					accepted.Task.UpdatedAt = time.Now().UTC()
-					if _, err = tx.ExecContext(ctx, "UPDATE agent_adapter_jobs SET data=? WHERE id=?", encoded(accepted), accepted.Task.ID); err != nil {
+				prior, err := readReceiverRecord(ctx, tx, r.Claim.ConnectionID, delivery)
+				if err != nil {
+					return err
+				}
+				if prior.Admission == nil || prior.Admission.Binding != c.Binding || prior.Claim.Binding != c.Dispatch {
+					return agentlink.ErrFenced
+				}
+				caller := protocol.AgentRef{}
+				if prior.Work != nil {
+					caller = prior.Work.Request.From
+				} else if prior.Control != nil {
+					caller = prior.Control.Caller
+				}
+				if caller != c.Caller {
+					return agentlink.ErrUnauthorized
+				}
+				previous = &prior.Admission.Binding
+				{
+					var raw string
+					if err = tx.QueryRowContext(ctx, "SELECT data FROM agent_adapter_jobs WHERE id=? AND caller=? AND id NOT IN (SELECT id FROM retired_agent_link_work WHERE kind='job')", c.Binding.Task.AgentID, callerKey(caller)).Scan(&raw); err != nil {
 						return err
 					}
-					cancelID = accepted.Task.ID
+					if err = json.Unmarshal([]byte(raw), &accepted); err != nil {
+						return err
+					}
+					if accepted.Task.RunID != c.Binding.RunID {
+						return agentlink.ErrFenced
+					}
+					if !terminal(accepted.Task.State) {
+						if accepted.Task.State == "queued" {
+							accepted.Task.State = "cancelled"
+						} else {
+							accepted.Task.State = "cancelling"
+						}
+						accepted.Task.UpdatedAt = time.Now().UTC()
+						if _, err = tx.ExecContext(ctx, "UPDATE agent_adapter_jobs SET data=? WHERE id=?", encoded(accepted), accepted.Task.ID); err != nil {
+							return err
+						}
+						cancelID = accepted.Task.ID
+					}
+					r.ControlApplied = true
+					return saveReceiverRecord(ctx, tx, r)
 				}
-				r.ControlApplied = true
-				return saveReceiverRecord(ctx, tx, r)
 			}
 		}
 		binding := agentlink.MCPRunBinding{Task: protocol.AgentRef{NodeID: p.identity.NodeID(), Kind: "task", AgentID: accepted.Task.ID}, RunID: accepted.Task.RunID, Receiver: r.Claim.Binding.Receiver}

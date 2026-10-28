@@ -145,6 +145,17 @@ func (c *Client) Admit(ctx context.Context, a agentlink.MCPRunAdmission) error {
 	}
 	return nil
 }
+
+func (c *Client) InputReceipt(ctx context.Context, input agentlink.MCPInputReceipt) error {
+	var receipt agentlink.MCPInputReceipt
+	if err := c.Call(ctx, "pot_receiver_input_receipt", input, &receipt); err != nil {
+		return err
+	}
+	if receipt.Validate() != nil || receipt != input {
+		return agentlink.ErrConflict
+	}
+	return nil
+}
 func (c *Client) Event(ctx context.Context, e agentlink.MCPExecutionEvent) (agentlink.MCPEventReceipt, error) {
 	var receipt agentlink.MCPEventReceipt
 	err := c.Call(ctx, "pot_receiver_event", e, &receipt)

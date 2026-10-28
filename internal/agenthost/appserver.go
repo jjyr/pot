@@ -267,6 +267,9 @@ func (a *appTurn) approval(m rpcMessage) {
 	a.mu.Lock()
 	a.denied = true
 	a.approvalError = codexLocalReviewDiagnostic(m.Method, "unsupported_interaction")
+	if m.Method == "mcpServer/elicitation/request" {
+		a.approvalError += codexElicitationShape(m.Params, a.result.ThreadID, a.result.TurnID)
+	}
 	a.mu.Unlock()
 	switch m.Method {
 	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
@@ -291,6 +294,52 @@ func codexLocalReviewDiagnostic(method, reason string) string {
 		method = "unrecognized"
 	}
 	return "codex_approval_requires_local_review: " + method + ": " + reason
+}
+
+// Keep only known enum values and field presence/association. Neither a native
+// approval nor a server elicitation can be inferred from this method alone.
+func codexElicitationShape(raw json.RawMessage, thread, turn string) string {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return "; shape=invalid"
+	}
+	mode := func(value json.RawMessage) string {
+		if len(value) == 0 {
+			return "absent"
+		}
+		var name string
+		if json.Unmarshal(value, &name) != nil {
+			return "invalid"
+		}
+		switch name {
+		case "form", "openai/form", "openaiForm", "url":
+			return name
+		}
+		return "unrecognized"
+	}
+	association := func(key, expected string) string {
+		value, ok := fields[key]
+		if !ok {
+			return "absent"
+		}
+		if string(value) == "null" {
+			return "null"
+		}
+		var name string
+		if json.Unmarshal(value, &name) != nil {
+			return "invalid"
+		}
+		if expected == "" {
+			return "unbound"
+		}
+		if name == expected {
+			return "match"
+		}
+		return "mismatch"
+	}
+	var request map[string]json.RawMessage
+	_ = json.Unmarshal(fields["request"], &request)
+	return fmt.Sprintf("; mode=%s; request_mode=%s; thread=%s; turn=%s; schema_present=%t; request_present=%t; item_present=%t", mode(fields["mode"]), mode(request["mode"]), association("threadId", thread), association("turnId", turn), len(fields["requestedSchema"]) != 0, len(fields["request"]) != 0, len(fields["itemId"]) != 0)
 }
 
 func (a *appTurn) notification(m rpcMessage) {

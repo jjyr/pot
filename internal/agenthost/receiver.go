@@ -16,6 +16,7 @@ type receiverRemote interface {
 	Claim(context.Context, string, int) (receiverDelivery, error)
 	Ack(context.Context, agentlink.MCPDeliveryAck) error
 	Admit(context.Context, agentlink.MCPRunAdmission) error
+	InputReceipt(context.Context, agentlink.MCPInputReceipt) error
 	Event(context.Context, agentlink.MCPExecutionEvent) (agentlink.MCPEventReceipt, error)
 }
 

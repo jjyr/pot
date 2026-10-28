@@ -145,6 +145,7 @@ type MCPControlDelivery struct {
 	Binding    MCPRunBinding        `json:"binding" required:"true"`
 	Caller     protocol.AgentRef    `json:"caller" required:"true"`
 	Input      *MCPTaskInput        `json:"input,omitempty"`
+	InputPhase protocol.TaskPhase   `json:"input_phase,omitempty"`
 	Cancel     *MCPCancelInput      `json:"cancel,omitempty"`
 	Approval   *MCPApprovalDecision `json:"approval,omitempty"`
 }
@@ -163,6 +164,11 @@ func (d MCPControlDelivery) Validate() error {
 		if d.Input.TaskID != d.Dispatch.Task.AgentID || d.Input.RunID != d.Binding.RunID {
 			return ErrFenced
 		}
+		switch d.InputPhase {
+		case protocol.TaskQueued, protocol.TaskWaiting, protocol.TaskRunning, protocol.TaskWaitingApproval, protocol.TaskComplete, protocol.TaskFailed, protocol.TaskCancelled, protocol.TaskInterrupted, "unknown":
+		default:
+			return ErrInvalid
+		}
 	} else if d.Cancel != nil {
 		if err := d.Cancel.Validate(); err != nil {
 			return err
@@ -171,6 +177,25 @@ func (d MCPControlDelivery) Validate() error {
 			return ErrFenced
 		}
 	} else if d.Approval.Validate() != nil {
+		return ErrInvalid
+	}
+	if d.Input == nil && d.InputPhase != "" {
+		return ErrInvalid
+	}
+	return nil
+}
+
+// MCPInputReceipt records the mailbox disposition at a safe execution boundary.
+// Consumed binds the selected input to a durably admitted run; it does not claim
+// that the model ran or completed. Cancelled inputs never create a new run.
+type MCPInputReceipt struct {
+	Claim   MCPClaim      `json:"claim" required:"true"`
+	Binding MCPRunBinding `json:"binding" required:"true"`
+	State   string        `json:"state" required:"true"`
+}
+
+func (r MCPInputReceipt) Validate() error {
+	if r.Claim.Validate() != nil || r.Binding.Validate() != nil || r.Binding.Receiver != r.Claim.Binding.Receiver || (r.State != "consumed" && r.State != "cancelled") {
 		return ErrInvalid
 	}
 	return nil

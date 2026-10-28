@@ -158,7 +158,7 @@ func TestCLIExecutionStdioKeepsListenerRootAndRunBound(t *testing.T) {
 				}
 				defer session.Close()
 				tools, err := session.ListTools(ctx)
-				if err != nil || len(tools) != 1 || tools[0].Name != "pot_execution_context" {
+				if err != nil || len(tools) != 1 || tools[0].Name != "pot_execution_context" || tools[0].Annotations == nil || !tools[0].Annotations.ReadOnlyHint {
 					t.Fatal("Task gained extra tools", err)
 				}
 				result, err := session.CallTool(ctx, "pot_execution_context", json.RawMessage(`{}`))

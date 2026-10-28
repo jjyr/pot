@@ -235,8 +235,8 @@ func TestMCPMutationRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	current.State = "running"
-	if _, err := f.Input.Guidance(caller, current); !errors.Is(err, agentlink.ErrConflict) {
-		t.Fatalf("terminal input became live steering: %v", err)
+	if _, err := f.Input.Guidance(caller, current); err != nil {
+		t.Fatalf("active mailbox admission rejected: %v", err)
 	}
 	current.RunID = "new-run"
 	if _, err := f.Input.Guidance(caller, current); !errors.Is(err, agentlink.ErrFenced) {

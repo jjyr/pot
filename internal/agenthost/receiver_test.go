@@ -66,6 +66,14 @@ func (r *receiverFixtureRemote) Admit(_ context.Context, a agentlink.MCPRunAdmis
 	r.admissions[a.Claim.ClaimID] = a
 	return r.lost("admit")
 }
+func (r *receiverFixtureRemote) InputReceipt(_ context.Context, input agentlink.MCPInputReceipt) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if input.Validate() != nil {
+		return agentlink.ErrInvalid
+	}
+	return r.lost("input")
+}
 func (r *receiverFixtureRemote) Event(_ context.Context, e agentlink.MCPExecutionEvent) (agentlink.MCPEventReceipt, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -212,7 +220,7 @@ func receiverTerminalContinuationFixture(t *testing.T, retiredCount int) {
 	if err = p.backend.db.QueryRow("SELECT data FROM agent_adapter_jobs WHERE id=?", j.Task.ID).Scan(&previousRun); err != nil {
 		t.Fatal(err)
 	}
-	control := agentlink.MCPControlDelivery{Version: 1, DeliveryID: "input-delivery", Dispatch: d.Claim.Binding, Binding: old.Admission.Binding, Caller: d.Work.Request.From, Input: &agentlink.MCPTaskInput{RequestID: "follow-up", TaskID: d.Claim.Binding.Task.AgentID, RunID: old.Admission.Binding.RunID, Text: "continue fixture"}}
+	control := agentlink.MCPControlDelivery{Version: 1, DeliveryID: "input-delivery", Dispatch: d.Claim.Binding, Binding: old.Admission.Binding, Caller: d.Work.Request.From, InputPhase: protocol.TaskComplete, Input: &agentlink.MCPTaskInput{RequestID: "follow-up", TaskID: d.Claim.Binding.Task.AgentID, RunID: old.Admission.Binding.RunID, Text: "continue fixture"}}
 	claim := agentlink.MCPClaim{ConnectionID: p.identity.ConnectionID(), DeliveryID: control.DeliveryID, ClaimID: "input-claim", Binding: d.Claim.Binding}
 	next := receiverDelivery{Claim: &claim, Control: &control}
 	remote.queue = append(remote.queue, next)
@@ -244,19 +252,10 @@ func receiverTerminalContinuationFixture(t *testing.T, retiredCount int) {
 	if history != 1 {
 		t.Fatal(history)
 	}
-	// Same old-run input with a fresh delivery must fail the backend run CAS.
-	stale := control
-	stale.DeliveryID = "stale-input"
-	staleClaim := claim
-	staleClaim.DeliveryID = stale.DeliveryID
-	staleClaim.ClaimID = "stale-claim"
-	if err = p.accept(ctx, receiverDelivery{Claim: &staleClaim, Control: &stale}); err != nil {
-		t.Fatal(err)
-	}
-	r := receiverRecordFixture(t, p, receiverDelivery{Claim: &staleClaim})
-	if r.Ack.Accepted || r.Ack.Error == nil || r.Ack.Error.Code != agentlink.MCPFenced {
-		t.Fatal("stale input not durably rejected", r)
-	}
+	// A control accepted by the trusted queue may arrive after prior mailbox
+	// messages advanced the run. The gateway owns the original expected-run check;
+	// the receiver must preserve that acceptance and use the current run chain.
+
 }
 
 func TestReceiverCancelRecordsIntentAndUnknownCleanupCannotContinue(t *testing.T) {
@@ -386,15 +385,15 @@ func TestReceiverConcurrentAdmissionHasOneBackendReceipt(t *testing.T) {
 	}
 }
 
-func TestReceiverControlRejectsForeignCallerTaskRunAndLiveInput(t *testing.T) {
-	for _, kind := range []string{"caller", "task", "run", "live-input"} {
+func TestReceiverControlRejectsForeignCallerTaskAndRun(t *testing.T) {
+	for _, kind := range []string{"caller", "task", "run"} {
 		t.Run(kind, func(t *testing.T) {
 			p, _, d := receiverFixture(t)
 			ctx := context.Background()
 			receiverMustStep(t, p)
 			receiverMustStep(t, p)
 			old := receiverRecordFixture(t, p, d)
-			control := agentlink.MCPControlDelivery{Version: 1, DeliveryID: "bad-control", Dispatch: d.Claim.Binding, Binding: old.Admission.Binding, Caller: d.Work.Request.From, Input: &agentlink.MCPTaskInput{RequestID: "bad-input", TaskID: d.Claim.Binding.Task.AgentID, RunID: old.Admission.Binding.RunID, Text: "continue"}}
+			control := agentlink.MCPControlDelivery{Version: 1, DeliveryID: "bad-control", Dispatch: d.Claim.Binding, Binding: old.Admission.Binding, Caller: d.Work.Request.From, InputPhase: protocol.TaskComplete, Input: &agentlink.MCPTaskInput{RequestID: "bad-input", TaskID: d.Claim.Binding.Task.AgentID, RunID: old.Admission.Binding.RunID, Text: "continue"}}
 			switch kind {
 			case "caller":
 				control.Caller.AgentID = "foreign"

@@ -66,5 +66,11 @@ func (q *MCPAccessQueue) projectCatalogue(ctx context.Context, tx *sql.Tx, task 
 	if err == nil && !changed {
 		return agentlink.ErrFenced
 	}
+	if err == nil && result != nil && actor.Kind != "user" {
+		if err = taskExecutionNotificationTx(ctx, tx, q.NodeID, record); err != nil {
+			return err
+		}
+		return q.Tasks.NotifyExecutionTx(ctx, tx, record.AssistantID, record.Info.ID, binding.RunID)
+	}
 	return err
 }

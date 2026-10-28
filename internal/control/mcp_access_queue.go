@@ -327,16 +327,10 @@ func (q *MCPAccessQueue) Control(ctx context.Context, c agentlink.MCPCaller, inp
 		if !registration.Capabilities.Supports(op) {
 			return agentlink.ErrUnsupported
 		}
-		// A pending continuation fences another new control until real admission.
-		var pending int
-		e = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mcp_service_deliveries WHERE task_id=? AND control!='' AND admission='' AND (ack='' OR json_extract(ack,'$.accepted')=1) AND json_type(control,'$.input') IS NOT NULL`, id).Scan(&pending)
-		if e != nil {
-			return e
-		}
-		if pending != 0 {
-			return agentlink.ErrConflict
-		}
 		d := agentlink.MCPControlDelivery{Version: agentlink.MCPContractVersion, DeliveryID: rand.Text(), Dispatch: agentlink.MCPDispatchBinding{Task: protocol.AgentRef{NodeID: q.NodeID, Kind: "task", AgentID: id}, Receiver: t.Receiver.Address}, Binding: *binding, Caller: c.Actor(), Input: input, Cancel: cancel}
+		if input != nil {
+			d.InputPhase = protocol.TaskPhase(t.State)
+		}
 		if e = d.Validate(); e != nil {
 			return e
 		}
@@ -570,6 +564,13 @@ func (q *MCPAccessQueue) Admit(ctx context.Context, r agentlink.MCPReceiver, a a
 			}
 			return nil
 		}
+		var disposition string
+		if e = tx.QueryRowContext(ctx, "SELECT input_receipt FROM mcp_service_deliveries WHERE id=?", a.Claim.DeliveryID).Scan(&disposition); e != nil {
+			return e
+		}
+		if disposition != "" {
+			return agentlink.ErrFenced
+		}
 		var execution, taskRaw string
 		e = tx.QueryRowContext(ctx, "SELECT execution,task FROM mcp_service_tasks WHERE id=?", a.Claim.Binding.Task.AgentID).Scan(&execution, &taskRaw)
 		if e != nil {
@@ -588,7 +589,23 @@ func (q *MCPAccessQueue) Admit(ctx context.Context, r agentlink.MCPReceiver, a a
 			if e = mcpRead(execution, previous); e != nil {
 				return e
 			}
-			if *previous != control.Binding {
+			// The input's old run was checked when it entered the mailbox. Earlier
+			// accepted messages may since have advanced the same execution Task.
+			if previous.Task != control.Binding.Task || previous.Receiver != control.Binding.Receiver {
+				return agentlink.ErrFenced
+			}
+			var earlier int
+			if e = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mcp_service_deliveries WHERE task_id=? AND rowid<(SELECT rowid FROM mcp_service_deliveries WHERE id=?) AND control!='' AND json_type(control,'$.input')='object' AND admission='' AND (ack='' OR json_extract(ack,'$.accepted')=1) AND COALESCE(json_extract(NULLIF(input_receipt,''),'$.state'),'')!='cancelled'`, a.Claim.Binding.Task.AgentID, a.Claim.DeliveryID).Scan(&earlier); e != nil {
+				return e
+			}
+			if earlier != 0 {
+				return agentlink.ErrFenced
+			}
+			var current agentlink.Task
+			if e = mcpRead(taskRaw, &current); e != nil {
+				return e
+			}
+			if !terminalLinkTask(current.State) || current.State == "unknown" || current.State == "cancelled" && (control.Binding.RunID != previous.RunID || control.InputPhase.Scope() == "active") {
 				return agentlink.ErrFenced
 			}
 		}
@@ -610,7 +627,7 @@ func (q *MCPAccessQueue) Admit(ctx context.Context, r agentlink.MCPReceiver, a a
 		if e = q.projectCatalogue(ctx, tx, t, a.Binding, a.PreviousRunID, nil); e != nil {
 			return e
 		}
-		_, e = tx.ExecContext(ctx, "UPDATE mcp_service_tasks SET execution=?,current_claim=?,task=? WHERE id=?", mcpJSON(a.Binding), a.Claim.ClaimID, mcpJSON(t), t.ID)
+		_, e = tx.ExecContext(ctx, "UPDATE mcp_service_tasks SET execution=?,current_claim=?,task=?,cancel_requested=0 WHERE id=?", mcpJSON(a.Binding), a.Claim.ClaimID, mcpJSON(t), t.ID)
 		if e != nil {
 			return e
 		}

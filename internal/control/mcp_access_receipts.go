@@ -13,10 +13,12 @@ type MCPAccessReceiptInput struct {
 	RequestID string              `json:"request_id" required:"true"`
 }
 type MCPAccessReceipt struct {
-	State      string                    `json:"state"`
-	Acceptance *MCPTaskAcceptance        `json:"acceptance,omitempty"`
-	Ack        *agentlink.MCPDeliveryAck `json:"ack,omitempty"`
-	Error      *agentlink.MCPError       `json:"error,omitempty"`
+	InputState string                     `json:"input_state,omitempty"`
+	State      string                     `json:"state"`
+	Acceptance *MCPTaskAcceptance         `json:"acceptance,omitempty"`
+	Ack        *agentlink.MCPDeliveryAck  `json:"ack,omitempty"`
+	Input      *agentlink.MCPInputReceipt `json:"input,omitempty"`
+	Error      *agentlink.MCPError        `json:"error,omitempty"`
 }
 
 // mutationReceipt reads a single owned business mutation, never a generic
@@ -50,6 +52,23 @@ func (a *MCPAccess) mutationReceipt(ctx context.Context, c agentlink.MCPCaller, 
 		if ack != "" {
 			result.Ack = &agentlink.MCPDeliveryAck{}
 			err = mcpRead(ack, result.Ack)
+		}
+		if err == nil && input.Operation == agentlink.TaskInput {
+			var disposition string
+			err = a.options.Queue.DB.QueryRowContext(ctx, `SELECT input_receipt FROM mcp_service_deliveries WHERE task_id=? AND control!='' AND json_extract(control,'$.input.request_id')=?`, result.Acceptance.Task.ID, input.RequestID).Scan(&disposition)
+			if err == nil && disposition != "" {
+				result.Input = &agentlink.MCPInputReceipt{}
+				err = mcpRead(disposition, result.Input)
+			}
+		}
+		if err == nil && input.Operation == agentlink.TaskInput {
+			result.InputState = "pending"
+			if result.Ack != nil && !result.Ack.Accepted {
+				result.InputState = "rejected"
+			}
+			if result.Input != nil {
+				result.InputState = result.Input.State
+			}
 		}
 		return
 	}

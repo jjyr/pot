@@ -382,6 +382,17 @@ func (a *MCPAccess) tools() {
 		}
 		return input, a.options.Queue.Admit(ctx, receiver, input)
 	})
+	a.tool("pot_receiver_input_receipt", mcpContractSchema(agentlink.MCPInputReceipt{}), func(ctx context.Context, r *mcp.CallToolRequest, raw json.RawMessage) (any, error) {
+		receiver, e := mcpReceiver(r)
+		if e != nil {
+			return nil, e
+		}
+		var input agentlink.MCPInputReceipt
+		if e = agentlink.DecodeMCPContract(raw, &input); e != nil {
+			return nil, e
+		}
+		return input, a.options.Queue.InputReceipt(ctx, receiver, input)
+	})
 	a.tool("pot_receiver_event", mcpContractSchema(agentlink.MCPExecutionEvent{}), func(ctx context.Context, r *mcp.CallToolRequest, raw json.RawMessage) (any, error) {
 		receiver, e := mcpReceiver(r)
 		if e != nil {
