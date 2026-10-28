@@ -42,23 +42,27 @@ func TestAntigravityPolicyKeepsNativePermissionsAndReadOnlyScope(t *testing.T) {
 	}{
 		{"ordinary shell", "", "", "", "read-only", "run_command", "", "", "allow"},
 		{"ordinary remote", "", "", "", "read-only", "call_mcp_tool", "pot", "pot_send", "allow"},
-		{"ordinary context", "", "", "", "read-only", "call_mcp_tool", "pot_receiver", "pot_execution_context", "allow"},
+		{"ordinary context", "", "", "", "read-only", "call_mcp_tool", "pot-receiver_pot_receiver", "pot_execution_context", "allow"},
 		{"read file", "task", "run", "", "read-only", "view_file", "", "", "allow"},
 		{"shell denied", "task", "run", "", "read-only", "run_command", "", "", "deny"},
 		{"write denied", "task", "run", "", "read-only", "write_to_file", "", "", "deny"},
 		{"subagent denied", "task", "run", "", "read-only", "invoke_subagent", "", "", "deny"},
-		{"bound context", "task", "run", "", "read-only", "call_mcp_tool", "pot_receiver", "pot_execution_context", "allow"},
-		{"missing run", "task", "", "", "read-only", "call_mcp_tool", "pot_receiver", "pot_execution_context", "deny"},
+		{"bound context", "task", "run", "", "read-only", "call_mcp_tool", "pot-receiver_pot_receiver", "pot_execution_context", "allow"},
+		{"missing run", "task", "", "", "read-only", "call_mcp_tool", "pot-receiver_pot_receiver", "pot_execution_context", "deny"},
+		{"unqualified receiver denied", "task", "run", "", "read-only", "call_mcp_tool", "pot_receiver", "pot_execution_context", "deny"},
+		{"foreign receiver prefix denied", "task", "run", "", "read-only", "call_mcp_tool", "other_pot_receiver", "pot_execution_context", "deny"},
+		{"legacy context denied", "task", "run", "", "read-only", "call_mcp_tool", "pot_pot", "pot_execution_context", "deny"},
+		{"assistant unqualified receiver denied", "task", "run", "assistant", "read-only", "call_mcp_tool", "pot_receiver", "pot_message", "deny"},
 		{"wrong server", "task", "run", "", "read-only", "call_mcp_tool", "other", "pot_execution_context", "deny"},
-		{"unknown context tool", "task", "run", "", "read-only", "call_mcp_tool", "pot_receiver", "pot_send", "deny"},
-		{"worker reverse denied", "task", "run", "", "read-only", "call_mcp_tool", "pot_receiver", "pot_message", "deny"},
-		{"assistant reverse policy", "task", "run", "assistant", "read-only", "call_mcp_tool", "pot_receiver", "pot_message", "allow"},
+		{"unknown context tool", "task", "run", "", "read-only", "call_mcp_tool", "pot-receiver_pot_receiver", "pot_send", "deny"},
+		{"worker reverse denied", "task", "run", "", "read-only", "call_mcp_tool", "pot-receiver_pot_receiver", "pot_message", "deny"},
+		{"assistant reverse policy", "task", "run", "assistant", "read-only", "call_mcp_tool", "pot-receiver_pot_receiver", "pot_message", "allow"},
 		{"legacy pot denied", "task", "run", "", "read-only", "call_mcp_tool", "pot", "pot_send", "deny"},
 		{"legacy prefixed pot denied", "task", "run", "", "read-only", "call_mcp_tool", "pot_pot", "pot_send", "deny"},
 		{"assistant legacy denied", "task", "run", "assistant", "read-only", "call_mcp_tool", "pot", "pot_send", "deny"},
 		{"workspace remote policy", "task", "run", "", "workspace-write", "call_mcp_tool", "other", "user_tool", "allow"},
 		{"workspace legacy policy", "task", "run", "", "workspace-write", "call_mcp_tool", "pot", "pot_send", "allow"},
-		{"workspace context policy", "task", "run", "", "workspace-write", "call_mcp_tool", "pot_receiver", "pot_execution_context", "allow"},
+		{"workspace context policy", "task", "run", "", "workspace-write", "call_mcp_tool", "pot-receiver_pot_receiver", "pot_execution_context", "allow"},
 		{"workspace shell policy", "task", "run", "", "workspace-write", "run_command", "", "", "allow"},
 	}
 	for _, tc := range cases {
@@ -67,7 +71,7 @@ func TestAntigravityPolicyKeepsNativePermissionsAndReadOnlyScope(t *testing.T) {
 			t.Setenv("POT_AGENT_RUN_ID", tc.run)
 			t.Setenv("POT_AGENT_ASSISTANT_ID", tc.assistant)
 			t.Setenv("POT_AGENT_MODE", tc.mode)
-			payload, err := json.Marshal(map[string]any{"toolCall": map[string]any{"name": tc.tool, "args": map[string]string{"ServerName": tc.server, "ToolName": tc.remoteTool}}})
+			payload, err := json.Marshal(map[string]any{"toolCall": map[string]any{"name": tc.tool, "args": map[string]any{"ServerName": tc.server, "ToolName": tc.remoteTool, "Arguments": map[string]any{}}}})
 			if err != nil {
 				t.Fatal(err)
 			}

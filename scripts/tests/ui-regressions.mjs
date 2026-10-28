@@ -47,6 +47,7 @@ else {
       else if(name==='composer-enter')result=await contract('pot-ui-mobile-enter-browser.js',null,{browser,origin:server.origin,base:server.origin+'/web/src'});
       else result=await isolatedPage(browser,server.origin,async page=>{
         if(name==='machines')return contract('pot-ui-machines-browser.js',page,{origin:server.origin});
+        if(name==='topology-status')return contract('pot-ui-topology-status-browser.js',page,{origin:server.origin});
         if(/^(assistant-start|settings|composer|usage)-/.test(name)||name==='linked-approvals'||name==='patch-approvals')return focused(page,name,server.origin);
         if(name==='controller')return contract('pot-ui-conversation-controller-browser.js',page,{origin:server.origin});
         if(fixtures[name]){const result=await fixture(page,server.origin,name,fixtures[name]);if(name==='cached-loading.html')return {...result,firstCacheReturn:await page.evaluate(()=>window.cachedFirstReturnEvidence),cacheReturn:await page.evaluate(()=>window.cachedScopeReturnEvidence)};return name==='chat-cache-ui.html'?{...result,readiness:await page.evaluate(()=>window.cacheViewportEvidence)}:result;}

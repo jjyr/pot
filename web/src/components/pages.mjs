@@ -75,14 +75,14 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
   const list = value => Array.isArray(value) ? value : value?.items || [];
   function captureView(){if(!editor&&viewReady&&currentViewKey&&host.offsetParent)cached.set(currentViewKey,{scroll:host.scrollTop,reading:taskView?.ui.position(),expanded:[...host.querySelectorAll('details[data-cache-key][open]')].map(node=>node.dataset.cacheKey),scrolls:[...host.querySelectorAll('[data-scroll-key]')].map(node=>({key:node.dataset.scrollKey,top:node.scrollTop,left:node.scrollLeft}))});}
   function restoreView(key,token){currentViewKey=key;viewReady=true;requestAnimationFrame(()=>{if(!gate.current(token)||key!==currentViewKey)return;const value=cached.get(key);if(!value){host.scrollTop=0;taskView?.ui.start();return;}host.scrollTop=value.scroll;for(const node of host.querySelectorAll('details[data-cache-key]'))if(node.dataset.cacheKey!=='keyboard-shortcuts')node.open=value.expanded.includes(node.dataset.cacheKey);for(const node of host.querySelectorAll('[data-scroll-key]')){const saved=value.scrolls?.find(item=>item.key===node.dataset.scrollKey);if(saved){node.scrollTop=saved.top;node.scrollLeft=saved.left;}}taskView?.ui.restore(value.reading);});}
-  async function across(path, token, {spaceID='all', paginate=false,perAssistant=false,ownerID='',errorTarget=null}={}) {
+  async function across(path, token, {spaceID='all', paginate=false,perAssistant=false,ownerID='',errorTarget=null,authoritative=false}={}) {
     const spaces=(client.spaces||[]).filter(space=>spaceID==='all'||space.id===spaceID);
     if(!spaces.length)throw Error(tr('Space is unavailable.','Space 不可用。'));
     const targets=spaces.flatMap(space=>perAssistant?(client.assistants||[]).filter(item=>supportsCapability(item,'assistant.usage')&&item.space_id===space.id).map(item=>({space,owner:item.id})):[{space,owner:ownerID}]);
     const results=await Promise.allSettled(targets.map(async({space,owner})=>{
       try {
         const shared=paginate&&client.resources;
-        const options={owner,space:space.id,signal:shared?undefined:token.signal};
+        const options={owner,space:space.id,signal:shared?undefined:token.signal,authoritative};
         const readPage=paginate?(client.transport||request):read;
         const readPages=async()=>{
           let value=await readPage(path,options);
@@ -1120,27 +1120,27 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
   async function machines(root,token) {
     const t=key=>translate(locale(),key);root.classList.add('topology-page');
     const toolbar=n('div','topology-toolbar'),connectionRoot=n('div','topology-connection'),storage=n('div','topology-machine-storage'),rows=n('div'),entries=new Map(),linkNotice=n('p','inline-error');storage.hidden=true;storage.append(rows);connectionRoot.className='agent-links-container';toolbar.append(connectionRoot);root.append(toolbar,linkNotice,storage);
-    let model,view,currentNode=null,currentEdgeID='';
+    let model,view,currentNode=null,currentEdgeID='',updatingTopology=false;
     const timestamp=value=>value?new Date(value).toLocaleString(locale()):t('topology.activity.unknown');
-    function showActivity(node){
+    function showActivity(node,destination){
       const observation=node.observation;
       if(!observation)return;
-      const section=n('section','topology-activity');
+      const section=n('section','topology-activity');section.dataset.viewKey='activity';
       section.append(n('h3','section-heading',t('topology.workload')));
       if(observation.value){const counts=n('p','topology-workload-counts',t('topology.taskLoad').replace('{running}',String(observation.counts.running)).replace('{queued}',String(observation.counts.queued)));section.append(counts,n('p','hint',t('topology.waitingTasks').replace('{approval}',String(observation.counts.waiting_approval)).replace('{allowance}',String(observation.counts.waiting_allowance))));}
       if(!observation.fresh)section.append(n('p','hint',t('topology.issue.stale')));
       if(node.issue&&node.issue!=='stale'){const notice=n('p','topology-issue-notice',t('topology.issueDetail.'+node.issue));section.append(notice);}
       section.append(n('p','hint',t('topology.sampleTime').replace('{time}',timestamp(observation.observedAt))),n('p','hint',t('topology.workloadScope')));
-      view.inspector.append(section);
+      destination.append(section);
     }
-    function showQueues(link,fromName,toName){
-      const section=n('section','topology-queues');section.append(n('h3','section-heading',t('topology.messageQueues')));
+    function showQueues(link,fromName,toName,destination){
+      const section=n('section','topology-queues');section.dataset.viewKey='queues';section.append(n('h3','section-heading',t('topology.messageQueues')));
       for(const [from,to,queue,stale]of [[fromName,toName,link.outbox,false],[toName,fromName,link.observation?.value?.outbox,link.status!=='connected'||!!link.observation?.error||Date.now()-(link.observation?.observed_at_ms||0)>=30000]]){
         const row=n('div','topology-queue-row');row.append(n('p','',t('topology.queueDirection').replace('{from}',from).replace('{to}',to).replace('{count}',queue?String(queue.pending):t('topology.activity.unknown'))));
         if(queue?.pending>0)row.append(n('p','hint',t('topology.oldestQueued').replace('{time}',timestamp(queue.oldest_at_ms))));
         if(stale)row.append(n('p','hint',t('topology.cachedQueue')));section.append(row);
       }
-      section.append(n('p','hint',t('topology.lastExchange').replace('{time}',timestamp(link.last_exchange_at_ms))),n('p','hint',t('topology.receiptMeaning')));view.inspector.append(section);
+      section.append(n('p','hint',t('topology.lastExchange').replace('{time}',timestamp(link.last_exchange_at_ms))),n('p','hint',t('topology.receiptMeaning')));destination.append(section);
     }
     const data={inventory:[],permissionPages:[],permissionsPending:true,linkPages:[]};
     agentOwnerSpace=client.spaces.some(space=>space.id===agentOwnerSpace)?agentOwnerSpace:scope().space||client.spaces[0]?.id;
@@ -1148,84 +1148,122 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     const edit=({title,initial,fields,save,scope:captured,submitLabel})=>renderEditor(title,initial,fields,save,{capturedScope:captured,submitLabel});
     if(client.spaces.length>1){const owner=field(t('agentLinks.selectControl'),agentOwnerSpace,{choices:client.spaces.map(space=>[space.id,space.name||t('machine.unavailable')])});connectionRoot.append(owner.row);owner.input.onchange=()=>{agentOwnerSpace=owner.input.value;connections.load();};}
     const connections=createAgentLinks({root:connectionRoot,request,resources:client.resources,locale,notify,scope:selectedScope,edit,signal:token.signal,onConnected:async result=>{const id=result?.id||result?.link?.id;if(id){const peer=result.peer||result.link?.peer;const identity=peer?.address?{id:peer.address.agent_id,node_id:peer.address.node_id,kind:peer.adapter}:peer;const owned=identity?.kind==='pot'&&client.spaces.find(space=>space.control_id===identity.node_id);topologySelection=owned?'control:'+owned.id:agentNodeID(identity);}await pageView?.queue.run();}});
-    function related(node){const section=n('div','topology-related');section.append(n('p','hint',t('topology.related')));for(const edge of model.edges.filter(item=>item.from===node.id||item.to===node.id)){const a=model.nodes.find(item=>item.id===edge.from),b=model.nodes.find(item=>item.id===edge.to);section.append(action(a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name,()=>showEdge(edge)));}return section;}
-    function preserveInspectorFocus(){
-      const active=document.activeElement,nodeID=active?.closest('[data-node-id]')?.dataset.nodeId,edgeID=active?.closest('[data-edge-id]')?.dataset.edgeId;
-      const focused=view.inspector.contains(document.activeElement)?document.activeElement:null;
-      const label=focused?.getAttribute('aria-label'),text=focused?.textContent;
-      return ()=>{if(nodeID||edgeID){const target=[...root.querySelectorAll('[data-node-id],[data-edge-id]')].find(node=>nodeID?node.dataset.nodeId===nodeID:node.dataset.edgeId===edgeID);target?.focus({preventScroll:true});return;}if(!focused)return;const target=focused.isConnected&&view.inspector.contains(focused)?focused:[...view.inspector.querySelectorAll('button,summary')].find(node=>label?node.getAttribute('aria-label')===label:node.textContent===text);if(target&&document.activeElement!==target)target.focus({preventScroll:true});};
+    function related(node){
+      const section=n('div','topology-related');section.dataset.viewKey='related';section.append(n('p','hint',t('topology.related')));
+      for(const edge of model.edges.filter(item=>item.from===node.id||item.to===node.id)){
+        const a=model.nodes.find(item=>item.id===edge.from),b=model.nodes.find(item=>item.id===edge.to),button=action(a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name,()=>showEdge(edge));
+        button.dataset.viewKey=edge.id;section.append(button);
+      }return section;
     }
-    function keepMachine(){for(const card of view.inspector.querySelectorAll('.machine-card'))rows.append(card);}
-    function showNode(node){if(!node)return;currentEdgeID='';const restore=currentNode?.id===node.id?preserveInspectorFocus():()=>{};currentNode=node;topologySelection=node.id;keepMachine();view.inspector.replaceChildren();
-      if(node.kind==='machine'){const entry=entries.get(JSON.stringify([node.space,node.identity]));if(entry){entry.renderPermissions?.();view.inspector.append(entry.element);}}
-      else {
-        const paused=node.link?.state==='disconnected'||node.link?.status==='disconnected';
-        view.inspector.append(view.brand(node),n('p','hint',t('topology.kind.'+node.kind)),n('h2','',node.name));
-        if(node.subtitle)view.inspector.append(n('p','hint topology-host',node.subtitle));
-        view.inspector.append(n('p',node.status==='connected'?'success-text':'hint',t(paused?'agentLinks.disconnected':node.status==='stale'?'topology.status.stale':'agentLinks.status.'+(node.status==='connected'?'connected':node.status==='connecting'?'connecting':'offline'))),n('p','hint',t(paused?'agentLinks.disconnectedDescription':'topology.messageScope')));
-        showActivity(node);
-        const assistants=node.link?.assistants||node.link?.directory?.targets?.filter(item=>item.address?.kind==='assistant')||(!node.link?(client.assistants||[]).filter(item=>!item.origin&&item.space_id===node.space):[]),directory=n('section','topology-assistants');
-        directory.append(n('h3','section-heading',t('agentLinks.providedAssistants')));
-        if(!assistants.length)directory.append(n('p','hint',t('agentLinks.noAssistants')));
-        for(const assistant of assistants){
-          const remoteID=assistant.address?.agent_id||assistant.id,id=node.link?'agent-link:'+node.link.id+':'+remoteID:assistant.id;
-          const open=action('',()=>openChat({space:node.space,owner:id}));open.className='control topology-assistant';
-          open.append(avatar(24,assistant.avatar),n('span','topology-assistant-name',assistant.name||remoteID));
-          const activity=node.activities?.get(remoteID),state=node.observation?.fresh?assistantActivityState(activity):'unknown';
-          open.append(n('span','topology-assistant-state state-'+state,t('topology.activity.'+state)));
-          if(remoteID===(node.link?.default_assistant_id||node.link?.directory?.default_target?.agent_id))open.append(n('span','hint',t('agentLinks.defaultAssistant')));
-          if(node.link&&!assistant.capabilities?.operations?.includes('chat.read'))open.disabled=true;
-          open.setAttribute('aria-label',t('agentLinks.openChat')+' · '+(assistant.name||remoteID));directory.append(open);
-        }
-        if(node.link?.directory?.targets?.some(item=>item.capabilities?.operations?.includes('assistant.management'))){
-          directory.append(action(t('agentLinks.manageAssistants'),()=>linkedAssistantEditor(node.link.id,node.space,'',linkDisplayName(node.link),node.link.peer?.kind)));
-          for(const assistant of assistants)directory.append(action(t('agentLinks.editExecution')+' · '+assistant.name,()=>linkedAssistantEditor(node.link.id,node.space,assistant.address?.agent_id||assistant.id,linkDisplayName(node.link),node.link.peer?.kind)));
-        }
-        view.inspector.append(directory);
-        if(node.link?.transport==='mcp'){
-          const local=model.nodes.find(item=>item.self&&item.space===node.space);showQueues(node.link,local?.name||'',node.name);
-          if(node.link.last_error==='agent_link_reconnect_required')view.inspector.append(n('p','hint',t('agentLinks.reconnectRequired')));
-          const link={...node.link,_space:node.space},actions=n('div','topology-link-actions');
-          if(!link.inbound)actions.append(action(t(paused?'potMCP.reconnect':'potMCP.disconnect'),()=>{(paused?connections.reconnect(link):connections.disconnect(link)).catch(()=>{});}));actions.append(action(t('potMCP.revoke'),()=>connections.remove(link),{danger:true}));view.inspector.append(actions);
-        }
+    function keepMachine(keep){for(const card of view.inspector.querySelectorAll('.machine-card'))if(card!==keep)rows.append(card);}
+    // Navigation may replace an inspector; refreshing the same identity patches
+    // its committed controls and handlers without detaching them.
+    function inspectorProjection(identity){
+      keepMachine();
+      if(view.inspector.dataset.identity!==identity)view.inspector.replaceChildren();
+      const projection=view.inspector.cloneNode(false);projection.dataset.identity=identity;return projection;
+    }
+    function showNode(node){
+      if(!node)return;
+      currentEdgeID='';currentNode=node;topologySelection=node.id;
+      if(node.kind==='machine'){
+        const entry=entries.get(JSON.stringify([node.space,node.identity]));keepMachine(entry?.element);
+        if(!entry){view.inspector.replaceChildren();return;}
+        if(entry.element.parentNode!==view.inspector)view.inspector.replaceChildren(entry.element);
+        view.inspector.dataset.identity='node:'+node.id;entry.renderPermissions?.();
+        const next=related(node),previous=view.inspector.querySelector(':scope > .topology-related');
+        if(previous)reconcile(previous,next);else view.inspector.append(next);
+        return;
       }
-      view.inspector.append(related(node));restore();
+      const projection=inspectorProjection('node:'+node.id),paused=node.link?.state==='disconnected'||node.link?.status==='disconnected';
+      projection.append(view.brand(node),n('p','hint',t('topology.kind.'+node.kind)),n('h2','',node.name));
+      if(node.subtitle)projection.append(n('p','hint topology-host',node.subtitle));
+      projection.append(n('p',node.status==='connected'?'success-text':'hint',t(paused?'agentLinks.disconnected':node.status==='stale'?'topology.status.stale':'agentLinks.status.'+(node.status==='connected'?'connected':node.status==='connecting'?'connecting':'offline'))),n('p','hint',t(paused?'agentLinks.disconnectedDescription':'topology.messageScope')));
+      showActivity(node,projection);
+      const assistants=node.link?.assistants||node.link?.directory?.targets?.filter(item=>item.address?.kind==='assistant')||(!node.link?(client.assistants||[]).filter(item=>!item.origin&&item.space_id===node.space):[]),directory=n('section','topology-assistants');
+      directory.dataset.viewKey='assistants';directory.append(n('h3','section-heading',t('agentLinks.providedAssistants')));
+      if(!assistants.length)directory.append(n('p','hint',t('agentLinks.noAssistants')));
+      for(const assistant of assistants){
+        const remoteID=assistant.address?.agent_id||assistant.id,id=node.link?'agent-link:'+node.link.id+':'+remoteID:assistant.id;
+        const open=action('',()=>openChat({space:node.space,owner:id}));open.className='control topology-assistant';open.dataset.viewKey=JSON.stringify([node.space,id]);
+        open.append(avatar(24,assistant.avatar),n('span','topology-assistant-name',assistant.name||remoteID));
+        const activity=node.activities?.get(remoteID),state=node.observation?.fresh?assistantActivityState(activity):'unknown';
+        open.append(n('span','topology-assistant-state state-'+state,t('topology.activity.'+state)));
+        if(remoteID===(node.link?.default_assistant_id||node.link?.directory?.default_target?.agent_id))open.append(n('span','hint',t('agentLinks.defaultAssistant')));
+        if(node.link&&!assistant.capabilities?.operations?.includes('chat.read'))open.disabled=true;
+        open.setAttribute('aria-label',t('agentLinks.openChat')+' · '+(assistant.name||remoteID));directory.append(open);
+      }
+      if(node.link?.directory?.targets?.some(item=>item.capabilities?.operations?.includes('assistant.management'))){
+        const manage=action(t('agentLinks.manageAssistants'),()=>linkedAssistantEditor(node.link.id,node.space,'',linkDisplayName(node.link),node.link.peer?.kind));manage.dataset.viewKey='manage';directory.append(manage);
+        for(const assistant of assistants){const id=assistant.address?.agent_id||assistant.id,edit=action(t('agentLinks.editExecution')+' · '+assistant.name,()=>linkedAssistantEditor(node.link.id,node.space,id,linkDisplayName(node.link),node.link.peer?.kind));edit.dataset.viewKey='edit:'+JSON.stringify([node.space,id]);directory.append(edit);}
+      }
+      projection.append(directory);
+      if(node.link?.transport==='mcp'){
+        const local=model.nodes.find(item=>item.self&&item.space===node.space);showQueues(node.link,local?.name||'',node.name,projection);
+        if(node.link.last_error==='agent_link_reconnect_required')projection.append(n('p','hint',t('agentLinks.reconnectRequired')));
+        const link={...node.link,_space:node.space},actions=n('div','topology-link-actions');actions.dataset.viewKey='connection-actions';
+        if(!link.inbound){const toggle=action(t(paused?'potMCP.reconnect':'potMCP.disconnect'),()=>{(paused?connections.reconnect(link):connections.disconnect(link)).catch(()=>{});});toggle.dataset.viewKey='toggle';actions.append(toggle);}
+        const revoke=action(t('potMCP.revoke'),()=>connections.remove(link),{danger:true});revoke.dataset.viewKey='revoke';actions.append(revoke);projection.append(actions);
+      }
+      projection.append(related(node));reconcile(view.inspector,projection);
     }
-    function showEdge(edge){currentEdgeID=edge.id;keepMachine();view.inspector.replaceChildren();const a=model.nodes.find(node=>node.id===edge.from),b=model.nodes.find(node=>node.id===edge.to);view.inspector.append(n('p','hint',t(edge.kind==='agent'?'topology.agentLegend':'topology.machineLegend')),n('h2','',a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name),n('p','hint',t(edge.kind==='agent'?'topology.messageScope':'topology.executionScope')),action(t('topology.viewSource'),()=>view.select(a.id)),action(t('topology.viewTarget'),()=>view.select(b.id)));if(edge.kind==='agent')showQueues(edge.link,a.name,b.name);}
-    view=createTopology({root,locale,initialSelection:topologySelection,onSelect:showNode,onEdge:showEdge,signal:token.signal});
-    let needsPermissions=true,freshnessTicks=0;
-    const redrawTopology=()=>{if(!data.inventory.length)return;const restore=preserveInspectorFocus(),edgeSelection=currentEdgeID,items=data.inventory.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner));model=projectTopology(client.spaces,items,data.linkPages);view.update(model);if(edgeSelection){const edge=model.edges.find(item=>item.id===edgeSelection);if(edge)showEdge(edge);}restore();};
+    function showEdge(edge){
+      currentEdgeID=edge.id;
+      const projection=inspectorProjection('edge:'+edge.id),a=model.nodes.find(node=>node.id===edge.from),b=model.nodes.find(node=>node.id===edge.to);
+      const source=action(t('topology.viewSource'),()=>view.select(a.id)),target=action(t('topology.viewTarget'),()=>view.select(b.id));source.dataset.viewKey='source';target.dataset.viewKey='target';
+      projection.append(n('p','hint',t(edge.kind==='agent'?'topology.agentLegend':'topology.machineLegend')),n('h2','',a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name),n('p','hint',t(edge.kind==='agent'?'topology.messageScope':'topology.executionScope')),source,target);
+      if(edge.kind==='agent')showQueues(edge.link,a.name,b.name,projection);
+      reconcile(view.inspector,projection);
+    }
+    // Drawing the graph must not briefly replace a selected edge's inspector
+    // with the previously selected node before restoring the edge.
+    function updateTopology(){
+      const edgeID=currentEdgeID;updatingTopology=true;
+      try{view.update(model);}finally{updatingTopology=false;}
+      if(edgeID){const edge=model.edges.find(item=>item.id===edgeID);if(edge)showEdge(edge);else{currentEdgeID='';view.select(model.nodes.find(item=>item.id===currentNode?.id)?.id||model.nodes[0]?.id);}}
+    }
+    view=createTopology({root,locale,initialSelection:topologySelection,onSelect:node=>{if(!updatingTopology||!currentEdgeID)showNode(node);},onEdge:showEdge,signal:token.signal});
+    let needsPermissions=true,needsLinks=false,freshnessTicks=0;
+    const redrawTopology=()=>{if(!data.inventory.length)return;const items=data.inventory.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner));model=projectTopology(client.spaces,items,data.linkPages);updateTopology();};
     const freshnessTimer=setInterval(()=>{if(!document.hidden&&gate.current(token)&&!editor){redrawTopology();if(++freshnessTicks%3===0)pageView?.queue.run();}},10000);
     token.signal.addEventListener('abort',()=>clearInterval(freshnessTimer),{once:true});
     const update=async({inventory,permissionPages,permissionsPending,linkPages})=>{
       if(!gate.current(token)||disposed)return;
-      const restore=preserveInspectorFocus(),items=inventory.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner));
-      keyedRows(rows,entries,items,{key:machine=>JSON.stringify([machine._space_id,machine.runtime_id||machine.id]),create:()=>{
+      const items=inventory.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner));
+      // Selected cards live in the inspector, others in hidden storage. Updating
+      // the registry must not move a live input through that hidden container.
+      const retained=new Set();
+      for(const machine of items){
+        const identity=JSON.stringify([machine._space_id,machine.runtime_id||machine.id]);retained.add(identity);let entry=entries.get(identity);
+        if(!entry){entry=(()=>{
         const element=n('section','page-card machine-card'),header=n('div','machine-header'),mark=n('span','machine-icon'),name=n('span','machine-name'),status=n('span'),tags=n('p','hint machine-tags'),location=n('p','hint machine-location'),addresses=n('p','hint machine-addresses'),permissions=n('div','machine-permissions');mark.append(icon('machines'));header.append(mark,name,status);element.append(location,header,addresses,tags,permissions);return {element,name,status,tags,location,addresses,permissions};
-      },update:(entry,machine)=>{
+        })();entries.set(identity,entry);rows.append(entry.element);}
         const id=machine.runtime_id||machine.id,permissionPage=permissionPages.find(page=>page.space.id===machine._space_id),policy=permissionPage?.value.policy;
         const stale=machine._stale||permissionPage?.stale||client.spaces.find(space=>space.id===machine._space_id)?.connected===false,permissions=entry.permissions;
         entry.element.dataset.machineId=id;entry.element.dataset.spaceId=machine._space_id;entry.name.textContent=machineDisplayName(machine)||t('topology.kind.machine');entry.location.textContent=machine._space_name;entry.status.textContent=t(stale?'topology.status.stale':machine.connected?'agentLinks.status.connected':'agentLinks.status.offline');entry.status.className=machine.connected&&!stale?'success-text':'hint';entry.tags.textContent=(machine.tags||[]).join(' · ');entry.tags.hidden=!machine.tags?.length;
         entry.addresses.textContent=(machine.ip_addresses||[])[0]||'';entry.addresses.hidden=!entry.addresses.textContent;
         entry.renderPermissions=()=>{
-        permissions.setAttribute('aria-busy',String(permissionsPending));if(permissionsPending&&!policy?.machines?.[id]){permissions.replaceChildren();return;}
+        permissions.setAttribute('aria-busy',String(data.permissionsPending));if(data.permissionsPending&&!policy?.machines?.[id]){permissions.replaceChildren();return;}
         if(!policy?.machines?.[id]){permissions.replaceChildren(n('p','inline-error',t('topology.permissionsUnavailable')),action(t('retry'),()=>show('machines')));return;}
         const captured={space:machine._space_id,owner:''},controlID=permissionPage.space.control_id,current=policy.machines[id],key=JSON.stringify([machine._space_id,controlID,id]);
         let draft=machineDrafts.get(key);
-        if(!draft||!draft.dirty&&!draft.pending){const error=draft?.error;draft=createEditorSession({...captured,boot:client.runtime.boot_id},current);draft.error=error;machineDrafts.set(key,draft);}
-        renderMachinePermissions({root:permissions,machine,policy,request,scope:captured,locale,draft,stale,isCurrent:()=>client.runtime.boot_id===draft.context.boot&&client.spaces.some(space=>space.id===captured.space&&space.control_id===controlID),refresh:()=>{if(route==='machines'&&!editor)return pageView?.queue.run();},edit});
+        if(!draft||!draft.dirty&&!draft.pending&&!data.permissionsPending){const error=draft?.error;draft=createEditorSession({...captured,boot:client.runtime.boot_id},current);draft.error=error;machineDrafts.set(key,draft);}
+        renderMachinePermissions({root:permissions,machine,policy,request,scope:captured,locale,draft,stale,confirming:()=>data.permissionsPending,isCurrent:()=>client.runtime.boot_id===draft.context.boot&&client.spaces.some(space=>space.id===captured.space&&space.control_id===controlID),refresh:()=>{needsPermissions=true;data.permissionsPending=true;refreshPermissionControls();if(gate.current(token)&&route==='machines'&&!editor)return pageView?.queue.run();},edit});
         };
         if(currentNode?.kind==='machine'&&currentNode.space===machine._space_id&&currentNode.identity===id)entry.renderPermissions();
-      }});
-      const edgeSelection=currentEdgeID;model=projectTopology(client.spaces,items,linkPages);view.update(model);if(currentNode?.kind==='machine')showNode(currentNode);if(edgeSelection){const edge=model.edges.find(item=>item.id===edgeSelection);if(edge)showEdge(edge);}restore();
+      }
+      for(const [identity,entry]of entries)if(!retained.has(identity)){entry.element.remove();entries.delete(identity);}
+      model=projectTopology(client.spaces,items,linkPages);updateTopology();
     };
+    // Revoke command authority synchronously, even when every read is held.
+    function refreshPermissionControls(){for(const entry of entries.values())if(entry.element.parentNode===view.inspector)entry.renderPermissions?.();}
     return connectView(root,token,async()=>{
-      const readPermissions=needsPermissions;needsPermissions=false;
-      data.permissionsPending=readPermissions;
+      const readPermissions=needsPermissions,confirmLinks=needsLinks;needsPermissions=false;needsLinks=false;
+      data.permissionsPending=readPermissions;if(readPermissions)refreshPermissionControls();
       const permissions=readPermissions?across('/api/v1/permissions',token).catch(()=>{needsPermissions=true;return [];}).then(pages=>{data.permissionPages=pages;data.permissionsPending=false;if(data.inventory.length)return update(data);}):Promise.resolve();
-      const links=across('/api/v1/agent-links',token,{errorTarget:connectionRoot}).then(pages=>{data.linkPages=pages;const selected=pages.find(page=>page.space.id===agentOwnerSpace);if(selected)connections.update(selected.value);linkNotice.hidden=true;}).catch(reason=>{if(reason.name==='AbortError')return;linkNotice.hidden=false;linkNotice.replaceChildren(n('span','',t('topology.connectionUnavailable')),action(t('retry'),()=>pageView?.queue.run()));});
+      const links=across('/api/v1/agent-links',token,{errorTarget:connectionRoot,authoritative:confirmLinks?'invalidated':false}).then(pages=>{data.linkPages=pages;const selected=pages.find(page=>page.space.id===agentOwnerSpace);if(selected)connections.update(selected.value);linkNotice.hidden=true;}).catch(reason=>{if(reason.name==='AbortError')return;linkNotice.hidden=false;linkNotice.replaceChildren(n('span','',t('topology.connectionUnavailable')),action(t('retry'),()=>pageView?.queue.run()));});
       data.inventory=(await across('/api/v1/runtime',token)).map(page=>{const machine=runtimeMachine(page.value);return {...page,value:machine?[machine]:[]};});await links;await update(data);await permissions;return data;
-    },update,{topics:['machines','spaces','permissions','agent-links','tasks','assistant-mail','runtime'],space:client.spaces?.length===1?client.spaces[0].id:'',invalidate:topics=>{if(!topics.length||topics.some(topic=>['permissions','spaces'].includes(topic)))needsPermissions=true;}});
+    },update,{topics:['machines','spaces','permissions','agent-links','tasks','assistant-mail','runtime'],space:client.spaces?.length===1?client.spaces[0].id:'',invalidate:topics=>{if(!topics.length||topics.some(topic=>['permissions','spaces'].includes(topic))){needsPermissions=true;data.permissionsPending=true;refreshPermissionControls();}if(!topics.length||topics.some(topic=>['agent-links','spaces'].includes(topic)))needsLinks=true;}});
   }
   const approvalScope=()=>taskView?.scope||scope();
   const approvalContext=()=>JSON.stringify([approvalScope(),taskView?.task.id||'']);

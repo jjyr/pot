@@ -87,7 +87,10 @@ allowed, while shell, writes, edits and subagents are denied. Other native
 execution remains under existing policy. The hook is inert outside supervised
 jobs; it does not disable users' other MCP globally. Trusted execution context
 replaces inherited reserved actor/job/run variables per process. The local
-`pot_receiver` service checks the current active Task/run. Task workers expose
+`pot_receiver` service checks the current active Task/run. AGY exposes this
+plugin-owned server at runtime as `pot-receiver_pot_receiver`
+(`<plugin name>_<MCP config key>`); the read-only hook matches that exact name,
+not an unqualified name or a suffix. Task workers expose
 only execution context and cannot delegate or message remote agents. Assistant
 message executions additionally expose typed sender-free reverse message and
 Task callbacks through the authenticated receiver gateway. The local hook and

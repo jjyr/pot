@@ -10,6 +10,7 @@ import {createPages} from '../../web/src/components/pages.mjs';
 import {createProductionClient,mutationTopics} from '../../web/src/adapters/production.mjs';
 
 installDOM();
+{const source=new Element('button');source.className='clone-probe';source.dataset.viewKey='identity';source.style.width='12px';source.textContent='Label';source.onclick=()=>{};const shallow=source.cloneNode(false),deep=source.cloneNode(true);assert.equal(shallow.children.length,0);assert.equal(deep.textContent,'Label');assert.equal(deep.getAttribute('data-view-key'),'identity');assert.equal(deep.onclick,undefined);assert.notEqual(deep.children[0],source.children[0]);deep.style.width='20px';assert.equal(source.style.width,'12px');assert.equal(source.children[0].parentNode,source);}
 const original={now:Date.now,setTimeout,clearTimeout,setInterval,clearInterval};
 let now=100000,serial=0;const timers=new Map();
 Date.now=()=>now;globalThis.setTimeout=(callback,delay=0)=>{const id=++serial;timers.set(id,{callback,at:now+delay});return id;};globalThis.clearTimeout=id=>timers.delete(id);

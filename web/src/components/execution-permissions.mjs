@@ -3,7 +3,7 @@ import {node as n,action,field} from './primitives.mjs';
 import {icon} from './icons.mjs';
 import {translate} from '../locales/messages.mjs';
 
-export function renderMachinePermissions({root:target,machine,policy,request,scope,locale,refresh,edit,draft,isCurrent,stale=false}) {
+export function renderMachinePermissions({root:target,machine,policy,request,scope,locale,refresh,edit,draft,isCurrent,stale=false,confirming=()=>false}) {
   const root=n('div','machine-permissions');
   const tr=(en,zh)=>locale()==='zh-CN'?zh:en;
   const labels={ask:tr('Sandbox execution','沙箱执行'),allow:tr('Direct execution','直接执行'),deny:tr('Blocked','禁止执行')};
@@ -11,7 +11,9 @@ export function renderMachinePermissions({root:target,machine,policy,request,sco
   const id=machine.runtime_id||machine.id,current=policy.machines[id],application=policy.application?.[id];
   const warning=tr('Saving stops existing execution on this machine and clears temporary authorizations. Work is not restarted automatically.','保存会停止这台机器上的现有执行，并清除临时授权。任务不会自动重启。');
   const status=n('p','inline-error permission-status',draft.error||'');status.setAttribute('role','alert');
-  const blocked=()=>stale||draft.pending||application?.recovery_required;
+  // A retained handler consults the current read gate; local editing remains
+  // available while confirmation is pending, but cannot authorize a command.
+  const blocked=()=>stale||confirming()||draft.pending||application?.recovery_required;
   const mutate=async(body,{configure=false}={})=>{
     if(blocked()||!draft.begin())return;
     draft.error='';update();
@@ -75,7 +77,7 @@ export function renderMachinePermissions({root:target,machine,policy,request,sco
     const conflicted=draft.dirty&&draft.values.revision!==current.revision;
     const liveSave=target.querySelector('.permission-changes .primary'),liveCancel=target.querySelector('.permission-changes .control');
     for(const button of target.querySelectorAll('button'))button.disabled=blocked()||draft.dirty&&button!==liveSave&&button!==liveCancel;
-    target.querySelector('.permission-default select').disabled=blocked();liveCancel.disabled=draft.pending;liveSave.disabled=blocked()||conflicted;
+    target.querySelector('.permission-default select').disabled=stale||draft.pending||!!application?.recovery_required;liveCancel.disabled=draft.pending;liveSave.disabled=blocked()||conflicted;
     const changes=target.querySelector('.permission-changes'),conflict=changes.querySelector('.inline-error'),status=target.querySelector('.permission-status');
     changes.hidden=!draft.dirty;conflict.hidden=!conflicted;conflict.textContent=conflicted?tr('Permissions changed elsewhere. Cancel to load the latest policy before editing again.','权限已在其他位置变更，请取消以载入最新策略后重新编辑。'):'';
     status.textContent=draft.error||'';

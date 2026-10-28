@@ -33,7 +33,8 @@ func agyPolicy(in io.Reader, out io.Writer) error {
 			if tool == "" {
 				tool, _ = payload.ToolCall.Args["tool_name"].(string)
 			}
-			if server == "pot_receiver" && isExecutionTool(tool) && (os.Getenv("POT_AGENT_ASSISTANT_ID") != "" || tool == "pot_execution_context") && os.Getenv("POT_AGENT_RUN_ID") != "" {
+			// AGY namespaces plugin servers as <plugin name>_<MCP config key>.
+			if server == "pot-receiver_pot_receiver" && isExecutionTool(tool) && (os.Getenv("POT_AGENT_ASSISTANT_ID") != "" || tool == "pot_execution_context") && os.Getenv("POT_AGENT_RUN_ID") != "" {
 				decision = "allow"
 			} else if os.Getenv("POT_AGENT_MODE") == "read-only" {
 				decision = "deny"

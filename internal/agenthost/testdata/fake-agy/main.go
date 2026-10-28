@@ -94,6 +94,19 @@ func probeExecutionContext() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	// Match AGY's actual plugin namespace and PascalCase dispatcher schema.
+	// Exercise the installed hook contract before dispatching the MCP tool.
+	policy := exec.CommandContext(ctx, string(binary), "policy")
+	policy.Env = append(os.Environ(), "POT_AGENTHOST_CLI_FIXTURE=1", "POT_AGENTHOST_CLI_ADAPTER=antigravity")
+	policy.Stdin = strings.NewReader(`{"toolCall":{"name":"call_mcp_tool","args":{"ServerName":"pot-receiver_pot_receiver","ToolName":"pot_execution_context","Arguments":{}}}}`)
+	decisionRaw, err := policy.Output()
+	if err != nil {
+		return err
+	}
+	var decision map[string]string
+	if json.Unmarshal(decisionRaw, &decision) != nil || decision["decision"] != "allow" {
+		return fmt.Errorf("receiver context denied by native hook")
+	}
 	cmd := exec.CommandContext(ctx, string(binary), "execution-tools")
 	cmd.Env = append(os.Environ(), "POT_AGENTHOST_CLI_FIXTURE=1", "POT_AGENTHOST_CLI_ADAPTER=antigravity")
 	input, err := cmd.StdinPipe()
