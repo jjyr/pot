@@ -121,9 +121,38 @@ func main() {
 					os.Exit(26)
 				}
 			}
+			if prompt == "early-overflow-count" || prompt == "early-overflow-bytes" {
+				count, text := 65, "x"
+				if prompt == "early-overflow-bytes" {
+					count, text = 3, strings.Repeat("x", 2*1024*1024)
+				}
+				for i := 0; i < count; i++ {
+					notification("item/completed", map[string]any{"threadId": threadID, "turnId": "turn-1", "item": map[string]string{"id": "early", "type": "agentMessage", "text": text}})
+				}
+				continue
+			}
+			if prompt == "early-events" || prompt == "early-approval" {
+				notification("turn/started", map[string]any{"threadId": threadID, "turn": map[string]string{"id": "old", "status": "inProgress"}})
+				notification("turn/started", map[string]any{"threadId": threadID, "turn": map[string]string{"id": "turn-1", "status": "inProgress"}})
+				notification("item/completed", map[string]any{"threadId": threadID, "turnId": "old", "item": map[string]string{"id": "old", "type": "agentMessage", "text": "wrong"}})
+				if prompt == "early-approval" {
+					send(map[string]any{"id": "approval-1", "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": threadID, "turnId": "turn-1", "itemId": "command-1", "command": "untrusted"}})
+				} else {
+					notification("item/completed", map[string]any{"threadId": threadID, "turnId": "turn-1", "item": map[string]string{"id": "early", "type": "agentMessage", "text": "early answer"}})
+					notification("turn/completed", map[string]any{"threadId": threadID, "turn": map[string]string{"id": "turn-1", "status": "completed"}})
+				}
+			}
 			reply(m.ID, map[string]any{"turn": map[string]string{"id": "turn-1", "status": "inProgress"}})
+			if prompt == "failure-without-started" {
+				notification("turn/completed", map[string]any{"threadId": threadID, "turn": map[string]any{"id": "turn-1", "status": "failed", "error": map[string]any{"message": "private", "codexErrorInfo": "unauthorized"}}})
+				continue
+			}
+			if prompt == "early-events" || prompt == "early-approval" {
+				continue
+			}
+
 			notification("turn/started", map[string]any{"threadId": threadID, "turn": map[string]string{"id": "turn-1", "status": "inProgress"}})
-			notification("item/started", map[string]any{"threadId": threadID, "item": map[string]string{"id": "command-1", "type": "commandExecution", "command": "fixture only"}})
+			notification("item/started", map[string]any{"threadId": threadID, "turnId": "turn-1", "item": map[string]string{"id": "command-1", "type": "commandExecution", "command": "fixture only"}})
 			if prompt == "approve" || strings.HasPrefix(prompt, "approve\n") {
 				send(map[string]any{"id": "approval-1", "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": threadID, "turnId": "turn-1", "itemId": "command-1", "command": "untrusted"}})
 				continue
@@ -140,16 +169,16 @@ func main() {
 				continue
 			}
 			if prompt == "large-tool-result" {
-				notification("item/completed", map[string]any{"threadId": threadID, "item": map[string]any{"type": "mcpToolCall", "result": map[string]string{"text": strings.Repeat("x", 722126)}}})
+				notification("item/completed", map[string]any{"threadId": threadID, "turnId": "turn-1", "item": map[string]any{"type": "mcpToolCall", "result": map[string]string{"text": strings.Repeat("x", 722126)}}})
 			}
 			go func() {
-				notification("item/completed", map[string]any{"threadId": threadID, "item": map[string]string{"type": "agentMessage", "phase": "commentary", "text": "Checking the request."}})
+				notification("item/completed", map[string]any{"threadId": threadID, "turnId": "turn-1", "item": map[string]string{"type": "agentMessage", "phase": "commentary", "text": "Checking the request."}})
 				for i := 0; i < 3; i++ {
 					notification("item/agentMessage/delta", map[string]any{"threadId": threadID, "itemId": "answer-1", "delta": fmt.Sprint(i)})
 					time.Sleep(15 * time.Millisecond)
 				}
-				notification("item/completed", map[string]any{"threadId": threadID, "item": map[string]string{"type": "agentMessage", "phase": "partial_answer", "text": "Preliminary answer."}})
-				notification("item/completed", map[string]any{"threadId": threadID, "item": map[string]string{"type": "agentMessage", "phase": "final_answer", "text": "result: " + prompt}})
+				notification("item/completed", map[string]any{"threadId": threadID, "turnId": "turn-1", "item": map[string]string{"type": "agentMessage", "phase": "partial_answer", "text": "Preliminary answer."}})
+				notification("item/completed", map[string]any{"threadId": threadID, "turnId": "turn-1", "item": map[string]string{"type": "agentMessage", "phase": "final_answer", "text": "result: " + prompt}})
 				if prompt == "hold-after-answer" {
 					if os.WriteFile(filepath.Join(workspace, "answer-ready"), nil, 0600) != nil {
 						os.Exit(23)
@@ -176,7 +205,7 @@ func main() {
 					if os.WriteFile(filepath.Join(workspace, "approval-executed"), []byte("approved once"), 0600) != nil {
 						os.Exit(24)
 					}
-					notification("item/completed", map[string]any{"threadId": threadID, "item": map[string]string{"type": "agentMessage", "phase": "final_answer", "text": "approved operation completed"}})
+					notification("item/completed", map[string]any{"threadId": threadID, "turnId": "turn-1", "item": map[string]string{"type": "agentMessage", "phase": "final_answer", "text": "approved operation completed"}})
 				} else if m.Result["decision"] != "decline" {
 					os.Exit(19)
 				}

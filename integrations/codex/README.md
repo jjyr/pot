@@ -210,8 +210,16 @@ Unknown or malformed details remain `codex_turn_failed`. Free-form native error
 messages, additional details and stderr are not persisted or forwarded by this
 classification. Independent `error` notifications do not complete a turn or
 supply guessed terminal diagnostics; Codex may still retry them and succeed.
-A completed notification naming a different bound turn is ignored. These
-identifiers describe the failure; they grant no retry or approval authority.
+The reader binds and persists the turn ID exactly once from the outstanding
+`turn/start` response before processing subsequent events. A `turn/started`
+notification cannot replace that identity. Handled events arriving before the
+response are held in order, with a limit of 64 messages and 4 MiB total; exceeding
+that bound reports `codex_turn_event_buffer_exceeded_outcome_unknown` and cleans
+up the supervised session. Approval requests retain the same review policy when
+replayed. Turn lifecycle and item events require nonempty, unambiguous matching
+thread and turn IDs; missing or foreign identities are ignored. A terminal result
+cannot be changed by later events. Failure identifiers grant no retry or approval
+authority.
 App Server JSONL
 events are bounded to 4 MiB per line independently of the final-answer limit;
 read failures (including oversized events) are reported as

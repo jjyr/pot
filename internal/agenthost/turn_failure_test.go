@@ -56,9 +56,9 @@ func TestTurnFailureClassificationRequiresBoundThreadAndTurn(t *testing.T) {
 	}{
 		{"other thread", "foreign", "turn", "thread", "turn", true},
 		{"other turn", "thread", "old-turn", "thread", "turn", true},
-		{"missing thread", "", "turn", "thread", "turn", false},
-		{"missing turn", "thread", "", "thread", "turn", false},
-		{"unbound", "thread", "turn", "thread", "", false},
+		{"missing thread", "", "turn", "thread", "turn", true},
+		{"missing turn", "thread", "", "thread", "turn", true},
+		{"unbound", "thread", "turn", "thread", "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := &appTurn{done: make(chan struct{}), result: TurnResult{ThreadID: tc.boundThread, TurnID: tc.boundTurn}}
