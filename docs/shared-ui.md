@@ -913,6 +913,8 @@ API, access, native transport and foreign-origin requests never enter this cache
 
 Browser storage eviction can remove local availability. An origin needs one
 successful online shell installation before offline reopening works. Offline
-support covers cached chat windows and local drafts, not all history, attachments'
-remote content or management pages. It adds neither background connections nor an
-outbox. Native startup continues through the native runtime adapter.
+support covers cached chat windows, local drafts and explicit local submissions,
+not all history, attachments' remote content or management pages. The shell cache
+does not run background delivery; the separate [message outbox](chat-outbox.md)
+resumes in an open application. Native startup continues through the native runtime
+adapter.
