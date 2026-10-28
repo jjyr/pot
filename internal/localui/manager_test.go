@@ -85,4 +85,10 @@ func TestChangedEventPreservesProductionSSEBoot(t *testing.T) {
 	if !dirty || string(value["boot_id"]) != `"boot-b"` || string(value["tasks"]) != "1" {
 		t.Fatalf("boot change did not invalidate the complete baseline: %s", changed.Data)
 	}
+	for _, body := range []string{`null`, `{"versions":null}`} {
+		_, kept, dirty := changedEvent(Event{ID: "boot-c:1", Data: json.RawMessage(body)}, versions)
+		if !dirty || string(kept["boot_id"]) != `"boot-a"` {
+			t.Fatalf("invalid version map established a boot: %s", body)
+		}
+	}
 }

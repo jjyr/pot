@@ -186,8 +186,11 @@ func changedEvent(event Event, previous map[string]json.RawMessage) (Event, map[
 		return event, previous, true
 	}
 	current := raw
+	if current == nil {
+		return event, previous, true
+	}
 	if nested := raw["versions"]; nested != nil {
-		if json.Unmarshal(nested, &current) != nil {
+		if json.Unmarshal(nested, &current) != nil || current == nil {
 			return event, previous, true
 		}
 		if boot := raw["boot_id"]; boot != nil {
