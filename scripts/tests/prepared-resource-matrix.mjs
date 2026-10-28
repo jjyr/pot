@@ -40,7 +40,7 @@ export async function preparedResourceMatrix(page){
     const live=f.host.querySelector('[data-message-id="matrix-99"]'),nodes=[...live.querySelectorAll('pot-resource')],diagram=live.querySelector('pot-mermaid'),height=live.getBoundingClientRect().height;
     if(nodes.length!==5||nodes.some(node=>node.dataset.state!=='ready')||diagram?.dataset.state!=='ready')throw Error('Recursive ready includes image decode, PDF frame, isolated HTML and nested Markdown diagram');
     if(acquired!==5||released!==0)throw Error('Initial candidate transfer restarted a lease');
-    live.querySelector('iframe.resource-interactive').contentWindow.postMessage('grow','*');await wait(()=>live.querySelector('iframe.resource-interactive').style.getPropertyValue('--resource-height')==='900px');await frames();
+    live.querySelector('iframe.resource-interactive').contentWindow.postMessage('grow','*');await wait(()=>live.querySelector('iframe.resource-interactive').style.getPropertyValue('--resource-height')==='900px'&&window.prepared);await frames();
     if(live.getBoundingClientRect().height!==height)throw Error('Late isolated HTML resize changed the committed row frame');
     const ready={elapsed:performance.now()-start,height,acquired,released,kinds:nodes.map(node=>node.dataset.kind),sameNodes:nodes.every(node=>node.isConnected)};
     document.body.tabIndex=-1;document.body.focus({preventScroll:true});window.locate({id:'matrix-0'});await wait(()=>window.prepared&&!live.isConnected);
