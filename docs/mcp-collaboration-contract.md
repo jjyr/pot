@@ -205,6 +205,13 @@ coverage; C0 changes no stored format.
 
 ## Service composition and consent
 
+Public-client registration selects `authorization_code` with token endpoint
+authentication `none`. A client may also request `refresh_token`; registration
+returns and saves only the supported `authorization_code` grant, as permitted by
+RFC 7591 section 3.2.1. Refresh-only requests, other grants and confidential-client
+authentication are rejected. No refresh credential is issued; authorization
+expiry requires a new browser-confirmed S256 PKCE flow.
+
 `control.NewMCPAccess` composes the official SDK Streamable HTTP handler with
 `MCPOAuthServer` and `MCPAccessQueue`. It returns an HTTP handler and starts no
 listener. Mount `/mcp`, `/.well-known/oauth-protected-resource/mcp`,

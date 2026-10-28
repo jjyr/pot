@@ -206,7 +206,7 @@ func (a *appTurn) approval(m rpcMessage) {
 				}
 			}
 			if !accept {
-				a.finish("failed", "codex_approval_requires_local_review")
+				a.finish("failed", codexLocalReviewDiagnostic(m.Method, "accept_unavailable"))
 				a.interrupt()
 				return
 			}
@@ -218,7 +218,7 @@ func (a *appTurn) approval(m rpcMessage) {
 			proposed := a.fileChanges[id]
 			a.mu.Unlock()
 			if len(proposed) == 0 {
-				a.finish("failed", "codex_approval_requires_local_review")
+				a.finish("failed", codexLocalReviewDiagnostic(m.Method, "file_changes_unavailable"))
 				a.interrupt()
 				return
 			}
@@ -253,7 +253,7 @@ func (a *appTurn) approval(m rpcMessage) {
 				a.denied = true
 				a.approvalError = "codex_approval_denied"
 				if err != nil {
-					a.approvalError = "codex_approval_requires_local_review"
+					a.approvalError = codexLocalReviewDiagnostic(m.Method, "review_rejected")
 				}
 			}
 			a.mu.Unlock()
@@ -265,7 +265,7 @@ func (a *appTurn) approval(m rpcMessage) {
 	}
 	a.mu.Lock()
 	a.denied = true
-	a.approvalError = "codex_approval_requires_local_review"
+	a.approvalError = codexLocalReviewDiagnostic(m.Method, "unsupported_interaction")
 	a.mu.Unlock()
 	switch m.Method {
 	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
@@ -277,6 +277,21 @@ func (a *appTurn) approval(m rpcMessage) {
 		a.interrupt()
 	}
 }
+
+// Keep diagnostic protocol IDs, never interactive parameters or arbitrary
+// server-provided method strings. This records which native gate rejected the
+// turn without exposing elicitation text, command arguments or credentials.
+func codexLocalReviewDiagnostic(method, reason string) string {
+	switch method {
+	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval",
+		"mcpServer/elicitation/request", "item/tool/requestUserInput",
+		"item/permissions/requestApproval", "item/tool/call", "account/chatgptAuthTokens/refresh":
+	default:
+		method = "unrecognized"
+	}
+	return "codex_approval_requires_local_review: " + method + ": " + reason
+}
+
 func (a *appTurn) notification(m rpcMessage) {
 	if m.Method == "item/started" {
 		var p struct {

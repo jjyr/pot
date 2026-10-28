@@ -140,6 +140,13 @@ caller/request and real execution Task/run. Models cannot approve. Pending nativ
 channels are process-local: restarts invalidate them, and uncertain decision
 intents are not replayed. See the shared contract for correlation and fences.
 
+When a native interaction requires local review, the Task error retains
+`codex_approval_requires_local_review` with a known App Server protocol method
+and rejection reason. Unknown methods are recorded as `unrecognized`; interactive
+parameters and request content are omitted. This diagnosis does not enable
+additional interaction types: command/file review keeps its existing checks,
+MCP elicitation is cancelled, and unsupported requests remain rejected.
+
 Updated Pot and plugins/adapters require explicit MCP reconnection. Old P2P
 pairing is unsupported by this path, with no automatic migration or fallback.
 The product no longer mounts the old pairing/listener entry points.

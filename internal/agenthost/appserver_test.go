@@ -131,6 +131,37 @@ func TestAppServerReadFailureIsDistinctFromProcessExit(t *testing.T) {
 	}
 }
 
+func TestUnsupportedNativeInteractionKeepsOnlyProtocolDiagnostic(t *testing.T) {
+	for _, method := range []string{"mcpServer/elicitation/request", "item/permissions/requestApproval", "item/tool/requestUserInput", "untrusted-secret-method"} {
+		t.Run(method, func(t *testing.T) {
+			var output bytes.Buffer
+			a := &appTurn{input: nopWriteCloser{&output}, ctx: context.Background(), done: make(chan struct{}), result: TurnResult{ThreadID: "thread", TurnID: "turn"}, events: turnEvents{Review: func(context.Context, string, json.RawMessage) (string, error) {
+				t.Fatal("unsupported native interaction reached human command/file review")
+				return "", nil
+			}}}
+			a.approval(rpcMessage{ID: json.RawMessage(`"request"`), Method: method, Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","message":"private-interactive-text","token":"private-token"}`)})
+			a.notification(rpcMessage{Method: "turn/completed", Params: json.RawMessage(`{"threadId":"thread","turn":{"id":"turn","status":"completed"}}`)})
+			wantMethod := method
+			if method == "untrusted-secret-method" {
+				wantMethod = "unrecognized"
+			}
+			if a.result.Status != "failed" || a.result.Error != "codex_approval_requires_local_review: "+wantMethod+": unsupported_interaction" {
+				t.Fatal(a.result)
+			}
+			if strings.Contains(output.String(), "private-") || strings.Contains(a.result.Error, "private-") || strings.Contains(a.result.Error, "untrusted-secret") {
+				t.Fatal("interactive content leaked into diagnostics or response")
+			}
+			if method == "mcpServer/elicitation/request" {
+				if !strings.Contains(output.String(), `"action":"cancel"`) || strings.Contains(output.String(), "turn/interrupt") {
+					t.Fatal("elicitation cancellation changed", output.String())
+				}
+			} else if !strings.Contains(output.String(), `"code":-32601`) || !strings.Contains(output.String(), "turn/interrupt") {
+				t.Fatal("unsupported interaction rejection changed", output.String())
+			}
+		})
+	}
+}
+
 func TestAppServerKeepsOnlyAnswerAndStopsAtTurnCompletion(t *testing.T) {
 	a := &appTurn{done: make(chan struct{}), readerDone: make(chan struct{}), pending: map[int]chan rpcMessage{}, result: TurnResult{ThreadID: "thread"}}
 	var stream strings.Builder

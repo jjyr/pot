@@ -115,6 +115,7 @@ func (f *mcpAccessFixture) request(t *testing.T, method, path, owner string, bod
 
 type mcpFixtureGrant struct {
 	Token      string `json:"access_token"`
+	Refresh    string `json:"refresh_token"`
 	Connection string `json:"connection_id"`
 	Node       string `json:"node_id"`
 	ClientID   string `json:"-"`
@@ -126,10 +127,20 @@ func (f *mcpAccessFixture) grant(t *testing.T, receiver bool) (grant mcpFixtureG
 	if receiver {
 		client.ReceiverNode = "receiver-fixture"
 	}
+	return f.grantClient(t, client)
+}
+
+func (f *mcpAccessFixture) grantClient(t *testing.T, client mcpOAuthClient) (grant mcpFixtureGrant) {
+	t.Helper()
 	var registration struct {
-		ClientID string `json:"client_id"`
+		ClientID                string   `json:"client_id"`
+		GrantTypes              []string `json:"grant_types"`
+		TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
 	}
 	fixtureResponse(t, f.request(t, "POST", "/oauth/register", "", client), 201, &registration)
+	if mcpJSON(registration.GrantTypes) != `["authorization_code"]` || registration.TokenEndpointAuthMethod != "none" {
+		t.Fatal("registration did not select the supported public-client flow")
+	}
 	verifier := strings.Repeat("v", 43)
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
@@ -160,6 +171,9 @@ func (f *mcpAccessFixture) grant(t *testing.T, receiver bool) (grant mcpFixtureG
 		t.Fatal(e)
 	}
 	fixtureResponse(t, response, 200, &grant)
+	if grant.Refresh != "" {
+		t.Fatal("code-only flow issued a refresh credential")
+	}
 	grant.ClientID = registration.ClientID
 	// Every issued code is single-use, including an otherwise exact token retry.
 	response, e = http.PostForm(f.http.URL+"/oauth/token", values)
@@ -372,6 +386,44 @@ func TestMCPAccessOAuthValidationAndExpiry(t *testing.T) {
 	fixtureResponse(t, f.request(t, "POST", "/mcp", "owner-fixture", map[string]any{}), 401, nil)
 	fixtureResponse(t, f.request(t, "GET", "/control/v1/owner", "owner-fixture", nil), 404, nil)
 	fixtureResponse(t, f.request(t, "GET", "/oauth/connections", "", nil), 401, nil)
+}
+
+func TestMCPAccessOAuthNegotiatesAuthorizationCodeWithoutRefresh(t *testing.T) {
+	f := mcpAccessTestFixture(t)
+	// Codex 0.163.0's pinned rmcp requests both grants even when discovery
+	// advertises authorization_code only. RFC 7591 section 3.2.1 permits the
+	// server to replace requested metadata and return the selected values.
+	for _, grants := range [][]string{{"authorization_code", "refresh_token"}, {"refresh_token", "authorization_code"}} {
+		grant := f.grantClient(t, mcpOAuthClient{
+			ClientName:              "Codex",
+			RedirectURIs:            []string{"http://127.0.0.1:9876/callback/synthetic-client"},
+			GrantTypes:              grants,
+			ResponseTypes:           []string{"code"},
+			TokenEndpointAuthMethod: "none",
+		})
+		stored, err := f.oauth.client(context.Background(), grant.ClientID)
+		if err != nil || mcpJSON(stored.GrantTypes) != `["authorization_code"]` {
+			t.Fatal("unsupported refresh grant was persisted", err)
+		}
+		session := f.session(t, grant)
+		var directory map[string]any
+		fixtureCall(t, session, "pot_directory", map[string]any{}, &directory)
+		response, err := http.PostForm(f.http.URL+"/oauth/token", url.Values{"grant_type": {"refresh_token"}, "client_id": {grant.ClientID}, "refresh_token": {"synthetic-not-issued"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixtureResponse(t, response, 400, nil)
+	}
+	for _, grants := range [][]string{{"refresh_token"}, {"implicit"}, {"authorization_code", "password"}, {"authorization_code", "client_credentials"}, {"authorization_code", "refresh_token", "unknown"}, {"authorization_code", "authorization_code"}, {"authorization_code", "refresh_token", "refresh_token"}} {
+		client := mcpOAuthClient{RedirectURIs: []string{"http://127.0.0.1:9876/callback"}, GrantTypes: grants, TokenEndpointAuthMethod: "none"}
+		fixtureResponse(t, f.request(t, "POST", "/oauth/register", "", client), 400, nil)
+	}
+	for _, client := range []mcpOAuthClient{
+		{RedirectURIs: []string{"http://remote.example/callback"}, GrantTypes: []string{"authorization_code", "refresh_token"}},
+		{RedirectURIs: []string{"https://client.example/callback"}, GrantTypes: []string{"authorization_code", "refresh_token"}, TokenEndpointAuthMethod: "client_secret_basic"},
+	} {
+		fixtureResponse(t, f.request(t, "POST", "/oauth/register", "", client), 400, nil)
+	}
 }
 func TestMCPAccessQueueRestartAndOwnership(t *testing.T) {
 	f := mcpAccessTestFixture(t)

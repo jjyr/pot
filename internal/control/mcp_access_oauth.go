@@ -191,7 +191,7 @@ func (s *MCPOAuthServer) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Standard public-client DCR only; no client secrets, implicit or password flow.
-	if len(client.RedirectURIs) == 0 || len(client.RedirectURIs) > 8 || len(client.ClientName) > 200 || (client.TokenEndpointAuthMethod != "" && client.TokenEndpointAuthMethod != "none") || (len(client.GrantTypes) > 0 && !slices.Equal(client.GrantTypes, []string{"authorization_code"})) || (len(client.ResponseTypes) > 0 && !slices.Equal(client.ResponseTypes, []string{"code"})) || (client.ReceiverNode != "" && !core.Identifier(client.ReceiverNode)) {
+	if len(client.RedirectURIs) == 0 || len(client.RedirectURIs) > 8 || len(client.ClientName) > 200 || (client.TokenEndpointAuthMethod != "" && client.TokenEndpointAuthMethod != "none") || !mcpOAuthCodeGrantRequested(client.GrantTypes) || (len(client.ResponseTypes) > 0 && !slices.Equal(client.ResponseTypes, []string{"code"})) || (client.ReceiverNode != "" && !core.Identifier(client.ReceiverNode)) {
 		mcpOAuthError(w, 400, "invalid_client_metadata")
 		return
 	}
@@ -215,6 +215,15 @@ func (s *MCPOAuthServer) register(w http.ResponseWriter, r *http.Request) {
 	}
 	mcpOAuthJSON(w, 201, map[string]any{"client_id": id, "redirect_uris": client.RedirectURIs, "client_name": client.ClientName, "token_endpoint_auth_method": "none", "grant_types": client.GrantTypes, "response_types": client.ResponseTypes})
 }
+
+// Public MCP clients can request refresh alongside code even when discovery
+// advertises code only. RFC 7591 section 3.2.1 permits substituting metadata:
+// register returns and persists code only, and never issues refresh credentials.
+func mcpOAuthCodeGrantRequested(grants []string) bool {
+	return len(grants) == 0 || slices.Equal(grants, []string{"authorization_code"}) ||
+		len(grants) == 2 && slices.Contains(grants, "authorization_code") && slices.Contains(grants, "refresh_token")
+}
+
 func mcpSingleValues(values url.Values) bool {
 	for _, v := range values {
 		if len(v) != 1 {
