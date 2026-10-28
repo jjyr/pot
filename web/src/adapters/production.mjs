@@ -62,6 +62,7 @@ export function normalizeSnapshot(frame, runtime, owner, space = '') {
 // for upload chunks, login polling, model checks or other read-like commands.
 export function mutationTopics(path,body,value) {
   if(path==='/api/v1/schedules/preview')return null;
+  if(path==='/api/v1/extensions/mcp/oauth/begin')return null;
   if(path==='/api/v1/attachments'||/\/(resolve|check)$/.test(path))return null;
   if(path==='/api/v1/assistants/bootstrap'&&!value?.assistant)return null;
   if(path==='/api/v1/agent-links/invitation')return null;
@@ -87,7 +88,7 @@ export async function createProductionClient({desktop = false, base = '', resour
   const context = {owner: '', space: ''};
   let client,displayReader,connectionAbort=new AbortController(),directoryAbort=new AbortController(),directoryRevision=0;const confirmedSessions=new Map();
   const sessionKey=scope=>JSON.stringify([scope.space||'',scope.owner||'']);
-  const acceptedCommands=new Map();
+  const acceptedCommands=new Map(),changeStreams=new Set();
   async function commitCommand(path,method,body,value,capturedScope,signature){
     const topics=mutationTopics(path,body,value);
     if(!topics?.length)return value;
@@ -367,27 +368,30 @@ export async function createProductionClient({desktop = false, base = '', resour
           return ()=>onSnapshot(snapshot);
         }},onStatus:guardReconnect(onStatus),terminal:terminalStreamFailure});
     },
+    changesHealthy(space=''){return !desktop&&client.onlineReady&&[...changeStreams].some(stream=>stream.healthy&&stream.generation===client.connectionGeneration&&stream.boot===client.runtime.boot_id&&(!stream.space||stream.space===space));},
     changes(onChange,{space=context.space}={}) {
       const scope = {...context,space};
       if(!client.onlineReady){let active=true,stop;const cancel=whenOnline(()=>{if(active)stop=client.changes(onChange,{space});});return ()=>{active=false;cancel();stop?.();};}
+      const health={space,generation:client.connectionGeneration,boot:client.runtime.boot_id,healthy:false};changeStreams.add(health);
       const versions=createTopicVersions();
       const generation=client.connectionGeneration;
       const notify=(topics,sourceSpace,boot)=>{const changed=versions(topics,sourceSpace,boot);if(changed.length)onChange(changed,{space:sourceSpace,boot});};
-      if (desktop) return runtimeAPI.Events.On('pot:changed', event => {
+      if (desktop) {const stop=runtimeAPI.Events.On('pot:changed', event => {
         if(!client.onlineReady||generation!==client.connectionGeneration)return;
         if(scope.space&&event.data.space_id!==scope.space)return;
         if(client.startup&&(event.data.reset||event.data.boot_id&&event.data.boot_id!==runtime.boot_id)){client.suspendStartup();client.revalidateStartup?.();return;}
         if(event.data.reset){onChange([],{space:event.data.space_id,reset:true});return;}
         notify(event.data.topics,event.data.space_id,event.data.boot_id||'');
-      });
+      });return()=>{changeStreams.delete(health);stop();};}
       const deliver=(event,initial)=>{
         if(!client.onlineReady)return false;
         const value=JSON.parse(event.data),id=event.lastEventId||'',separator=id.lastIndexOf(':');
-        return ()=>{if(initial)onChange([],{space:scope.space,reset:true});
+        return ()=>{health.boot=separator<0?'':id.slice(0,separator);health.healthy=!!health.boot;if(initial)onChange([],{space:scope.space,reset:true});
           notify(value.topics||value,scope.space,separator<0?'':id.slice(0,separator));};
       };
-      return createEventStream({url:`${base}${scopedPath('/api/v1/changes',scope)}`,
-        events:{changed:deliver,changes:deliver,message:deliver},onStatus:guardReconnect(),terminal:terminalStreamFailure});
+      const reconnect=guardReconnect(),stop=createEventStream({url:`${base}${scopedPath('/api/v1/changes',scope)}`,
+        events:{changed:deliver,changes:deliver,message:deliver},onStatus:(state,reason)=>{health.healthy=false;reconnect(state,reason);},terminal:terminalStreamFailure});
+      return()=>{changeStreams.delete(health);stop();};
     },
   };
   displayReader=createResourceReader(client,request,{base,desktop,...(resourceCopies?{copies:resourceCopies}:{})});

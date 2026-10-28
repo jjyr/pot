@@ -325,15 +325,16 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       editor.kind='assistant';
       const preview=avatar(56,definition.avatar);
       form.form.querySelector('.editor-fields').prepend(preview);
+      let avatarPending=false;
       const editAvatar=async work=>{
-        if(!session.begin())return;
-        const disabled=new Map([...form.form.querySelectorAll('input,select,textarea,button')].map(node=>[node,node.disabled]));
-        for(const node of disabled.keys())node.disabled=true;
+        if(avatarPending||session.pending)return;avatarPending=true;
+        const submit=form.form.querySelector('.editor-actions .primary'),disabled=submit.disabled;submit.disabled=true;changeAvatar.disabled=resetAvatar.disabled=true;
         avatarError.hidden=true;
-        try{const {value,image}=await work();session.settle(false);session.set('avatar',value);preview.replaceChildren(...avatar(56,image).childNodes);}
-        catch{session.settle(false);avatarError.hidden=false;avatarError.textContent=translate(locale(),'assistant.avatarFailed');}
-        finally{for(const [node,value]of disabled)node.disabled=value;}
+        try{const {value,image}=await work();if(editor?.session!==session||disposed||!configurationIdentityCurrent(client,captured))return;session.set('avatar',value);preview.replaceChildren(...avatar(56,image).childNodes);}
+        catch{avatarError.hidden=false;avatarError.textContent=translate(locale(),'assistant.avatarFailed');}
+        finally{avatarPending=false;submit.disabled=disabled;changeAvatar.disabled=resetAvatar.disabled=false;}
       };
+      form.form.addEventListener('submit',event=>{if(avatarPending){event.preventDefault();event.stopImmediatePropagation();}},{capture:true});
       const avatarActions=toolbar(),upload=n('input');upload.type='file';upload.accept='image/png,image/jpeg,image/webp';upload.hidden=true;
       const changeAvatar=action('',()=>upload.click()),resetAvatar=action('',()=>editAvatar(async()=>{
         const generated=await domains.directory.defaultAvatar(captured);return {value:'',image:generated.avatar};
@@ -406,14 +407,16 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     editor.kind='assistant';
     const preview=avatar(56,profile.avatar),actions=toolbar(),upload=n('input'),help=n('p','hint'),error=n('p','inline-error');
     upload.type='file';upload.accept='image/png,image/jpeg,image/webp';upload.hidden=true;error.hidden=true;error.setAttribute('role','alert');
+    let avatarPending=false;
     const edit=async work=>{
-      if(!form.session.begin())return;
-      const controls=[...form.form.querySelectorAll('input,button')];for(const node of controls)node.disabled=true;
+      if(avatarPending||form.session.pending)return;avatarPending=true;
+      const submit=form.form.querySelector('.editor-actions .primary'),disabled=submit.disabled;submit.disabled=true;change.disabled=reset.disabled=true;
       error.hidden=true;
-      try{const {value,image}=await work();form.session.settle(false);form.session.set('avatar',value);preview.replaceChildren(...avatar(56,image).childNodes);}
-      catch{form.session.settle(false);error.hidden=false;error.textContent=t('assistant.avatarFailed');}
-      finally{for(const node of controls)node.disabled=false;form.lifecycle.refreshDelete?.();}
+      try{const {value,image}=await work();if(editor?.session!==form.session||disposed||!configurationIdentityCurrent(client,captured))return;form.session.set('avatar',value);preview.replaceChildren(...avatar(56,image).childNodes);}
+      catch{error.hidden=false;error.textContent=t('assistant.avatarFailed');}
+      finally{avatarPending=false;submit.disabled=disabled;change.disabled=reset.disabled=false;form.lifecycle.refreshDelete?.();}
     };
+    form.form.addEventListener('submit',event=>{if(avatarPending){event.preventDefault();event.stopImmediatePropagation();}},{capture:true});
     const change=action('',()=>upload.click()),reset=action('',()=>edit(async()=>{const value=await domains.directory.defaultAvatar(captured);return {value:'',image:value.avatar};}));
     upload.onchange=async()=>{const file=upload.files?.[0];upload.value='';if(file)await edit(async()=>{const image=await avatarFromFile(file);return {value:image,image};});};
     actions.append(change,reset,upload);form.form.querySelector('.editor-fields').prepend(preview,actions,help,error);
@@ -469,9 +472,9 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     if(client.desktop&&locations.length>1){const location=field(tr('Configuration location','配置位置'),configurationSpace,{choices:locations.map(space=>[space.id,space.name])});location.input.onchange=()=>{configurationSpace=location.input.value;show('settings');};root.append(location.row);}
     const current=()=>gate.current(token)&&!disposed,refresh=()=>pageView?.queue.run(),options={root,tr,locale,request,scope:settingsScope,current,refresh,allowanceMemory:providerAllowanceMemory,allowanceMemoryKey:client.runtime.boot_id};
     if(filter.settingsTab==='integrations'){
-      const refreshIntegrations=()=>{if(!current())return Promise.resolve();client.resources?.invalidate(['integrations'],{space:settingsScope.space});return refresh();};
-      const update=createIntegrations({root,request,scope:settingsScope,signal:token.signal,locale,openExternal:client.openExternal,refresh:refreshIntegrations});
-      return connectView(root,token,async()=>{const [accounts,notifications]=await Promise.all([request('/api/v1/integrations',{...settingsScope,signal:token.signal,transient:true}),request('/api/v1/plugin-notifications',{...settingsScope,signal:token.signal})]);return {...accounts,notifications};},update,{topics:['integrations','plugin-notifications','assistants','spaces'],space:settingsScope.space});
+      const view=createIntegrations({root,request,scope:settingsScope,signal:token.signal,locale,openExternal:client.openExternal,resources:client.resources});
+      pageView={root,token,domain:true,topics:[],queue:{run:view.refresh,close:()=>{}}};
+      return view.refresh();
     }
     if(filter.settingsTab==='tasks'){
       const update=createTaskSettings({root,tr,locale,configure:(profile,policy)=>routingEditor(profile,policy,settingsScope),allowance:quota=>providerPolicyEditor(quota,settingsScope)});
@@ -1118,7 +1121,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     const selectedScope=()=>({space:agentOwnerSpace,owner:''});
     const edit=({title,initial,fields,save,scope:captured,submitLabel})=>renderEditor(title,initial,fields,save,{capturedScope:captured,submitLabel});
     if(client.spaces.length>1){const owner=field(t('agentLinks.selectControl'),agentOwnerSpace,{choices:client.spaces.map(space=>[space.id,space.name||t('machine.unavailable')])});connectionRoot.append(owner.row);owner.input.onchange=()=>{agentOwnerSpace=owner.input.value;connections.load();};}
-    const connections=createAgentLinks({root:connectionRoot,request,locale,notify,scope:selectedScope,edit,signal:token.signal,onConnected:async result=>{const id=result?.id||result?.link?.id;if(id){const peer=result.peer||result.link?.peer;const identity=peer?.address?{id:peer.address.agent_id,node_id:peer.address.node_id,kind:peer.adapter}:peer;const owned=identity?.kind==='pot'&&client.spaces.find(space=>space.control_id===identity.node_id);topologySelection=owned?'control:'+owned.id:agentNodeID(identity);}client.resources?.invalidate(['agent-links'],selectedScope());await changed(result);}});
+    const connections=createAgentLinks({root:connectionRoot,request,locale,notify,scope:selectedScope,edit,signal:token.signal,onConnected:async result=>{const id=result?.id||result?.link?.id;if(id){const peer=result.peer||result.link?.peer;const identity=peer?.address?{id:peer.address.agent_id,node_id:peer.address.node_id,kind:peer.adapter}:peer;const owned=identity?.kind==='pot'&&client.spaces.find(space=>space.control_id===identity.node_id);topologySelection=owned?'control:'+owned.id:agentNodeID(identity);}await pageView?.queue.run();}});
     function related(node){const section=n('div','topology-related');section.append(n('p','hint',t('topology.related')));for(const edge of model.edges.filter(item=>item.from===node.id||item.to===node.id)){const a=model.nodes.find(item=>item.id===edge.from),b=model.nodes.find(item=>item.id===edge.to);section.append(action(a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name,()=>showEdge(edge)));}return section;}
     function preserveInspectorFocus(){
       const active=document.activeElement,nodeID=active?.closest('[data-node-id]')?.dataset.nodeId,edgeID=active?.closest('[data-edge-id]')?.dataset.edgeId;
@@ -1164,7 +1167,9 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     }
     function showEdge(edge){currentEdgeID=edge.id;keepMachine();view.inspector.replaceChildren();const a=model.nodes.find(node=>node.id===edge.from),b=model.nodes.find(node=>node.id===edge.to);view.inspector.append(n('p','hint',t(edge.kind==='agent'?'topology.agentLegend':'topology.machineLegend')),n('h2','',a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name),n('p','hint',t(edge.kind==='agent'?'topology.messageScope':'topology.executionScope')),action(t('topology.viewSource'),()=>view.select(a.id)),action(t('topology.viewTarget'),()=>view.select(b.id)));if(edge.kind==='agent')showQueues(edge.link,a.name,b.name);}
     view=createTopology({root,locale,initialSelection:topologySelection,onSelect:showNode,onEdge:showEdge,signal:token.signal});
-    const freshnessTimer=setInterval(()=>{if(!document.hidden&&gate.current(token)&&!editor)pageView?.queue.run();},10000);
+    let needsPermissions=true,freshnessTicks=0;
+    const redrawTopology=()=>{if(!data.inventory.length)return;const restore=preserveInspectorFocus(),edgeSelection=currentEdgeID,items=data.inventory.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner));model=projectTopology(client.spaces,items,data.linkPages);view.update(model);if(edgeSelection){const edge=model.edges.find(item=>item.id===edgeSelection);if(edge)showEdge(edge);}restore();};
+    const freshnessTimer=setInterval(()=>{if(!document.hidden&&gate.current(token)&&!editor){redrawTopology();if(++freshnessTicks%3===0)pageView?.queue.run();}},10000);
     token.signal.addEventListener('abort',()=>clearInterval(freshnessTimer),{once:true});
     const update=async({inventory,permissionPages,permissionsPending,linkPages})=>{
       if(!gate.current(token)||disposed)return;
@@ -1189,12 +1194,12 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       const edgeSelection=currentEdgeID;model=projectTopology(client.spaces,items,linkPages);view.update(model);if(currentNode?.kind==='machine')showNode(currentNode);if(edgeSelection){const edge=model.edges.find(item=>item.id===edgeSelection);if(edge)showEdge(edge);}restore();
     };
     return connectView(root,token,async()=>{
-      const connectionRequest=connections.load();
-      data.permissionsPending=true;
-      const permissions=across('/api/v1/permissions',token).catch(()=>[]).then(pages=>{data.permissionPages=pages;data.permissionsPending=false;if(data.inventory.length)return update(data);});
-      const links=across('/api/v1/agent-links',token,{errorTarget:connectionRoot}).then(pages=>{data.linkPages=pages;linkNotice.hidden=true;}).catch(reason=>{if(reason.name==='AbortError')return;linkNotice.hidden=false;linkNotice.replaceChildren(n('span','',t('topology.connectionUnavailable')),action(t('retry'),()=>pageView?.queue.run()));});
-      data.inventory=(await across('/api/v1/runtime',token)).map(page=>{const machine=runtimeMachine(page.value);return {...page,value:machine?[machine]:[]};});await links;await update(data);await permissions;await connectionRequest;return data;
-    },update,{topics:['machines','spaces','permissions','agent-links','tasks','assistant-mail','runtime'],space:client.spaces?.length===1?client.spaces[0].id:''});
+      const readPermissions=needsPermissions;needsPermissions=false;
+      data.permissionsPending=readPermissions;
+      const permissions=readPermissions?across('/api/v1/permissions',token).catch(()=>{needsPermissions=true;return [];}).then(pages=>{data.permissionPages=pages;data.permissionsPending=false;if(data.inventory.length)return update(data);}):Promise.resolve();
+      const links=across('/api/v1/agent-links',token,{errorTarget:connectionRoot}).then(pages=>{data.linkPages=pages;const selected=pages.find(page=>page.space.id===agentOwnerSpace);if(selected)connections.update(selected.value);linkNotice.hidden=true;}).catch(reason=>{if(reason.name==='AbortError')return;linkNotice.hidden=false;linkNotice.replaceChildren(n('span','',t('topology.connectionUnavailable')),action(t('retry'),()=>pageView?.queue.run()));});
+      data.inventory=(await across('/api/v1/runtime',token)).map(page=>{const machine=runtimeMachine(page.value);return {...page,value:machine?[machine]:[]};});await links;await update(data);await permissions;return data;
+    },update,{topics:['machines','spaces','permissions','agent-links','tasks','assistant-mail','runtime'],space:client.spaces?.length===1?client.spaces[0].id:'',invalidate:topics=>{if(!topics.length||topics.some(topic=>['permissions','spaces'].includes(topic)))needsPermissions=true;}});
   }
   const approvalScope=()=>taskView?.scope||scope();
   const approvalContext=()=>JSON.stringify([approvalScope(),taskView?.task.id||'']);
@@ -1227,7 +1232,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     for(const key of approvalCards.keys())if(!retained.has(key)){approvalCards.get(key).invalidate();approvalCards.delete(key);}
     approvalHost.replaceChildren();
   }
-  let approvalQueue=null,approvalQueueKey='';
+  let approvalQueue=null,approvalQueueKey='',approvalReadAt=0,approvalFailures=0;
   function permissions(){
     const captured={...approvalScope()},key=approvalContext();
     if(!captured.owner||disposed||!supportsCapability((client.assistants||[]).find(item=>item.id===captured.owner&&item.space_id===captured.space),'approvals.manage')){approvalQueue?.close();approvalQueue=null;approvalQueueKey='';approvalGate.close();approvalFresh=false;pendingApprovals=[];approvalOwner='';for(const card of approvalCards.values())card.invalidate();approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);taskView?.ui.setApprovals([]);taskView?.ui.refreshApprovals();onApprovalsChanged();return Promise.resolve();}
@@ -1235,19 +1240,26 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       approvalQueue?.close();approvalQueueKey=key;const token=approvalGate.next(),current=()=>!disposed&&approvalGate.current(token)&&approvalQueueKey===key&&approvalContext()===key;
       approvalFresh=false;pendingApprovals=[];approvalOwner='';for(const card of approvalCards.values())card.invalidate();approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);taskView?.ui.setApprovals([]);taskView?.ui.refreshApprovals();onApprovalsChanged();
       approvalQueue=createRefreshQueue(async()=>{
+        approvalReadAt=Date.now();
         const [value]=await Promise.all([request('/api/v1/permissions',{...captured,signal:token.signal}),machineInfo.load({...captured,signal:token.signal})]);if(!current())return;
-        approvalFresh=true;pendingApprovals=(value.pending||[]).filter(item=>item.request?.owner===captured.owner&&(!taskView||item.request.task===taskView.task.id));approvalOwner=key;
+        approvalFailures=0;approvalFresh=true;pendingApprovals=(value.pending||[]).filter(item=>item.request?.owner===captured.owner&&(!taskView||item.request.task===taskView.task.id));approvalOwner=key;
         if(taskView)renderTaskTranscript(taskView);onApprovalsChanged();renderApprovals();
         await Promise.all([...new Set(pendingApprovals.map(item=>item.request.task).filter(Boolean))].map(async id=>{
           const nameKey=taskNameKey(captured,id);if(taskNames.has(nameKey))return;
           try{const record=await taskDomain.metadata({id},captured,{signal:token.signal});if(current())taskNames.set(nameKey,record.info?.title||record.request?.text||id);}catch{/* Retain the exact Task ID when its title is unavailable. */}
         }));if(current()){renderApprovals();if(taskView)renderTaskTranscript(taskView);}
-      },{active:current,onError:reason=>{approvalFresh=false;renderApprovals();if(taskView)renderTaskTranscript(taskView);onApprovalsChanged();notify(reason.message);}});
+      },{active:current,onError:reason=>{approvalFailures++;approvalFresh=false;renderApprovals();if(taskView)renderTaskTranscript(taskView);onApprovalsChanged();notify(reason.message);}});
     }return approvalQueue.run();
   }
-  // Linked approval requests arrive independently of the local conversation.
-  // Read while visible; the receiver revalidates every decision at execution.
-  const approvalTimer=setInterval(()=>{if(!disposed&&!document.hidden&&(chatVisible()||taskView))permissions();},2500);
+  // Local changes have a monitored push source. Linked owners have no such
+  // delivery guarantee, and unhealthy local streams need bounded recovery.
+  const approvalTimer=setInterval(()=>{
+    if(disposed||document.hidden||!chatVisible()&&!taskView)return;
+    const captured=approvalScope(),assistant=client.assistants?.find(item=>item.id===captured.owner&&item.space_id===captured.space);
+    if(!assistant?.origin&&client.changesHealthy?.(captured.space)&&approvalFresh)return;
+    const delay=Math.min(5000*2**Math.min(approvalFailures,3),30000);
+    if(Date.now()-approvalReadAt>=delay)permissions();
+  },1000);
   async function show(next,{keepUsageOwner=false,force=false}={}) {
     if(editor)return;
  if(extensionUI&&next==='extensions')return extensionUI.refresh();extensionUI?.dispose();extensionUI=null;
@@ -1277,7 +1289,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     showProviders(){filter.settingsTab='providers';return show('settings');},
     refresh(topics=[],source={}){
       const changed=source.domainNotified?Promise.resolve():domains.changed(topics,source);if(pageView?.domain||taskView||taskListView)return changed;
- if(extensionUI){if(topics.includes('extensions')||topics.includes('spaces'))extensionUI.refresh();return;}
+ if(extensionUI){if(!topics.length||topics.includes('extensions')||topics.includes('spaces'))extensionUI.load().catch(()=>{});return changed;}
       if(editor){editor.lifecycle.refreshDelete?.();if(topics.includes('extensions')&&(!source.space||source.space===editor.session.context.space))editor.lifecycle.providersInvalidated?.();return;}if(disposed||!route||!host.offsetParent)return;
       if(pageView){if(relevantChange(topics,pageView.topics,pageView.space,source)){pageView.invalidate?.(topics);return pageView.queue.run();}return;}
       if(route==='settings')return;

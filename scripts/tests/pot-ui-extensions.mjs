@@ -21,7 +21,7 @@ globalThis.document={createElement:tag=>new Element(tag),createElementNS:(_,tag)
 globalThis.window=new EventTarget();window.confirm=()=>{throw Error('Browser confirm is unavailable in native WKWebView');};
 let locale='en',items=[{id:'fixture',name:'Fixture MCP',transport:'http',url:'http://127.0.0.1:18744',enabled:true,revision:0}],posts=[];
 const root=new Element('main');document.body.append(root);
-const component=createExtensions({root,locale:()=>locale,client:{scope:()=>({space:'local',owner:'main'}),request:async(path,options={})=>{if(options.method==='POST'){posts.push(options);if(options.body.action==='remove')items=[];else items.push(options.body.server);return {};}return {items:[],mcp:items};}}});
+const component=createExtensions({root,locale:()=>locale,client:{scope:()=>({space:'local',owner:'main'}),request:async(path,options={})=>{if(options.method==='POST'){posts.push(options);if(options.body.action==='remove')items=[];else {const server={...options.body.server,revision:(options.body.server.revision||0)+1};items.push(server);return server;}return {};}return {items:[],mcp:items};}}});
 const button=(host,key)=>host.querySelectorAll('button').find(node=>node.dataset.extensionText===key);
 const editor=()=>document.body.querySelector('.extensions-dialog'),confirmation=()=>document.body.querySelector('.extension-confirmation');
 await component.load();root.querySelector('.extension-open').click();

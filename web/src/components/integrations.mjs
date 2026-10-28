@@ -3,23 +3,34 @@ import {icon} from './icons.mjs';
 import {translate} from '../locales/messages.mjs';
 import {createPluginNotifications} from './plugin-notifications.mjs';
 import {reconcile} from './reconcile.mjs';
+import {createRefreshQueue} from '../state/refresh.mjs';
 
 // The view only sees the integration catalog and login sessions. OAuth tokens
 // and provider-specific polling remain behind the Integrations API.
-export function createIntegrations({root,request,scope,signal,locale,openExternal,refresh}) {
+export function createIntegrations({root,request,scope,signal,locale,openExternal,resources}) {
   const t=key=>translate(locale(),key),context={...scope};
   const section=n('section','integrations');root.append(section);
   const heading=n('h2','page-heading'),description=n('p','hint');section.append(heading,description);
   const rows=n('div','integration-list');section.append(rows);
-  const notifications=createPluginNotifications({pluginID: 'github',request,scope:context,signal,locale,refresh,render});
+  const notifications=createPluginNotifications({pluginID: 'github',request,scope:context,signal,locale,onProjection:value=>{notificationValue=value;},render});
   let expanded=false,accountIdentity=null;
-  let items=[],timer,busy=false;
+  let items=[],notificationValue=null,timer,attempt=0,accountEpoch=0;const pendingAccounts=new Set();
   const active=()=>!signal.aborted;
   window.addEventListener('pot:locale',render);
-  signal.addEventListener('abort',()=>{clearTimeout(timer);window.removeEventListener('pot:locale',render);},{once:true});
+  signal.addEventListener('abort',()=>{clearTimeout(timer);accountsQueue.close();notificationsQueue.close();stop?.();window.removeEventListener('pot:locale',render);},{once:true});
   const call=(path,options={})=>request(path,{...context,signal,...options,transient:true});
   const fail=(row,error)=>{if(!active())return;row.querySelector('.inline-error')?.remove();const message=n('p','inline-error',error.message||String(error));message.setAttribute('role','alert');row.append(message);};
-  async function work(button,task){const row=button.closest('.integration-row');if(busy)return;busy=true;for(const control of rows.querySelectorAll('.integration-actions button,.integration-toggle'))control.disabled=true;try{await task();if(active())await refresh();}catch(error){fail(row,error);}finally{busy=false;if(active())for(const control of rows.querySelectorAll('.integration-actions button,.integration-toggle'))control.disabled=control.dataset.unavailable==='true';}}
+  async function work(button,id,task){const row=button.closest('.integration-row');if(pendingAccounts.has(id))return;pendingAccounts.add(id);accountEpoch++;render();try{await task();if(active()&&!resources)await accountsQueue.run();}catch(error){fail(row,error);}finally{pendingAccounts.delete(id);if(active())render();}}
+  const accountsQueue=createRefreshQueue(async()=>{const epoch=accountEpoch,value=await call('/api/v1/integrations');if(!active()||epoch!==accountEpoch)return;attempt=0;updateAccounts(value);},{active,onError:error=>{attempt++;fail(section,error);schedule();}});
+  const notificationsQueue=createRefreshQueue(async()=>{const identity=accountIdentity,value=await call('/api/v1/plugin-notifications');if(!active())return;if(identity!==accountIdentity&&value.items?.find(item=>item.id==='github')?.settings?.account_id!==accountIdentity){notificationsQueue.run();return;}if((value.items?.find(item=>item.id==='github')?.settings?.revision||0)<(notificationValue?.items?.find(item=>item.id==='github')?.settings?.revision||0))return;notificationValue=value;notifications.update(value,items.find(item=>item.id==='github')?.account);render();},{active,onError:error=>fail(section,error)});
+  const stop=resources?.subscribeInvalidation((topics,source={})=>{
+    if(!active()||source.space&&source.space!==context.space)return;
+    if(!topics.length||topics.some(topic=>['integrations','spaces'].includes(topic))){accountEpoch++;accountsQueue.run();}
+    if(!topics.length||topics.some(topic=>['plugin-notifications','assistants','spaces'].includes(topic)))notificationsQueue.run();
+  });
+  function schedule(){clearTimeout(timer);if(active()&&items.some(item=>item.login?.status==='pending'))timer=setTimeout(()=>accountsQueue.run(),Math.min(1500*2**Math.min(attempt,4),15000));}
+  function updateAccounts(value){items=value.items||[];const account=items.find(item=>item.id==='github')?.account,identity=account?.identity.id||null;if(accountIdentity!==identity){expanded=false;accountIdentity=identity;}notifications.update(notificationValue,account);render();}
+
   function render(){
     heading.textContent=t('integrations.title');description.textContent=t('integrations.description');
     clearTimeout(timer);const projection=n('div','integration-list');
@@ -38,23 +49,24 @@ export function createIntegrations({root,request,scope,signal,locale,openExterna
       const controls=n('div','integration-actions');
       if(github){const panel=n('div','github-account-settings');panel.id='github-account-settings';panel.hidden=!expanded;panel.append(notifications.form(),controls);row.append(panel);}else row.append(controls);
       const base='/api/v1/integrations/'+encodeURIComponent(item.id);
-      if(connected){controls.append(action(t('integrations.logout'),event=>work(event.currentTarget,()=>call(base+'/connection',{method:'DELETE',body:{expected_revision:item.account.revision}}))));}
+      if(connected){controls.append(action(t('integrations.logout'),event=>work(event.currentTarget,item.id,()=>call(base+'/connection',{method:'DELETE',body:{expected_revision:item.account.revision}}))));}
       else if(pending){
-        controls.append(action(t('integrations.cancel'),event=>work(event.currentTarget,()=>call(base+'/login/'+encodeURIComponent(item.login.id),{method:'DELETE'}))));
+        controls.append(action(t('integrations.cancel'),event=>work(event.currentTarget,item.id,()=>call(base+'/login/'+encodeURIComponent(item.login.id),{method:'DELETE'}))));
         if(item.login.authorization_url){const instructions=n('div','integration-authorization');instructions.append(n('p','hint',t('integrations.authorization.instructions')),n('code','integration-code',item.login.user_code));const link=n('a','control primary',t('integrations.authorization.openBrowser'));link.href=item.login.authorization_url;link.target='_blank';link.rel='noopener noreferrer';if(openExternal)link.onclick=event=>{event.preventDefault();const link=event.currentTarget;openExternal(link.href).catch(error=>fail(link.closest('.integration-row'),error));};instructions.append(link);row.append(instructions);}
       }else{
         const login=action(t('integrations.login'),event=>{const button=event.currentTarget;
           // Reserve a browser tab inside the user gesture to avoid popup blockers.
           const popup=openExternal?null:window.open('about:blank','_blank');if(popup)popup.opener=null;
-          return work(button,async()=>{try{const session=await call(base+'/login',{method:'POST',body:{}});if(!active()){popup?.close();return;}if(openExternal)await openExternal(session.authorization_url);else if(popup)popup.location.href=session.authorization_url;}catch(error){popup?.close();throw error;}});
+          if(pendingAccounts.has(item.id)){popup?.close();return;}return work(button,item.id,async()=>{try{const session=await call(base+'/login',{method:'POST',body:{}});if(!active()){popup?.close();return;}if(openExternal)await openExternal(session.authorization_url);else if(popup)popup.location.href=session.authorization_url;}catch(error){popup?.close();throw error;}});
         });login.disabled=!item.login_available;login.dataset.unavailable=String(!item.login_available);controls.append(login);
         if(!item.login_available)row.append(n('p','hint integration-note',t('integrations.loginUnavailable')));
         if(item.login?.error)row.append(n('p','inline-error',t('integrations.authorization.failed')));
       }
-      for(const control of controls.querySelectorAll('button')){control.dataset.unavailable=String(control.disabled);control.disabled=busy||control.disabled;}projection.append(row);
+      for(const control of controls.querySelectorAll('button')){control.dataset.unavailable=String(control.disabled);control.disabled=pendingAccounts.has(item.id)||control.disabled;}projection.append(row);
     }
     reconcile(rows,projection);
-    if(items.some(item=>item.login?.status==='pending'))timer=setTimeout(()=>refresh().catch(error=>{if(active())fail(section,error);}),1500);
+    schedule();
   }
-  return value=>{items=value.items||[];const account=items.find(item=>item.id==='github')?.account;const identity=account?.identity.id||null;if(accountIdentity!==identity){expanded=false;accountIdentity=identity;}notifications.update(value.notifications,account);render();};
+  const refresh=()=>Promise.all([accountsQueue.run(),notificationsQueue.run()]);
+  return {refresh};
 }

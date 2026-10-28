@@ -3,29 +3,53 @@ import {translate} from '../locales/messages.mjs';
 const split=value=>value.split(',').map(v=>v.trim()).filter(Boolean);
 // Generic list-filter subscription editor. Field names/options and all service
 // semantics come from the plugin's MCP projection, not a host-side rules model.
-export function createPluginNotifications({request,scope,signal,locale,refresh,render,pluginID}){
+export function createPluginNotifications({request,scope,signal,locale,onProjection=()=>{},render,pluginID}){
  const t=key=>translate(locale(),key);
- let current=null,identity=null,busy=false,error='',adding=false;
+ let current=null,identity=null,generation=0,error='',adding=false;
+ const pending=new Set();
  const drafts=new Map();
  const settings=()=>current?.items?.find(item=>item.id===pluginID)?.settings;
  const subscriptions=()=>settings()?.subscriptions||[];
- const from=sub=>({id:sub.id,revision:sub.revision,enabled:sub.enabled,assistant:sub.assistant,filters:structuredClone(sub.filters),dirty:false,requestID:null});
+ const from=sub=>({id:sub.id,revision:sub.revision,enabled:sub.enabled,assistant:sub.assistant,filters:structuredClone(sub.filters),dirty:false,version:0,requestID:null});
  const draftFor=sub=>{if(!drafts.has(sub.id))drafts.set(sub.id,from(sub));return drafts.get(sub.id);};
- const edit=(draft,change)=>{if(busy)return;change();draft.dirty=true;draft.requestID=null;};
+ const edit=(draft,change)=>{change();draft.version++;draft.dirty=true;draft.requestID=null;};
  const save=async(draft,remove=false)=>{
- if(busy)return;const account=identity;busy=true;error='';render();draft.requestID ||= crypto.randomUUID();
- const tool=remove?'delete_subscription':draft.id==='new'?'create_subscription':'update_subscription';
- const args=remove?{id:draft.id,revision:draft.revision,request_id:draft.requestID}:{...(draft.id==='new'?{}:{id:draft.id,revision:draft.revision}),request_id:draft.requestID,account_id:identity,assistant:draft.assistant,enabled:draft.enabled,filters:draft.filters};
+ if(pending.has(draft)||draft.acceptedUnknown||!identity||signal.aborted)return;
+ const account=identity,epoch=generation;draft.requestID ||= crypto.randomUUID();
+ const attempt=draft.retry||{submitted:structuredClone({...draft,retry:undefined}),version:draft.version,remove};draft.retry=attempt;
+ const {submitted,version}=attempt;remove=attempt.remove;
+ pending.add(draft);error='';render();
+ const tool=remove?'delete_subscription':submitted.id==='new'?'create_subscription':'update_subscription';
+ const args=remove?{id:submitted.id,revision:submitted.revision,request_id:submitted.requestID}:{...(submitted.id==='new'?{}:{id:submitted.id,revision:submitted.revision}),request_id:submitted.requestID,account_id:account,assistant:submitted.assistant,enabled:submitted.enabled,filters:submitted.filters};
  try{
  const value=await request('/api/v1/plugin-notifications/'+pluginID,{...scope,signal,method:'POST',body:{tool,arguments:args}});
- if(!signal.aborted&&identity===account){const incoming=value.items?.find(i=>i.id===pluginID)?.settings;if(incoming?.revision<(settings()?.revision||0))throw Error('stale_notification_response');current=value;drafts.delete(draft.id);if(draft.id==='new')adding=false;await refresh();}
- }catch(cause){if(identity===account)error=cause.message||String(cause);}finally{busy=false;if(!signal.aborted)render();}
+ if(!signal.aborted&&identity===account&&generation===epoch){
+   const incoming=value.items?.find(i=>i.id===pluginID)?.settings;
+   // Concurrent independent rows can finish out of order. Only the newer full
+   // projection replaces current, but each exact write acknowledges its draft.
+   const older=(incoming?.revision||0)<(settings()?.revision||0),sameAccount=!incoming?.account_id||incoming.account_id===account;
+   // A complete display list can aid reconciliation even when the command
+   // receipt is missing; it never identifies or acknowledges this local draft.
+   if(incoming&&sameAccount&&!older){current=value;onProjection(value);}
+   const savedID=value.operation?.subscription_id;
+   if(!incoming||!sameAccount||!savedID||submitted.id!=='new'&&savedID!==submitted.id){draft.acceptedUnknown=true;throw Error('missing_subscription_receipt');}
+   const acknowledgedRevision=submitted.id==='new'?1:submitted.revision+1,latest=subscriptions().find(sub=>sub.id===savedID),superseded=older&&(!latest||latest.revision>acknowledgedRevision);
+   if(superseded)error='stale_notification_response';draft.retry=null;
+   if(draft.version===version&&!superseded){drafts.delete(submitted.id);if(submitted.id==='new')adding=false;}
+   else{draft.dirty=true;drafts.delete(submitted.id);draft.id=savedID;draft.revision=acknowledgedRevision;draft.requestID=null;drafts.set(savedID,draft);if(submitted.id==='new')adding=false;}
+   // This response is the complete subscription projection; render it once.
+ }
+ }catch(cause){if(!signal.aborted&&identity===account&&generation===epoch){if(cause.status>=400&&cause.status<500)draft.retry=null;else if(draft.retry)draft.retry.uncertain=true;error=cause.message||String(cause);}}
+ finally{pending.delete(draft);if(!signal.aborted)render();}
  };
  return {
  update(value,account){
- const next=account?.identity.id||null;if(next!==identity){identity=next;drafts.clear();adding=false;error='';}
- current=value;
- for(const sub of subscriptions()){const draft=drafts.get(sub.id);if(!draft||(!draft.dirty&&!busy))drafts.set(sub.id,from(sub));}
+ const next=account?.identity.id||null;if(next!==identity){identity=next;generation++;drafts.clear();adding=false;error='';current=null;}
+ const incoming=value?.items?.find(item=>item.id===pluginID)?.settings;
+ if(!incoming){current=value;return;}
+ if(incoming?.account_id&&incoming.account_id!==identity)return;
+ if((incoming?.revision||0)<(settings()?.revision||0))return;current=value;
+ for(const sub of subscriptions()){const draft=drafts.get(sub.id);if(!draft||(!draft.dirty&&!pending.has(draft)))drafts.set(sub.id,from(sub));}
  },
  summary(){const values=subscriptions().filter(sub=>sub.enabled);return {text:t('pluginNotifications.subscriptionSummary').replace('{count}',String(values.length)),error:subscriptions().some(s=>s.enabled&&!['ready','baseline','pending'].includes(s.status))};},
  form(){
@@ -33,7 +57,7 @@ export function createPluginNotifications({request,scope,signal,locale,refresh,r
  root.append(n('h3','',t('pluginNotifications.title')),n('p','hint',t('pluginNotifications.description')),n('p','hint',t('pluginNotifications.filterHelp')));
  if(!settings()){root.append(n('p','inline-error',t('pluginNotifications.status.plugin_missing')));return root;}
  if(!subscriptions().length)root.append(n('p','hint',t('pluginNotifications.noSubscriptions')));
- const all=[...subscriptions()];if(adding)all.push({id:'new',revision:0,enabled:true,assistant:current.assistants?.[0]?.id||'',filters:Object.fromEntries((settings().fields||[]).map(f=>[f.key,null]))});
+ const all=[...subscriptions(),...[...drafts.values()].filter(draft=>draft.id!=='new'&&!subscriptions().some(sub=>sub.id===draft.id))];if(adding)all.push({id:'new',revision:0,enabled:true,assistant:current.assistants?.[0]?.id||'',filters:Object.fromEntries((settings().fields||[]).map(f=>[f.key,null]))});
  for(const sub of all){
  const draft=draftFor(sub),section=n('section','page-section');section.dataset.viewKey='subscription-'+sub.id;
  const name=current.assistants?.find(a=>a.id===sub.assistant)?.name||sub.assistant;
@@ -54,14 +78,17 @@ export function createPluginNotifications({request,scope,signal,locale,refresh,r
  }
  }
  section.append(n('p','hint',t('pluginNotifications.reasonHelp')),n('p','hint',t('pluginNotifications.threadHelp')));
- const submit=action(t('pluginNotifications.save'),()=>save(draft));submit.disabled=busy||!draft.assistant;section.append(submit);
- section.append(action(t('pluginNotifications.reset'),()=>{drafts.delete(sub.id);if(sub.id==='new')adding=false;error='';render();}));
- if(sub.id!=='new')section.append(action(t('pluginNotifications.delete'),()=>save(draft,true),{danger:true}));
+ const missing=sub.id!=='new'&&!subscriptions().some(item=>item.id===sub.id);
+ if(draft.acceptedUnknown)section.append(n('p','inline-error',t('pluginNotifications.receiptMissing')));
+ else if(draft.retry&&!pending.has(draft))section.append(n('p','hint',t('pluginNotifications.retryDraft')));
+ if(missing)section.append(n('p','inline-error',t('pluginNotifications.removedDraft')));
+ const submit=action(t(draft.acceptedUnknown?'pluginNotifications.awaitingConfirmation':draft.retry?.uncertain?'pluginNotifications.'+(draft.retry.remove?'retryDelete':'retryPrevious'):'pluginNotifications.save'),()=>save(draft));submit.disabled=pending.has(draft)||draft.acceptedUnknown||missing&&!draft.retry||!draft.assistant;section.append(submit);
+ section.append(action(t('pluginNotifications.reset'),()=>{if(pending.has(draft))return;drafts.delete(sub.id);if(sub.id==='new')adding=false;error='';render();}));
+ if(sub.id!=='new'){const remove=action(t('pluginNotifications.delete'),()=>save(draft,true),{danger:true});remove.disabled=pending.has(draft)||!!draft.retry||missing;section.append(remove);}if(pending.has(draft))section.querySelectorAll('button').forEach(button=>button.disabled=true);
  root.append(section);
  }
  const add=action(t('pluginNotifications.add'),()=>{adding=true;render();});add.disabled=adding||!identity;root.append(add);
  if(error)root.append(n('p','inline-error',t('pluginNotifications.error')),n('pre','notification-diagnostics',error));
- for(const control of root.querySelectorAll('input,select,button'))control.disabled=busy||control.disabled;
  return root;
  }
  };
