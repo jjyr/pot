@@ -44,10 +44,13 @@ export async function taskStatusBrowser(browser,{sourceOrigin,output}={}){
    assert.equal(await row.locator('.task-activity-dot').getAttribute('data-phase'),'waiting','temporary gate does not replace last task phase');
    assert.equal(await row.locator('.background-task-status').textContent(),'Waiting');
    const frozen=await row.locator('.background-task-elapsed').textContent();
+   // A normal draft never becomes a submitted message without the click.
+   await waitForOutbox(page,value=>value[0].every(row=>row.state==='cancelled'));
    // Send remains a local explicit submission while network authority is lost.
    await send.click();
-   const committed=await waitForOutbox(page,value=>value[0].some(row=>row.state==='queued'&&!row.started));
-   const queued=committed.rows.find(row=>row.state==='queued'&&!row.started);
+   const committed=await waitForOutbox(page,value=>value[0].some(row=>['queued','failed'].includes(row.state)&&!row.started));
+   const queued=committed.rows.find(row=>['queued','failed'].includes(row.state)&&!row.started);
+   if(queued.state==='failed')assert.equal(queued.problem,'permission','revoked capability retains the local submission without dispatch');
    assert.equal(queued.request.text,'Synthetic guarded draft '+JSON.stringify(gate));
    assert.equal(queued.target.owner,'pot');assert.equal(queued.target.space,'review-local');
    assert.equal(queued.target.control,'review-local');assert.equal(queued.target.conversation,'main');
