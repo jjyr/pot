@@ -56,7 +56,10 @@ can publish. A query fetched before an event or successful command cannot replac
 a newer projection, including across tabs. In-memory invalidation immediately
 revokes stale selection eligibility; query subscribers consume only committed
 values. Storage failure retains the prior projection and retries the pending
-invalidation before another refresh.
+invalidation before another refresh. Reading an existing display projection does
+not depend on namespace registration writes succeeding. Pending epochs still fence
+new reads and commits; destructive scope retirement cannot fall back to retained
+data. Retained display values never grant command capabilities.
 
 Shared domain queries serialize reads and coalesce changes into one later read.
 Resource commit notifications and business invalidations have separate matching
@@ -118,6 +121,25 @@ offline destinations, storage failures and fresh capability removal still remove
 unavailable actions. Settings remains available. Handlers recheck current capability,
 scope and subscription identity; turn controls also require the same active turn,
 conversation boot and pause state before sending a request.
+
+Known scoped Task transcripts mount as retained, read-only output before metadata
+or machine labels finish loading. Current metadata gates commands and new event
+reads. A changed run retires the old transcript window. Task event catch-up reads
+at most 5000 events per batch, then schedules a serial next batch while the active
+detail remains subscribed. It reports catching up until the last page is committed;
+a storage failure or removed subscriber stops that continuation.
+
+Cached Chat history windows are projected in a readonly transaction from committed
+records and coverage, with the current conversation and reader-intent fences.
+Position and layout hints save independently; a failed hint write cannot hide a
+readable window. New network history still commits before presentation.
+
+Tasks, schedules and Usage allow cache browsing, local filtering and disclosures
+without current command authority. Schedule display sources use only known scoped
+identities and existing cache entries when management is unavailable. Freshness,
+capabilities and backend authorization still gate mutations. Usage cancel reads a
+normalized authority snapshot without confirming a session or changing Chat's
+reading window, and rechecks the waiting request and captured identity before POST.
 
 Task details refresh metadata, results, files and guidance alongside their
 incremental execution transcript. Schedule details and run history share the same

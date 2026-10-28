@@ -3,14 +3,15 @@ import {createTaskRepository} from '../task-repository.mjs';
 import {createTaskPages} from '../task-pages.mjs';
 import {createTaskTranscript} from '../task-transcript.mjs';
 import {supportsCapability} from '../agent-links.mjs';
-export function createTasksDomain(client,{resources,queries,commands}){
-  let transcript,closed=false;const transcripts=()=>transcript ||= createTaskRepository(client),pages=createTaskPages(client);
+export function createTasksDomain(client,{resources,queries,commands,transcriptRepository}){
+  let transcript=transcriptRepository,closed=false;const catchupTimers=new Map();const transcripts=()=>transcript ||= createTaskRepository(client),pages=createTaskPages(client);
   const current=()=>{if(closed)throw new DOMException('Domain disposed','AbortError');};
   const path=id=>'/api/v1/tasks/'+encodeURIComponent(id),ref=(task,scope)=>JSON.stringify([scope.space,scope.owner,task.id,task.run_id]);
   const detail=(task,scope)=>queries.define('task:'+ref(task,scope),async(force,publish)=>{
-    const record=await resources.read(path(task.id),{...scope,authoritative:force}),freshness=resources.state(record)?.freshness||'fresh';
+    const record=await resources.read(path(task.id),{...scope,authoritative:force||'invalidated'}),freshness=resources.state(record)?.freshness||'fresh';
     const taskRef={...task,run_id:record.run_id};let state=await transcripts().read(taskRef,scope)||createTaskTranscript(),inputs=[],storageError=false,connectionError='';
     if(state.cursor)publish({data:{record,state,inputs:[],fresh:false},freshness:'retained'});
+    if(freshness!=='fresh')return {data:{record,state,inputs:[],fresh:false},freshness:'retained'};
     try{
       const jobs=await Promise.allSettled([
         supportsCapability(record,'task.input')?resources.read(path(task.id)+'/messages',{...scope,authoritative:force}):Promise.resolve([]),
@@ -18,7 +19,11 @@ export function createTasksDomain(client,{resources,queries,commands}){
       ]);
       if(jobs[0].status==='fulfilled')inputs=jobs[0].value;
       const failures=jobs.filter(job=>job.status==='rejected');storageError=failures.some(job=>job.reason.storage);connectionError=failures.map(job=>job.reason.message).join('\n');
-      return {data:{record,state,inputs:Array.isArray(inputs)?inputs:inputs.items||[],inputsTruncated:!!inputs.cache_truncated,unavailable:!!jobs[1].value?.unavailable,storageError,connectionError,fresh:freshness==='fresh'&&!failures.length},freshness:failures.length?'stale':freshness,lastConfirmed:resources.state(record)?.lastConfirmed};
+      const catchingUp=!failures.length&&!!jobs[1].value?.has_more;
+      if(catchingUp&&!catchupTimers.has(ref(task,scope))){
+        const key=ref(task,scope);catchupTimers.set(key,setTimeout(()=>{catchupTimers.delete(key);if(closed)return;const query=detail(task,scope);if(query.active())query.requery();},0));
+      }
+      return {data:{record,state,catchingUp,inputs:Array.isArray(inputs)?inputs:inputs.items||[],inputsTruncated:!!inputs.cache_truncated,unavailable:!!jobs[1].value?.unavailable,storageError,connectionError,fresh:freshness==='fresh'&&!failures.length&&!catchingUp},freshness:failures.length?'stale':catchingUp?'retained':freshness,lastConfirmed:resources.state(record)?.lastConfirmed};
     }catch(error){throw Object.assign(error,{storage:storageError});}
   },{paths:[path(task.id),path(task.id)+'/messages'],topics:['tasks','runner','spaces'],space:scope.space,owner:scope.owner});
   const active=scope=>queries.define('active-tasks:'+JSON.stringify(scope),async force=>{const items=[];let offset=0,stale=false;const seen=new Set();do{if(seen.has(offset))throw Error('task_pagination');seen.add(offset);const value=await resources.read('/api/v1/tasks/query?'+new URLSearchParams({scope:'active',limit:50,offset}),{...scope,authoritative:force});stale ||= resources.state(value)?.freshness!=='fresh';items.push(...(value.items||[]));offset=value.next_offset;}while(offset!=null);return {data:items.filter(task=>['queued','running','waiting','waiting_approval'].includes(task.phase)).map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner,_stale:stale})),freshness:stale?'retained':'fresh'};},{paths:['/api/v1/tasks/query'],topics:['tasks'],space:scope.space,owner:scope.owner});
@@ -41,6 +46,6 @@ export function createTasksDomain(client,{resources,queries,commands}){
     pause:(task,scope,paused)=>command(scope,task,'pause',{run_id:task.run_id,action:paused?'pause':'resume'},(body,_,captured)=>post(task,'/control',body,captured)),
     archive:(task,scope,archived)=>command(scope,task,'archive',{task_id:task.id,run_id:task.run_id,archived,reason:''},(decision,_,captured)=>client.request('/api/v1/tasks/dispositions',{...captured,method:'POST',body:{decisions:[decision]}})),
     resume:(task,scope,wait)=>command(scope,task,'resume',wait,(body,id,captured)=>post(task,'/resume',{...body,request_id:id},captured),{idempotent:true}),
-    clear:()=>pages.clear(),watchCommands:commands.watch,dispose(){closed=true;transcript?.close();},
+    clear:()=>pages.clear(),watchCommands:commands.watch,dispose(){closed=true;for(const timer of catchupTimers.values())clearTimeout(timer);catchupTimers.clear();transcript?.close();},
   };
 }

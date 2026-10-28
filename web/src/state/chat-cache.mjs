@@ -183,22 +183,28 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
       meta.ranges=ranges([...(meta.ranges||[]),history]);meta=await save(tx,key,meta,snapshot);if(signal?.aborted)throw signal.reason;return {meta,snapshot};
     });return committed(key,result);
   }
-  async function readPage(key,query){
+  async function readPage(key,query,options={}){
     return transaction('readonly',async tx=>{
-      const meta=await request(tx.objectStore('conversations').get(key));if(!meta)return null;
+      options.validate?.();const meta=await request(tx.objectStore('conversations').get(key));if(!meta)return null;
       const store=tx.objectStore('messages'),index=store.index('sequence'),target=query.around?await request(store.get([key,query.around])):null;if(query.around&&!target)return null;
       const pivot=query.before?BigInt(query.before)-1n:query.after?BigInt(query.after)+1n:target?sequence(target.message):BigInt(meta.latest);
       const range=meta.ranges?.find(value=>pivot>=BigInt(value.before)&&pivot<=BigInt(value.after));if(!range)return null;
-      const limit=Math.max(1,Math.min(640,query.limit||80)),options={accept:row=>row.normal,limit};let selected;
-      if(query.before)selected=(await indexedRows(index,bounds(key,range.before,pivot),{...options,direction:'prev'})).reverse();
-      else if(query.after)selected=await indexedRows(index,bounds(key,pivot,range.after),options);
-      else if(target){const earlier=sequence(target.message)>BigInt(range.before)?(await indexedRows(index,bounds(key,range.before,sequence(target.message)-1n),{...options,direction:'prev',limit:Math.floor(limit/2)})).reverse():[];const newer=await indexedRows(index,bounds(key,target.message.sequence,range.after),{...options,limit:limit-earlier.length});selected=[...earlier,...newer];}
-      else selected=(await indexedRows(index,bounds(key,range.before,range.after),{...options,direction:'prev'})).reverse();
+      const limit=Math.max(1,Math.min(640,query.limit||80)),scanOptions={accept:row=>row.normal,limit};let selected;
+      if(query.before)selected=(await indexedRows(index,bounds(key,range.before,pivot),{...scanOptions,direction:'prev'})).reverse();
+      else if(query.after)selected=await indexedRows(index,bounds(key,pivot,range.after),scanOptions);
+      else if(target){const earlier=sequence(target.message)>BigInt(range.before)?(await indexedRows(index,bounds(key,range.before,sequence(target.message)-1n),{...scanOptions,direction:'prev',limit:Math.floor(limit/2)})).reverse():[];const newer=await indexedRows(index,bounds(key,target.message.sequence,range.after),{...scanOptions,limit:limit-earlier.length});selected=[...earlier,...newer];}
+      else selected=(await indexedRows(index,bounds(key,range.before,range.after),{...scanOptions,direction:'prev'})).reverse();
       if(!selected.length)return null;const messages=await dependencies(tx,key,selected);if(!messages)return null;
-      return {boot_id:meta.projection.boot_id,conversation_id:meta.projection.conversation_id,cursor:meta.projection.cursor,messages,...(checkpoints?{checkpoint:await request(tx.objectStore('taskCheckpoints').get(key))}:{}),history:{before:selected[0].message.sequence,after:selected.at(-1).message.sequence,has_more:sequence(selected[0].message)>1n,has_newer:sequence(selected.at(-1).message)<BigInt(meta.latest)}};
+      const page={boot_id:meta.projection.boot_id,conversation_id:meta.projection.conversation_id,cursor:meta.projection.cursor,messages,...(checkpoints?{checkpoint:await request(tx.objectStore('taskCheckpoints').get(key))}:{}),history:{before:selected[0].message.sequence,after:selected.at(-1).message.sequence,has_more:sequence(selected[0].message)>1n,has_newer:sequence(selected.at(-1).message)<BigInt(meta.latest)}};
+      if(!options.project)return page;
+      if(options.identity&&(page.boot_id!==options.identity.boot_id||page.conversation_id!==options.identity.conversation_id))throw new DOMException('Chat history identity retired','AbortError');
+      const {window}=options.context?.()||options,previous=await projection(tx,key,meta,window||meta.window);
+      options.validate?.();const {anchor}=options.context?.()||options;
+      return mergeHistoryPage(previous,page,anchor,{around:!!options.around&&(options.currentPosition?.()??true)});
+
     });
   }
-  return {read,writeFrames,writePage,writeRecords,readPage,readMessages:(key,ids)=>transaction('readonly',async tx=>(await records(tx,key,ids)).map(row=>row.message)),subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},
+  return {read,writeFrames,writePage,writeRecords,readPage,projectPage:(key,query,options)=>readPage(key,query,{...options,project:true}),readMessages:(key,ids)=>transaction('readonly',async tx=>(await records(tx,key,ids)).map(row=>row.message)),subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},
     async saveView(key,surface,value){await transaction('readwrite',async tx=>{
       const meta=await request(tx.objectStore('conversations').get(key));if(!meta||meta.projection.conversation_id!==value.conversation_id)return;
       const store=tx.objectStore('views'),previous=await request(store.get([key,surface]));
