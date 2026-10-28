@@ -137,11 +137,12 @@ const evidence={scope,forms:[],integrations:{},extensions:{}};
 
 // Actual assistant editor: slow avatar processing disables duplicate avatar
 // actions and submit while an unrelated name remains editable.
-{
+for(const capability of ['assistant.configure','assistant.profile']){
  const host=root(),approvalHost=root(),chatApprovalHost=root(),avatar=deferred(),write=deferred(),posts=[];
- const definition={id:'a',space_id:'one',name:'Initial',revision:1,capabilities:{version:1,operations:['assistant.configure']}};
+ const definition={id:'a',space_id:'one',name:'Initial',revision:1,capabilities:{version:1,operations:[capability]}};
  const client={runtime:{id:'fixture',boot_id:'boot'},spaces:[{id:'one',control_id:'fixture'}],assistants:[definition],scope:()=>scope,request:async(path,options={})=>{
   if(path==='/api/v1/assistants/default-avatar')return avatar.promise;
+  if(path==='/api/v1/assistants/profile')return {name:'Initial',avatar:'',revision:1};
   if(options.method==='POST'){posts.push({path,options});return write.promise;}
   if(path==='/api/v1/providers')return {profiles:[]};
   if(path==='/api/v1/instructions')return {text:'',revision:'rules'};
@@ -150,6 +151,6 @@ const evidence={scope,forms:[],integrations:{},extensions:{}};
  const pages=createPages({client,host,approvalHost,chatApprovalHost,chatVisible:()=>false,locale,notify:()=>{},changed:()=>{},titleChanged:()=>{},openChat:()=>{}});await pages.assistant(definition);await tick();
  const reset=button(host,'Restore default avatar');assert(reset,'assistant editor exposes default avatar action: '+host.textContent);
  const pending=reset.click();input(field(host,'Name'),'B');assert.equal(field(host,'Name').disabled,false);assert.equal(button(host,'Save').disabled,true);
- avatar.resolve({avatar:'data:image/png;base64,c3ludGhldGlj'});await pending;assert.equal(field(host,'Name').value,'B');const form=host.querySelector('form'),save=form.onsubmit({preventDefault(){}});await tick();assert.equal(posts[0].options.body.name,'B');input(field(host,'Name'),'C');write.resolve({revision:2});await save;assert.equal(field(host,'Name').value,'C');assert.match(host.textContent,/saved|Saved/);pages.dispose();host.remove();approvalHost.remove();chatApprovalHost.remove();evidence.forms.push({kind:'avatar',nameDuringProcessing:'B',nameDuringSave:'C',posts:posts.length});
+ avatar.resolve({avatar:'data:image/png;base64,c3ludGhldGlj'});await pending;assert.equal(field(host,'Name').value,'B');const form=host.querySelector('form'),save=form.onsubmit({preventDefault(){}});await tick();assert.equal(posts[0].options.body.name,'B');input(field(host,'Name'),'C');write.resolve({revision:2});await save;assert.equal(field(host,'Name').value,'C');assert.match(host.textContent,/saved|Saved/);pages.dispose();host.remove();approvalHost.remove();chatApprovalHost.remove();evidence.forms.push({kind:'avatar:'+capability,nameDuringProcessing:'B',nameDuringSave:'C',posts:posts.length});
 }
 console.log(JSON.stringify(evidence,null,2));

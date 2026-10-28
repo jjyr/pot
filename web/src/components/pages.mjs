@@ -405,14 +405,16 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     editor.kind='assistant';
     const preview=avatar(56,profile.avatar),actions=toolbar(),upload=n('input'),help=n('p','hint'),error=n('p','inline-error');
     upload.type='file';upload.accept='image/png,image/jpeg,image/webp';upload.hidden=true;error.hidden=true;error.setAttribute('role','alert');
+    let avatarPending=false;
     const edit=async work=>{
-      if(!form.session.begin())return;
-      const controls=[...form.form.querySelectorAll('input,button')];for(const node of controls)node.disabled=true;
+      if(avatarPending||form.session.pending)return;avatarPending=true;
+      const submit=form.form.querySelector('.editor-actions .primary'),disabled=submit.disabled;submit.disabled=true;change.disabled=reset.disabled=true;
       error.hidden=true;
-      try{const {value,image}=await work();form.session.settle(false);form.session.set('avatar',value);preview.replaceChildren(...avatar(56,image).childNodes);}
-      catch{form.session.settle(false);error.hidden=false;error.textContent=t('assistant.avatarFailed');}
-      finally{for(const node of controls)node.disabled=false;form.lifecycle.refreshDelete?.();}
+      try{const {value,image}=await work();if(editor?.session!==form.session||disposed||!configurationIdentityCurrent(client,captured))return;form.session.set('avatar',value);preview.replaceChildren(...avatar(56,image).childNodes);}
+      catch{error.hidden=false;error.textContent=t('assistant.avatarFailed');}
+      finally{avatarPending=false;submit.disabled=disabled;change.disabled=reset.disabled=false;form.lifecycle.refreshDelete?.();}
     };
+    form.form.addEventListener('submit',event=>{if(avatarPending){event.preventDefault();event.stopImmediatePropagation();}},{capture:true});
     const change=action('',()=>upload.click()),reset=action('',()=>edit(async()=>{const value=await domains.directory.defaultAvatar(captured);return {value:'',image:value.avatar};}));
     upload.onchange=async()=>{const file=upload.files?.[0];upload.value='';if(file)await edit(async()=>{const image=await avatarFromFile(file);return {value:image,image};});};
     actions.append(change,reset,upload);form.form.querySelector('.editor-fields').prepend(preview,actions,help,error);
