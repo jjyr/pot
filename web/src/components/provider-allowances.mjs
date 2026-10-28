@@ -34,7 +34,7 @@ export function createProviderAllowances({root,providersDomain,scope,profileID,l
  const refresh=action('',()=>load(true)),save=action('',async()=>{
   synchronizeIdentity();if(memory.saving||!memory.draft||!available()||!threshold.input.reportValidity())return;
   const desired=structuredClone(memory.draft),revision=memory.revision,signature=memory.signature,write=memory.write={};memory.saving=true;memory.message='';renderControls();
-  try{const value=await providersDomain.configureAllowance(scope,profileID,desired,revision);if(memory.signature!==signature||memory.write!==write)return;memory.needsRead=false;memory.view=value;memory.baseline=desired;memory.revision=value.monitor.revision;if(JSON.stringify(memory.draft)===JSON.stringify(desired))memory.draft=monitorValues(value.monitor);memory.message='reminderSaved';}
+  try{const value=await providersDomain.configureAllowance(scope,profileID,desired,revision);if(signature!==JSON.stringify(identity())||memory.signature!==signature||memory.write!==write)return;memory.needsRead=false;memory.view=value;memory.baseline=desired;memory.revision=value.monitor.revision;if(JSON.stringify(memory.draft)===JSON.stringify(desired))memory.draft=monitorValues(value.monitor);memory.message='reminderSaved';}
   catch{if(memory.signature===signature&&memory.write===write)memory.message='reminderFailed';}
   finally{if(memory.write===write){memory.saving=false;delete memory.write;memory.render?.();}}
  },{primary:true});
@@ -49,7 +49,7 @@ export function createProviderAllowances({root,providersDomain,scope,profileID,l
    const choices=[['',t('waitingAssistant')],...(memory.view?.assistants||[]).map(item=>[item.id,item.name])];if(memory.draft.assistant&&!choices.some(item=>item[0]===memory.draft.assistant))choices.push([memory.draft.assistant,t('status.assistant_missing')]);
    const signature=JSON.stringify(choices);if(assistant.signature!==signature){assistant.signature=signature;assistant.input.replaceChildren();for(const [value,label]of choices){const option=n('option','',label);option.value=value;assistant.input.append(option);}}assistant.input.value=memory.draft.assistant;
   }
-  for(const item of [enabled,threshold,assistant])item.input.disabled=!!memory.saving||!available();save.disabled=!!memory.saving||!available()||!dirty();reload.disabled=!!memory.saving||pending||!available();
+  for(const item of [enabled,threshold,assistant])item.input.disabled=!available();save.disabled=!!memory.saving||!available()||!dirty();reload.disabled=!!memory.saving||pending||!available();
  }
  function render(){
   if(disposed||!current())return;synchronizeIdentity();summary.textContent=t('allowances');refresh.textContent=t('allowanceRefresh');refresh.disabled=pending||!!memory.saving||!available();accountsRoot.replaceChildren();renderControls();

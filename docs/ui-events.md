@@ -87,6 +87,13 @@ call's wait. Storage failures remain explicit errors with the prior committed
 projection available for retry; directory and host metadata loaders must not
 turn them into successful offline results.
 
+Command receipts already advance resource epochs and notify domain queries.
+Provider default changes wait for that event revalidation rather than adding a
+forced read. General editor completion does not reload the assistant directory;
+its subscribed query owns presentation updates. Provider catalogue/settings
+queries declare their concrete resource paths and Control-level owner scope, so
+an unrelated usage resource commit cannot reassemble them merely by topic.
+
 Change callbacks retain their originating scope and boot identity. Each view
 declares the domains and scope it reads; unrelated notifications do not refresh
 it. General preferences and build information remain mounted without requesting
@@ -125,6 +132,16 @@ background lifecycle as lists. Machine settings expand locally without reads. Ag
 selected node and assistant directory across refreshes.
 Third-party account login status uses the same queue and retains its row during
 the bounded login-session status checks.
+
+Visible approval regions use local change events while the browser changes
+stream is confirmed healthy for the current scope, connection and boot. Opening
+a stream alone is insufficient; transport retirement clears health. Native has
+no equivalent health proof, and linked owners have no guaranteed approval push,
+so they retain a serial recovery read with 5–30 second failure backoff. Approval
+decisions still perform their own fresh context checks. Topology's ten-second
+sample-expiry redraw does no IO. Its thirty-second observation recovery reads
+runtime and Agent Link display resources through their TTLs; initial load and
+permission/Space invalidation separately read permission authority.
 
 The desktop local UI adapter consumes the same backend subscriptions and emits
 `pot:changed` through Wails. Responses and changes retain their local scope;

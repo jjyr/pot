@@ -118,6 +118,9 @@ func TestGitHubFilterSettingsPortReturnsEffectiveRevisionAndIdempotentRetry(t *t
 		raw, _ := json.Marshal(result)
 
 		var projection struct {
+			Operation struct {
+				SubscriptionID string `json:"subscription_id"`
+			}
 			Items []struct {
 				Settings struct {
 					Revision      int
@@ -132,7 +135,7 @@ func TestGitHubFilterSettingsPortReturnsEffectiveRevisionAndIdempotentRetry(t *t
 		if err := json.Unmarshal(raw, &projection); err != nil {
 			t.Fatal(err)
 		}
-		if len(projection.Items) != 1 || projection.Items[0].Settings.Revision != 2 || len(projection.Items[0].Settings.Subscriptions) != 1 {
+		if projection.Operation.SubscriptionID != "default" || len(projection.Items) != 1 || projection.Items[0].Settings.Revision != 2 || len(projection.Items[0].Settings.Subscriptions) != 1 {
 			t.Fatal(string(raw))
 		}
 		sub := projection.Items[0].Settings.Subscriptions[0]

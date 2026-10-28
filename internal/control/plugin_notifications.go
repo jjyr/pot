@@ -322,6 +322,10 @@ func (s *Service) PluginNotificationCall(ctx context.Context, id, tool string, a
 	if tool != c.Configuration.List && tool != c.Configuration.Create && tool != c.Configuration.Update && tool != c.Configuration.Delete {
 		return nil, errors.New("unknown configuration tool")
 	}
+	defs, err := s.Registry.Definitions(ctx)
+	if err != nil {
+		return nil, err
+	}
 	_, r, err := s.invokePluginMCP(ctx, p, tool, args)
 	if err != nil {
 		return nil, err
@@ -330,7 +334,14 @@ func (s *Service) PluginNotificationCall(ctx context.Context, id, tool string, a
 		raw, _ := json.Marshal(r.StructuredContent)
 		return nil, errors.New(string(raw))
 	}
-	return s.PluginNotifications(ctx)
+	// Configuration tools return the updated settings and their exact operation
+	// receipt. Reuse it: a second list call can fail after the write was accepted
+	// or include an unrelated concurrent creation. The host keeps this opaque.
+	return map[string]any{
+		"items":      []any{map[string]any{"id": id, "settings": r.StructuredContent}},
+		"assistants": defs,
+		"operation":  r.StructuredContent,
+	}, nil
 }
 
 func (s *Service) validateNotificationTarget(ctx context.Context, id string) error {
