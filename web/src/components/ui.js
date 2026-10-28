@@ -514,7 +514,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function saveNavigation(next,replace=false){const value={potRoute:next,potScope:client.scope?.()||{},potDirectory:directoryOpen};window.history[replace?'replaceState':'pushState'](value,'',location.href);}
   async function navigate(next,{replace=false,record=true}={}) {
-    if(client.operationsReady===false&&next!=='chat'&&!configurationRoute(next))return;
+    if(client.operationsReady===false&&!['chat','tasks','usage','extensions'].includes(next)&&!configurationRoute(next))return;
     if (pages && !await pages.leave()) return;
     if(client.production&&record&&next==='add-assistant'&&route==='chat'){const prior=directoryOpen;directoryOpen=true;saveNavigation('chat',true);directoryOpen=prior;}
     route = next;
@@ -534,7 +534,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (inMenu) item.append(el('span', '', t(name === 'chat' ? 'assistants' : name)));
       item.classList.toggle('is-selected', route === name);
       if (route === name) item.setAttribute('aria-current', 'page');
-      item.disabled=client.operationsReady===false&&name!=='chat'&&!configurationRoute(name);
+      item.disabled=client.operationsReady===false&&!['chat','tasks','usage','extensions'].includes(name)&&!configurationRoute(name);
       item.onclick = () => navigate(name);
       fragment.append(item);
     }
@@ -671,7 +671,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function renderShell() {
     outboxDialog?.update();
     root.classList.toggle('is-local-startup',client.operationsReady===false);
-    unavailable.inert=!configurationRoute(route)&&!pages?.editing&&(client.operationScopeReady?.()===false||pages?.authorityReady===false);approvals.inert=client.operationScopeReady?.()===false;
+    unavailable.inert=!['tasks','usage','extensions'].includes(route)&&!configurationRoute(route)&&!pages?.editing&&(client.operationScopeReady?.()===false||pages?.authorityReady===false);approvals.inert=client.operationScopeReady?.()===false;
     root.classList.toggle('is-background',document.visibilityState==='hidden');
     const showingChat=route==='chat'&&!(media.matches&&directoryOpen);
     if(chatShown&&!showingChat){rememberChatPosition();cancelChatPosition();initialLayout.cancel();messageWindow.suspend();}

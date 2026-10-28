@@ -1,3 +1,5 @@
+import {resourceAuthorityCurrent} from '../state/resource-authority.mjs';
+import {captureUsageWait} from '../state/usage-wait.mjs';
 import {domainsFor} from '../state/domains/index.mjs';
 import {mergeTaskHistory} from '../state/task-repository.mjs';
 import {taskIdentityMark,taskIdentityShort} from './task-identity.mjs';
@@ -652,7 +654,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
           const line=n('span','task-title-line'),title=n('span','task-title'),elapsed=n('span','task-list-elapsed'),chevron=n('span','hint task-chevron','›'),detail=n('span','task-meta'),phase=n('span'),mark=taskIdentityMark(task),short=taskIdentityShort(task),meta=n('span','hint'),archived=n('span','task-archived');
           short.classList.add('task-short-id');elapsed.setAttribute('role','timer');elapsed.setAttribute('aria-live','off');line.append(title);detail.append(phase,mark,short,archived,meta);row.append(line,elapsed,chevron,detail);entry={row,title,phase,mark,short,meta,elapsed,archived};view.nodes.set(taskKey,entry);
         }
-        entry.row.setAttribute('aria-label',task.title);entry.row.disabled=task._stale;entry.row.title=task.title;entry.row.dataset.phase=task.phase;entry.row.onclick=()=>taskDetail(task,{returnTo:{route:'tasks'}});
+        entry.row.setAttribute('aria-label',task.title);entry.row.disabled=false;entry.row.title=task.title;entry.row.dataset.phase=task.phase;entry.row.onclick=()=>taskDetail(task,{returnTo:{route:'tasks'}});
         text(entry.title,task.title);entry.phase.className=`task-phase phase-${task.phase}`;text(entry.phase,taskPhaseLabel(task.phase)+(task.paused?' · '+t('tasks.schedulePaused'):''));
         reconcile(entry.mark,taskIdentityMark(task));text(entry.short,taskIdentities.short(task)||t('tasks.identityUnknown'));entry.short.title=taskAddress(task)?JSON.stringify(taskAddress(task)):t('tasks.identityUnknown');text(entry.archived,task.archived?t('tasks.scope.archived'):'');
         const time=['queued','running','waiting','waiting_approval'].includes(task.phase)?taskElapsed(task.started_at_ms,Date.now(),locale()):'';entry.elapsed.hidden=!time;text(entry.elapsed,time);entry.elapsed.id=`task-elapsed-${encodeURIComponent(taskKey)}`;
@@ -673,47 +675,56 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     rememberTasks([task]);taskOrigin=returnTo;captureView();viewReady=false;assistantCatalogLoad?.close();pageView?.queue.close();pageView=null;closeTaskList();closeTaskView();scheduleView=null;detailParent=true;
     if(recordHistory){const replace=history.state?.potTask?.id===task.id&&history.state?.potScope?.space===task._space_id;history[replace?'replaceState':'pushState']({potRoute:'tasks',potScope:{space:task._space_id,owner:task.assistant_id},potTask:{...task},potTaskReturn:returnTo},'',location.href);}
     const fileScope={owner:task.assistant_id,space:task._space_id};
-    let saved;
-    const result=await load(async token=>{saved=await taskDomain.readTranscript(task,fileScope);if(token.signal.aborted)throw token.signal.reason;const [record]=await Promise.all([taskDomain.metadata(task,fileScope,{signal:token.signal,authoritative:!saved}),machineInfo.load({...fileScope,signal:token.signal})]);return record;});if(!result)return;
-    const {root,token}=result,record=result.value;if(saved?.run_id&&saved.run_id!==record.run_id)saved=null;host.classList.add('task-page-host');
+    let saved,transcriptError;
+    const result=await load(async token=>{try{saved=await taskDomain.readTranscript(task,fileScope);}catch(error){if(error.name==='AbortError')throw error;transcriptError=error;}if(token.signal.aborted)throw token.signal.reason;return {run_id:saved?.run_id||task.run_id,info:task,capabilities:[]};});if(!result)return;
+    const {root,token}=result,record=result.value;host.classList.add('task-page-host');
     const draftKey=JSON.stringify([task._space_id,task.assistant_id,task.id]);
-    const view={task,record,token,returnTo,initialRead:!saved,scope:fileScope,state:saved||createTaskTranscript(),inputs:[],fresh:!saved,busy:false,again:false,unavailable:false};
+    const view={task,record,token,returnTo,initialRead:!saved,scope:fileScope,state:saved||createTaskTranscript(),inputs:[],storageError:!!transcriptError?.storage,connectionError:transcriptError?.message||'',fresh:false,busy:false,again:false,unavailable:false};
     const current=()=>gate.current(token)&&taskView===view;
 
+    const commandTask=()=>{const run=view.record.run_id,authority=view.authority;return {...task,run_id:run,_authority:authority,_valid:()=>current()&&view.fresh&&view.record.run_id===run&&view.authority===authority};};
+    const taskAction=(capability,work)=>{
+      if(!current()||!view.fresh||!resourceAuthorityCurrent(client,fileScope,view.authority)||!supportsCapability(view.record,capability)||client.supports?.(capability,fileScope)===false)throw Object.assign(Error(translate(locale(),'identityChanged')),{uiKey:'identityChanged'});
+      return work();
+    };
     const ui=createTaskConversation({root,task,record,locale,client,scope:fileScope,draft:taskDrafts.get(draftKey)||'',onDraft:text=>{taskDraftVersions.set(draftKey,(taskDraftVersions.get(draftKey)||0)+1);if(text)taskDrafts.set(draftKey,text);else taskDrafts.delete(draftKey);},
       onOpenTask:child=>taskDetail({...child,_space_id:child._space_id||fileScope.space,assistant_id:child.assistant_id||fileScope.owner}),
       assistantName:(client.assistants||[]).find(item=>item.id===task.assistant_id&&item.space_id===task._space_id)?.name||task.assistant_id,
       downloadFile:({task:id,path})=>client.downloadFile(id,path,fileScope),toolMemory,approvalFor:tool=>approvalFor(tool,task.id),onDecision:decideApproval,
       onSend:async text=>{
-        const version=taskDraftVersions.get(draftKey);
-        await taskDomain.sendInput({...task,run_id:view.record.run_id},fileScope,text);
+        const version=taskDraftVersions.get(draftKey),submittedTask=commandTask();
+        await taskAction('task.input',()=>taskDomain.sendInput(submittedTask,fileScope,text));
+        if(!submittedTask._valid())return false;
         if(taskDrafts.get(draftKey)===text&&taskDraftVersions.get(draftKey)===version)taskDrafts.delete(draftKey);
 
       },
-      onStop:()=>taskDomain.interrupt({...task,run_id:view.record.run_id},fileScope),
-      onCancel:()=>taskDomain.cancel({...task,run_id:view.record.run_id},fileScope),
-      onPause:()=>taskDomain.pause({...task,run_id:view.record.run_id},fileScope,!view.record.info?.paused),
-      onArchive:()=>taskDomain.archive({...task,run_id:view.record.run_id},fileScope,!view.record.info?.archived),
-      onUsage:()=>openUsageView({...fileScope,name:task.title,scope:task.id,returnTask:{...task},taskReturn:returnTo}),
+      onStop:()=>taskAction('task.interrupt',()=>taskDomain.interrupt(commandTask(),fileScope)),
+      onCancel:()=>taskAction('task.cancel',()=>taskDomain.cancel(commandTask(),fileScope)),
+      onPause:()=>taskAction('task.control',()=>taskDomain.pause(commandTask(),fileScope,!view.record.info?.paused)),
+      onArchive:()=>taskAction('task.archive',()=>taskDomain.archive(commandTask(),fileScope,!view.record.info?.archived)),
+      onUsage:()=>openUsageView({...fileScope,name:task.title,scope:task.id,returnTask:{...task,run_id:view.record.run_id},taskReturn:returnTo}),
       onEarlier:async({before,signal})=>{const generation=view.windowGeneration=(view.windowGeneration||0)+1,run=view.record.run_id;view.historyBefore=Number(view.state.messages.filter(message=>!message.context_only).at(-1)?.sequence||0)+1;
-        const earlier=await taskDomain.loadEarlier({...view.task,run_id:run},fileScope,before,{signal});if(!current()||generation!==view.windowGeneration||run!==view.record.run_id||signal.aborted)return;
+        const earlier=await taskDomain.loadEarlier({...view.task,run_id:run},fileScope,before,{signal,validate:()=>{if(!current()||generation!==view.windowGeneration||run!==view.record.run_id||!view.fresh||!resourceAuthorityCurrent(client,fileScope,view.authority))throw new DOMException('Task history retired','AbortError');}});if(!current()||generation!==view.windowGeneration||run!==view.record.run_id||signal.aborted)return;
         if(earlier?.messages.length){const anchor=view.ui.position()?.position?.anchor?.sequence;view.state=mergeTaskHistory(view.state,earlier,anchor||before);}else view.state={...view.state,has_more:false};
         view.historyBefore=Number(view.state.messages.filter(message=>!message.context_only).at(-1)?.sequence||0)+1;renderTaskTranscript(view);
       },onLatest:async()=>{const generation=view.windowGeneration=(view.windowGeneration||0)+1;view.historyBefore=null;const state=await taskDomain.latest({...view.task,run_id:view.record.run_id},fileScope);if(current()&&generation===view.windowGeneration){view.state=state||view.state;renderTaskTranscript(view);}},onRefresh:()=>refreshTaskEvents(view),onSettings:()=>{configurationSpace=task._space_id;filter.settingsTab='providers';routeChanged('settings');return show('settings');},
     });
     view.ui=ui;view.transcript=ui.transcript;taskView=view;heading(task.title);permissions();
-    if(saved)renderTaskTranscript(view);
+    renderTaskTranscript(view);
+    const machineStatus=n('p','hint task-machine-status');root.append(machineStatus);machineStatus.hidden=true;
+    const loadMachine=async()=>{try{await machineInfo.load({...fileScope,signal:token.signal});if(current()){machineStatus.hidden=true;renderTaskTranscript(view);}}catch(error){if(current()&&error.name!=='AbortError'){machineStatus.hidden=false;machineStatus.replaceChildren(n('span','',translate(locale(),'loading.stale')),action(translate(locale(),'retry'),loadMachine));}}};
+    loadMachine();
     restoreView(`task:${draftKey}`,token);
     view.stop=taskDomain.watchDetail(task,fileScope,snapshot=>{
-      if(!current())return;const data=snapshot.data;if(!data)return;
-      if(view.record.run_id!==data.record.run_id){view.windowGeneration=(view.windowGeneration||0)+1;view.historyBefore=null;}view.record=data.record;view.inputs=data.inputs;view.inputsTruncated=data.inputsTruncated;view.fresh=snapshot.fresh&&data.fresh;view.unavailable=data.unavailable;view.storageError=!!snapshot.error?.storage||data.storageError;view.connectionError=snapshot.error?.message||data.connectionError||'';
+      if(!current())return;const data=snapshot.data;if(!data){if(snapshot.error){view.fresh=false;view.connectionError=snapshot.error.message;view.storageError=!!snapshot.error.storage;renderTaskTranscript(view);}return;}
+      if(view.record.run_id!==data.record.run_id){view.windowGeneration=(view.windowGeneration||0)+1;view.historyBefore=null;}view.record=data.record;view.inputs=data.inputs;view.inputsTruncated=data.inputsTruncated;view.authority=data.authority;view.fresh=snapshot.fresh&&data.fresh&&resourceAuthorityCurrent(client,fileScope,data.authority);view.catchingUp=!!data.catchingUp;view.unavailable=data.unavailable;view.storageError=!!snapshot.error?.storage||data.storageError;view.connectionError=snapshot.error?.message||data.connectionError||'';
       if(!view.historyBefore)view.state=data.state;
       else{const updates=new Map(data.state.messages.map(message=>[message.id,message]));view.state={...view.state,cursor:data.state.cursor,inputs:data.state.inputs,messages:view.state.messages.map(message=>updates.get(message.id)||message)};}
       rememberTasks([{...view.record.info,_space_id:fileScope.space,assistant_id:fileScope.owner}]);renderTaskTranscript(view);
     });
   }
   function refreshTaskEvents(view=taskView){return view?taskDomain.refreshDetail(view.task,view.scope):Promise.resolve();}
-  function renderTaskTranscript(view){view.ui.update({storageError:view.storageError,cacheTruncated:view.inputsTruncated,fresh:view.fresh,record:view.record,state:view.state,inputs:view.inputs,unavailable:view.unavailable,connectionError:view.connectionError||'',approvals:pendingApprovals.filter(item=>item.request?.task===view.task.id)});renderApprovals();}
+  function renderTaskTranscript(view){view.ui.update({storageError:view.storageError,cacheTruncated:view.inputsTruncated,fresh:view.fresh,catchingUp:view.catchingUp,record:view.record,state:view.state,inputs:view.inputs,unavailable:view.unavailable,connectionError:view.connectionError||'',approvals:pendingApprovals.filter(item=>item.request?.task===view.task.id)});renderApprovals();}
   function approvalFor(tool,task=''){if(approvalOwner!==approvalContext())return;const scope=approvalScope();const approval=pendingApprovals.find(item=>item.request.owner===scope.owner&&(item.request.task||'')===task&&item.request.call_id===tool.id&&item.request.turn===tool.turn_id);return approval?{...approval,fresh:approvalFresh,task_title:taskNames.get(taskNameKey(scope,task))}:undefined;}
   function taskNeedsApproval(id,phase){return approvalOwner===approvalContext()?pendingApprovals.some(item=>item.request.owner===scope().owner&&item.request.task===id):phase==='waiting_approval';}
   const taskNameKey=(captured,id)=>JSON.stringify([captured.space,captured.owner,id]);
@@ -726,7 +737,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     await permissions();
   }
   async function schedules(root,token) {
-    const t=key=>translate(locale(),key);root.classList.add('schedules-content');root.append(toolbar(action(t('schedule.new'),()=>scheduleEditor())));
+    const t=key=>translate(locale(),key);root.classList.add('schedules-content');const canCreate=()=>(client.assistants||[]).some(item=>supportsCapability(item,'schedules.manage')&&!item.retained&&!item.offline&&client.operationScopeReady?.({space:item.space_id,owner:item.id})!==false);root.append(toolbar(action(t('schedule.new'),()=>{if(canCreate())scheduleEditor();},{disabled:!canCreate()})));
     const search=field(t('tasks.scheduleSearch'),filter.scheduleQuery,{kind:'search'});search.row.classList.add('task-search');search.input.placeholder=t('tasks.scheduleSearch');
     const owner=field(t('tasks.assistantFilter'),filter.listOwner,{choices:ownerChoices(client,locale())});owner.row.classList.add('record-filter','record-owner-filter');
     const line=toolbar(search.row,owner.row);line.classList.add('record-search-line');root.append(line,n('p','record-view-help',t('tasks.scheduleHelp')));
@@ -752,8 +763,8 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       // Earlier sources are known in full here, so continuation has evidence.
       if(items.slice(0,filter.scheduleOffset).some(item=>recordOwner(item,client).key===group.key))section.append(n('p','record-continuation',t('tasks.continued')));
       for(const item of group.items){
-        const row=action('',()=>scheduleHistory(item),{disabled:item._stale});row.classList.add('schedule-record');row.setAttribute('aria-label',item.spec.title);row.dataset.viewKey=JSON.stringify([item._space_id,item._assistant_id,item.id]);
-        const title=n('span','schedule-record-title',item.spec.title),meta=n('span','schedule-record-meta'),state=n('span',item.spec.enabled?'schedule-enabled':'hint',t(item.spec.enabled?'tasks.scheduleEnabled':'tasks.schedulePaused'));
+        const row=action('',()=>scheduleHistory(item));row.classList.add('schedule-record');row.setAttribute('aria-label',item.spec.title);row.dataset.viewKey=JSON.stringify([item._space_id,item._assistant_id,item.id]);
+        if(item._stale)row.append(n('span','hint',t('loading.stale')));const title=n('span','schedule-record-title',item.spec.title),meta=n('span','schedule-record-meta'),state=n('span',item.spec.enabled?'schedule-enabled':'hint',t(item.spec.enabled?'tasks.scheduleEnabled':'tasks.schedulePaused'));
         const next=item.spec.enabled?t('tasks.scheduleNext').replace('{time}',item.next_label||t('tasks.scheduleNoNext')):t('tasks.schedulePausedNext');meta.append(state,n('span','',next));
         const rule=item.spec.kind==='cron'?item.spec.cron:item.spec.kind==='interval'?t('tasks.scheduleInterval').replace('{minutes}',item.spec.every_minutes.toLocaleString(locale())):t('tasks.scheduleOnce').replace('{time}',item.spec.at);
         row.append(title,n('span','schedule-record-chevron','›'),meta,n('span','schedule-record-rule',`${rule} · ${t('tasks.scheduleTimezone').replace('{zone}',item.spec.timezone||'')}`));records.append(row);
@@ -777,7 +788,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     const selectedScope={space:item._space_id,owner:item._assistant_id},selectedQuery={selected:item.id,runsOffset,limit:20};
     await connectDomain(root,token,listener=>domains.schedules.watch(selectedScope,selectedQuery,listener),()=>domains.schedules.refresh(selectedScope,selectedQuery),(value,snapshot)=>{
       if(!value.selected||value.selected.deleted){scheduleView=null;return show('tasks',{force:true});}
-      view.fresh=snapshot.fresh;view.busy=!!snapshot.pending;view.item={...item,...value.selected};const projection=n('div');renderScheduleHistory(projection,view,value,runsOffset);reconcile(content,projection);
+      view.authority=snapshot.authority;view.fresh=snapshot.fresh&&resourceAuthorityCurrent(client,selectedScope,view.authority);view.busy=!!snapshot.pending;view.item={...item,...value.selected};const projection=n('div');renderScheduleHistory(projection,view,value,runsOffset);reconcile(content,projection);
     });
     if(gate.current(token))restoreView(JSON.stringify(['schedule-history',item._space_id,item._assistant_id,item.id,runsOffset]),token);
   }
@@ -788,11 +799,11 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     for(const name of ['run',selected.spec.enabled?'pause':'resume','edit','delete']) {
       const button=action(tr({run:'Run now',pause:'Pause',resume:'Resume',edit:'Edit',delete:'Remove'}[name],{run:'立即运行',pause:'暂停',resume:'恢复',edit:'编辑',delete:'移除'}[name]),async event=>{
         const button=event.currentTarget,actions=button.parentElement;
-        if(!view.fresh||view.busy||scheduleView!==view||!gate.current(view.token))return;
+        if(!view.fresh||!resourceAuthorityCurrent(client,{space:selected._space_id,owner:selected._assistant_id},view.authority)||view.busy||scheduleView!==view||!gate.current(view.token)||client.operationScopeReady?.({space:selected._space_id,owner:selected._assistant_id})===false||!supportsCapability(recordOwner(selected,client).profile,'schedules.manage'))return;
         if(name==='edit'){scheduleEditor(selected);return;}
         if(name==='delete'&&!view.confirmed){view.confirmed=true;button.textContent=tr('Confirm removal','确认移除');return;}
         view.busy=true;for(const control of actions.querySelectorAll('button'))control.disabled=true;
-        const captured={space:selected._space_id,owner:selected._assistant_id};
+        const captured={space:selected._space_id,owner:selected._assistant_id,_authority:view.authority};
         try{await (name==='run'?domains.schedules.run(captured,selected.id):name==='delete'?domains.schedules.remove(captured,selected.id):domains.schedules.pause(captured,selected.id,name==='pause'));if(scheduleView===view&&gate.current(view.token)&&name==='delete'){scheduleView=null;await show('tasks',{force:true});}}
         catch(reason){if(scheduleView===view&&gate.current(view.token))errorView(reason,view.content);}
         finally{view.busy=false;for(const control of actions.querySelectorAll('button'))control.disabled=!view.fresh;}
@@ -857,14 +868,14 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       for(const [kind,title]of [['models',tr('Lifetime model usage','累计模型用量')],['requests',tr('Model requests','模型请求')],['tools',tr('Tool statistics','工具统计')],['compactions',tr('Context compaction','上下文压缩')]])jobs.push(createUsageList({root:listsRoot,kind,title,params:base,owner,request:read,token,current:()=>gate.current(token),offsets:usageOffsets,query:client.resources?.query,locale:locale(),tr}));
     }
     const content=n('div'),limits=n('div','usage-limit-actions');headingActions.append(limits);root.append(content,calendarNotices,listsRoot);
-    let initial=true;
+    let initial=true,usageProjection=0,waitingActionGeneration=0;
     return connectView(root,token,async()=>{
       const options={spaceID,ownerID:usageOwner?.owner||''};
       const summaries=Promise.allSettled([across(`/api/v1/usage/summary?${new URLSearchParams(params)}`,token,{...options,errorTarget:selectedNotices}),across(`/api/v1/usage/summary?${new URLSearchParams(calendarParams)}`,token,{...options,errorTarget:calendarNotices})]);
       for(const job of jobs)if(!initial)job.refresh();initial=false;
       const [selected,calendar]=await summaries;if(selected.status==='rejected')throw selected.reason;
       return {pages:selected.value,calendarPages:calendar.status==='fulfilled'?calendar.value:null};
-    },({pages,calendarPages})=>{const projection=n('div'),limitProjection=n('div','usage-limit-actions');
+    },({pages,calendarPages})=>{const generation=++usageProjection;const projection=n('div'),limitProjection=n('div','usage-limit-actions');
     const data=pages.length===1?{...pages[0].value,spaces:pages}:combineUsage(pages);
     const {exact,compact}=usageNumbers(locale()),total=data.total||{},metrics=n('div','usage-metrics'),totalCard=n('section','page-card usage-total');
     for(const [label,value]of [[tr('Total tokens','总 token'),total.input+total.output],[tr('Input (includes cache)','输入（含缓存）'),total.input],[tr('Output','输出'),total.output]]){const item=n('div','metric');item.append(n('span','hint',label),n('strong','',compact(value)));usageTooltip(item,{title:label,rows:usageRows(total,locale()),note:tr('Cached tokens are included in input. Token counts are not billed cost.','缓存已计入输入，token 数量不代表实际费用。')});metrics.append(item);}
@@ -879,7 +890,23 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       const policy=value.quota.policy;
       limitProjection.append(action(`${tr('Usage limits','用量限制')}${pages.length>1?' · '+page.space.name:''}`,()=>policyEditor(policy,owner),{disabled:page.stale}));
       if(value.quota?.active){const allowance=card(`${tr('Token allowance','Token 配额')} · ${page.space.name}`);allowance.append(n('p','hint',value.quota?.active?`${Number(value.quota.remaining).toLocaleString(locale())} ${tr('remaining','剩余')} · ${value.quota.reset_label||''}`:tr('No active token limit','未启用 token 限额')),action(tr('Edit allowance','编辑配额'),()=>policyEditor(policy,owner),{disabled:page.stale}));projection.append(allowance);}
-      if(value.waiting){const waiting=section(tr('Waiting for allowance','等待配额'));waiting.append(n('p','hint',value.waiting.provider||''));for(const name of ['resume','cancel']){const requestID=uid(),task=usageOwner?.returnTask;const button=action(tr(name==='resume'?'Resume':'Cancel waiting',name==='resume'?'恢复':'取消等待'),event=>operation(event.currentTarget,async()=>{if(task)return name==='resume'?taskDomain.resume(task,owner,{turn:value.waiting.turn,since:value.waiting.since}):taskDomain.cancel(task,owner);if(name==='resume')return request('/api/v1/usage/resume',{...owner,method:'POST',body:{request_id:requestID,turn:value.waiting.turn,since:value.waiting.since}});const snapshot=await request('/api/v1/snapshot',owner),message=snapshot.messages?.find(message=>message.id===snapshot.turn?.user_message_id);if(!message||message.request_id!==value.waiting.turn)throw Error(tr('Allowance wait changed. Refresh Usage.','配额等待已变化，请刷新用量页面。'));return request('/api/v1/turn/cancel',{...owner,method:'POST',body:{request_id:requestID,user_message_id:message.id}});},()=>show('usage',{keepUsageOwner:true})),{disabled:page.stale||!usageOwner});waiting.append(button);}projection.append(waiting);}
+      if(value.waiting){
+        const waiting=section(translate(locale(),'usage.waiting')),intent=JSON.stringify(value.waiting),usageTarget=usageOwner;
+        // This closure is retired by a newer projection, navigation or selection.
+        const current=()=>!disposed&&gate.current(token)&&usageOwner===usageTarget&&pageView?.root===root&&usageProjection===generation&&JSON.stringify(value.waiting)===intent&&!page.stale;
+        const cancel=captureUsageWait(client,owner,value.waiting,{current,locale});
+        waiting.append(n('p','hint',value.waiting.provider||''));
+        for(const name of ['resume','cancel']){
+          const requestID=uid(),task=usageOwner?.returnTask;
+          const button=action(translate(locale(),name==='resume'?'usage.resume':'usage.cancelWait'),event=>operation(event.currentTarget,async()=>{
+            const actionGeneration=++waitingActionGeneration;
+            if(!current()||client.operationScopeReady?.(owner)===false)throw Object.assign(Error(translate(locale(),'identityChanged')),{uiKey:'identityChanged'});
+            if(task)return name==='resume'?taskDomain.resume(task,owner,{turn:value.waiting.turn,since:value.waiting.since}):taskDomain.cancel(task,owner);
+            if(name==='resume')return request('/api/v1/usage/resume',{...owner,method:'POST',body:{request_id:requestID,turn:value.waiting.turn,since:value.waiting.since}});
+            return cancel(requestID,{current:()=>actionGeneration===waitingActionGeneration});
+          },()=>show('usage',{keepUsageOwner:true})),{disabled:page.stale||!usageOwner});waiting.append(button);
+        }projection.append(waiting);
+      }
     }
       for(const [index,node]of [...projection.children].entries())node.dataset.viewKey=node.querySelector('h2')?.textContent||node.className+':'+index;
       reconcile(content,projection);reconcile(limits,limitProjection);

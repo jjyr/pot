@@ -87,3 +87,39 @@ func TestRunnerTranscriptIsOrderedPagedAndSurvivesRestart(t *testing.T) {
 		t.Fatal(last, err)
 	}
 }
+
+func TestEventPageBindsRunWithoutFilteringCumulativeTaskJournal(t *testing.T) {
+	ctx := t.Context()
+	journal, err := openJournal(t, filepath.Join(t.TempDir(), "tasks.sqlite"), "runtime", "boot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.db.Close()
+	launch := launchFixture(t)
+	for i, run := range []string{"run", "continued"} {
+		launch.RunID = run
+		if _, err = journal.Accept(ctx, launch); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = journal.Claim(ctx, "runtime", "task", run); err != nil {
+			t.Fatal(err)
+		}
+		if err = journal.AppendEvent(ctx, "runtime", "task", run, core.AgentEvent{Generation: 1, TurnID: run, Seq: 1, Update: core.Update{Type: "text_delta", Text: run}}); err != nil {
+			t.Fatal(err)
+		}
+		page, e := journal.Events(ctx, "runtime", "task", run, 0, 100)
+		if e != nil || page.RunID != run || len(page.Events) != i+1 || page.Cursor != uint64(i+1) {
+			t.Fatal("wrong run provenance or lost cumulative history", page, e)
+		}
+		if err = journal.RecordCleanup(ctx, "runtime", "task", run); err != nil {
+			t.Fatal(err)
+		}
+		if err = journal.Finish(ctx, "runtime", "task", run, Terminal{Outcome: core.Success}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old, err := journal.Events(ctx, "runtime", "task", "run", 0, 100)
+	if err != nil || old.RunID != "run" || len(old.Events) != 1 {
+		t.Fatal("late old-run read escaped its immutable run bound", old, err)
+	}
+}

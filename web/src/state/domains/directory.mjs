@@ -12,8 +12,9 @@ export function createDirectoryDomain(client,{resources,queries,commands}){
   const local=(value,space,offline)=>{let items=value;if(typeof items==='string')items=JSON.parse(items);const fresh=!resources.state(value)||resources.state(value).freshness==='fresh';return (items?.items||items||[]).map(item=>({...(!fresh?retained({...item,space_id:space.id,control_id:space.control_id||space.id}):item),control_id:space.control_id||space.id,space_id:space.id,space_name:space.name,space_kind:space.kind,offline}));};
   const directory=queries.define('directory',async force=>{
     if(client.startup&&client.onlineReady!==false&&!client.operationsReady)force=true;
-    const generation=client.connectionGeneration;
-    const current=()=>{if(generation!==client.connectionGeneration)throw new DOMException('Directory connection retired','AbortError');};
+    const generation=client.connectionGeneration,revision=client.directoryAuthorityRevision||0,serving=JSON.stringify([client.runtime?.runtime_id,client.runtime?.boot_id]),controls=new Map((client.spaces||[]).map(space=>[space.id,space.control_id]));
+    const current=()=>{if(generation!==client.connectionGeneration||serving!==JSON.stringify([client.runtime?.runtime_id,client.runtime?.boot_id]))throw new DOMException('Directory connection retired','AbortError');};
+    try{
     const catalog=await resources.read('/api/v1/spaces',{owner:'',space:'',authoritative:force}),spaces=catalog.items||[];
     if(client.startup&&client.onlineReady!==false&&spaces.some(space=>{const before=client.spaces?.find(item=>item.id===space.id);return before?.control_id&&before.control_id!==space.control_id;})){
       client.revalidateStartup?.({resetScope:true});throw Object.assign(Error(translate(client.uiLocale?.()||'en','identityChanged')),{uiKey:'identityChanged'});
@@ -24,7 +25,7 @@ export function createDirectoryDomain(client,{resources,queries,commands}){
     const results=await Promise.all(spaces.map(async space=>{try{
       const [items]=await Promise.all([resources.read('/api/v1/assistants',{space:space.id,owner:'',authoritative:force}),machinePresentation(client).load({space:space.id})]);
       const own=local(items,space,space.connected===false||client.onlineReady===false);
-      if(force===true&&space.connected!==false)confirmedSpaces.add(space.id);
+      if(force===true&&space.connected!==false&&(!resources.state(catalog)||resources.state(catalog).freshness==='fresh')&&(!resources.state(items)||resources.state(items).freshness==='fresh'))confirmedSpaces.add(space.id);
       try{const links=await resources.read('/api/v1/agent-links',{space:space.id,owner:'',authoritative:force}),fresh=!resources.state(links)||resources.state(links).freshness==='fresh';const linked=projectLinkedAssistants(links,space).map(item=>client.onlineReady===false?{...retained(item),offline:true}:fresh?item:retained(item));
         for(const item of previous.filter(item=>item.origin&&item.space_id===space.id&&!linked.some(current=>current.id===item.id))){if(links.items?.some(link=>link.id===item.origin.link_id&&link.status!=='connected'))linked.push({...item,offline:true});}return [...own,...linked];
       }catch(error){if(error.storage||error.name==='AbortError')throw error;partial=true;return [...own,...previous.filter(item=>item.origin&&item.space_id===space.id).map(item=>({...retained(item),offline:true}))];}
@@ -33,8 +34,16 @@ export function createDirectoryDomain(client,{resources,queries,commands}){
     // Only this connection's explicit network refresh can grant authority.
     // Failed Spaces and retained linked assistants cannot borrow another scope's
     // confirmation; an unavailable peer does not block confirmed local work.
-    if(force===true&&client.onlineReady!==false){client.directorySpaces=confirmedSpaces;client.directoryGeneration=generation;}
+    if(force===true&&client.onlineReady!==false&&confirmedSpaces.size){client.directorySpaces=confirmedSpaces;client.directoryGeneration=generation;client.directoryAuthorityRevision=(client.directoryAuthorityRevision||0)+1;}
     return {data:{spaces,assistants:previous,activeSpace:catalog.active_space_id||spaces[0].id,partial},freshness:partial?'stale':previous.some(item=>item.retained)?'retained':'fresh'};
+    }catch(error){
+      // Revoke the shared command authority, not the committed display or local
+      // outbox admission. A retired read cannot revoke a later confirmation.
+      if(error.storage&&generation===client.connectionGeneration&&revision===(client.directoryAuthorityRevision||0)&&serving===JSON.stringify([client.runtime?.runtime_id,client.runtime?.boot_id])&&[...controls].every(([id,control])=>client.spaces?.find(space=>space.id===id)?.control_id===control)){
+        client.directoryGeneration=-1;client.directorySpaces=new Set();client.directoryAuthorityRevision=revision+1;
+      }
+      throw error;
+    }
   },{invalidationForce:false,paths:['/api/v1/spaces','/api/v1/assistants','/api/v1/agent-links','/api/v1/runtime'],topics:['spaces','assistants','assistant-mail','agent-links','conversation','runtime','permissions','tasks','machines']});
   return {watch:listener=>directory.watch(listener),query:()=>directory.snapshot.data?Promise.resolve(directory.snapshot.data):directory.value(),refresh:()=>directory.refresh(true),
     async confirm(item){const space=client.spaces.find(space=>space.id===item.space_id);if(!space||space.connected===false)return {...item,offline:true};const value=await resources.read(item.origin?'/api/v1/agent-links':'/api/v1/assistants',{space:space.id,owner:'',authoritative:true});const items=item.origin?projectLinkedAssistants(value,space):local(value,space,false);return items.find(current=>current.id===item.id)||(item.origin&&value.items?.some(link=>link.id===item.origin.link_id&&link.status!=='connected')?{...item,offline:true}:null);},

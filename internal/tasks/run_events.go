@@ -13,6 +13,7 @@ type Event struct {
 	Event    core.AgentEvent `json:"event"`
 }
 type EventPage struct {
+	RunID       string  `json:"run_id"`
 	Events      []Event `json:"events"`
 	Cursor      uint64  `json:"cursor"`
 	HasMore     bool    `json:"has_more"`
@@ -47,7 +48,7 @@ func (j *Journal) AppendEvent(ctx context.Context, control, task, run string, ev
 	})
 }
 func (j *Journal) Events(ctx context.Context, control, task, run string, after, limit uint64) (EventPage, error) {
-	result := EventPage{Events: []Event{}, Cursor: after}
+	result := EventPage{RunID: run, Events: []Event{}, Cursor: after}
 	if after > core.MaxSafeInteger {
 		return result, errors.New("invalid transcript cursor")
 	}

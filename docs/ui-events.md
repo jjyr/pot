@@ -56,7 +56,17 @@ can publish. A query fetched before an event or successful command cannot replac
 a newer projection, including across tabs. In-memory invalidation immediately
 revokes stale selection eligibility; query subscribers consume only committed
 values. Storage failure retains the prior projection and retries the pending
-invalidation before another refresh.
+invalidation before another refresh. Reading an existing display projection does
+not depend on namespace registration writes succeeding. Pending epochs still fence
+new reads and commits; destructive scope retirement cannot fall back to retained
+data. Retained display values never grant command capabilities. A directory storage
+failure retires the shared directory generation used by command dispatch while
+retaining the last committed directory and known connectivity. Only a successful
+authoritative read of fresh directory resources restores the affected qualification;
+retained Retry data cannot restore it. Connection, serving boot, Control identities
+and an authority revision prevent an old failure from revoking a later confirmation.
+A known immutable Chat target may still commit an explicit submission locally; its
+dispatch waits for that same directory authority to recover.
 
 Shared domain queries serialize reads and coalesce changes into one later read.
 Resource commit notifications and business invalidations have separate matching
@@ -118,6 +128,41 @@ offline destinations, storage failures and fresh capability removal still remove
 unavailable actions. Settings remains available. Handlers recheck current capability,
 scope and subscription identity; turn controls also require the same active turn,
 conversation boot and pause state before sending a request.
+
+Known scoped Task transcripts mount as retained, read-only output before metadata
+or machine labels finish loading. Current metadata gates commands and new event
+reads. Metadata IO captures serving Runtime/boot, source Control/boot, connection
+generation and owner/Space; that provenance stays with the query data and fences
+commands and history writes after asynchronous storage waits. A changed run retires
+the old transcript window as soon as current authoritative metadata confirms it,
+including while its event read is pending. Retained or failed metadata keeps the
+old output read-only. Task detail queries publish this intermediate retained
+window during refresh as well as during their first load. Task event catch-up reads
+at most 5000 events per batch, then schedules a serial next batch while the active
+detail remains subscribed. It reports catching up until the last page is committed;
+a storage failure or removed subscriber stops that continuation. Event pages carry
+`run_id` from the journal run actually queried, including a previous-launch
+fallback or unavailable source. The journal sequence remains cumulative across
+Task runs. Detail and earlier reads reject a missing or different run before any
+local write. A continuation follows freshly confirmed metadata, retires the old
+window and reconstructs the new run's checkpoint from that cumulative journal.
+
+Metadata results retain their Control, source boot and connection generation.
+Views compare this provenance when consuming a query and again before command IO;
+a late query cannot adopt a newer connection's authority. A local Task transaction
+also validates its captured generation after waiting for storage admission.
+
+Cached Chat history windows are projected in a readonly transaction from committed
+records and coverage, with the current conversation and reader-intent fences.
+Position and layout hints save independently; a failed hint write cannot hide a
+readable window. New network history still commits before presentation.
+
+Tasks, schedules and Usage allow cache browsing, local filtering and disclosures
+without current command authority. Schedule display sources use only known scoped
+identities and existing cache entries when management is unavailable. Freshness,
+capabilities and backend authorization still gate mutations. Usage cancel reads a
+normalized authority snapshot without confirming a session or changing Chat's
+reading window, and rechecks the waiting request and captured identity before POST.
 
 Task details refresh metadata, results, files and guidance alongside their
 incremental execution transcript. Schedule details and run history share the same
@@ -629,11 +674,18 @@ diagnostic details rather than entering this page exception log.
 
 ## Task execution transcripts
 
-`GET /api/v1/tasks/{id}/events?after=...&limit=...` pages the original run's
-durable ordered log. Each row has an outer sequence and its execution update:
+`GET /api/v1/tasks/{id}/events?after=...&limit=...` pages a Task's cumulative
+durable ordered log across its runs. Each row has an outer sequence and its execution update:
 message boundaries, text deltas, tool starts/output/results and turn outcomes.
-The reply contains `cursor`, `has_more` and `unavailable`. Historical remote pages
-remain cached and marked unavailable. Task details advertise `task.events` when
+The reply contains `run_id`, `cursor`, `has_more` and `unavailable`. `run_id` is
+transient API provenance from the actual selected journal launch, including a
+previous-launch fallback or an unavailable linked receipt; it does not change
+persisted events or checkpoints. Rows keep their cumulative Task sequence and
+may contain earlier execution turns. Clients confirm current metadata before
+adopting a new run, then rebuild that run's window from the cumulative journal.
+Missing or mismatched page provenance cannot append, backfill or confirm a fresh
+window, even when its sequence matches. Historical remote pages remain cached
+and marked unavailable. Task details advertise `task.events` when
 transcript reads are supported. Clients omit unsupported reads and controls;
 direct unsupported requests return a capability error. The original execution
 owner remains fixed.

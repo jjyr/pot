@@ -4,6 +4,7 @@ const baseline=new URLSearchParams(location.search).has('baseline');
 const prefix=baseline?'/output/cached-loading/baseline/web/src':'/web/src';
 const {createPages}=await import(`${prefix}/components/pages.mjs`);
 const {createResourceReads}=await import('/web/src/state/resource-cache.mjs');
+const {configurationIdentityCurrent}=await import('/web/src/state/settings-access.mjs');
 const host=document.querySelector('#page'),results=document.querySelector('#results'),counts=new Map();
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const check=(value,message)=>{if(!value)throw Error(message);results.textContent+='PASS '+message+'\n';};
@@ -20,7 +21,7 @@ const client={chatCacheName:cacheName,production:true,desktop:false,runtime:{run
     if((base==='/api/v1/tasks/query'||base==='/api/v1/tasks/catalog')){if(options.space==='b')return {items:[],total:0,counts:{}};const offset=Number(url.searchParams.get('offset')||0);return {items:taskItems.slice(offset,offset+50),next_offset:offset===0?50:null,counts:{active:51,attention:0,archived:0},total:51};}
     if(base==='/api/v1/tasks/t0')return {info:taskItems[0],run_id:'run',request:{text:'Fixture task input'},capabilities:{version:1,operations:['task.read','task.input','task.events']}};
     if(base==='/api/v1/tasks/t0/messages')return {items:[]};
-    if(base==='/api/v1/tasks/t0/events')return {events:Number(url.searchParams.get('after'))===0?[{sequence:1,event:{update:{type:'message_started'}}},{sequence:2,event:{update:{type:'text_delta',text:'Cached task transcript'}}},{sequence:3,event:{update:{type:'message_finished'}}}]:[],has_more:false};
+    if(base==='/api/v1/tasks/t0/events')return {run_id:'run',events:Number(url.searchParams.get('after'))===0?[{sequence:1,event:{update:{type:'message_started'}}},{sequence:2,event:{update:{type:'text_delta',text:'Cached task transcript'}}},{sequence:3,event:{update:{type:'message_finished'}}}]:[],has_more:false};
     if(base==='/api/v1/schedules')return {items:[],next_offset:null};
     if(base==='/api/v1/permissions')return {pending:[],machines:[],policy:{}};
     if(base==='/api/v1/integrations'){const loggedIn=counts.get(key)>1;return {items:[{id:'github',name:'GitHub',login_available:true,status:loggedIn?'connected':'disconnected',...(loggedIn?{account:{revision:1,identity:{username:'fixture-login'}}}:{login:{id:'fixture-login',status:'pending'}})}]};}
@@ -30,7 +31,14 @@ const client={chatCacheName:cacheName,production:true,desktop:false,runtime:{run
     if(base.startsWith('/api/v1/usage/'))return {items:[{agent:'pot',model:'fixture-model',input:100,output:20,cache:5}],next_offset:null};
     if(base==='/api/v1/about')return {version:'fixture',licenses:[]};
     return {};},downloadFile:()=>{}};
-if(!baseline){client.resources=createResourceReads(client);client.read=(...args)=>client.resources.read(...args);}
+function connectResources(){
+  client.transport=client.request;client.resources=createResourceReads(client);
+  // Match production's public request wrapper: allowlisted GETs share resources,
+  // and configuration identity is checked before and after asynchronous reads.
+  client.request=async(path,options={})=>{const generation=client.connectionGeneration,check=()=>{if(options.configuration&&(generation!==client.connectionGeneration||!configurationIdentityCurrent(client,options)))throw new DOMException('Configuration identity changed','AbortError');};check();if((options.method||'GET')!=='GET')return client.transport(path,options);const value=await client.resources.read(path,options);check();return value;};
+  client.read=(...args)=>client.resources.read(...args);
+}
+if(!baseline)connectResources();
 window.addEventListener('pagehide',()=>{pages.dispose();client.resources?.clear();indexedDB.deleteDatabase(cacheName);indexedDB.deleteDatabase(cacheName+'-tasks');indexedDB.deleteDatabase(cacheName+'-chat');});
 const pages=createPages({client,host,approvalHost:document.querySelector('#approvals'),chatApprovalHost:document.querySelector('#chat-approvals'),chatVisible:()=>false,locale:()=>locale,notify:text=>{results.textContent+='NOTICE '+text+'\n';},changed:()=>{},titleChanged:()=>{},openChat:()=>{}});
 const button=text=>[...host.querySelectorAll('button')].find(node=>node.textContent===text);
@@ -85,10 +93,10 @@ async function chatChecks(){
   const {createChatCache}=await import('/web/src/state/chat-cache.mjs');
   let subscriptions=0,snapshotReads=0,change,deliver,chatBoot='boot',holdChatSnapshot=false;const directoryReads={catalog:0,a:0,b:0};
   context={space:'a',owner:'alpha'};delays={};failProviders=false;
-  const raw=client.request;
+  const raw=client.transport;
   client.request=async(path,options={})=>{if(path==='/api/v1/spaces'){directoryReads.catalog++;return {items:client.spaces,active_space_id:'a'};}if(path==='/api/v1/assistants'){directoryReads[options.space]++;return {items:options.space==='a'?[{id:'alpha',name:'Alpha'},{id:'beta',name:'Beta'}]:[{id:'alpha',name:'Remote Alpha'}]};}return raw(path,options);};
   const snapshot=(scope,cursor=1,text=scope.owner+' confirmed')=>({kind:'reset',base_cursor:'0',history:{before:'1',after:'1',has_more:false,has_newer:false},runtime_id:'fixture-control',boot_id:chatBoot,owner_id:JSON.stringify([scope.space,scope.owner]),conversation_id:scope.owner,cursor:String(cursor),replies:[],running:false,turn_id:null,messages:[{id:'reply',sequence:'1',version:cursor,role:'assistant',text:scope.space+' '+text,status:'complete'}]});
-  client.chatCacheName=cacheName+'-chat';client.resources=createResourceReads(client);
+  client.chatCacheName=cacheName+'-chat';connectResources();
   client.snapshot=async()=>{snapshotReads++;return snapshot(client.scope());};
   client.subscribe=(receive,status)=>{subscriptions++;const scope=client.scope(),timer=setTimeout(()=>{if(!holdChatSnapshot)receive(snapshot(scope));},250);deliver=(cursor,text)=>receive(snapshot(scope,cursor,text));status('connected');return ()=>clearTimeout(timer);};
   client.changes=callback=>{change=callback;return ()=>{};};

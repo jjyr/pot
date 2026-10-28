@@ -28,7 +28,11 @@ func (s *Service) TaskEvents(ctx context.Context, owner, task string, after, lim
 			return empty, err
 		}
 	}
-	if record == nil || record.Launch == nil {
+	if record == nil {
+		return empty, nil
+	}
+	if record.Launch == nil {
+		empty.RunID = record.RunID
 		return empty, nil
 	}
 	launch := record.Launch
@@ -36,6 +40,7 @@ func (s *Service) TaskEvents(ctx context.Context, owner, task string, after, lim
 		return s.RunJournal.Events(ctx, launch.ControlID, task, launch.RunID, after, limit)
 	}
 	page := empty
+	page.RunID = launch.RunID
 	page.Unavailable = true
 	rows, err := s.Tasks.DB().QueryContext(ctx, "SELECT sequence,event FROM task_event_cache WHERE task_id=? AND sequence>? ORDER BY sequence LIMIT ?", task, after, limit+1)
 	if err != nil {

@@ -47,7 +47,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   root.classList.add('task-conversation');root.append(stage,history,composerArea);
   const dialog=n('dialog','preferences product-actions task-actions');dialog.setAttribute('aria-label',tr('Task actions','任务操作'));root.append(dialog);
   let fresh=false,record=initial,state,inputs=[],approvals=[],unavailable=false,connectionError='',storageError=false,busy=false,historyBusy=false,disposed=false,frame=0,menuMode='actions',menuSignature='',draftVersion=0;
-  let forest,projection,downloadFailure,historyFailure,historyAbort,historyAttempt='',historyRun='',historyFrame=0,unmatchedApprovals=[],approvalGeneration=0,cacheTruncated=false;
+  let forest,projection,downloadFailure,historyFailure,historyAbort,historyAttempt='',historyRun='',historyFrame=0,unmatchedApprovals=[],approvalGeneration=0,cacheTruncated=false,catchingUp=false;
   function renderDownloadFailure(target,failure){
     const open=downloadNotice.querySelector('details')?.open||false;target.hidden=!failure;target.replaceChildren();
     if(!failure)return;
@@ -95,7 +95,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   async function submit(){
     if(!fresh||!can('task.input')||busy||editor.composing||!completion.value().trim()||connectionError)return;
     const text=completion.value(),version=draftVersion;
-    await run(async()=>{await onSend(text);if(disposed)return;if(completion.value()===text&&version===draftVersion){completion.setValue('');onDraft('');}completion.reset();});
+    await run(async()=>{const acknowledged=await onSend(text);if(disposed||acknowledged===false)return;if(completion.value()===text&&version===draftVersion){completion.setValue('');onDraft('');}completion.reset();});
   }
   form.onsubmit=event=>{event.preventDefault();if(!editor.mobile)submit();};send.onclick=()=>completion.value().trim()?submit():run(onStop);
   function updateComposer(){return updateComposerLayout();}
@@ -111,9 +111,9 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   function renderStage(){
     const rawPhase=record.info?.phase||task.phase,pending=approvals.length,phase=rawPhase;
     stage.dataset.phase=unavailable||connectionError?'offline':pending?'approval':record.info?.paused?'paused':phase;
-    const text=storageError?t('storage.failed'):connectionError?tr('Connection interrupted · Showing retained history','连接中断 · 显示已有记录'):unavailable?tr('Original machine is offline · Showing cached output','原执行机器离线 · 显示缓存执行输出'):!fresh?t('tasks.cachedState'):pending?tr(`Waiting for approval · ${pending} pending`,`等待授权 · ${pending} 项待处理`):record.info?.paused?tr('Paused','已暂停'):t(phase==='waiting'?'tasks.stage.waiting':`schedule.state.${phase}`);
+    const text=storageError?t('storage.failed'):connectionError?tr('Connection interrupted · Showing retained history','连接中断 · 显示已有记录'):unavailable?tr('Original machine is offline · Showing cached output','原执行机器离线 · 显示缓存执行输出'):catchingUp?t('tasks.catchingUp'):!fresh?t('tasks.cachedState'):pending?tr(`Waiting for approval · ${pending} pending`,`等待授权 · ${pending} 项待处理`):record.info?.paused?tr('Paused','已暂停'):t(phase==='waiting'?'tasks.stage.waiting':`schedule.state.${phase}`);
     stageInner.querySelector('.agent-source')?.remove();const source=taskAgentSource({...task,agent_link:linked()},locale());if(source)stageInner.prepend(source);
-    if(stageLabel.textContent!==text)stageLabel.textContent=text;stageLabel.title=connectionError;locate.hidden=!pending||!!connectionError;retry.hidden=!connectionError||!can('task.read');retry.disabled=busy;
+    if(stageLabel.textContent!==text)stageLabel.textContent=text;stageLabel.title=connectionError;locate.hidden=!pending||!!connectionError;retry.hidden=!connectionError;retry.disabled=busy;
   }
   function locateApproval(){
     for(const message of projectTaskMessages(state,inputs,record))if(message.tool&&approvalFor(message.tool)){
@@ -226,7 +226,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     update(next){
       if(disposed)return;
       projection=null;
-      if(next.storageError!==undefined)storageError=next.storageError;if(next.fresh!==undefined)fresh=next.fresh;cacheTruncated=!!(next.state?.cache_truncated||next.record?.cache_truncated||next.cacheTruncated);const nextRun=next.record?.run_id||task.id;if(nextRun!==historyRun){if(historyRun)transcriptWindow.reset();historyAbort?.abort();historyAbort=null;historyBusy=false;historyFailure=null;historyAttempt='';historyRun=nextRun;showHistoryStatus();}if(next.record)record=next.record;messageIdentities(client).rememberTasks([record.info||task]);if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
+      if(next.catchingUp!==undefined)catchingUp=next.catchingUp;if(next.storageError!==undefined)storageError=next.storageError;if(next.fresh!==undefined)fresh=next.fresh;cacheTruncated=!!(next.state?.cache_truncated||next.record?.cache_truncated||next.cacheTruncated);const nextRun=next.record?.run_id||task.id;if(nextRun!==historyRun){if(historyRun){draftVersion++;transcriptWindow.reset();}historyAbort?.abort();historyAbort=null;historyBusy=false;historyFailure=null;historyAttempt='';historyRun=nextRun;showHistoryStatus();}if(next.record)record=next.record;messageIdentities(client).rememberTasks([record.info||task]);if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
       updateIdentity();renderStage();renderTranscript();scheduleFollow();updateComposer();renderMenu();
     },
     openMenu(){menuMode='actions';menuSignature='';renderMenu(true);dialog.showModal();},

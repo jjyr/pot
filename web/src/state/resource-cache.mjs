@@ -113,35 +113,47 @@ export function createResourceReads(client,{storage=client.production?createProj
       control:space?.control_id||client.runtime.runtime_id||client.runtime.id,
       boot:boots.get(scope.space)||boots.get('')||client.runtime.boot_id||'',topics};
   };
+  const mayRetain=meta=>!pendingInvalidations.some(([topics,source])=>(!source.space||source.space===meta.space||meta.path==='/api/v1/spaces')&&(source.reset||topics.includes('spaces')));
+  async function prepareStorage(meta){
+    const namespace=JSON.stringify([meta.control,meta.space]);
+    if(!registered.has(namespace)){await storage.register(meta);registered.add(namespace);}
+    await flushInvalidations();
+  }
   const cachedRead=(meta,options,load)=>readCommitted(meta,options,load).catch(error=>{throw localize(error);});
   const readCommitted=async(meta,options,load)=>{
+    if(options.signal?.aborted)throw options.signal.reason;
     const ttl=meta.topics.some(topic=>['usage','tasks','schedules','conversation','machines','skills'].includes(topic))?5000:30000;
     // Selection candidates must wait for the current directory. Historical
     // identity display may retain names, but must never supply active targets.
     const mentions=meta.path.startsWith('/api/v1/completions?')&&new URLSearchParams(meta.path.split('?')[1]).get('q')?.startsWith('@');
     const key=JSON.stringify(meta);
+    const authoritative=options.authoritative||mentions;
+    const stillCurrent=()=>{if(closed||meta.control!==describe(meta.path,meta).control||meta.boot!==describe(meta.path,meta).boot)throw new DOMException('Resource identity retired','AbortError');};
     if(storage){
-      await flushInvalidations();
-      const namespace=JSON.stringify([meta.control,meta.space]);
-      if(!registered.has(namespace)){await storage.register(meta);registered.add(namespace);}
+      // Hydration is readonly. Idempotent epoch registration and pending writes
+      // cannot hide a previously committed projection for a legal identity.
       if(!hydrated.has(key)){
-        const saved=await storage.read(key);hydrated.add(key);
+        const saved=await storage.read(key);stillCurrent();hydrated.add(key);
         if(saved)cache.set(key,saved.value,{at:-Infinity,confirmedAt:saved.lastConfirmed,source:'retained',notify:false});
       }
+      // Destructive scope changes cannot downgrade into retained authority.
+      if(!mayRetain(meta)){await prepareStorage(meta);stillCurrent();}
+
     }
     const committedLoad=!storage?load:async onRead=>{
       for(;;){
-        const expected=await storage.token(meta);onRead();const value=await load();
+        await prepareStorage(meta);stillCurrent();const expected=await storage.token(meta);onRead();const value=await load();stillCurrent();
         if(closed)throw new DOMException('Resource disposed','AbortError');
-        if(!await storage.commit(key,meta,displayProjection(meta.path,value),expected))continue;
+        await flushInvalidations();stillCurrent();if(!await storage.commit(key,meta,displayProjection(meta.path,value),expected))continue;
         const saved=await storage.read(key);
         if(!saved?.fresh)continue;
         return saved.value;
       }
     };
-    const before=cache.status(key),authoritative=options.authoritative||mentions;
+    const before=cache.status(key);
     const value=client.onlineReady===false&&before.has&&!authoritative?cache.peek(key):await cache.read(key,committedLoad,{ttl,signal:options.signal,authoritative,notify:options.notify});
     const status=before.has&&!authoritative?before:cache.status(key);
+    if(options.signal?.aborted)throw options.signal.reason;
     if(value&&typeof value==='object')queryStates.set(value,{lastConfirmed:status.lastConfirmed,freshness:status.source==='retained'?'retained':Date.now()-status.at<ttl&&!status.error?'fresh':'stale'});
     return value;
   };
@@ -155,7 +167,7 @@ export function createResourceReads(client,{storage=client.production?createProj
   const result={
     describe,storage,state:value=>queryStates.get(value),
     policySummary(options={}){return result.collection('@permissions-policy',{...options,authoritative:true,notify:false},async()=>{const value=await (client.transport||client.request)('/api/v1/permissions',{...options,transient:true});return {policy:value.policy};});},
-    async query(path,options={}){const meta={...describe(path,options),...(options.collection?{collection:true}:{})},key=JSON.stringify(meta);if(!storage){const value=cache.peek(key);return value===undefined?null:{value,...cache.status(key)};}await flushInvalidations();const saved=await storage.read(key);return saved?{value:saved.value,lastConfirmed:saved.lastConfirmed,freshness:saved.fresh?'retained':'stale'}:null;},
+    async query(path,options={}){const meta={...describe(path,options),...(options.collection?{collection:true}:{})},key=JSON.stringify(meta);if(!storage){const value=cache.peek(key);return value===undefined?null:{value,...cache.status(key)};}const saved=await storage.read(key);if(!mayRetain(meta))return null;return saved?{value:saved.value,lastConfirmed:saved.lastConfirmed,freshness:saved.fresh&&!pendingInvalidations.length?'retained':'stale'}:null;},
     async applyCommand(path,options,value,topics){
       if(!storage){result.invalidate(topics,options);return value;}
       const meta={...describe(path,options),...(options.expectedControl?{control:options.expectedControl}:{}),topics,path:'@command:'+path};

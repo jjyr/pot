@@ -2,7 +2,7 @@
 export function createQueryRegistry(resources){
   const queries=new Map();let closed=false;
   const state=(data,status='ready',freshness='fresh',error=null)=>({data,status,freshness,error,lastConfirmed:status==='ready'&&freshness==='fresh'?Date.now():0});
-  function define(key,load,{topics=[],space='',owner,paths=[],maxAge=5000,invalidationForce=true,subscribe}={}){
+  function define(key,load,{topics=[],space='',owner,paths=[],maxAge=5000,invalidationForce=true,publishIntermediate=false,subscribe}={}){
     if(queries.has(key))return queries.get(key);
     let snapshot=state(undefined,'idle','unknown'),flight,queued,version=0;
     const listeners=new Set();let stopExternal;
@@ -16,7 +16,7 @@ export function createQueryRegistry(resources){
       flight=batch.promise;
       const finish=()=>{flight=null;const next=queued;queued=null;if(next){if(closed)next.resolve(snapshot);else run(next);}};
       (async()=>{const initial=snapshot.data===undefined;if(initial)publish({...snapshot,status:'loading',error:null});
-        try{const result=projection(await load(batch.force,result=>{if(initial)publish({...state(result.data),...projection(result),error:null});}));const data=result.data,freshness=result.freshness||resources.state(data)?.freshness||'fresh';publish({...state(data,'ready',freshness),...result,lastConfirmed:result.lastConfirmed??resources.state(data)?.lastConfirmed??(freshness==='fresh'?Date.now():snapshot.lastConfirmed),error:null});return snapshot;}
+        try{const result=projection(await load(batch.force,result=>{if(initial||publishIntermediate)publish({...state(result.data),...projection(result),error:null});}));const data=result.data,freshness=result.freshness||resources.state(data)?.freshness||'fresh';publish({...state(data,'ready',freshness),...result,lastConfirmed:result.lastConfirmed??resources.state(data)?.lastConfirmed??(freshness==='fresh'?Date.now():snapshot.lastConfirmed),error:null});return snapshot;}
         catch(error){if(error.name!=='AbortError')publish({...snapshot,status:'error',freshness:snapshot.data===undefined?'unknown':'stale',error});throw error;}
       })().then(value=>{finish();batch.resolve(value);},error=>{finish();batch.reject(error);});
       return batch.promise;
