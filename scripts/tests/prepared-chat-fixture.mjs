@@ -1,5 +1,7 @@
 import {createServer} from 'node:http';
 import {Readable} from 'node:stream';
+import {createHash} from 'node:crypto';
+import {messageRevision} from '../../web/src/state/resource-bytes.mjs';
 
 // Only synthetic HTTP state. The document, adapter, SSE lifecycle and IndexedDB
 // are the product implementation; no model, product profile or Push is used.
@@ -13,9 +15,10 @@ export async function preparedChatFixture(sourceOrigin,{workRecords=false,resour
  const input={id:'active-input',request_id:'active-request',role:'user',text:'Synthetic active turn: keep one stable activity slot.',status:'accepted',...(workRecords?{references:[{message_id:'alpha-721',quote:'Historical grouped member'}]}:resourceMatrix?{references:[{message_id:'alpha-700',quote:'Historical mixed previews'}]}:currentReference?{references:[{message_id:'active-answer',quote:'Independent exact current-scope answer'}]}:{})};
  messages.get('alpha').push(input);let scenario='thinking',holdPreview=true,customText='';
  const previewHeld=new Set(),previewBytes=Buffer.from('# Rendered report\n\n```mermaid\ngraph TD\n A[Prepare] --> B[Commit]\n```\n\n'+Array.from({length:12},(_,i)=>`## Section ${i+1}\n\nSynthetic **Markdown** content.\n\n\x60\x60\x60js\nconst measured = true;\n\x60\x60\x60`).join('\n\n'));
- const resource={id:'synthetic-markdown',name:'report.md',entry:'report.md',mime_type:'text/markdown',size:previewBytes.length,download:{path:'report.md'},files:[{path:'report.md',size:previewBytes.length,mime_type:'text/markdown',digest:'synthetic-digest'}]};
+ const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
+ const resource={id:'synthetic-markdown',name:'report.md',entry:'report.md',mime_type:'text/markdown',size:previewBytes.length,download:{path:'report.md'},files:[{path:'report.md',size:previewBytes.length,mime_type:'text/markdown',digest:digest(previewBytes)}]};
  const slowResource={...resource,id:'synthetic-slow-markdown',name:'slow.md',entry:'slow.md',download:{path:'slow.md'},files:resource.files.map(file=>({...file,path:'slow.md'}))};
- const matrixFiles=[['image','matrix.png','image/png',image],['pdf','matrix.pdf','application/pdf',Buffer.from('%PDF-1.4\n1 0 obj <</Type /Catalog /Pages 2 0 R>> endobj\n2 0 obj <</Type /Pages /Kids [] /Count 0>> endobj\ntrailer <</Root 1 0 R>>\n%%EOF')],['html','matrix.html','text/html',Buffer.from('<!doctype html><p>Synthetic interactive document</p>')]].map(([kind,path,mime,bytes])=>({kind,bytes,resource:{id:'matrix-'+kind,name:path,entry:path,mime_type:mime,size:bytes.length,download:{path},files:[{path,mime_type:mime,size:bytes.length,digest:'matrix-'+kind}]}}));
+ const matrixFiles=[['image','matrix.png','image/png',image],['pdf','matrix.pdf','application/pdf',Buffer.from('%PDF-1.4\n1 0 obj <</Type /Catalog /Pages 2 0 R>> endobj\n2 0 obj <</Type /Pages /Kids [] /Count 0>> endobj\ntrailer <</Root 1 0 R>>\n%%EOF')],['html','matrix.html','text/html',Buffer.from('<!doctype html><p>Synthetic interactive document</p>')]].map(([kind,path,mime,bytes])=>({kind,bytes,resource:{id:'matrix-'+kind,name:path,entry:path,mime_type:mime,size:bytes.length,download:{path},files:[{path,mime_type:mime,size:bytes.length,digest:digest(bytes)}]}}));
  if(resourceMatrix)messages.get('alpha')[699].text+='\n\n[Decoded image](matrix.png)\n\n[PDF document](matrix.pdf)\n\n[Isolated HTML](matrix.html)';
  const answer=(text,status='streaming')=>({id:'active-answer',reply_to:input.id,role:'assistant',text,status});
  const updateScenario=value=>{scenario=value;const all=messages.get('alpha'),start=all.findIndex(row=>row.id===input.id);all.splice(start+1);
@@ -56,17 +59,20 @@ export async function preparedChatFixture(sourceOrigin,{workRecords=false,resour
    return json(res,{});
   }
   if(path.startsWith('/api/')||path==='/access/status')log('http-start',{path,method:req.method,owner,query:url.search,body});
-  if(path==='/api/v1/message-files/active-answer'||path==='/api/v1/message-files/alpha-700')return json(res,[{id:'binding-1',href:'report.md',state:'ready',resource},{id:'binding-2',href:'slow.md',state:'ready',resource:slowResource},...(resourceMatrix?matrixFiles.map(item=>({id:item.resource.id,href:item.resource.entry,state:'ready',resource:item.resource})):[])]);
+  if(path==='/api/v1/message-files/active-answer'||path==='/api/v1/message-files/alpha-700'){
+   const message=path.split('/').at(-1),revision=await messageRevision(messages.get(owner)?.find(row=>row.id===message)?.text||'');
+   return json(res,[{id:'binding-1',href:'report.md',state:'ready',resource},{id:'binding-2',href:'slow.md',state:'ready',resource:slowResource},...(resourceMatrix?matrixFiles.map(item=>({id:item.resource.id,href:item.resource.entry,state:'ready',resource:item.resource})):[])].map(row=>({...row,message,revision})));
+  }
   const matrix=matrixFiles.find(item=>path.startsWith('/api/v1/resources/'+item.resource.id+'/'));
   if(resourceMatrix&&matrix){
    log('matrix-resource-response',{kind:matrix.kind,operation:path.split('/').at(-1)});
    if(path.endsWith('/chunk'))return json(res,{revision:matrix.resource.files[0].digest,offset:0,size:matrix.bytes.length,data:matrix.bytes.toString('base64')});
-   if(path.endsWith('/render')){const token=JSON.stringify(url.searchParams.get('token'));res.writeHead(200,{'content-type':'text/html','cache-control':'no-store'});res.end(matrix.bytes.toString()+'<script>parent.postMessage({type:"pot-resource",token:'+token+',action:"resize",value:240},"*");parent.postMessage({type:"pot-resource",token:'+token+',action:"ready"},"*")</script>');return;}
+   if(path.endsWith('/render-document')){const token='pot-resource-mount-token-v1',html=matrix.bytes.toString()+'<script>parent.postMessage({type:"pot-resource",token:'+JSON.stringify(token)+',action:"resize",value:240},"*");parent.postMessage({type:"pot-resource",token:'+JSON.stringify(token)+',action:"ready"},"*")</script>';return json(res,{version:1,resource:matrix.resource.id,entry:matrix.resource.entry,files:matrix.resource.files,token,html,digest:digest(html)});}
    res.writeHead(200,{'content-type':matrix.resource.mime_type,'cache-control':'no-store'});res.end(matrix.bytes);return;
   }
   if(path==='/api/v1/resources/synthetic-markdown/chunk'||path==='/api/v1/resources/synthetic-slow-markdown/chunk'){
    if(holdPreview)await new Promise(resolve=>previewHeld.add(resolve));
-   log('preview-chunk-response',{owner});return json(res,{revision:'synthetic-digest',offset:0,size:previewBytes.length,data:previewBytes.toString('base64')});
+   log('preview-chunk-response',{owner});return json(res,{revision:digest(previewBytes),offset:0,size:previewBytes.length,data:previewBytes.toString('base64')});
   }
   if(path==='/access/status')return json(res,{authenticated:true});
   if(path==='/api/v1/attachments/synthetic-image'){
