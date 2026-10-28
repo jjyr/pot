@@ -40,7 +40,7 @@ export function createTaskIdentityRegistry() {
       }
     }
   };
-  return {register, resolve(address) { return records.get(addressKey(address)); }, short(value) {
+  return {register, snapshot(){return structuredClone([...records.values()].sort((a,b)=>addressKey(a.address).localeCompare(addressKey(b.address))));}, resolve(address) { return records.get(addressKey(address)); }, short(value) {
     register([value]);return taskShortID(value);
   }};
 }

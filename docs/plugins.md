@@ -349,6 +349,20 @@ supplies all four filter fields. New repository subscriptions do not implicitly
 force `mention`. Thread IDs are numeric Notifications thread IDs, not issue or PR
 numbers. Drafts retain their starting revision across refresh and language changes;
 conflicts keep the draft. Saves and deletes use an idempotent `request_id`.
+Pending writes leave fields and unrelated subscription rows editable. Success
+acknowledges the submitted version, preserving later edits. An unknown network
+result exposes **Retry previous save/deletion**: it retries that same immutable
+operation and request ID before any later edits can be submitted. An accepted
+operation without a usable receipt keeps the local draft and offers an explicit
+discard after reviewing the list; it never guesses a new ID from other rows.
+
+The configuration HTTP response returns the invoked plugin's complete updated
+settings and its opaque structured operation receipt alongside the assistant
+directory. Control reuses the configuration tool's return instead of issuing a
+second list after acceptance. The UI binds new rows by the receipt's
+`subscription_id` and fences full settings by account and collection revision.
+Account login status and notification settings have independent read queues;
+login recovery does not reload unchanged notification settings.
 
 On the first connected list/bootstrap with an available assistant, the plugin
 atomically initializes one ordinary subscription for the first assistant in

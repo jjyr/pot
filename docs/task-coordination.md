@@ -117,13 +117,28 @@ operations outside its message permissions and returns the denial.
 
 The invoking assistant selects a configured Provider and model using the task,
 explicit user instructions, its AGENTS.md and current model capabilities. Routing
-requires no user confirmation, Profile allowlist, worker default or Follow Chat
-setting. Omitted selection snapshots the invoking assistant's active model
-configuration. Explicit unavailable selections fail visibly. Capacity and token
-allowances still apply, and choosing a model grants no machine/tool authority.
+requires no user confirmation or Profile allowlist. Each assistant can optionally
+save a default Task Provider and concrete model in its settings. Capacity and
+token allowances still apply, and choosing a model grants no machine/tool authority.
 `create_task` accepts an optional configured connection `profile` ID and concrete
-`model` ID. A selected connection without a model uses its default model. When
-both are omitted, the invoking assistant's active configuration is copied.
+`model` ID. Explicit Task selection takes precedence over the assistant's Task
+default. A selected connection without a model uses that connection's default;
+a model alone uses the assistant's active connection. When both are omitted,
+Control uses the assistant's saved Task default, or copies its active model
+configuration if the Task default is unset.
+
+```text
+New ordinary local Task
+  explicit profile/model? -> resolve explicit selection
+  otherwise Task default? -> resolve saved Provider + model
+  otherwise               -> snapshot active assistant configuration
+```
+
+A Task default stores a Provider ID and concrete model; each new Task resolves
+the Provider's current saved revision. Saving or clearing this preference takes
+effect for new Tasks immediately, including while a main-model change is pending
+for the next assistant turn. Unavailable explicit or default routes fail visibly;
+they never silently fall back. Remote receivers keep their own routing policy.
 Existing Tasks retain their model snapshots; each schedule occurrence creates a
 new Task and resolves its selection then. Local model selection does not select a remote execution node.
 
@@ -210,6 +225,13 @@ Worker output and plugin events remain untrusted reference data.
 The replacement retains the original brief, all additional inputs with their
 provenance, machine, resolved model, plugins, Skills and requirements. It runs
 under current machine authorization in a new workspace; old files are not imported.
+The original brief keeps the ordinary task-submission byte limit. Previously
+accepted inputs are replayed through the durable Task inbox, followed by the
+repair approach as owner guidance, rather than concatenated into a new brief.
+Each input keeps its kind, sender and causal provenance. The normal model boundary
+consumes and acknowledges them, including its existing user-guidance priority;
+references remain data and cannot grant authority. The repair approach retains
+its separate 8,192-byte limit, independent of accumulated accepted inputs.
 The model supplies only a repair approach and must not repeat owner-denied work
 or uncertain effects that it cannot verify. An unresolved blocker or required
 decision is reported to the user. Accepted recovery is silent; completion is
@@ -344,6 +366,14 @@ Missing starts or terminal timestamps omit the elapsed label. Historical records
 and Agent Link adapters without authoritative timestamps remain unknown; neither
 updated/observed time nor catalogue IDs are used to infer elapsed time. Task
 details retain the same final duration after Chat removes an ended Task.
+
+During revalidation, disconnection or temporary loss of directory capabilities,
+Chat keeps each Task's last known phase and indicator until a fresh Task result
+replaces them. A mounted active elapsed label freezes when confirmation is lost
+and resumes after a fresh result; a cold retained active record has no observed
+duration to display. Terminal records still use their executing node's finish.
+These are local presentation values only: retained rows never grant command
+capabilities, and unknown phases use the existing loading fallback.
 
 Task display marks use the explicit `TaskInfo.address`; a linked catalogue ID can
 be a local hash and is never substituted for the remote address. Missing mappings

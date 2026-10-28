@@ -6,6 +6,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -218,7 +219,11 @@ class ConfigTests(unittest.TestCase):
             original = '[mcp_servers.other]\nurl="https://other.invalid"\nenabled_tools=["safe"]\nhttp_headers={Authorization="synthetic-private"}\n'
             config.write_text(original)
             fake = root / "codex-cli"
-            fake.write_text("""#!/usr/bin/env python3
+            fake.write_text(
+                "#!"
+                + sys.executable
+                + "\n"
+                + """\
 import json,os,sys,tomllib
 from pathlib import Path
 p=Path(os.environ["CODEX_HOME"])/"config.toml"
@@ -231,7 +236,8 @@ elif a[:2]==["mcp","add"]:
  with p.open("a") as f: f.write("\\n[mcp_servers."+a[2]+"]\\nurl="+json.dumps(a[4])+"\\n")
  print("synthetic-private-must-not-leak")
 else: sys.exit(3)
-""")
+"""
+            )
             fake.chmod(0o700)
             before_home = os.environ.get("HOME")
             with (

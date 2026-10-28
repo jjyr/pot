@@ -33,7 +33,8 @@ func TestRetryPreservesScopeAndHasOneDurableReplacementPerSource(t *testing.T) {
 	ctx := context.Background()
 	s, p, path := fixture(t)
 	skills := []string{"research"}
-	original, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "original", Text: "Research\nKeep the original constraints.", Skills: &skills, Requirements: protocol.TaskRequirements{Tools: true}})
+	profile, model, reason := "profile", "model", "original selection"
+	original, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "original", Text: "Research\nKeep the original constraints.", Skills: &skills, Requirements: protocol.TaskRequirements{Tools: true}, Profile: &profile, Model: &model, SelectionReason: &reason, Workspace: protocol.TaskWorkspace{Kind: "worktree", ProjectDir: t.TempDir(), Base: "main", Branch: "retry-scope"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,8 +52,17 @@ func TestRetryPreservesScopeAndHasOneDurableReplacementPerSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retry.Info.ID == original.Info.ID || retry.NodeID != original.NodeID || !reflect.DeepEqual(retry.Config, original.Config) || !reflect.DeepEqual(retry.Request.Skills, original.Request.Skills) || retry.Request.Requirements != original.Request.Requirements || !strings.Contains(retry.Request.Text, original.Request.Text) || !strings.Contains(retry.Request.Text, "Preserve this additional constraint.") {
+	if retry.Info.ID == original.Info.ID || retry.NodeID != original.NodeID || !reflect.DeepEqual(retry.Config, original.Config) || !reflect.DeepEqual(retry.Request.Skills, original.Request.Skills) || retry.Request.Requirements != original.Request.Requirements || retry.Request.Text != original.Request.Text {
 		t.Fatal("replacement lost original scope", retry)
+	}
+	wantRequest := original.Request
+	wantRequest.RequestID = retry.Request.RequestID
+	if !reflect.DeepEqual(retry.Request, wantRequest) || !reflect.DeepEqual(retry.Plugins, original.Plugins) || retry.RunID == original.RunID || retry.Launch != nil {
+		t.Fatal("replacement changed execution selection or reused a previous run")
+	}
+	inputs, err := s.Inputs(ctx, "assistant", retry.Info.ID)
+	if err != nil || len(inputs) != 3 || inputs[1].Text != "Preserve this additional constraint." || !strings.Contains(inputs[2].Text, "Check upstream availability before continuing.") {
+		t.Fatal("replacement lost guidance or repair", inputs, err)
 	}
 	// Reopening storage retains the original receipt without consuming recovery
 	// opportunities for later failed replacements.
@@ -66,6 +76,20 @@ func TestRetryPreservesScopeAndHasOneDurableReplacementPerSource(t *testing.T) {
 		t.Fatal(again, err)
 	}
 	for range 3 {
+		// A model failure occurs after its queued replay/repair inputs enter the
+		// original run's checkpoint at the ordinary steering boundary.
+		if err := reopened.Tick(ctx); err != nil {
+			t.Fatal(err)
+		}
+		steering, err := reopened.Steering(ctx, "assistant", retry.Info.ID, retry.RunID, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, input := range steering {
+			if err := reopened.AcknowledgeInputs(ctx, "assistant", retry.Info.ID, retry.RunID, []string{input.ID}); err != nil {
+				t.Fatal(err)
+			}
+		}
 		failRetryTask(t, reopened, p, retry)
 		if allowed, err := reopened.CanRetry(ctx, "assistant", retry.Info.ID); err != nil || !allowed {
 			t.Fatal("failed replacement lost recovery eligibility", allowed, err)

@@ -7,13 +7,13 @@ import {conversationMenuRefreshContract} from './conversation-menu-refresh-contr
 // DOM disabled/removal so these assertions exercise execution-time authority.
 export async function conversationActionsContract(report=()=>{}){
   const check=(value,label)=>{if(!value)throw Error(label);report('PASS '+label);};
-  const wait=async test=>{for(let i=0;i<500;i++){if(test())return;await new Promise(done=>setTimeout(done,10));}throw Error('Conversation actions timed out');};
+  const wait=async test=>{for(let i=0;i<500;i++){if(test())return;await new Promise(done=>setTimeout(done,10));}const history=root.querySelector('.history:not([data-preparation-surface])'),host=root.querySelector('.message-window');throw Error('Conversation actions timed out '+JSON.stringify({root:root.getBoundingClientRect().toJSON(),history:history&&{width:history.clientWidth,height:history.clientHeight,hidden:history.hidden,busy:history.getAttribute('aria-busy')},host:host&&{width:host.clientWidth,busy:host.getAttribute('aria-busy')},text:root.textContent.slice(-300)}));};
   const root=document.createElement('div'),name='pot-conversation-actions-'+crypto.randomUUID();document.body.append(root);
   const operations=['chat.read','chat.send','chat.cancel','chat.control','assistant.profile','assistant.usage'];
   let scope={space:'local',owner:'a'},failing=false,connected=true,freshness='fresh',capabilities=operations,conversationBoot='boot',cursor=0,receive,status;
-  const controls=[],reads=[];let cancels=0;
-  const read=async path=>{
-    reads.push(path);
+  const controls=[],reads=[],configurationReads=[];let cancels=0;
+  const read=async(path,options={})=>{
+    reads.push(path);if(options.configuration)configurationReads.push({path,...options});
     if(path==='/api/v1/spaces')return {items:[{id:'local',name:'Synthetic',kind:'local',connected,control_id:'runtime'}]};
     if(path==='/api/v1/assistants'){
       if(failing)throw Object.assign(Error('Synthetic storage failure'),{storage:true,uiKey:'storage.failed'});
@@ -22,7 +22,7 @@ export async function conversationActionsContract(report=()=>{}){
     return {items:[],policy:{}};
   };
   const frame=(values={})=>({kind:'reset',runtime_id:'runtime',owner_id:JSON.stringify(['local',scope.owner]),conversation_id:'chat',boot_id:conversationBoot,cursor:String(++cursor),running:true,turn_id:'synthetic-turn',turn:{paused:false},messages:[{id:'m1',sequence:'1',version:cursor,role:'assistant',text:'Committed synthetic output '+cursor,status:'complete'}],replies:[],history:{before:'1',after:'1'},...values});
-  const client={production:true,chatCacheName:name,runtime:{runtime_id:'runtime',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>scope={...scope,...value},read,request:read,
+  const client={production:true,chatCacheName:name,connectionGeneration:0,directoryGeneration:0,get operationsReady(){return this.directoryGeneration===this.connectionGeneration;},operationScopeReady:()=>client.operationsReady,runtime:{runtime_id:'runtime',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>scope={...scope,...value},read,request:read,
     controlTurn:async(body,captured)=>{controls.push({body,captured});},cancel:async()=>{cancels++;},changes:()=>()=>{},
     resources:{read,state:()=>({freshness}),invalidate:async()=>{},subscribe:()=>()=>{},subscribeInvalidation:()=>()=>{}},
     subscribe(onFrame,onStatus){receive=onFrame;status=onStatus;queueMicrotask(()=>{status('connected');receive(frame());});return()=>{};}};
@@ -40,14 +40,17 @@ export async function conversationActionsContract(report=()=>{}){
       try{await domains.directory.refresh();throw Error('Expected storage failure');}catch(error){check(error.storage,'Directory refresh rejects the injected storage failure');}
       await wait(()=>root.querySelector('.connection-status').textContent.includes(translate(client.uiLocale(),'storage.failed')));
       oldControl(true);check(controls.length===before,'Old '+(paused?'Resume':'Pause')+' nodes and callbacks cannot send after storage authority is lost');
-      check(!action('turn-control')&&!action('assistant-settings')&&!action('usage')&&action('settings')&&!action('settings').disabled,'Open menu revokes capability actions and retains Settings');
-      const readCount=reads.length;oldSettings(true);oldUsage(true);root.querySelector('.send-button').dispatchEvent(new MouseEvent('click',{bubbles:true}));
-      check(controls.length===before&&cancels===0&&reads.length===readCount&&dialog().open,'Old '+(paused?'Resume':'Pause')+' nodes/callbacks and capability navigation cannot execute during storage failure');
+      check(!action('turn-control')&&action('assistant-settings')&&!action('assistant-settings').disabled&&!action('usage')&&action('settings')&&!action('settings').disabled,'Open menu revokes execution and retains discoverable assistant and global Settings');
+      const readCount=reads.length;oldUsage(true);root.querySelector('.send-button').dispatchEvent(new MouseEvent('click',{bubbles:true}));
+      check(controls.length===before&&cancels===0&&reads.length===readCount&&dialog().open,'Old '+(paused?'Resume':'Pause')+' nodes/callbacks and Usage capability navigation cannot execute during storage failure');
       check(await domains.directory.query()===committed&&client.assistants.every(item=>!item.offline)&&root.textContent.includes('Committed synthetic output'),'Storage failure keeps committed content and known online state');
       for(const locale of ['zh-CN','en']){
         window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:locale}}));
         check(root.querySelector('.connection-status').textContent.includes(translate(locale,'storage.failed'))&&[...root.querySelectorAll('.connection-status button')].some(node=>node.textContent===translate(locale,'retry')),'Storage failure and Retry remain localized in '+locale);
       }
+      oldSettings();await wait(()=>configurationReads.some(item=>item.owner==='a'&&item.space==='local'&&item.control_id==='runtime'&&item.configurationBoot==='boot'));
+      check(controls.length===before&&cancels===0&&!client.operationsReady,'Read-only settings navigation keeps its original identity without restoring command authority');
+      root.querySelector('.rail-button[aria-label="'+translate(client.uiLocale(),'chat')+'"]').click();await wait(()=>root.querySelector('.history:not([data-preparation-surface])')?.hidden===false);open();
       failing=false;[...root.querySelectorAll('.connection-status button')].find(node=>node.textContent===translate(client.uiLocale(),'retry')).click();
       await wait(()=>action('turn-control')&&!action('turn-control').disabled&&!root.querySelector('.connection-status').textContent.includes(translate(client.uiLocale(),'storage.failed')));
       const closed=new Promise(done=>dialog().addEventListener('close',done,{once:true}));action('turn-control').click();await closed;await wait(()=>controls.length===before+1);
@@ -72,7 +75,7 @@ export async function conversationActionsContract(report=()=>{}){
     const oldCapabilities=saved('turn-control'),oldProfile=saved('assistant-settings'),oldUsageCapability=saved('usage');capabilities=['chat.read'];await domains.directory.refresh();await wait(()=>!action('turn-control')&&!action('assistant-settings')&&!action('usage'));
     oldCapabilities();oldProfile();oldUsageCapability();check(controls.length===beforeState&&dialog().open,'Capability removal refreshes the open menu and fences all capability callbacks');
     capabilities=operations;await domains.directory.refresh();await wait(()=>action('turn-control'));const retained=saved('turn-control'),retainedNode=action('turn-control');retainedNode.focus();freshness='retained';await domains.directory.refresh();await wait(()=>action('turn-control')?.getAttribute('aria-disabled')==='true');retained(true);check(controls.length===beforeState&&action('turn-control')===retainedNode&&document.activeElement===retainedNode&&action('settings')&&!action('settings').disabled,'Retained directory projection keeps the focused node, revokes execution and preserves Settings');
-    connected=false;await domains.directory.refresh();await wait(()=>!action('turn-control')&&!action('assistant-settings')&&!action('usage'));retainedNode.removeAttribute('aria-disabled');retained(true);check(controls.length===beforeState&&action('settings')&&!retainedNode.isConnected,'An offline retained destination removes capability actions and fences its old node and callback');
+    connected=false;await domains.directory.refresh();await wait(()=>!action('turn-control')&&action('assistant-settings')&&!action('assistant-settings').disabled&&!action('usage'));retainedNode.removeAttribute('aria-disabled');retained(true);check(controls.length===beforeState&&action('settings')&&!retainedNode.isConnected,'An offline retained destination keeps Settings discoverable and removes execution actions, fencing its old node and callback');
     connected=true;freshness='fresh';await domains.directory.refresh();status('connected');await wait(()=>action('turn-control')&&!action('turn-control').disabled);
     const disposedControl=saved('turn-control');failing=true;await domains.directory.refresh().catch(()=>{});await wait(()=>!action('turn-control'));
     action('settings').click();await wait(()=>root.querySelector('.rail-button.is-selected')?.getAttribute('aria-label')===translate(client.uiLocale(),'settings'));

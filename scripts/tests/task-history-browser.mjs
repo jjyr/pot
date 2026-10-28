@@ -5,7 +5,7 @@ export async function taskHistoryBrowser(page,{origin}={}){
   await page.goto(origin+'/scripts/tests/fixtures/db-driven-task.html');
   await page.waitForFunction(()=>document.querySelector('#results')?.textContent.startsWith('Ready'),null,{timeout:120000});
   await page.waitForFunction(()=>document.querySelector('.task-transcript')?.textContent.includes('Execution update 1200.'));
-  const history=page.locator('.task-history');
+  const history=page.locator('.task-history:not([data-preparation-surface])');
   async function top(){await history.hover();await page.mouse.wheel(0,-1000000);}
   assert.equal(await page.getByRole('button',{name:'Load earlier output',exact:true}).count(),0);
   await page.evaluate(()=>{
@@ -18,7 +18,7 @@ export async function taskHistoryBrowser(page,{origin}={}){
   await page.evaluate(async()=>{
     const f=taskFixture,{domainsFor}=await f.pagesDomainPromise,domain=domainsFor(f.client).tasks,earlier=domain.loadEarlier;
     domain.loadEarlier=async(...args)=>{
-      const history=document.querySelector('.task-history'),row=[...history.querySelectorAll('article.message')].find(node=>node.getBoundingClientRect().bottom>history.getBoundingClientRect().top);
+      const history=document.querySelector('.task-history:not([data-preparation-surface])'),row=[...history.querySelectorAll('article.message')].find(node=>node.getBoundingClientRect().bottom>history.getBoundingClientRect().top);
       const anchor=row?{id:row.dataset.messageId,y:row.getBoundingClientRect().top-history.getBoundingClientRect().top}:null;
       const call={before:args[2],anchor};f.earlier.push(call);f.maximum=Math.max(f.maximum,++f.inflight);
       try{const result=await earlier(...args);call.first=result?.messages[0]?.text;return result;}finally{f.inflight--;}
@@ -26,9 +26,9 @@ export async function taskHistoryBrowser(page,{origin}={}){
   });
   await top();
   await page.waitForFunction(()=>taskFixture.earlier.length===1&&taskFixture.inflight===0&&taskFixture.earlier[0].first?.includes('Execution update 0481.'));
-  await page.waitForFunction(()=>document.querySelector('.task-history').scrollTop>100);
+  await page.waitForFunction(()=>document.querySelector('.task-history:not([data-preparation-surface])').scrollTop>100);
   const first=await page.evaluate(()=>{
-    const f=taskFixture,h=document.querySelector('.task-history'),a=f.earlier[0].anchor,row=h.querySelector(`[data-message-id="${a.id}"]`);return {counts:f.counts,maximum:f.maximum,calls:f.earlier.length,shift:row?row.getBoundingClientRect().top-h.getBoundingClientRect().top-a.y:null};
+    const f=taskFixture,h=document.querySelector('.task-history:not([data-preparation-surface])'),a=f.earlier[0].anchor,row=h.querySelector(`[data-message-id="${a.id}"]`);return {counts:f.counts,maximum:f.maximum,calls:f.earlier.length,shift:row?row.getBoundingClientRect().top-h.getBoundingClientRect().top-a.y:null};
   });
   assert.deepEqual(first.counts,{rows:80,scans:1},'Automatic local pagination reads one indexed 80-row page');
   assert.equal(first.maximum,1);assert.equal(first.calls,1);assert.ok(first.shift!==null&&Math.abs(first.shift)<=3,'Prepending preserves the visible message offset: '+JSON.stringify(first));
@@ -55,7 +55,7 @@ export async function taskHistoryEdges(page,{origin}){
   await page.evaluate(()=>historyEdges.reset('same-cursor'));
   await page.waitForFunction(()=>historyEdges.pending);
   const heldCalls=await page.evaluate(()=>historyEdges.calls.length);
-  await page.evaluate(async()=>{for(let i=0;i<8;i++){document.querySelector('.task-history').dispatchEvent(new Event('scroll'));await new Promise(requestAnimationFrame);}});
+  await page.evaluate(async()=>{for(let i=0;i<8;i++){document.querySelector('.task-history:not([data-preparation-surface])').dispatchEvent(new Event('scroll'));await new Promise(requestAnimationFrame);}});
   assert.equal(await page.evaluate(()=>historyEdges.calls.length),heldCalls,'Visible boundary cannot duplicate an in-flight cursor');
   await page.evaluate(()=>historyEdges.release());
   await page.waitForFunction(()=>historyEdges.inflight===0);

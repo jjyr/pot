@@ -18,7 +18,7 @@ const open=async(version,{width=1280,height=1200,theme='light',scenario='convers
   assert.deepEqual(errors,[]);return page;
 };
 const fit=async page=>{
-  const result=await page.evaluate(()=>({document:document.documentElement.scrollWidth<=innerWidth,history:document.querySelector('.history').scrollWidth<=document.querySelector('.history').clientWidth,rows:[...document.querySelectorAll('.message')].every(row=>row.getBoundingClientRect().right<=innerWidth),unsafe:!!window.bubblesInjected,errors:window.chatBubbles.errors}));
+  const result=await page.evaluate(()=>({document:document.documentElement.scrollWidth<=innerWidth,history:document.querySelector('.history:not([data-preparation-surface])').scrollWidth<=document.querySelector('.history:not([data-preparation-surface])').clientWidth,rows:[...document.querySelectorAll('.message')].every(row=>row.getBoundingClientRect().right<=innerWidth),unsafe:!!window.bubblesInjected,errors:window.chatBubbles.errors}));
   assert.deepEqual(result,{document:true,history:true,rows:true,unsafe:false,errors:[]});
 };
 try{

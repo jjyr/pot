@@ -37,7 +37,7 @@ async page => {
           return {x: rect.x, y: rect.y, width: rect.width, height: rect.height, display: getComputedStyle(element).display};
         };
         return {rail: bounds('.feature-rail'), pane: bounds('.assistant-directory'), titlebar: bounds('.titlebar'), composer: bounds('.composer'),
-          overflow: document.documentElement.scrollWidth > innerWidth, historyOverflow: document.querySelector('.history').scrollWidth > document.querySelector('.history').clientWidth,
+          overflow: document.documentElement.scrollWidth > innerWidth, historyOverflow: document.querySelector('.history:not([data-preparation-surface])').scrollWidth > document.querySelector('.history:not([data-preparation-surface])').clientWidth,
           inset: getComputedStyle(document.documentElement).getPropertyValue('--page-inset').trim()};
       });
       assert(!geometry.overflow && !geometry.historyOverflow, `No horizontal overflow at ${width}/${surface}`);
@@ -118,7 +118,7 @@ async page => {
     });
     const focusDraft='Long mobile draft keeps native selection and scrolling. '.repeat(30);
     await input.fill(focusDraft);await input.evaluate(node=>node.blur());
-    await page.locator('.history').evaluate(node=>{node.scrollTop=120;node.dispatchEvent(new Event('scroll'));});
+    await page.locator('.history:not([data-preparation-surface])').evaluate(node=>{node.scrollTop=120;node.dispatchEvent(new Event('scroll'));});
     await cdp.send('Emulation.setTouchEmulationEnabled',{enabled:true});
     const touchRect=await input.boundingBox();
     await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:touchRect.x+touchRect.width/2,y:touchRect.y+touchRect.height/2}]});
@@ -128,7 +128,7 @@ async page => {
       const probe=document.createElement('div');probe.id='focus-scroll-probe';probe.style.cssText='position:absolute;top:1400px;height:1px;width:1px;pointer-events:none';document.body.append(probe);
       window.scrollTo(0,160);
       window.focusHeightWrites=0;window.focusObserver=new MutationObserver(records=>window.focusHeightWrites+=records.filter(row=>row.attributeName==='style').length);window.focusObserver.observe(input,{attributes:true});
-      return {rootScroll:scrollY,history:document.querySelector('.history').scrollTop,inputScroll:input.scrollTop};
+      return {rootScroll:scrollY,history:document.querySelector('.history:not([data-preparation-surface])').scrollTop,inputScroll:input.scrollTop};
     });
     assert(focusState.rootScroll===0,'Focusing an input cannot scroll the outer browser document');
     for(const [height,top]of [[420,80],[420,110],[450,50],[852,0]]){
@@ -140,7 +140,7 @@ async page => {
       assert(state.top>top+44&&state.bottom<=top+height,'Focused composer stays below the titlebar and above the keyboard');
       assert(state.focused&&state.start===50&&state.end===60,'Keyboard transitions retain native focus and selection');
       assert(state.scroll===focusState.inputScroll,'Keyboard panning retains long-draft reading position');
-      assert(await page.locator('.history').evaluate(node=>node.scrollTop)===focusState.history,'Keyboard transitions preserve history reading position');
+      assert(await page.locator('.history:not([data-preparation-surface])').evaluate(node=>node.scrollTop)===focusState.history,'Keyboard transitions preserve history reading position');
     }
     assert(await page.evaluate(()=>window.focusHeightWrites)===0,'Keyboard transitions never rewrite the focused textarea height');
     assert(await input.inputValue()===focusDraft,'Keyboard dismissal retains the draft');
@@ -192,7 +192,7 @@ async page => {
         await page.goto(`${base}/?theme=light&locale=zh-CN&surface=${surface}&conversation=preview-conversation`);
         await page.locator('.role-assistant .markdown-table').waitFor();
         const geometry = await page.evaluate(() => {
-          const history = document.querySelector('.history');
+          const history = document.querySelector('.history:not([data-preparation-surface])');
           history.scrollLeft = 100;
           return {
             viewport: innerWidth, page: document.documentElement.scrollWidth,
@@ -208,7 +208,7 @@ async page => {
           };
         });
         if (width === 393 || width === 1440) {
-          await page.locator('.history').evaluate(node => {
+          await page.locator('.history:not([data-preparation-surface])').evaluate(node => {
             node.scrollLeft = 0;
             for (const content of node.querySelectorAll('pre, .markdown-table')) content.scrollLeft = 0;
             node.scrollTop = node.scrollHeight;

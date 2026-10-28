@@ -85,6 +85,15 @@ Task callbacks through the authenticated receiver gateway. The local hook and
 service gate preserve the role boundary. Ordinary OAuth cannot substitute for
 execution identity or supply human approval.
 
+The hook uses `allow` to delegate to the next hook and native permission policy,
+as defined by the [Antigravity hook contract](https://antigravity.google/docs/hooks).
+It never emits `auto_approve` or adds permission overrides, including for the local
+`pot_receiver` context server. Independent MCP servers have no legacy-name
+exemption from the read-only boundary. A native permission requirement remains
+in force; headless execution must not silently approve it to continue. Plugin
+metadata validation confirms the required support is present, not that a real
+CLI loaded the hook or enforced its decisions during execution.
+
 The driver persists conversation identity before writing input, resumes the exact
 saved conversation and rejects mismatches without opening a replacement. It has
 no native turn ID; the real Pot RunID remains separate. Input means terminal

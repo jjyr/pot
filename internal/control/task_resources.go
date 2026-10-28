@@ -27,12 +27,13 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 	if err != nil {
 		return tasks.Selection{}, err
 	}
-	thread, err := c.Thread(ctx)
-	if err != nil || thread == nil {
-		return tasks.Selection{}, errors.New("assistant model is not configured")
-	}
-	spec := thread.Config
+	var spec core.ResolvedSpec
 	if r.Profile != nil || r.Model != nil {
+		thread, err := c.Thread(ctx)
+		if err != nil || thread == nil {
+			return tasks.Selection{}, errors.New("assistant model is not configured")
+		}
+		spec = thread.Config
 		profileID := spec.SourceProfileID
 		if r.Profile != nil {
 			profileID = *r.Profile
@@ -58,6 +59,27 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 		spec, err = s.Profiles.ResolveAssistant(AssistantSelection{ProfileID: chosen.ID, ProfileRevision: chosen.Revision, Model: model})
 		if err != nil {
 			return tasks.Selection{}, err
+		}
+	} else {
+		state, err := c.Configuration(ctx)
+		if err != nil {
+			return tasks.Selection{}, err
+		}
+		if state.Config == nil {
+			return tasks.Selection{}, errors.New("assistant model is not configured")
+		}
+		spec = *state.Config
+		if len(state.Intent) > 0 && string(state.Intent) != "null" {
+			var selection AssistantSelection
+			if err := core.DecodeJSON(state.Intent, &selection); err != nil {
+				return tasks.Selection{}, err
+			}
+			if selection.TaskDefault != nil {
+				spec, err = s.resolveTaskDefault(ctx, *selection.TaskDefault)
+				if err != nil {
+					return tasks.Selection{}, err
+				}
+			}
 		}
 	}
 	if err := s.Profiles.sourceAvailable(ctx, spec.Provider); err != nil {

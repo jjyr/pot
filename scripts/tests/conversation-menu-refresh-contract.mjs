@@ -27,13 +27,14 @@ export async function conversationMenuRefreshContract(report=()=>{}){
   try{
     await wait(()=>root.querySelector('.connection-status.is-connected')&&!root.querySelector('.send-button')?.disabled);
     root.querySelector('[data-view-key="conversation-actions"]').click();
-    const keys=['assistant-settings','usage','turn-control'],nodes=keys.map(action),callbacks=nodes.map(node=>node.onclick);
+    const keys=['assistant-settings','usage','turn-control'],nodes=keys.map(action),callbacks=nodes.map(node=>node.onclick),unavailable=()=>keys.slice(1).every(key=>action(key)?.getAttribute('aria-disabled')==='true')&&!action('assistant-settings')?.disabled&&!action('assistant-settings')?.hasAttribute('aria-disabled');
     nodes[1].focus();held=true;const refresh=domains.changed(['assistants'],{space:'local'});
-    await wait(()=>release&&client.assistants[0].retained&&keys.every(key=>action(key)?.getAttribute('aria-disabled')==='true'));
+    await wait(()=>release&&client.assistants[0].retained&&unavailable());
     check(keys.every((key,i)=>action(key)===nodes[i])&&document.activeElement===nodes[1]&&nodes.every(node=>node.getClientRects().length),'Held real repository revalidation keeps visible menu nodes and keyboard focus');
     check(client.assistants[0].capabilities.operations.join(',')==='chat.read','Retained directory never restores old execution capabilities');
     const before=reads.length;
     for(const [i,node]of nodes.entries()){
+      if(i===0)continue; // Configuration remains discoverable without execution authority.
       node.click();callbacks[i]({currentTarget:node});
       // aria-disabled is presentation, not the execution guard. Even if it is
       // stripped, both the saved and the current handler must reject authority.
@@ -43,10 +44,10 @@ export async function conversationMenuRefreshContract(report=()=>{}){
     check(!controls.length&&reads.length===before&&dialog().open,'Held revalidation fences node clicks and saved navigation/control callbacks independently of aria-disabled');
     for(const locale of ['zh-CN','en']){
       window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:locale}}));
-      check(action('usage')===nodes[1]&&document.activeElement===nodes[1]&&nodes[1].textContent===translate(locale,'usage')&&nodes.every(node=>node.getAttribute('aria-disabled')==='true'),'Held menu keeps focus and accessible unavailable actions when switching to '+locale);
+      check(action('usage')===nodes[1]&&document.activeElement===nodes[1]&&nodes[1].textContent===translate(locale,'usage')&&unavailable(),'Held menu keeps focus and accessible unavailable actions when switching to '+locale);
     }
     const currentControl=nodes[2].onclick;
-    scope={...scope,owner:'other'};nodes[2].removeAttribute('aria-disabled');currentControl({currentTarget:nodes[2]});scope={...scope,owner:'a'};
+    scope={...scope,owner:'other'};nodes[2].removeAttribute('aria-disabled');currentControl({currentTarget:nodes[2]});callbacks[0]({currentTarget:nodes[0]});scope={...scope,owner:'a'};
     check(!controls.length&&dialog().open,'Held revalidation cannot redirect a captured control to another scope');
     nodes[2].setAttribute('aria-disabled','true');
     held=false;release();await refresh;

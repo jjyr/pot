@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -36,7 +37,13 @@ func (b publicationBearer) RoundTrip(r *http.Request) (*http.Response, error) {
 // This uses the real access Manager, browser login and private Unix Control
 // socket. No public owner listener, local native Host or model process exists.
 func TestMCPProductionPublicationThroughPrivateSocket(t *testing.T) {
-	root := t.TempDir()
+	// Keep the socket path below macOS sockaddr_un limits; t.TempDir includes
+	// this long test name in its directory path.
+	root, err := os.MkdirTemp("", "pot-api-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	keys, _ := secrets.NewMemoryKey(make([]byte, 32))
 	manager, _ := execution.New("publication", "boot", execution.DefaultLimits())
 	service, e := control.Open(control.Options{Root: root, RuntimeID: "publication", BootID: "boot", Keys: keys, Manager: manager})

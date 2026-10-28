@@ -20,6 +20,14 @@ mise run open
 `build`/`bundle` create `.local/pot/PotPreview.app`, an independent development
 bundle identified as `dev.pot.preview`. Release packaging uses the production identity. Do not replace a running product's files implicitly.
 
+`mise run test:ui-native` exercises desktop startup and subscription isolation
+without a browser or Wails frameworks. Its native binding fixture runs the real
+Go local UI manager and subscription bridge against a synthetic Control caller,
+then routes their events into the production JavaScript adapter. The fixture
+builds under a fresh home-directory temporary path and removes it after exit.
+Startup orchestration uses the production app with synthetic DOM mounting and
+locator storage; it does not replace real WebView or IndexedDB acceptance.
+
 The macOS builder downloads the pinned Wails module before applying its
 checksum-verified patches to a disposable copy. A fresh module cache is supported;
 the original cache and repository module files remain unchanged.
@@ -98,6 +106,25 @@ mise run test:i18n
 mise run licenses
 mise run build:linux
 ```
+
+`mise run test:settings-browser` uses isolated production HTTP/SSE services and
+temporary browser profiles to check settings independently of assistant activity.
+Set `POT_SETTINGS_BEFORE` to an extracted baseline tree containing `web/src` and
+the UI cache/notification migrations. Configure an existing Playwright module
+with `POT_PLAYWRIGHT_MODULE` and Chromium with `POT_CHROMIUM_EXECUTABLE`; no browser
+is downloaded. The runner checks desktop and 390px layouts, preserves native
+fields through reconnect, tests configuration preconditions and saves only
+synthetic data. `POT_SETTINGS_IMAGES` selects the paired screenshot directory.
+Native configuration tests use fake Codex/Antigravity processes and never call a
+model. Configuration drafts and keys are not persisted in a browser write queue.
+
+`node scripts/tests/pot-ui-settings-outbox-browser.mjs` exercises settings and
+submitted messages together at desktop and 390px widths. Set
+`POT_SETTINGS_SOURCE` to a fixed source tree with the complete UI migrations and
+the browser module/executable variables above. It holds synthetic configuration,
+snapshot and save responses while checking local submission, draft preservation,
+snapshot acknowledgement and active-turn delivery. `POT_COMBINED_OUTPUT` selects
+the local evidence directory.
 
 `mise run test:pwa` runs the shared notification/source/transport contracts and
 an isolated Chromium Service Worker scenario. The browser runner uses an existing
@@ -263,6 +290,16 @@ isolated production HTTP/SSE, IndexedDB and Service Worker fixtures. Its reconne
 checks hold directory or session responses, revoke capabilities and release
 retired connection/Control responses; no command is submitted.
 
+`node scripts/tests/pot-ui-cache-entry-browser.mjs` independently checks cached
+Chat entry and local browsing while production bootstrap, SSE and history HTTP
+responses are held. It seeds and verifies real committed IndexedDB identities,
+uses desktop and phone viewports, and exercises offline reopening, assistant
+switches, cached references and a pending page transaction. Use
+`POT_PLAYWRIGHT_MODULE` and `POT_CHROMIUM_EXECUTABLE` for an existing installation;
+`POT_CACHE_ENTRY_OUTPUT` selects the evidence directory and
+`POT_CACHE_ENTRY_SOURCE` selects the source tree under test. The fixture owns and
+closes its synthetic loopback server and temporary browser profile.
+
 For chat stream lifecycle checks, `node scripts/tests/ui-regressions.mjs --group
 connection` runs the production browser adapter and shared UI with real
 EventSource, IndexedDB and a controlling Service Worker against synthetic HTTP
@@ -286,6 +323,17 @@ scripts, routes and transcript cache. It receives the fixture browser's disposab
 authentication state for provider probes. The real HTTP contract keeps its two
 independent authenticated clients. Set `TMPDIR` to a private directory when the
 default temporary filesystem is quota constrained.
+
+`mise run test:ui-assistant-create` exercises the phone creation flow in English
+and Chinese with the production HTTP adapter, SSE, IndexedDB and trusted Chromium
+touch input. Its loopback API holds configuration and creation responses, counts
+requests and supplies only synthetic assistants; it does not connect a real peer
+or call a model. The runner also checks late catalogs after navigation, scope and
+identity changes. Use the existing `POT_PLAYWRIGHT_MODULE` and
+`POT_CHROMIUM_EXECUTABLE` overrides. `POT_CREATION_OUTPUT` selects the untracked
+evidence directory; `POT_CREATION_SOURCE` selects an extracted source tree and
+`--baseline` records its behavior. These checks do not establish physical iOS
+browser or installed PWA gesture behavior.
 
 For Markdown resource previews, start `POT_MARKDOWN_RESOURCE_FIXTURE=1
 POT_RESOURCE_FIXTURE_URL_FILE=/tmp/pot-markdown-url mise exec -- go test
@@ -342,6 +390,20 @@ the data window, reconnects and the five-second preview slot fallback. Set
 selects an extracted source tree. Pass `--baseline` directly to
 `node scripts/tests/chat-scroll-http-browser.mjs` to record the known send and
 draft-layout regressions in that tree while retaining the other assertions.
+
+`mise run test:ui-prepared-layout` exercises connected off-flow rendering with
+the same existing Playwright/Chromium prerequisites. It covers the native and
+fallback scroll-end branches, recursive readiness, stable component deadlines,
+load admission, same-node resource transfer, streaming HTTP/SSE output, mixed
+image/PDF/HTML/Markdown previews through real history pagination, cached initial
+layout and virtual remount, native group aliases across pagination/cold IndexedDB/remount, and a trusted mobile
+touch gesture during an incomplete Mermaid fence's completion. The fixtures
+use synthetic loopback data and reject product writes. They do not qualify
+physical iOS/Safari behavior. `POT_PREPARED_OUTPUT`, `POT_HISTORY_RESOURCES_OUTPUT`, `POT_ALIAS_OUTPUT` and
+`POT_TOUCH_OUTPUT` select untracked evidence directories. The touch runner accepts
+`--baseline` with `POT_TOUCH_SOURCE` pointing to an extracted source tree; that
+mode requires the temporary-source/shrink failure rather than reporting it as a
+passing fix.
 
 `mise run test:ui-chat-activity` uses the same isolated browser prerequisites to
 check lifecycle activity through reconnects, empty model/tool rounds, long

@@ -13,6 +13,11 @@ Keep each tool focused on its responsibility. Update affected callers, tests and
 
 # Development
 
+## UI development
+
+When modifying UI, read and follow the [UI development rules](docs/ui-development.md).
+For chat submission or delivery changes, also follow [Chat outbox](docs/chat-outbox.md).
+
 ## UI internationalization
 
 New or changed user-visible UI text must use the shared i18n catalog and lookup,

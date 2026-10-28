@@ -8,27 +8,57 @@ import {taskIdentityMark,taskIdentityShort} from './task-identity.mjs';
 
 const node=(tag,className='',text)=>{const value=document.createElement(tag);value.className=className;if(text!==undefined)value.textContent=text;return value;};
 const taskKey=task=>JSON.stringify([task._space_id,task.assistant_id,task.id]);
+const statuses={queued:'tasks.queued',running:'tool.running',waiting:'tasks.waiting',waiting_approval:'tool.waiting_approval',complete:'tasks.complete',failed:'tasks.failed',cancelled:'schedule.state.cancelled',interrupted:'schedule.state.interrupted'};
+const activePhases=new Set(['queued','running','waiting','waiting_approval']);
 
 // Conversation presentation state survives moving the strip to a newer reply,
 // detail navigation and refreshes. It is never part of the transcript.
 export function createBackgroundTasks({locale,onOpen,onToggle}) {
   const element=node('section','background-tasks'),states=new Map();
-  const id=`background-tasks-${crypto.randomUUID()}`;
+  const baseID=`background-tasks-${crypto.randomUUID()}`;
   let current=null,signature='';
-  function update(scope,tasks,needsApproval) {
-    let state=states.get(scope);
-    if(!tasks.length){const changed=current===scope&&signature!=='';states.delete(scope);element.remove();current=null;signature='';return changed;}
-    if(!state){state={expanded:false,order:[]};states.set(scope,state);}
+  // Expanded intent is shared by committed DOM and in-flight candidates so a
+  // clock tick cannot reset a toggle made while a preparation is pending.
+  const intents=new Map();
+  // A prepared render owns a candidate copy of the committed state. Nothing in
+  // it becomes observable to retained handlers until commit publishes it.
+  function candidate(scope) {
+    const base=states.get(scope),observed=new Map();
+    for(const [key,value] of base?.observed||[])observed.set(key,{...value});
+    return {id:base?.id||baseID+'-'+crypto.randomUUID(),expanded:!!intents.get(scope),order:[...(base?.order||[])],observed,records:new Map(base?.records||[]),signature:base?.signature||'',empty:false};
+  }
+  function update(scope,tasks,needsApproval,target=element,now=Date.now(),state=candidate(scope)) {
+    target.hidden=!tasks.length;
+    if(!tasks.length){const changed=current===scope&&signature!=='';target.replaceChildren();state.empty=true;if(target===element){states.delete(scope);current=null;signature='';}return changed;}
+    state.empty=false;
+    const byID=new Map(tasks.map(task=>{
+      const key=taskKey(task),previous=state.observed.get(key);
+      // Display memory never grants capabilities or changes the source record.
+      // Retained data cannot roll a confirmed phase back during revalidation.
+      const presentation=task._stale&&previous?{...previous}: {
+        phase:task.phase,started_at_ms:task.started_at_ms,finished_at_ms:task.finished_at_ms,
+        waiting:task.phase==='waiting_approval'||(!task._stale&&needsApproval(task.id,task.phase)),
+      };
+      if(task._stale){
+        // A mounted live clock stops at loss of confirmation. A cold retained
+        // active row has no observed duration, so do not invent one from now.
+        if(!previous?.stale)presentation.clockEnd=previous?taskClockEnd(previous,now):activePhases.has(task.phase)?undefined:task.finished_at_ms;
+      }else presentation.clockEnd=undefined;
+      presentation.stale=!!task._stale;state.observed.set(key,presentation);
+      return [key,{...task,...presentation,source:task}];
+    }));
+    state.records=byID;
+    for(const key of state.observed.keys())if(!byID.has(key))state.observed.delete(key);
     taskIdentities.register(tasks);
-    const nextSignature=JSON.stringify([scope,locale(),state.expanded,tasks.map(task=>[taskKey(task),task.address,taskIdentities.short(task),task.title,task.phase,task._stale,task.started_at_ms,task.finished_at_ms,task.agent_link,needsApproval(task.id,task.phase)])]);
-    if(current===scope&&signature===nextSignature)return false;
-    signature=nextSignature;
-    const byID=new Map(tasks.map(task=>[taskKey(task),task]));
+    const nextSignature=JSON.stringify([scope,locale(),state.expanded,[...byID.values()].map(task=>[taskKey(task),task.address,taskIdentities.short(task),task.title,task.phase,task.stale,task.clockEnd,task.started_at_ms,task.finished_at_ms,task.agent_link,task.waiting])]);
+    state.signature=nextSignature;
+    if(target===element&&current===scope&&signature===nextSignature){states.set(scope,state);return false;}
     state.order=state.order.filter(key=>byID.has(key));
     for(const key of byID.keys())if(!state.order.includes(key))state.order.push(key);
     // Keep existing order within each approval group; clock/status refreshes and
     // backend updated-at ordering must not shuffle the reader's task rows.
-    const ordered=state.order.map(key=>byID.get(key)).sort((a,b)=>Number(needsApproval(b.id,b.phase))-Number(needsApproval(a.id,a.phase)));
+    const ordered=state.order.map(key=>byID.get(key)).sort((a,b)=>Number(b.waiting)-Number(a.waiting));
+    const id=state.id;
     const t=key=>translate(locale(),key),projection=node('section','background-tasks');
     projection.setAttribute('aria-labelledby',`${id}-heading`);
     const heading=node('h2','background-tasks-heading',t('tasks.backgroundCount').replace('{count}',tasks.length.toLocaleString(locale())));
@@ -36,23 +66,28 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
     const list=node('div','background-task-list');list.id=id;
     for(const task of state.expanded?ordered:ordered.slice(0,3)){
       const open=node('button','background-task');open.type='button';open.dataset.viewKey=taskKey(task);open.dataset.scrollAnchor=`task:${taskKey(task)}`;open.title=[task.title,task.address?.node_id,task.address?.agent_id].filter(Boolean).join(' · ');
-      const waiting=needsApproval(task.id,task.phase),meta=node('span','background-task-meta');open.classList.toggle('needs-approval',waiting);
+      const waiting=task.waiting,meta=node('span','background-task-meta');open.classList.toggle('needs-approval',waiting);
       open.append(taskIdentityMark(task),taskIdentityShort(task,t('tool.messageTaskIDMissing')),node('span','background-task-title',task.title));
       const description=node('span','background-task-description visually-hidden');
       description.id=`${id}-description-${list.children.length}`;
       open.setAttribute('aria-describedby',description.id);
       if(task.address?.node_id)description.append(node('span','',t('tool.messageFromSource').replace('{source}',task.address.node_id)+' · '));
-      const status=task._stale?'tasks.savedState':waiting?'tool.waiting_approval':task.phase==='queued'?'tasks.queued':task.phase==='waiting'?'tasks.waiting':task.phase==='complete'?'tasks.complete':task.phase==='failed'?'tasks.failed':task.phase==='cancelled'?'schedule.state.cancelled':task.phase==='interrupted'?'schedule.state.interrupted':'tool.running';
+      const status=waiting?'tool.waiting_approval':statuses[task.phase]||'loading.pending';
       const source=taskAgentSource(task,locale());if(source)description.append(node('span','',source.getAttribute('aria-label')+' · '));
-      const activity=node('span','task-activity-dot');activity.setAttribute('aria-hidden','true');activity.dataset.phase=task._stale?'unknown':waiting?'waiting_approval':task.phase;
+      const activity=node('span','task-activity-dot');activity.setAttribute('aria-hidden','true');activity.dataset.phase=waiting?'waiting_approval':statuses[task.phase]?task.phase:'unknown';
       meta.append(activity,node('span','background-task-status',t(status)));
-      const time=task._stale?'':taskElapsed(task.started_at_ms,taskClockEnd(task),locale(),true);
+      const end=task.stale?task.clockEnd:taskClockEnd(task,now);
+      const time=statuses[task.phase]?taskElapsed(task.started_at_ms,end,locale(),true):'';
       if(time){
         const separator=node('span','','·');separator.setAttribute('aria-hidden','true');
-        const elapsed=node('span','background-task-elapsed',time);elapsed.dataset.startedAt=task.started_at_ms;elapsed.dataset.compact='true';if(!['queued','running','waiting','waiting_approval'].includes(task.phase))elapsed.dataset.finishedAt=task.finished_at_ms||0;elapsed.setAttribute('role','timer');elapsed.setAttribute('aria-live','off');elapsed.title=t('tasks.elapsedDescription');
+        const elapsed=node('span','background-task-elapsed',time);elapsed.dataset.startedAt=task.started_at_ms;elapsed.dataset.compact='true';if(task.stale||!activePhases.has(task.phase))elapsed.dataset.finishedAt=end||0;elapsed.setAttribute('role','timer');elapsed.setAttribute('aria-live','off');elapsed.title=t('tasks.elapsedDescription');
         meta.append(separator,elapsed);
       }
-      open.append(meta,description);open.onclick=()=>onOpen(task);list.append(open);
+      open.append(meta,description);
+      // This node survives reconcile across clock ticks. Resolve the latest
+      // committed record; a candidate that never commits must not redirect it.
+      open.onclick=()=>{const record=states.get(scope)?.records?.get(taskKey(task));if(current===scope&&record)onOpen(record.source);};
+      list.append(open);
     }
     projection.append(heading,list);
     if(tasks.length>3){
@@ -60,11 +95,25 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
       toggle.setAttribute('aria-controls',id);toggle.setAttribute('aria-expanded',String(state.expanded));
       const count=tasks.length-3,label=state.expanded?t('tasks.collapse'):t(count===1?'tasks.expandOne':'tasks.expandMore').replace('{count}',count.toLocaleString(locale()));
       toggle.append(node('span','',label),icon('down'));
-      toggle.onclick=()=>{state.expanded=!state.expanded;onToggle({expanded:state.expanded});};projection.append(toggle);
+      toggle.onclick=()=>{const expanded=!intents.get(scope);intents.set(scope,expanded);onToggle({expanded});};projection.append(toggle);
     }
     // A different conversation must not inherit another owner's keyed DOM.
-    if(current!==scope)element.replaceChildren();current=scope;
-    reconcile(element,projection);return true;
+    if(target===element){if(current!==scope)element.replaceChildren();current=scope;signature=nextSignature;states.set(scope,state);}
+    reconcile(target,projection);return true;
   }
-  return {element,update,close(){}};
+  return {element,update,region(scope,tasks,needsApproval){
+    tasks=structuredClone(tasks);const now=Date.now();
+    const decisions=new Map(tasks.map(task=>[task.id,needsApproval(task.id,task.phase)]));
+    const state=candidate(scope);
+    // The revision carries elapsed text so each clock tick prepares a candidate;
+    // stable ids and reconcile retain the live nodes within that candidate.
+    return {key:'background-tasks',host:element,revision:JSON.stringify([scope,locale(),state.expanded,tasks,tasks.map(task=>taskElapsed(task.started_at_ms,taskClockEnd(task,now),locale(),true)),[...decisions]]),render:target=>update(scope,tasks,id=>decisions.get(id),target,now,state),commit:host=>{
+      // Only a committed candidate may change the records read by retained
+      // buttons; a cancelled preparation leaves the live section untouched.
+      if(state.empty){element.replaceChildren();states.delete(scope);current=null;signature='';return;}
+      if(current!==scope)element.replaceChildren();
+      states.set(scope,state);current=scope;signature=state.signature;
+      reconcile(element,host);
+    }};
+  },close(){}};
 }

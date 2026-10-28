@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"bytes"
+	"github.com/jjyr/pot/internal/resources"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/instance"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -331,6 +332,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-src 'self' blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+	if r.URL.Path == "/resource-document.html" {
+		w.Header().Set("Content-Security-Policy", resources.HTMLPolicy+" allow-same-origin")
+	}
 	s.assets.ServeHTTP(w, r)
 }
 func Allowed(method, path string) bool {
@@ -341,7 +345,7 @@ func Allowed(method, path string) bool {
 
 	if method == "GET" && strings.HasPrefix(path, "/api/v1/resources/") {
 		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/resources/"), "/")
-		return core.Identifier(parts[0]) && (len(parts) == 1 || len(parts) == 2 && (parts[1] == "chunk" || parts[1] == "content" || parts[1] == "download" || parts[1] == "render"))
+		return core.Identifier(parts[0]) && (len(parts) == 1 || len(parts) == 2 && (parts[1] == "chunk" || parts[1] == "content" || parts[1] == "download" || parts[1] == "render" || parts[1] == "render-document"))
 	}
 	if strings.ContainsAny(path, "\\%") || strings.Contains(path, "//") || strings.Contains(path, "/../") {
 		return false

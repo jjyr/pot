@@ -1,5 +1,5 @@
 import {translate} from '../locales/messages.mjs';
-import {createProjectionStore} from './projection-store.mjs';
+import {createProjectionStore,projectionKey} from './projection-store.mjs';
 import {messageBytes,truncateUTF8} from './projection-bytes.mjs';
 // Memory-only resource reads. Cancellation belongs to a consumer, never shared IO.
 export function createResourceCache({now=Date.now,limit=256,onChange=()=>{}}={}) {
@@ -76,18 +76,22 @@ export function createResourceCache({now=Date.now,limit=256,onChange=()=>{}}={})
   };
 }
 
-// Explicit allowlist. Editor versions, credentials, approvals and snapshot streams
-// bypass this cache. Agent Link invitations are command-only and never cached.
+// Explicit display allowlist. Retained editor values never grant save authority.
+// Credentials, approvals and snapshot streams use their specialized interfaces.
 const resources={
   '@permissions-policy':['permissions','machines'],
   '/api/v1/spaces':['spaces'],
   '/api/v1/assistants':['assistants','conversation','assistant-mail','permissions','tasks'],
   '/api/v1/providers':['providers','extensions'],
+  '/api/v1/agent':['settings','conversation','providers'],
+  '/api/v1/instructions':['settings','conversation'],
+  '/api/v1/extensions':['extensions'],
   '/api/v1/agent/routing':['settings','providers'],
   '/api/v1/usage/providers':['usage','providers'],
   '/api/v1/integrations':['integrations'],
   '/api/v1/runtime':['runtime','machines'],
   '/api/v1/agent-links':['agent-links'],
+  '/api/v1/agent-links/mcp':['agent-links'],
   '/api/v1/about':['runtime'],
   '/api/v1/completions':['machines','skills','assistants','agent-links','settings','permissions'],
 };
@@ -113,53 +117,69 @@ export function createResourceReads(client,{storage=client.production?createProj
       control:space?.control_id||client.runtime.runtime_id||client.runtime.id,
       boot:boots.get(scope.space)||boots.get('')||client.runtime.boot_id||'',topics};
   };
+  const mayRetain=meta=>!pendingInvalidations.some(([topics,source])=>(!source.space||source.space===meta.space||meta.path==='/api/v1/spaces')&&(source.reset||topics.includes('spaces')));
+  async function prepareStorage(meta){
+    const namespace=JSON.stringify([meta.control,meta.space]);
+    if(!registered.has(namespace)){await storage.register(meta);registered.add(namespace);}
+    await flushInvalidations();
+  }
   const cachedRead=(meta,options,load)=>readCommitted(meta,options,load).catch(error=>{throw localize(error);});
   const readCommitted=async(meta,options,load)=>{
+    if(options.signal?.aborted)throw options.signal.reason;
     const ttl=meta.topics.some(topic=>['usage','tasks','schedules','conversation','machines','skills'].includes(topic))?5000:30000;
     // Selection candidates must wait for the current directory. Historical
     // identity display may retain names, but must never supply active targets.
     const mentions=meta.path.startsWith('/api/v1/completions?')&&new URLSearchParams(meta.path.split('?')[1]).get('q')?.startsWith('@');
-    const key=JSON.stringify(meta);
+    const key=JSON.stringify(meta),stable=projectionKey(meta),generation=client.connectionGeneration;
+    const authoritative=options.authoritative||mentions;
+    const stillCurrent=()=>{if(closed||generation!==client.connectionGeneration||meta.control!==describe(meta.path,meta).control||meta.boot!==describe(meta.path,meta).boot)throw new DOMException('Resource identity retired','AbortError');};
     if(storage){
-      await flushInvalidations();
-      const namespace=JSON.stringify([meta.control,meta.space]);
-      if(!registered.has(namespace)){await storage.register(meta);registered.add(namespace);}
+      // Hydration is readonly. Idempotent epoch registration and pending writes
+      // cannot hide a previously committed projection for a legal identity.
       if(!hydrated.has(key)){
-        const saved=await storage.read(key);hydrated.add(key);
+        const saved=await storage.read(stable);stillCurrent();hydrated.add(key);
         if(saved)cache.set(key,saved.value,{at:-Infinity,confirmedAt:saved.lastConfirmed,source:'retained',notify:false});
       }
+      // Destructive scope changes cannot downgrade into retained authority.
+      if(!mayRetain(meta)){await prepareStorage(meta);stillCurrent();}
+
     }
     const committedLoad=!storage?load:async onRead=>{
       for(;;){
-        const expected=await storage.token(meta);onRead();const value=await load();
+        await prepareStorage(meta);stillCurrent();const expected=await storage.token(meta);onRead();const value=await load();stillCurrent();
         if(closed)throw new DOMException('Resource disposed','AbortError');
-        if(!await storage.commit(key,meta,displayProjection(meta.path,value),expected))continue;
-        const saved=await storage.read(key);
-        if(!saved?.fresh)continue;
+        await flushInvalidations();stillCurrent();if(!await storage.commit(stable,meta,displayProjection(meta.path,value),expected,stillCurrent))continue;
+        const saved=await storage.read(stable);stillCurrent();
+        // Another window may replace the stable display between this commit
+        // and read. Its boot provenance cannot become this connection's fresh
+        // authority, even when no invalidation epoch changed in between.
+        if(!saved?.fresh||saved.meta?.boot!==meta.boot||saved.meta?.control!==meta.control)continue;
         return saved.value;
       }
     };
-    const before=cache.status(key),authoritative=options.authoritative||mentions;
+    const before=cache.status(key);
     const value=client.onlineReady===false&&before.has&&!authoritative?cache.peek(key):await cache.read(key,committedLoad,{ttl,signal:options.signal,authoritative,notify:options.notify});
     const status=before.has&&!authoritative?before:cache.status(key);
+    if(options.signal?.aborted)throw options.signal.reason;
     if(value&&typeof value==='object')queryStates.set(value,{lastConfirmed:status.lastConfirmed,freshness:status.source==='retained'?'retained':Date.now()-status.at<ttl&&!status.error?'fresh':'stale'});
     return value;
   };
   const stopStorage=storage?.subscribe((event,{remote})=>{
     if(!remote||closed)return;
     if(event.kind==='commit'||event.kind==='remove'){
-      hydrated.delete(event.key);cache.reset(key=>key===event.key);
+      for(const key of hydrated)if(projectionKey(JSON.parse(key))===event.key)hydrated.delete(key);
+      cache.reset(key=>projectionKey(JSON.parse(key))===event.key);
       if(event.meta)for(const listener of listeners)listener(event.meta);
     }else if(event.kind==='invalidate')result.invalidate(event.topics,{...event.source,remote:true});
   });
   const result={
     describe,storage,state:value=>queryStates.get(value),
     policySummary(options={}){return result.collection('@permissions-policy',{...options,authoritative:true,notify:false},async()=>{const value=await (client.transport||client.request)('/api/v1/permissions',{...options,transient:true});return {policy:value.policy};});},
-    async query(path,options={}){const meta={...describe(path,options),...(options.collection?{collection:true}:{})},key=JSON.stringify(meta);if(!storage){const value=cache.peek(key);return value===undefined?null:{value,...cache.status(key)};}await flushInvalidations();const saved=await storage.read(key);return saved?{value:saved.value,lastConfirmed:saved.lastConfirmed,freshness:saved.fresh?'retained':'stale'}:null;},
+    async query(path,options={}){const meta={...describe(path,options),...(options.collection?{collection:true}:{})},key=JSON.stringify(meta),stable=projectionKey(meta);if(!storage){const value=cache.peek(key);return value===undefined?null:{value,...cache.status(key)};}const generation=client.connectionGeneration,saved=await storage.read(stable);if(closed||generation!==client.connectionGeneration||meta.control!==describe(path,options).control)throw new DOMException('Resource identity retired','AbortError');if(!mayRetain(meta))return null;return saved?{value:saved.value,lastConfirmed:saved.lastConfirmed,freshness:saved.fresh&&!pendingInvalidations.length?'retained':'stale'}:null;},
     async applyCommand(path,options,value,topics){
       if(!storage){result.invalidate(topics,options);return value;}
-      const meta={...describe(path,options),topics,path:'@command:'+path};
-      const id=options.commandID||options.body?.request_id||crypto.randomUUID(),key=JSON.stringify({...meta,id});
+      const meta={...describe(path,options),...(options.expectedControl?{control:options.expectedControl}:{}),topics,path:'@command:'+path};
+      const id=options.commandID||options.body?.request_id||crypto.randomUUID(),key=projectionKey({...meta,id});
       await flushInvalidations();
       const saved=await storage.command(key,meta,displayProjection(path,value));
       result.invalidate(topics,{...options,remote:true});return saved;
@@ -189,7 +209,7 @@ export function createResourceReads(client,{storage=client.production?createProj
       const bootChanged=source.boot&&source.boot!==(boots.get(source.space)||boots.get('')||client.runtime.boot_id||'');
       if(source.boot)boots.set(source.space,source.boot);
       if(bootChanged) {
-        // Boot identity changes invalidate every resource in that scope,
+        // Boot identity changes invalidate every volatile resource in that scope,
         // independently of which topic happened to carry the first new version.
         hydrated.clear();cache.reset(key=>{const meta=JSON.parse(key);return !source.space||meta.space===source.space||meta.path==='/api/v1/spaces';});
       }else if(topics.includes('spaces')){hydrated.clear();cache.reset(matches);}
@@ -213,7 +233,7 @@ export function createResourceReads(client,{storage=client.production?createProj
 
 export function displayProjection(path,value){
   const base=path.split('?')[0],pick=(value,keys)=>Object.fromEntries(keys.filter(key=>value?.[key]!==undefined).map(key=>[key,value[key]]));
-  const redact=value=>{if(Array.isArray(value))return value.map(redact);if(!value||typeof value!=='object')return value;const result={};for(const [key,item]of Object.entries(value)){if(key==='default_credential'){result[key]=!!item;continue;}if(/^(api_key|access_token|refresh_token|client_secret|secret|secrets|credential|credentials|authorization|authorization_url|user_code|invitation|private_key|password|token|owner_key)$/i.test(key))continue;result[key]=redact(item);}return result;};
+  const redact=value=>{if(Array.isArray(value))return value.map(redact);if(!value||typeof value!=='object')return value;const result={};for(const [key,item]of Object.entries(value)){if(key==='default_credential'){result[key]=!!item;continue;}if(/^(api_key|access_token|refresh_token|client_secret|secret|secrets|credential|credentials|authorization|authorization_url|user_code|invitation|private_key|password|token|owner_key|oauth_session|session|session_id|code_verifier|code_challenge|authorization_code)$/i.test(key))continue;result[key]=redact(item);}return result;};
   if(/^\/api\/v1\/tasks\/[^/]+$/.test(base)){
     const result=value?.result;let truncated=!!value?.cache_truncated;
     const text=value=>{if(typeof value!=='string')return value;const bounded=truncateUTF8(value,1024*1024,{tail:true});if(bounded!==value)truncated=true;return bounded;};
@@ -238,6 +258,24 @@ export function displayProjection(path,value){
       provider_types:(value.provider_types||[]).map(item=>pick(item,['id','plugin_id','name','endpoint','protocol','protocols','directory_provider','default_credential','capabilities','icon','available','identity']))});
   }
   if(base==='/api/v1/integrations')return redact({items:(value?.items||[]).map(item=>pick(item,['id','name','status','login_available','account','login']))});
+  if(base==='/api/v1/agent'){
+    const selection=pick(value?.selection,['profile_id','profile_revision','model','context_window','max_output_tokens','reasoning_effort']);
+    if(value?.selection?.task_default)selection.task_default=pick(value.selection.task_default,['profile_id','profile_revision','model']);
+    return redact({...pick(value,['generation','revision','pending']),selection,config:pick(value?.config,['source_profile_id','model'])});
+  }
+  if(base==='/api/v1/instructions')return pick(value,['text','revision']);
+  if(base==='/api/v1/extensions')return redact({
+    items:(value?.items||[]).map(item=>pick(item,['id','kind','name','description','source','location','version','icon','enabled','revision','origin','tools','requirements','background','model_providers','manual'])),
+    mcp:(value?.mcp||[]).map(item=>({...pick(item,['id','name','revision','enabled','transport','command','args','cwd','url','has_credentials','tools','disabled_tools','status','client_id','scope']),...(typeof item.auth==='string'?{auth:item.auth}:{})})),
+    diagnostics:value?.diagnostics||[],
+  });
+  if(base==='/api/v1/agent-links/mcp')return (Array.isArray(value)?value:[]).map(item=>({
+    ...pick(item,['id','remote_node_id','state','status','inbound']),
+    // Endpoint query strings, userinfo and diagnostics can contain credentials.
+    url:(()=>{try{const url=new URL(item.url);return /^https?:$/.test(url.protocol)?url.origin+url.pathname:'';}catch{return '';}})(),
+    directory:{name:typeof item.directory?.name==='string'?item.directory.name:''},
+    last_error:item.last_error==='authorization_expired'?'authorization_expired':item.last_error?'unavailable':'',
+  }));
   if(base.startsWith('/api/v1/agent-links')||/^\/api\/v1\/(agent|instructions|extensions|spaces|usage)(?:\/|$)/.test(base))return redact(value);
   return value;
 }

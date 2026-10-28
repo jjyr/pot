@@ -8,15 +8,15 @@ const wait=async(test,label)=>{for(let i=0;i<300;i++){if(test())return;await pau
 const check=(value,label)=>{if(!value)throw Error(label);results.textContent+='PASS '+label+'\n';};
 function userScroll(history,top){const w=history.ownerDocument.defaultView;history.dispatchEvent(new w.WheelEvent('wheel',{deltaY:top-history.scrollTop||1,bubbles:true}));history.scrollTop=top;history.dispatchEvent(new w.Event('scroll'));}
 const app=()=>frame.contentWindow,doc=()=>frame.contentDocument;
-const anchor=()=>{const history=doc().querySelector('.history'),top=history.getBoundingClientRect().top;const row=[...doc().querySelectorAll('article.message')].find(row=>{const box=row.getBoundingClientRect();return box.height&&box.top<=top+4&&box.bottom>top;})||[...doc().querySelectorAll('article.message')].find(row=>{const box=row.getBoundingClientRect();return box.height&&box.top>top&&box.top<top+history.clientHeight;});return {id:row?.dataset.messageId,offset:row?.getBoundingClientRect().top-top};};
-const position=id=>{const history=doc().querySelector('.history'),row=[...doc().querySelectorAll('article.message')].find(row=>row.dataset.messageId===id);return row?.getBoundingClientRect().top-history.getBoundingClientRect().top;};
+const anchor=()=>{const history=doc().querySelector('.history:not([data-preparation-surface])'),top=history.getBoundingClientRect().top;const row=[...doc().querySelectorAll('article.message')].find(row=>{const box=row.getBoundingClientRect();return box.height&&box.top<=top+4&&box.bottom>top;})||[...doc().querySelectorAll('article.message')].find(row=>{const box=row.getBoundingClientRect();return box.height&&box.top>top&&box.top<top+history.clientHeight;});return {id:row?.dataset.messageId,offset:row?.getBoundingClientRect().top-top};};
+const position=id=>{const history=doc().querySelector('.history:not([data-preparation-surface])'),row=[...doc().querySelectorAll('article.message')].find(row=>row.dataset.messageId===id);return row?.getBoundingClientRect().top-history.getBoundingClientRect().top;};
 async function run(mobile){
  results.textContent='Running '+(mobile?'mobile 390×700':'desktop 1100×650')+' checks…\n';
  try{
   frame.style.width=mobile?'390px':'1100px';frame.style.height=mobile?'700px':'650px';
   if(mobile){frame.src='chat-history-app.html?conversation=main&locale=zh-CN&theme=light';await new Promise(resolve=>frame.addEventListener('load',resolve,{once:true}));}
   await wait(()=>app().fixture&&doc().querySelector('article.message'),'mounted chat');await pause(700);
-  const {client,metrics}=app().fixture,history=doc().querySelector('.history');
+  const {client,metrics}=app().fixture,history=doc().querySelector('.history:not([data-preparation-surface])');
   check(metrics.frames[0].kind==='reset'&&metrics.frames[0].count<=113,'bounded initial snapshot: '+metrics.frames[0].count+' messages, '+metrics.frames[0].bytes+' bytes');
   check(doc().querySelectorAll('article.message').length<80,'initial mounted messages: '+doc().querySelectorAll('article.message').length);
   userScroll(history,history.scrollTop-24);await pause(200);
@@ -82,7 +82,7 @@ document.querySelector('#scroll').onclick=async()=>{
     frame.src=`chat-history-app.html?conversation=main&locale=${mobile?'zh-CN':'en'}&theme=light&short=1&case=${gesture}`;
     await new Promise(resolve=>frame.addEventListener('load',resolve,{once:true}));
     await wait(()=>app().fixture&&doc().querySelector('article.message'),'short chat');await pause(500);
-    const history=doc().querySelector('.history'),{metrics,client}=app().fixture;
+    const history=doc().querySelector('.history:not([data-preparation-surface])'),{metrics,client}=app().fixture;
     check(history.scrollHeight<=history.clientHeight+1,`${mobile?'mobile':'desktop'} ${gesture}: short window cannot scroll`);
     if(gesture==='wheel'){
      history.dispatchEvent(new WheelEvent('wheel',{deltaY:-1,ctrlKey:true,bubbles:true}));
@@ -109,7 +109,7 @@ document.querySelector('#scroll').onclick=async()=>{
    frame.src=`chat-history-app.html?conversation=main&locale=${mobile?'zh-CN':'en'}&theme=light&short=complete`;
    await new Promise(resolve=>frame.addEventListener('load',resolve,{once:true}));
    await wait(()=>app().fixture&&doc().querySelector('article.message'),'complete short chat');await pause(500);
-   const history=doc().querySelector('.history'),{metrics}=app().fixture;
+   const history=doc().querySelector('.history:not([data-preparation-surface])'),{metrics}=app().fixture;
    check(history.scrollHeight<=history.clientHeight+1,'all history fits within viewport');
    history.dispatchEvent(new WheelEvent('wheel',{deltaY:-24,bubbles:true}));
    history.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true}));await pause(200);
@@ -129,7 +129,7 @@ document.querySelector('#extras').onclick=async()=>{
  results.textContent='Running cache, viewport and live-locale checks…\n';
  try{
   await wait(()=>app().fixture&&doc().querySelector('article.message'),'mounted chat');
-  const {client,metrics}=app().fixture,history=doc().querySelector('.history');
+  const {client,metrics}=app().fixture,history=doc().querySelector('.history:not([data-preparation-surface])');
   userScroll(history,Math.max(500,history.scrollHeight/2));history.dispatchEvent(new Event('scroll'));await pause(500);
   const before=anchor();frame.style.width='700px';await pause(500);
   check(Math.abs(position(before.id)-before.offset)<5,'viewport resize preserves reading anchor');

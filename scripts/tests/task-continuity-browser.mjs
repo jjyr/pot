@@ -9,7 +9,7 @@ export async function taskContinuity(page,{origin}) {
     await page.waitForFunction(()=>document.querySelector('#results')?.textContent.startsWith('Ready'));
     await page.evaluate(()=>{
       const sample=()=>{
-        const h=document.querySelector('.task-history'),top=h.getBoundingClientRect().top;
+        const h=document.querySelector('.task-history:not([data-preparation-surface])'),top=h.getBoundingClientRect().top;
         const rows=[...h.querySelectorAll('article.message')],visible=rows.flatMap(row=>{
           const box=row.getBoundingClientRect();return box.height&&box.bottom>top&&box.top<top+h.clientHeight?[{id:row.dataset.messageId,sequence:Number(row.dataset.messageId.match(/row-(\d+)$/)?.[1])+1,top:box.top-top,bottom:box.bottom-top}]:[];
         });
@@ -28,10 +28,10 @@ export async function taskContinuity(page,{origin}) {
     });
     const wheel=async(delta)=>{
       const previous=await sample();await page.mouse.wheel(0,delta);
-      await page.waitForFunction(({top,delta})=>{const h=document.querySelector('.task-history');return h.scrollTop!==top||(delta<0?h.scrollTop===0:h.scrollHeight-h.clientHeight-h.scrollTop<=1);},{top:previous.top,delta});
+      await page.waitForFunction(({top,delta})=>{const h=document.querySelector('.task-history:not([data-preparation-surface])');return h.scrollTop!==top||(delta<0?h.scrollTop===0:h.scrollHeight-h.clientHeight-h.scrollTop<=1);},{top:previous.top,delta});
       await settle();return sample();
     };
-    await settle();await page.locator('.task-history').hover();
+    await settle();await page.locator('.task-history:not([data-preparation-surface])').hover();
     const {steps,worstDrift,worstSample,maxMounted}=await witnessMessages({page,sample,wheel,width,ids:Array.from({length:11},(_,i)=>i+1189),limit:90,label:'Task',bounded:120});
     for(let step=0;step<12;step++)await wheel(-36);
     const reading=(await sample()).visible[0];

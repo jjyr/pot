@@ -1,7 +1,9 @@
+import {currentPreparedRender,preparedAsset,preparedPreviousRoot,adoptPreparedChildren} from './prepared-render.mjs';
+import {moveConversationNode} from './conversation-dom.mjs';
 import {translate} from '../locales/messages.mjs';
 import {activeTool} from '../state/tool-calls.mjs';
 import {toolArgs,toolKind,toolLabels,patchGroups} from '../state/tool-presentation.mjs';
-import {renderMarkdown} from './markdown.mjs';
+import {updateMarkdown} from './markdown.mjs';
 const n=(tag,cls='',text)=>{const node=document.createElement(tag);node.className=cls;if(text!==undefined)node.textContent=text;return node;};
 const pretty=value=>typeof value==='string'?value:JSON.stringify(value??null,null,2);
 const LIMIT=24000,MAX_NODES=240;
@@ -12,9 +14,10 @@ for(const key of ['output','avatar','cancel_requested','interrupt_requested'])fi
 // Stable keyed sections keep output scrolling and selected text across snapshots.
 // This view reads receipts only: its controls copy, disclose or navigate existing Tasks.
 export function createToolContent({locale=()=> 'en',downloadFile,acquireFileImage,onOpenTask,resolveTask=()=>undefined}={}){
-  const element=n('div','tool-content'),terminal=n('div','tool-terminal'),bar=n('div','tool-terminal-bar'),location=n('span','tool-terminal-location'),shell=n('span','tool-terminal-shell'),terminalSections=n('div'),footer=n('div','tool-terminal-footer'),sections=n('div','tool-content-sections');
+  const element=n('div','tool-content');let terminal=n('div','tool-terminal'),bar=n('div','tool-terminal-bar'),location=n('span','tool-terminal-location'),shell=n('span','tool-terminal-shell'),terminalSections=n('div'),footer=n('div','tool-terminal-footer'),sections=n('div','tool-content-sections');
   bar.append(location,shell);terminal.append(bar,terminalSections,footer);element.append(terminal,sections);
   const entries=new Map();let current,context;
+  const environment=currentPreparedRender(),previous=environment?.context.phase==='prepare'?preparedPreviousRoot(environment.context,environment.member)?.querySelector('.tool-content')?.preparedToolContent:null;
   const t=key=>translate(locale(),'tool.'+key);
   const label=key=>fieldKeys.has(key)?t('field.'+key):key;
   const scalar=value=>value===null?t('valueNull'):typeof value==='boolean'?t(value?'valueYes':'valueNo'):typeof value==='number'?value.toLocaleString(locale()):String(value);
@@ -49,17 +52,17 @@ export function createToolContent({locale=()=> 'en',downloadFile,acquireFileImag
       const box=n('section','tool-section'),head=n('div','tool-section-heading'),title=n('strong'),copy=n('button','tool-action'),content=n(output?'pre':'div',output?'tool-code tool-output':'tool-section-content'),truncated=n('p','tool-truncated');
       copy.type='button';copy.onclick=async()=>{try{await navigator.clipboard.writeText(item.text);copy.textContent=t('copied');}catch{copy.textContent=t('copyFailed');}};
       head.append(title,copy);const follow=n('button','tool-action');follow.type='button';follow.hidden=!output;head.append(follow);box.append(head,content,truncated);
-      item={box,title,copy,content,truncated,follow,following:true};entries.set(id,item);
-      if(output){content.addEventListener('scroll',()=>{item.following=content.scrollHeight-content.clientHeight-content.scrollTop<24;follow.textContent=t(item.following?'following':'latest');});follow.onclick=()=>{item.following=true;item.signature='';update(current,context);content.scrollTop=content.scrollHeight;};}
+      item={box,title,copy,content,truncated,follow,following:previous?.entries.get(id)?.following??true,displayed:previous?.entries.get(id)?.displayed,refresh:requestRefresh};entries.set(id,item);
+      if(output){content.toolEntry=item;content.addEventListener('scroll',()=>{const active=content.toolEntry,following=content.scrollHeight-content.clientHeight-content.scrollTop<24;if(active.following!==following){active.following=following;active.refresh();}});follow.onclick=()=>{item.following=true;item.signature='';item.refresh();item.content.scrollTop=item.content.scrollHeight;};}
     }
     if(item.box.parentElement!==parent)parent.append(item.box);item.box.hidden=false;item.title.textContent=heading;item.copy.textContent=t('copy');
     const text=pretty(value);item.text=text;
     const shown=output?(item.following?text.slice(-LIMIT):(text.length>LIMIT?item.displayed??text.slice(0,LIMIT):text)):text.slice(0,LIMIT);
-    const signature=JSON.stringify([structured?value:shown,structured?locale():'',markdown,structured]);
+    const signature=JSON.stringify([structured?value:shown,structured?locale():'',markdown,structured]);item.markdown=markdown;item.shown=shown;item.output=output;
     if(signature!==item.signature){
       item.signature=signature;item.displayed=shown;const top=item.content.scrollTop;
       if(structured)item.content.replaceChildren(renderValue(value));
-      else if(markdown)item.content.replaceChildren(renderMarkdown(shown,{downloadFile,acquireFileImage}));
+      else if(markdown)updateMarkdown(item.content,shown,{downloadFile,acquireFileImage,renderSlot:'tool-content:'+id});
       else item.content.textContent=shown;
       if(output&&item.following)item.content.scrollTop=item.content.scrollHeight;else item.content.scrollTop=top;
     }
@@ -125,7 +128,7 @@ export function createToolContent({locale=()=> 'en',downloadFile,acquireFileImag
     }else resultView(result);
     if(!context.compact&&result===undefined&&Object.keys(args).length)section('input',t('arguments'),args,{structured:true});
   }
-  function update(tool,next={}){
+  function render(tool,next={}){
     current=tool;context=next;const {result,pending,targetLabel='',hasChildren=false,compact=false}=next,args=toolArgs(tool),kind=toolKind(tool);
     element.dataset.kind=kind;for(const item of entries.values())item.box.hidden=true;terminal.hidden=kind!=='terminal'||!!pending;sections.hidden=!!pending;if(pending)return;
     if(kind==='terminal'){
@@ -183,5 +186,30 @@ export function createToolContent({locale=()=> 'en',downloadFile,acquireFileImag
     const output=(tool.output||[]).map(chunk=>chunk.text).join('\n');if(output)section('output',t('output'),output,{output:true});
     if(result===undefined&&!Object.keys(args).length)section('pending',t('result'),t(activeTool(tool)?'waitingResult':'resultUnavailable'));
   }
-  return {element,update};
+  function requestRefresh(){if(element.closest('.prepared-row'))element.dispatchEvent(new CustomEvent('pot:prepare-resize',{bubbles:true}));else update(current,context);}
+  function update(tool,next={}){
+    const source=JSON.stringify([tool,next,locale()]),environment=currentPreparedRender();
+    if(environment?.context.phase==='commit'){
+      const view=preparedAsset('tool-content-view',source,()=>{throw Error('Missing prepared tool content');});
+      const retained=[];
+      for(const [id,item]of view.entries){
+        const old=entries.get(id);
+        if(old&&old.box.isEqualNode(item.box)){retained.push([item.box,old.box]);for(const key of ['text','signature','following','displayed','shown','scrollTop','scrollLeft'])old[key]=item[key];view.entries.set(id,old);continue;}
+        if(old&&item.markdown){
+          updateMarkdown(old.content,item.shown,{downloadFile,acquireFileImage,renderSlot:'tool-content:'+id});
+          retained.push([item.content,old.content]);item.content=old.content;
+        }else if(old&&item.output&&old.content.childNodes.length===1&&old.content.firstChild.nodeType===3&&item.content.childNodes.length===1&&item.content.firstChild.nodeType===3){
+          adoptPreparedChildren(old.content,item.content);retained.push([item.content,old.content]);item.content=old.content;
+        }
+      }
+      adoptPreparedChildren(element,view.element,{retain:retained});
+      ({terminal,bar,location,shell,terminalSections,footer,sections}=view.parts);
+      entries.clear();for(const [id,item]of view.entries){item.refresh=requestRefresh;item.content.toolEntry=item;entries.set(id,item);item.content.scrollTop=item.output&&item.following?item.content.scrollHeight:item.scrollTop||0;item.content.scrollLeft=item.scrollLeft||0;}
+      current=tool;context=next;return;
+    }
+    render(tool,next);
+    for(const [id,item]of entries){const old=previous?.entries.get(id);item.scrollTop=old?.content.scrollTop??item.content.scrollTop;item.scrollLeft=old?.content.scrollLeft??item.content.scrollLeft;}
+    if(environment?.context.phase==='prepare')preparedAsset('tool-content-view',source,()=>({element,entries,parts:{terminal,bar,location,shell,terminalSections,footer,sections}}));
+  }
+  const view={element,update,entries};element.preparedToolContent=view;return view;
 }

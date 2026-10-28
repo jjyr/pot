@@ -48,7 +48,7 @@ f.client={production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scope:()
  }
  if(u.pathname.startsWith('/api/v1/schedules/'))return {ok:true};
  const id=u.pathname.split('/')[4],task=f.tasks.find(t=>t.id===id&&t.space===space);
- if(u.pathname.endsWith('/events'))return {events:[],cursor:0,has_more:false};
+ if(u.pathname.endsWith('/events'))return {run_id:'fixture-run',events:[],cursor:0,has_more:false};
  if(u.pathname.endsWith('/messages'))return options.method==='POST'?{accepted:true}:[];
  if(u.pathname.endsWith('/dispositions')){for(const d of options.body?.decisions||[]){const t=f.tasks.find(t=>t.id===d.task_id&&t.space===space);if(t)t.archived=d.archived;}return {ok:true};}
  if(task&&options.method==='POST'){

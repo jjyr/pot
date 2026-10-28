@@ -16,7 +16,7 @@ export function createInitialChatLayout({history, layout, position = ()=>{}, rea
     const run={frame:0,previous:null,expired:false};current=run;
     const active=()=>current===run;
     const schedule=()=>{if(active()&&!run.frame)run.frame=view.requestAnimationFrame(check);};
-    const pending=()=>[...history.querySelectorAll(resources)].filter(node=>node.getBoundingClientRect().height>0&&!node.classList.contains('initial-layout-slot')&&node.dataset.state==='loading');
+    const pending=()=>[...history.querySelectorAll(resources)].filter(node=>node.getBoundingClientRect().height>0&&!node.closest('.initial-layout-slot,.prepared-frame')&&node.dataset.state==='loading');
     const geometry=()=>JSON.stringify([history.scrollTop,history.scrollHeight,history.clientWidth,history.clientHeight,
       ...[...history.querySelectorAll('article.message,[data-scroll-anchor]')].map(node=>{const box=node.getBoundingClientRect();return [node.dataset.scrollAnchor,box.top,box.height];})]);
     function check(){
@@ -24,6 +24,7 @@ export function createInitialChatLayout({history, layout, position = ()=>{}, rea
       layout();
       run.observer.takeRecords();
       if(!active())return;
+      if(!ready()){run.previous=null;return;}
       const waiting=pending();
       if(run.expired){
         // A stalled/offline preview must not hide the conversation forever or
@@ -45,6 +46,7 @@ export function createInitialChatLayout({history, layout, position = ()=>{}, rea
       position();
       layout();
       run.observer.takeRecords();
+      if(!ready()){run.previous=null;return;}
       if(pending().length){run.previous=null;schedule();return;}
       const next=geometry();
       // Live output or an interactive document can keep changing indefinitely.

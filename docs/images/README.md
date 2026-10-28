@@ -27,9 +27,13 @@ node scripts/tests/product-overview-browser.mjs
 
 The capture script accepts `POT_PLAYWRIGHT_MODULE` and `POT_WEBSITE_ORIGIN`, like
 the website browser checks. It verifies the loaded Development avatar, task
-counts and read-only fixture before writing the two images and website copies.
+counts and the read-only fixture before writing the two full-app images.
 
-The website's `assets/product-work.png` and `assets/product-agent-link.png` are
-copies for its local result gallery. Refresh those copies when these images
-change. These are product illustrations using synthetic content, not evidence
-that the illustrated installation checks ran on a user's computer.
+The website uses a separate component-composition fixture for its homepage
+illustrations. Run `node scripts/tests/product-overview-browser.mjs --website-only`
+to refresh those assets without changing the full-app documentation images.
+It uses production replies, resource previews, assistant identities and Task rows
+with authoritative synthetic catalogue addresses. See the
+[website illustration contract](../../website/README.md#product-illustrations).
+These are behavior illustrations, not evidence that installation checks ran on a
+user's computer.

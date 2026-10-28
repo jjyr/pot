@@ -7,7 +7,7 @@ async page=>{
   await page.goto(`${origin}/scripts/tests/fixtures/chat-scroll.html?conversation=alpha&locale=zh-CN&theme=dark`);
   await page.waitForSelector('.history article.message');
   await page.evaluate(()=>{
-    const history=document.querySelector('.history'),native=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
+    const history=document.querySelector('.history:not([data-preparation-surface])'),native=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
     const trace=window.chatTouchTrace={writes:[],frames:[],events:[],touching:false,momentum:false,lastInput:performance.now(),simulating:false,active:true,errors:[],gestures:[]};
     Object.defineProperty(history,'scrollTop',{configurable:true,get(){return native.get.call(this);},set(value){
       const before=native.get.call(this);native.set.call(this,value);
@@ -43,14 +43,14 @@ async page=>{
   try{cdp=await page.context().newCDPSession(page);}catch{/* WebKit has no CDP touch input. */}
   const nativeTouch=!!cdp;
   try{
-    const rect=await page.locator('.history').boundingBox(),x=rect.x+rect.width*.5,y=rect.y+rect.height*.5;
+    const rect=await page.locator('.history:not([data-preparation-surface])').boundingBox(),x=rect.x+rect.width*.5,y=rect.y+rect.height*.5;
     const gesture=async(distance,speed=2200,quiet=300)=>{
       const before=await page.evaluate(()=>window.chatTouchTrace.capture());
       if(cdp){
         await cdp.send('Input.synthesizeScrollGesture',{x,y,yDistance:distance,speed,gestureSourceType:'touch',preventFling:false});
       }else{
         await page.evaluate(async distance=>{
-          const history=document.querySelector('.history'),native=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
+          const history=document.querySelector('.history:not([data-preparation-surface])'),native=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
           window.chatTouchTrace.simulating=true;
           const frame=()=>new Promise(requestAnimationFrame);
           const touch=(name,y)=>{const event=new Event(name,{bubbles:true});Object.defineProperty(event,'touches',{value:name==='touchend'?[]:[{clientY:y}]});history.dispatchEvent(event);};

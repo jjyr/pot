@@ -39,7 +39,7 @@ async function mountFixture(){
       }
       const task=items.find(item=>url.pathname==='/api/v1/tasks/'+item.id);
       if(task)return {run_id:'run',info:task,request:{text:task.title},capabilities};
-      if(url.pathname.endsWith('/events')){const events=(f.taskEvents||[]).filter(row=>row.sequence>Number(url.searchParams.get('after')||0));return {events,cursor:events.at(-1)?.sequence||0,has_more:false};}
+      if(url.pathname.endsWith('/events')){const events=(f.taskEvents||[]).filter(row=>row.sequence>Number(url.searchParams.get('after')||0));return {run_id:'run',events,cursor:events.at(-1)?.sequence||0,has_more:false};}
       if(url.pathname.endsWith('/messages'))return [];
       return {items:[]};
     },send:async()=>{throw Error('Sending is disabled in this fixture');},cancel:async()=>{},markRead:async value=>value,
@@ -77,7 +77,7 @@ function userScroll(history,top){const w=history.ownerDocument.defaultView;histo
 function check(value,message){if(!value)throw Error(message);}
 async function regression(frame,completed){
   const w=frame.contentWindow,d=frame.contentDocument,f=w.taskExpansionFixture;
-  const rows=()=>[...d.querySelectorAll('.background-task')],toggle=()=>d.querySelector('.background-tasks-toggle'),history=()=>d.querySelector('.history'),key=node=>node.dataset.viewKey,top=node=>node.getBoundingClientRect().top-history().getBoundingClientRect().top;
+  const rows=()=>[...d.querySelectorAll('.background-task')],toggle=()=>d.querySelector('.background-tasks-toggle'),history=()=>d.querySelector('.history:not([data-preparation-surface])'),key=node=>node.dataset.viewKey,top=node=>node.getBoundingClientRect().top-history().getBoundingClientRect().top;
   f.preference('locale','zh-CN');f.preference('theme','light');await settle();
   await f.setTasks(2);f.items.get('one')[0].phase='queued';f.items.get('one')[1].phase='waiting';f.change();
   await waitFor(()=>rows().length===2&&rows()[0].textContent.includes('排队中')&&rows()[1].textContent.includes('等待中'));
@@ -137,7 +137,7 @@ async function regression(frame,completed){
 
 async function taskNavigationRegression(w,d,f){
   const back=()=>d.querySelector('.titlebar button[aria-label="Back"]');
-  const chat=()=>!d.querySelector('.history').hidden&&!d.querySelector('.pot-app').classList.contains('show-directory');
+  const chat=()=>!d.querySelector('.history:not([data-preparation-surface])').hidden&&!d.querySelector('.pot-app').classList.contains('show-directory');
   const clickText=(selector,text)=>{const button=[...d.querySelectorAll(selector)].find(node=>node.textContent===text);check(button,'Missing '+text);button.click();};
   await f.setTasks(51);
   const draft=d.querySelector('#pot-composer');draft.value='Retain assistant draft';draft.dispatchEvent(new w.Event('input',{bubbles:true}));
@@ -149,8 +149,8 @@ async function taskNavigationRegression(w,d,f){
     {sequence:index*3+3,event:{update:{type:'message_finished'}}},
   ]).flat();
   d.querySelector('.task-row').click();await waitFor(()=>d.querySelector('.task-page-host'));
-  await waitFor(()=>d.querySelector('.task-history article.message'));await settle();
-  const taskHistory=d.querySelector('.task-history'),taskInput=d.querySelector('.task-composer-area textarea');
+  await waitFor(()=>d.querySelector('.task-history:not([data-preparation-surface]) article.message'));await settle();
+  const taskHistory=d.querySelector('.task-history:not([data-preparation-surface])'),taskInput=d.querySelector('.task-composer-area textarea');
   const type=text=>{taskInput.value=text;taskInput.dispatchEvent(new w.Event('input',{bubbles:true}));};
   for(const text of ['Task draft\n'.repeat(7),'Task draft\n'.repeat(7)+'继续输入']){
     type(text);await settle();check(taskHistory.scrollHeight-taskHistory.clientHeight-taskHistory.scrollTop<2&&d.querySelector('.task-composer-area .latest-button').hidden,'Task composer resizing and typing retain Latest');
@@ -166,16 +166,16 @@ async function taskNavigationRegression(w,d,f){
   check(Math.abs(taskHistory.querySelector(`[data-message-id="${taskID}"]`).getBoundingClientRect().top-taskHistory.getBoundingClientRect().top-offset)<2,'Task updates preserve historical cursor');
   for(const language of ['zh-CN','en']){
     f.preference('locale',language);await settle();await waitFor(()=>d.querySelector(`.task-history [data-message-id="${taskID}"]`));
-    const restored=d.querySelector('.task-history');
+    const restored=d.querySelector('.task-history:not([data-preparation-surface])');
     check(Math.abs(restored.querySelector(`[data-message-id="${taskID}"]`).getBoundingClientRect().top-restored.getBoundingClientRect().top-offset)<2,'Task refresh restores its logical reading cursor');
   }
-  d.querySelector('.task-composer-area .latest-button').click();await settle();const latestHistory=d.querySelector('.task-history');check(latestHistory.scrollHeight-latestHistory.clientHeight-latestHistory.scrollTop<2,'Task Latest resumes following');
+  d.querySelector('.task-composer-area .latest-button').click();await settle();const latestHistory=d.querySelector('.task-history:not([data-preparation-surface])');check(latestHistory.scrollHeight-latestHistory.clientHeight-latestHistory.scrollTop<2,'Task Latest resumes following');
   check(w.history.state.potTaskReturn.route==='tasks','Only list entry captures a Tasks return');
   f.preference('locale','zh-CN');await settle();await waitFor(()=>d.querySelector('.task-page-host'));
   f.preference('locale','en');await settle();await waitFor(()=>d.querySelector('.task-page-host'));
   check(w.history.state.potTaskReturn.route==='tasks','Locale changes retain list return');
   back().click();await waitFor(()=>d.querySelector('.task-list'));await settle();
-  check(d.querySelector('.task-list').scrollTop===scroll&&d.querySelector('.history').hidden,'List entry returns to list and restores scroll');
+  check(d.querySelector('.task-list').scrollTop===scroll&&d.querySelector('.history:not([data-preparation-surface])').hidden,'List entry returns to list and restores scroll');
   clickText('.tasks-content>.segments button','Schedules');await waitFor(()=>[...d.querySelectorAll('.schedule-card button')].some(node=>node.textContent==='Fixture schedule two'));
   clickText('.schedule-card button','Fixture schedule two');await waitFor(()=>[...d.querySelectorAll('button')].some(node=>node.textContent==='View task'));
   clickText('button','View task');await waitFor(()=>d.querySelector('.task-page-host'));

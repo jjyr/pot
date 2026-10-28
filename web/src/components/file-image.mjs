@@ -1,3 +1,4 @@
+import {preparedIsland,deferPreparedConnection} from './prepared-render.mjs';
 import {translate} from '../locales/messages.mjs';
 import {openImageViewer} from './image-viewer.mjs';
 
@@ -7,15 +8,16 @@ function registerImage() {
   customElements.define('pot-file-image',class extends HTMLElement {
     generation=0;
     connectedCallback() {
+      if(this.preparationSurrogate||this.started)return;if(deferPreparedConnection(this,()=>this.connectedCallback()))return;this.started=true;
       const generation=++this.generation;
       const t=key=>translate(this.ownerDocument.documentElement.lang,`markdown.${key}`);
       const preview=node('button','file-image-preview control'),image=node('img'),status=node('span','file-image-status'),download=node('button','file-image-download control');
-      preview.type=download.type='button';preview.disabled=true;image.alt=this.label;image.decoding='async';image.hidden=true;preview.append(image);status.setAttribute('role','status');
+      preview.type=download.type='button';preview.disabled=true;image.alt=this.label;image.decoding='async';image.hidden=true;preview.append(image);status.setAttribute('role','status');status.hidden=true;
       preview.setAttribute('aria-haspopup','dialog');
       this.replaceChildren(preview,status,download);this.dataset.state='loading';this.setAttribute('aria-busy','true');
       let failure=false;
       const refresh=()=>{
-        preview.setAttribute('aria-label',t('imagePreview'));download.textContent=t('imageDownload');status.textContent=t(failure?'imageUnavailable':'imageLoading');
+        preview.setAttribute('aria-label',t('imagePreview'));download.textContent=t('imageDownload');status.textContent=failure?t('imageUnavailable'):'';
       };
       refresh();window.addEventListener('pot:locale',refresh);this.stopLocale=()=>window.removeEventListener('pot:locale',refresh);
       const failed=()=>{if(!this.isConnected||generation!==this.generation)return;failure=true;this.dataset.state='error';this.removeAttribute('aria-busy');image.hidden=true;preview.hidden=true;status.hidden=false;refresh();};
@@ -29,7 +31,10 @@ function registerImage() {
       this.lease=this.acquireFileImage(this.file);
       this.lease.url.then(url=>{if(this.isConnected&&generation===this.generation)image.src=url;}).catch(failed);
     }
-    disconnectedCallback() {
+    disconnectedCallback(){queueMicrotask(()=>{if(!this.isConnected)this.retireRendering();});}
+    retireRendering(){
+      this.preparationTicket?.release();
+      if(!this.started)return;this.started=false;
       ++this.generation;this.viewer?.close();this.stopLocale?.();this.lease?.release();this.lease=null;
     }
   });
@@ -37,5 +42,5 @@ function registerImage() {
 
 export function createFileImage(file,label,{acquireFileImage,downloadFile}) {
   registerImage();const root=document.createElement('pot-file-image');
-  Object.assign(root,{file,label:label||file.path.split('/').at(-1),acquireFileImage,downloadFile});return root;
+  Object.assign(root,{file,label:label||file.path.split('/').at(-1),acquireFileImage,downloadFile});return preparedIsland(root);
 }

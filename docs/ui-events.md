@@ -33,6 +33,11 @@ version baseline. Usage-only updates do not reload the assistant directory. Perm
 refresh catalogue `pending_approvals` counts for every assistant independently of
 reply identity and unread baselines. They also refresh the selected owner's
 transient Chat approval region; duplicate request IDs do not repeat its notice.
+Approval regions carry an in-memory generation. A pending message preparation
+refreshes and measures an invalidated region before committing it, while retaining
+its body candidates. Stale, removed and cleared approvals disable their old live
+actions immediately; an older region cannot republish enabled actions after its
+generation has retired. Decision handlers also revalidate current approval context.
 Mutations publish after persistence; no-op reads do not produce invalidations.
 Task journal `text_delta` and `tool_output` commits publish `runner` only. They
 advance the same durable transcript cursor without invalidating the assistant
@@ -51,7 +56,17 @@ can publish. A query fetched before an event or successful command cannot replac
 a newer projection, including across tabs. In-memory invalidation immediately
 revokes stale selection eligibility; query subscribers consume only committed
 values. Storage failure retains the prior projection and retries the pending
-invalidation before another refresh.
+invalidation before another refresh. Reading an existing display projection does
+not depend on namespace registration writes succeeding. Pending epochs still fence
+new reads and commits; destructive scope retirement cannot fall back to retained
+data. Retained display values never grant command capabilities. A directory storage
+failure retires the shared directory generation used by command dispatch while
+retaining the last committed directory and known connectivity. Only a successful
+authoritative read of fresh directory resources restores the affected qualification;
+retained Retry data cannot restore it. Connection, serving boot, Control identities
+and an authority revision prevent an old failure from revoking a later confirmation.
+A known immutable Chat target may still commit an explicit submission locally; its
+dispatch waits for that same directory authority to recover.
 
 Shared domain queries serialize reads and coalesce changes into one later read.
 Resource commit notifications and business invalidations have separate matching
@@ -81,6 +96,13 @@ during that batch may schedule another local query without extending the forced
 call's wait. Storage failures remain explicit errors with the prior committed
 projection available for retry; directory and host metadata loaders must not
 turn them into successful offline results.
+
+Command receipts already advance resource epochs and notify domain queries.
+Provider default changes wait for that event revalidation rather than adding a
+forced read. General editor completion does not reload the assistant directory;
+its subscribed query owns presentation updates. Provider catalogue/settings
+queries declare their concrete resource paths and Control-level owner scope, so
+an unrelated usage resource commit cannot reassemble them merely by topic.
 
 Change callbacks retain their originating scope and boot identity. Each view
 declares the domains and scope it reads; unrelated notifications do not refresh
@@ -114,6 +136,41 @@ unavailable actions. Settings remains available. Handlers recheck current capabi
 scope and subscription identity; turn controls also require the same active turn,
 conversation boot and pause state before sending a request.
 
+Known scoped Task transcripts mount as retained, read-only output before metadata
+or machine labels finish loading. Current metadata gates commands and new event
+reads. Metadata IO captures serving Runtime/boot, source Control/boot, connection
+generation and owner/Space; that provenance stays with the query data and fences
+commands and history writes after asynchronous storage waits. A changed run retires
+the old transcript window as soon as current authoritative metadata confirms it,
+including while its event read is pending. Retained or failed metadata keeps the
+old output read-only. Task detail queries publish this intermediate retained
+window during refresh as well as during their first load. Task event catch-up reads
+at most 5000 events per batch, then schedules a serial next batch while the active
+detail remains subscribed. It reports catching up until the last page is committed;
+a storage failure or removed subscriber stops that continuation. Event pages carry
+`run_id` from the journal run actually queried, including a previous-launch
+fallback or unavailable source. The journal sequence remains cumulative across
+Task runs. Detail and earlier reads reject a missing or different run before any
+local write. A continuation follows freshly confirmed metadata, retires the old
+window and reconstructs the new run's checkpoint from that cumulative journal.
+
+Metadata results retain their Control, source boot and connection generation.
+Views compare this provenance when consuming a query and again before command IO;
+a late query cannot adopt a newer connection's authority. A local Task transaction
+also validates its captured generation after waiting for storage admission.
+
+Cached Chat history windows are projected in a readonly transaction from committed
+records and coverage, with the current conversation and reader-intent fences.
+Position and layout hints save independently; a failed hint write cannot hide a
+readable window. New network history still commits before presentation.
+
+Tasks, schedules and Usage allow cache browsing, local filtering and disclosures
+without current command authority. Schedule display sources use only known scoped
+identities and existing cache entries when management is unavailable. Freshness,
+capabilities and backend authorization still gate mutations. Usage cancel reads a
+normalized authority snapshot without confirming a session or changing Chat's
+reading window, and rechecks the waiting request and captured identity before POST.
+
 Task details refresh metadata, results, files and guidance alongside their
 incremental execution transcript. Schedule details and run history share the same
 background lifecycle as lists. Machine settings expand locally without reads. Agent Link state retains the
@@ -121,9 +178,23 @@ selected node and assistant directory across refreshes.
 Third-party account login status uses the same queue and retains its row during
 the bounded login-session status checks.
 
+Visible approval regions use local change events while the browser changes
+stream is confirmed healthy for the current scope, connection and boot. Opening
+a stream alone is insufficient; transport retirement clears health. Native has
+no equivalent health proof, and linked owners have no guaranteed approval push,
+so they retain a serial recovery read with 5–30 second failure backoff. Approval
+decisions still perform their own fresh context checks. Topology's ten-second
+sample-expiry redraw does no IO. Its thirty-second observation recovery reads
+runtime and Agent Link display resources through their TTLs; initial load and
+permission/Space invalidation separately read permission authority.
+
 The desktop local UI adapter consumes the same backend subscriptions and emits
 `pot:changed` through Wails. Responses and changes retain their local scope;
-Agent Link peer operations use their explicit connection identity.
+Agent Link peer operations use their explicit connection identity. A suspended
+desktop startup generation ignores changes from its retired listeners.
+The manager preserves the `/changes` SSE ID's Runtime boot in the native
+`pot:changed.boot_id` envelope, independently of domain version markers. A reset
+or changed boot revalidates desktop startup even when no Chat is selected.
 
 ## Browser stream recovery
 
@@ -237,7 +308,33 @@ the stream write deadline. No token queue grows behind a slow consumer.
 
 The browser uses EventSource and closes the old source when switching owners.
 Desktop forwards the same frames through `pot:snapshot`; its local UI adapter
-reconnects with bounded backoff. Every new connection begins with a reset. The
+reconnects with bounded backoff. The WebView allocates an opaque subscription
+token before calling `Service.Subscribe(token, space, owner, locale)`. The host
+rejects duplicate live tokens and caps active subscriptions at 128. The production
+`localui.NativeSubscriptions` bridge owns the registry and recovery loop; the
+Wails service delegates to it and broadcasts its emitted payloads.
+
+```text
+main WebView (token A) --+                        +--> pot:snapshot/subscription
+                        +--> Wails Service --> localui bridge --> Manager --> Control
+tray WebView (token B) --+                        +--> token + connection generation
+```
+
+Both `pot:snapshot` and `pot:subscription` carry `token`, `generation`,
+`space_id` and `owner`. Each connection attempt increments generation and emits
+`connecting` before its first frame. A WebView accepts only its token, scope,
+current startup generation and current connection attempt. A binding receipt
+does not mean connected; the first accepted reset must precede connected status.
+The Chat domain still confirms its session only after the snapshot commits to
+IndexedDB. Unsubscribe retires listeners immediately, including while the native
+binding promise is pending. Shutdown cancels and joins the bridge's streams.
+
+For a retained desktop client, transport loss or a changed frame boot revokes
+the startup generation before an old pending commit can confirm a session.
+Startup revalidation confirms native runtime/boot before the UI creates one
+replacement watch. Retained waiters defer resumption until that synchronous
+replacement can cancel them. The connected callback does not request another
+UI reattachment. Every new connection begins with a reset. The
 client rejects old cursors and duplicate deltas and renews the subscription on a
 base-cursor gap or boot change. Read versions prevent a concurrent older page
 from overwriting newer token text. A bounded recent-update map also covers
@@ -303,6 +400,23 @@ main/tray windows and browser tabs have independent positions. Returning to Chat
 reads its target window from disk while the subscription refreshes it. A reset
 while reading an older message reloads that message's window. References resolve
 by ID, without traversing intervening pages.
+Local browsing and historical network reads advance independently. A cached
+window completes its normal hidden preparation, measurement and positioning
+before reveal, without waiting for access verification, directory confirmation,
+an initial stream frame or a missing history page. A missing saved anchor can
+backfill asynchronously while an available measured local anchor remains readable.
+The history notice belongs to that gap; it does not hide or disable the current
+transcript. Cached pages and local references remain available during another
+page's network request or durable write. Unknown history creates no estimated
+canvas space. Returned pages commit under the captured session and conversation
+before entering the same preparation pipeline. A superseded around request may
+fill the cache, but cannot replace the reader's current window or restore an old
+position after input. Cached output never confirms command or session authority.
+Successive reader intentions for the same missing target consume the shared
+historical network read independently; an older ticket cannot suppress a later
+explicit navigation to that target.
+An incomplete committed cache window reports a storage failure instead of
+presenting an empty conversation.
 All Chat entry paths share a scoped positioning intent: restore the saved reading
 position, locate an explicit message, or follow Latest. Page returns, assistant
 switches and browser history prepare the composer, mount the destination window,
@@ -313,8 +427,10 @@ an unrelated assistant's cleanup failure does not complete the selected draft's
 preparation.
 Hidden rows do not overwrite measured heights. The destination remains visually
 hidden through mounting, measurement and position restoration; only the prepared
-viewport is exposed. Persisted height hints are qualified by width, locale, theme
-and font revision; content changes remeasure mounted rows. Explicit message/Latest actions supersede prior positioning, and
+viewport is exposed. Persisted height hints do not authorize offsets in a new layout. The complete
+loaded collection must have measurements for its current width, fonts, locale
+and render props before the list publishes its canvas; content changes replace
+the affected measurements through preparation. Explicit message/Latest actions supersede prior positioning, and
 navigation or deliberate upward reading retires an in-flight locate so its late
 response cannot replace the current history window or move the reader.
 An explicit message destination stays anchored through delayed preview loading;
@@ -356,12 +472,41 @@ an explicit Latest command does.
 
 The same reconciliation handles prepend, trimming, reorder, width reflow,
 external header/composer layout and asynchronous image or disclosure sizes.
-Newly mounted or updated rows have synchronous initial measurements, including
-during native scrolling; later ResizeObserver batches update the same geometry.
+New, changed and remounted rows first render in a connected, visually hidden
+surface with the actual ancestor CSS and available client width. The surface
+preserves the scroller's CSS inheritance, including relative line heights. Each
+component recursively reaches readiness or receives its five-second component
+frame before its parent is measured. Preparation uses batches of at most 96
+rows and admits at most 32 concurrent resource loads. It covers the entire
+loaded collection, while preserving the existing backend page boundaries.
+Only a complete measured index is installed into the engine. The prepared real
+nodes then move into the live tree in the same geometry transaction. Row and
+region containers retain natural flow; only bounded component frames isolate
+late resource content. Live activity, elapsed-time text and disclosure changes
+use this same preparation entry point. Width and font changes retain the old
+committed layout until the replacement measurements are ready. Live observer
+callbacks cannot insert unprepared sizes into the index.
+Interactive HTML keeps the viewport measured before publication; later document
+growth scrolls inside it. A genuine width change prepares its new viewport before
+committing, preserving the original iframe document, focus and application state.
+Ready preview wrappers do not add another scrolling layer; the content viewport
+owns scrolling. Unresolved deadline fallbacks retain a bounded scrolling frame.
+Background task regions reconcile stable keyed nodes and publish their candidate
+records only on commit. Cancelled preparations cannot replace live click targets.
+Task presentation updates invalidate dependent tool rows without reopening the
+layout generation of unrelated replies or embeds. Elapsed clocks still prepare
+their new text and geometry. The composer, its mode-switching button and icons
+remain mounted independently of these transactions; selecting the current chat
+does not retire its subscription or interrupt composition.
 A delayed or repeated measurement of an already accounted height yields zero
 remaining displacement. Independent height changes can receive independent
-corrections. Reading state is published after the resulting geometry settles,
-rather than by a separate cursor's layout-finally callback.
+corrections. The controller records requested and actual native landings. When
+the native scroller cannot represent a fractional CSS-pixel destination, it
+retains that residual in the intended anchor offsets and suppresses repeated
+identical commands. Publication may adopt a newly visible native anchor without
+erasing the residual. Actual readback also synchronizes the engine's offset.
+Reading state is published after the resulting geometry settles, rather than
+by a separate cursor's layout-finally callback.
 
 TanStack retains native touch ownership and executes deferred corrections through
 contact, dragging and the momentum tail. The controller accounts for a held
@@ -378,10 +523,22 @@ with twelve overscan items on each side. Native scroll notifications commit the
 range synchronously. Held touch corrections may require a negative leading
 spacer margin. Each DOM replacement temporarily reserves the host extent until
 all rows and spacers are in place, preventing native clamping against an
-intermediate shorter list. Initial measurement and subsequent bounded range
-commits avoid scanning or rendering the whole transcript. Item margins are
-included in sizes; width changes invalidate mounted measurements, and each
-cached owner retains bounded height hints.
+intermediate shorter list. A layout generation measures the complete loaded
+collection in bounded batches, retaining numeric measurements while disposing
+offscreen candidate DOM and leases. Only the current virtual range, pinned
+reading nodes and bounded preparation cohorts retain DOM. Item margins are
+included in every measured size. Recent valid measurements may be reused across
+page windows in the same layout generation; unknown or invalid values never
+become canvas offsets.
+
+If a native jump outruns materialization, the list can temporarily hold its last
+readable real nodes while the measured destination is prepared. These nodes
+keep their original message IDs and sequences. The explicitly marked hold is
+excluded from reading-position capture, resolution and persistence, never
+represents the new range, and is removed atomically with the ready destination.
+Its rectangles remain actual DOM rectangles; no projected rectangle is used as
+a readable witness or measurement. The hold does not write scrollTop or replace
+the controller's latest input and navigation intent.
 
 Expanded tools have range-only child virtualizers sharing the chat scroller;
 only the root controller owns reading intent and scroll compensation. Child
@@ -418,8 +575,10 @@ from the complete conversation catalogue/outbox, independently of UI windows.
 Returning to a visible window, restoring a page or regaining network connectivity
 also renews the conversation and change subscriptions and refreshes current
 projections. Paired focus/visibility events coalesce, and recovery reads do not
-overlap. Recovery retains drafts and in-flight send receipts without resending
-input; retired stream callbacks cannot overwrite the renewed subscription.
+overlap. Subscription recovery retains drafts and in-flight send receipts;
+retired stream callbacks cannot overwrite the renewed subscription. The separate
+[submitted-message outbox](chat-outbox.md) resumes explicit local submissions
+under their captured targets and durable request identities.
 
 The shared conversation state validates owner/Runtime/boot identity and rejects
 older cursors. Navigation generations fence late responses, including A → B → A.
@@ -430,11 +589,13 @@ immediately, including small movements within the bottom proximity threshold.
 Following resumes at the bottom or through Latest. Older and newer history start
 prefetching within two viewports of the relevant edge (at least 360 px), extending
 up to four viewports with observed scroll speed and request latency. Upward gestures also trigger it
-when the loaded content cannot scroll. Page reads remain serialized and preserve
-the visible message anchor. When the complete conversation fits in the viewport,
+when the loaded content cannot scroll. Local page probes remain independent;
+matching network reads share one request. Committed pages preserve the visible
+message anchor unless the current explicit navigation replaces the window. When
+the complete conversation fits in the viewport,
 upward gestures leave it still, without history reads or a Latest action; new
 messages continue following. Only confirmation matching the captured request and
-owner clears a submitted attempt. A user message's `request_id` confirms an ordinary send; steer messages
+owner settles business acceptance. A user message's `request_id` confirms an ordinary send; steer messages
 carry independent `accepted_request_id` and `accepted_turn_id` fields, leaving
 `request_id`'s turn semantics unchanged. Reset/delta acceptance is checked before
 UI window filtering. It confirms persistence, not Agent consumption.
@@ -447,11 +608,12 @@ The response repeats that identity plus `runtime_id`, `owner_id` and `state`:
 means an absent steer targets a turn that no longer accepts guidance. Reads do
 not start or interrupt Agent work.
 
-The normal submit path waits only for its business response: success confirms
-immediately, and an explicit rejection retains the draft and reports the error.
-No receipt query runs while that POST is pending, including on foreground/online
-signals. A matching persisted SSE message may also confirm the same request
-without waiting for the POST; Agent execution completion is not required.
+Explicit Send first commits the outbox entry and local originals in the same
+transaction that transfers the submitted draft versions. Only transaction
+completion clears those matching composer versions; newer typing remains. A
+storage failure keeps the input. Delivery failure retains the submitted content
+in the outbox with its problem rather than restoring or replacing a newer draft.
+Business success confirms persistence without waiting for Agent execution.
 
 The production send adapter returns a valid acceptance response before local
 command projection saving completes. Its `committed` promise and `retryCommit`
@@ -461,6 +623,22 @@ after commit. A local save failure shows the existing accepted-action storage
 notice in the captured owner's Chat. Retry saves that response locally without
 another POST or receipt read; it cannot restore the submitted draft or erase a
 newer one. Other mutation commands retain their commit-before-return behavior.
+
+The outbox bounds each dispatch wait without treating timeout as network rollback.
+An expired or uncertain claim reconciles the saved receipt before an identical
+request-ID retry. A successor claim may overlap an earlier network request; local
+claim tokens fence late writers and the backend's durable content-bound request
+receipt prevents duplicate acceptance. See [Outbox delivery authority](chat-outbox.md#delivery-authority-and-retry-identity)
+for the immutable target, FIFO and retirement rules.
+
+### Legacy draft confirmation fences
+
+An earlier build may have saved a pending request in an ordinary draft. Its
+confirmation controller retains the following recovery contract independently
+of the outbox; migration does not convert that draft into a queued send.
+Success or a matching persisted SSE message confirms that original request.
+An explicit rejection retains the draft and reports the error. No receipt query
+runs while its POST is pending, including on foreground/online signals.
 
 A timeout, network failure or another inconclusive submit error makes the result
 unknown and enables receipt checks. Each HTTP wait is bounded to ten seconds.
@@ -480,6 +658,9 @@ renewals and navigation retain it in the mounted client; newer drafts, reference
 and attachments survive late or duplicate confirmation.
 [Assistant drafts](assistant-drafts.md) persist that immutable request fence across
 closing/reloading the app and restore it through read-only confirmation.
+
+### Execution activity projection
+
 Assistant messages bind to their input through `reply_to`; terminal failures retain
 their original diagnostic in the message's `error` field, including preparation
 failures before the first model event. Chat projects one independent execution
@@ -522,11 +703,18 @@ diagnostic details rather than entering this page exception log.
 
 ## Task execution transcripts
 
-`GET /api/v1/tasks/{id}/events?after=...&limit=...` pages the original run's
-durable ordered log. Each row has an outer sequence and its execution update:
+`GET /api/v1/tasks/{id}/events?after=...&limit=...` pages a Task's cumulative
+durable ordered log across its runs. Each row has an outer sequence and its execution update:
 message boundaries, text deltas, tool starts/output/results and turn outcomes.
-The reply contains `cursor`, `has_more` and `unavailable`. Historical remote pages
-remain cached and marked unavailable. Task details advertise `task.events` when
+The reply contains `run_id`, `cursor`, `has_more` and `unavailable`. `run_id` is
+transient API provenance from the actual selected journal launch, including a
+previous-launch fallback or an unavailable linked receipt; it does not change
+persisted events or checkpoints. Rows keep their cumulative Task sequence and
+may contain earlier execution turns. Clients confirm current metadata before
+adopting a new run, then rebuild that run's window from the cumulative journal.
+Missing or mismatched page provenance cannot append, backfill or confirm a fresh
+window, even when its sequence matches. Historical remote pages remain cached
+and marked unavailable. Task details advertise `task.events` when
 transcript reads are supported. Clients omit unsupported reads and controls;
 direct unsupported requests return a capability error. The original execution
 owner remains fixed.
@@ -596,7 +784,7 @@ SSE keepalive comments run every 15 seconds; writes have bounded deadlines that
 are cleared after flushing, so idle HTTP/2 streams remain open between frames.
 Backend shutdown or request cancellation closes subscriptions. Browser logout
 revokes access and reloads into authentication. Window/client disposal removes
-listeners and releases subscriptions.
+listeners and releases subscriptions. Browser changes streams also reject both parsed and deferred notifications from a retired client connection generation; an old stream cannot become healthy or refresh a replacement connection.
 
 Execution, schedule deadlines, authorization expiry, resource preparation and
 Agent Link recovery retain their own backend lifecycle responsibilities.
@@ -604,3 +792,15 @@ Animation frames advance only active presentation effects; Reduced Motion makes
 activity indicators static and disables avatar/tray animation. Local stream keepalives do not add UI snapshot reads.
 
 See [Development](development.md) for backend and shared UI verification commands.
+
+
+## Silent page loading
+
+Page reads and metadata refreshes do not insert temporary loading prose. Existing
+content stays visible during refresh; asynchronous controls use `aria-busy` and
+retain their normal labels. Initial empty surfaces stay silent, and pagination
+keeps its previous summary or a neutral page number until results arrive.
+Assistant settings preserve editable known fields while individual sections load.
+Errors and retry actions remain visible, including failed startup, permissions,
+model discovery and metadata reads. Operation progress such as downloading an
+upgrade is separate from page loading.

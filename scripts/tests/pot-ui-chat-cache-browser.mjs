@@ -28,7 +28,7 @@ const client={chatCacheName:name,production:true,runtime:{runtime_id:'persistent
   if(url.pathname==='/api/v1/assistants')return {items:[{id:'alpha',name:'Alpha'},{id:'beta',name:'Beta'}].map(item=>({...item,capabilities:{version:1,operations:['chat.read','chat.send','assistant.configure']}}))};
   return {items:[],pending:[],policy:{}};
  }};
-const h=()=>root.querySelector('.history');
+const h=()=>root.querySelector('.history:not([data-preparation-surface])');
 const shown=()=>h()&&getComputedStyle(h()).visibility!=='hidden'&&!h().hidden&&!root.classList.contains('show-directory');
 const last=()=>root.querySelector(`[data-message-id="${scope.owner}-${scope.owner==='alpha'?140:12}"]`);
 const atLatest=()=>h().scrollHeight-h().clientHeight-h().scrollTop<2&&!!last();
@@ -60,8 +60,15 @@ async function run(){
  await wait(()=>h().textContent.includes(tail),'committed streaming reply');
  check((await cache.read(key('alpha'))).snapshot.messages.some(message=>message.text===tail),'displayed streaming output is already persisted');
  await verifyFrames(async()=>{await select('beta');await select('alpha');},()=>{if(!atLatest()||visibleError())throw Error('wrong first viewport');},'assistant return restores latest before every visible frame');
+ await wait(()=>shown()&&!h().querySelector('.message-window[aria-busy]')&&last()?.getBoundingClientRect().height>=24,'readable committed viewport before scrollbar input');
+ const previousRows=[...h().querySelectorAll('article.message')],started=performance.now();let watching=true,lostPrevious=false;
+ const track=()=>{if(!watching)return;if(h().querySelector('.message-window[aria-busy]')&&previousRows.some(row=>!row.isConnected))lostPrevious=true;requestAnimationFrame(track);};requestAnimationFrame(track);
  h().dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));h().scrollTop=h().scrollHeight*.4;h().dispatchEvent(new Event('scroll'));await settle();
- const reading=anchor();check(!!reading.id&&!root.querySelector('.latest-button').hidden,'historical reading is paused');
+ // A direct scrollbar jump can enter an unmounted range. Wait for its prepared
+ // rows instead of treating the old fixed settle delay as rendering readiness.
+ await wait(()=>!!anchor().id&&!h().querySelector('.message-window[aria-busy]'),'prepared historical viewport');
+ watching=false;window.cacheViewportEvidence={commitMilliseconds:performance.now()-started,lostPrevious};
+ const reading=anchor();check(!!reading.id&&!root.querySelector('.latest-button').hidden&&!lostPrevious,'historical reading is paused');
  await select('beta');
  await verifyFrames(()=>select('alpha',{target:reading.id}),()=>{if(scope.owner!=='alpha')return;const node=h().querySelector(`[data-message-id="${reading.id}"]`);if(!node||Math.abs(node.getBoundingClientRect().top-h().getBoundingClientRect().top-reading.offset)>3)throw Error('reading anchor shifted');},'historical reading restores from disk before exposure');
  holdHistory=true;version++;
@@ -81,10 +88,10 @@ async function run(){
  check(atLatest()&&reads===1,'Latest reads persisted history without another backend request');
  held=false;subscription.receive(snapshot('alpha'));await settle();
  check(errors.length===0,'no browser exceptions: '+errors.join('; '));
- await pause(180);sessionStorage.setItem(reloadKey,JSON.stringify({name,log:output.textContent}));dispose();await pause(100);window.top.location.reload();
+ await pause(180);sessionStorage.setItem(reloadKey,JSON.stringify({name,log:output.textContent,readiness:window.cacheViewportEvidence}));dispose();await pause(100);window.top.location.reload();
 }
 async function verifyReload(){
- output.textContent=reloadState.log;held=true;
+ output.textContent=reloadState.log;window.cacheViewportEvidence=reloadState.readiness;held=true;
  check(!!(await cache.read(key('alpha')))?.snapshot.messages.length,'committed records survive actual document navigation');
  dispose=mountApp(root,client);await wait(()=>shown()&&last(),'browser reload from IndexedDB');await settle();
  check(atLatest()&&h().textContent.includes('Committed streaming reply')&&!subscription.ready,'a real browser reload restores committed output before backend refresh');

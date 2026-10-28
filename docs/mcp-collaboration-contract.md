@@ -2,10 +2,10 @@
 
 `pkg/agentlink/mcp_contract.go` and `mcp_receiver.go` define the minimal shared
 contract for ordinary MCP callers, receiver Hosts and Pot-to-Pot collaboration.
-These are library types and validators. They do not install an MCP listener,
-authentication server, queue, execution driver or persistence schema. Existing
-production Agent Link transport remains as documented in [Agent Link](agent-links.md)
-until its coordinated replacement. [MCP](mcp.md) owns the standard SDK boundary.
+The product implements this contract through its authenticated MCP gateway,
+durable queues and native receiver Hosts. [Agent Link](agent-links.md) describes
+the MCP transport that replaces pairing; [Pot MCP connections](pot-mcp-connections.md)
+owns connection operation, and [MCP](mcp.md) owns the standard SDK boundary.
 
 ```text
 Ordinary MCP client ---- configured Pot URL ---- authenticated gateway

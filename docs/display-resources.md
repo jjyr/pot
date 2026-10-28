@@ -34,6 +34,13 @@ adapter. Undeclared relative images and links remain literal text and do not
 fetch local or remote files. The existing bundle contract only permits HTML
 bundles; Markdown does not add an asset-bundle contract or bypass path limits.
 
+Loading file bindings, images, diagrams and resource previews does not insert
+transient status prose. Inline references retain their label; preparation queues
+and native viewport holds use silent placeholders. Busy state is exposed through
+`aria-busy`, while failures retain their explanation and recovery actions. File
+preview dialogs reserve a viewport from opening so asynchronous content does not
+resize and recenter the dialog.
+
 ## Image previews
 
 Saved resource images and uploaded chat image attachments start in the expanded
@@ -73,6 +80,16 @@ share an idempotent resource receipt. The projection does not modify message tex
 model correspondence or model history, and original file bytes never become model
 input. Old messages without captured provenance remain unavailable; the UI cannot
 supply replacement paths or manufacture a source binding.
+
+The conversation UI can show a pending reference and query its binding metadata
+while a reply is streaming. This never initiates a source read or authorizes an
+unbound path. Pending references retained while prose is appended follow the
+committed text revision and reject older metadata completions, without renewing
+their preparation deadline or replacing an existing saved preview.
+A ready binding can prepare its saved preview before the reply
+ends; missing bindings retain the bounded preparation frame while metadata is
+pending. Completing the reply retires stale metadata-read completions and applies
+the terminal binding state inside that same frame.
 
 ```text
 execution completion -> explicit Markdown nodes -> provenance + pending references
@@ -240,3 +257,98 @@ and opener focus. An unhandled trusted Escape inside the frame sends a
 source/token-checked close notice for its containing viewer; inline previews
 have no modal to close. This adds no method to the public `window.pot` API and
 does not cancel or synthesize the original key event.
+
+## Persistent offline display copies
+
+Successful browser and native reads save independent, read-only display copies
+in the shared UI IndexedDB database. Ready message-file bindings are indexed by
+host origin/base and runtime identity, Control, Space, owner, Task, message and
+text digest. A resource byte key additionally includes its immutable ID, entry,
+complete file manifest and the member's digest, size and MIME type. Stored bytes
+are SHA-256 checked before use. A new message revision, Control or owner cannot
+select an older binding or a same-named path. Task path-image reads without an
+immutable message binding keep their existing transient behavior.
+
+Markdown/text, raster images, PDFs and successfully read sent image/PDF
+attachments can reopen from committed local bytes. A readonly hit neither waits
+for a network confirmation nor requires another write. Pending references,
+partial reads and aborted transactions are never offline copies. A cached binding
+can have missing bytes after eviction; that reference fails locally without
+removing the conversation or other resources. Existing readable bytes survive a
+failed refresh or quota error. Audio/video retain metadata-only streaming and
+are not made offline by this cache. Downloads still recheck the original owner
+through the live read/save operation; offline display grants no download,
+request, execution or approval authority.
+
+The display budget is independent of history, composer and outbox stores:
+128 MiB of accounted payload/identity bytes, 512 copies, and 30 days from the last
+successful save. Expired copies are unreadable and are swept on subsequent saves;
+capacity evicts the oldest saved copies. IndexedDB/index overhead and browser
+storage eviction are managed by the browser. At most 1024 scope-generation fences
+are retained (bounded identity lengths); reaching that bound atomically clears
+only display copies and advances a global writer epoch. Original draft/outbox
+Blobs and conversation/startup data are never adopted, moved or deleted by display
+retention. `cacheStats.resourceCopies` records the accounted bytes and count.
+
+Ready notifications are separate from stored bytes and fire only after the
+IndexedDB transaction completes. Tabs reread the same committed store. Explicit
+retirement, an observed read-authentication failure, or a confirmed directory
+removal/Control replacement deletes that scope's copies and retires active
+frames and URLs across tabs. A later live authorized binding/original read may
+reopen the scope at its new generation; older requests cannot commit after that
+recovery. Directory observations retain their request's connection generation
+and directory authority revision through local enumeration and the retirement
+transaction; a retired response cannot revoke a
+replacement connection's copies or return as a current directory read.
+Logout retires readers before clearing display stores and advances the durable
+global epoch in that same transaction, so a delayed cross-tab forget message
+cannot allow a pre-logout writer to restore bytes. Each resource's connected
+views share original-byte reads and Blob URLs, released after the last lease; no URL or per-mount bridge token is persisted.
+
+Complete HTML has a separate bounded display-document read:
+`GET /api/v1/resources/{id}/render-document`. The owner/Space-checked service
+rechecks every manifest digest and reruns the existing static dependency collector
+using only those members. Missing members, external dependencies, CSS imports,
+modules and recognized dynamic dependencies fail locally. It never fetches URLs
+or revisits a workspace directory. The returned versioned template contains all
+supported dependencies as data URLs, its original manifest, a SHA-256 digest and
+a public token placeholder. The rendered template is limited to 8 MiB to fit the
+shared bounded JSON operation port. Unknown runtime dependency attempts remain
+blocked by CSP and report the existing local dependency notice. This is a saved
+bundle transformation, not an iframe DOM snapshot or a promise that arbitrary
+HTML dependencies have been saved.
+
+```text
+ready immutable binding -> verified chunks / complete render-document
+                                      |
+                         IndexedDB transaction complete
+                                      |
+                            readonly display lease
+                    +-----------------+------------------+
+                    |                                    |
+          text / raster / PDF                 committed HTML template
+                                                         |
+                                  fixed trusted resource-document.html
+                                                         |
+                               remove iframe allow-same-origin first
+                                                         |
+                                   self-navigation to author Blob
+                                   opaque sandbox + resource CSP
+```
+
+HTML uses the fixed packaged `resource-document.html` only during initial mount.
+This trusted static factory may initially share the host origin so its navigation
+can be served by the verified offline shell. Its exact response alone permits
+`sandbox allow-scripts allow-same-origin`; the main application policy is unchanged.
+The parent and factory check the expected window, exact origin and fresh one-use
+factory token. Before sending any author bytes, the parent removes
+`allow-same-origin`; the factory independently checks that removal. It only creates
+a Blob and navigates itself, never inserts or evaluates author bytes in the
+trusted document. The author document's effective sandbox is `allow-scripts`,
+its origin is opaque, and its resource CSP still denies network, forms, objects,
+nested frames and base URLs. A separate fresh author token retains the existing
+source/window-checked resize/result bridge. Initial offline remounts get a new
+document; width/font/locale preparation and background confirmations preserve
+an already active document, window, value and focus. The factory URL, pending
+messages and generated Blob URL belong to the original component generation and
+lease and are retired with it.

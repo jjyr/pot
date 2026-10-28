@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 export async function referenceCancellation(page,origin){
   const phone=page.viewportSize().width<600;
   await page.goto(origin+'/scripts/tests/fixtures/reference-cancel.html?conversation=alpha&locale='+(phone?'zh-CN':'en'));
-  await page.waitForSelector('[data-reference-source]');
+  await page.waitForSelector('.history [data-reference-source]');
   const input=page.locator('.composer-input'),remove=page.locator('.composer-references .message-reference-remove');
   const state=()=>page.evaluate(()=>({cards:document.querySelectorAll('.composer-references .message-reference').length,selection:getSelection().toString(),text:document.querySelector('.composer-input').value,attachments:document.querySelectorAll('.composer-attachments .attachment-card').length}));
   const select=()=>page.evaluate(()=>referenceFixture.select());
@@ -32,7 +32,7 @@ export async function referenceCancellation(page,origin){
   const choose=async name=>{
     if(phone)await page.locator('.narrow-navigation').click();
     await page.locator('.assistant-row').filter({hasText:name}).click();
-    await page.waitForFunction(owner=>document.querySelector('[data-reference-source]')?.dataset.referenceSource===owner+'-source',name.toLowerCase());
+    await page.waitForFunction(owner=>{const h=document.querySelector('.history:not([data-preparation-surface])');return h&&getComputedStyle(h).visibility==='visible'&&!h.hasAttribute('aria-busy')&&!h.querySelector('.message-window[aria-busy]')&&h.querySelector('[data-reference-source]')?.dataset.referenceSource===owner+'-source';},name.toLowerCase());
   };
   await choose('Beta');await input.fill('Beta draft');await select();
   await page.evaluate(()=>referenceFixture.accept());

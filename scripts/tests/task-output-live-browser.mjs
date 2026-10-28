@@ -9,7 +9,7 @@ try{
  for(const phone of [false,true]){
   const context=await browser.newContext({viewport:phone?{width:390,height:852}:{width:1280,height:800},isMobile:phone,hasTouch:phone}),page=await context.newPage(),errors=[];
   page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
-  await context.addInitScript(()=>{window.taskOutputFrames=[];const sample=()=>{const h=document.querySelector('.task-history'),box=h?.getBoundingClientRect();taskOutputFrames.push({at:Date.now(),top:h?.scrollTop,height:h?.clientHeight,extent:h?.scrollHeight,visible:!!h&&getComputedStyle(h).visibility==='visible',text:document.querySelector('.task-transcript')?.textContent?.length,first:[...document.querySelectorAll('.task-transcript [data-message-id]')].find(row=>row.getBoundingClientRect().bottom>box?.top)?.dataset.messageId});requestAnimationFrame(sample);};requestAnimationFrame(sample);});
+  await context.addInitScript(()=>{window.taskOutputFrames=[];const sample=()=>{const h=document.querySelector('.task-history:not([data-preparation-surface])'),box=h?.getBoundingClientRect();taskOutputFrames.push({at:Date.now(),top:h?.scrollTop,height:h?.clientHeight,extent:h?.scrollHeight,visible:!!h&&getComputedStyle(h).visibility==='visible',text:document.querySelector('.task-transcript')?.textContent?.length,first:[...document.querySelectorAll('.task-transcript [data-message-id]')].find(row=>row.getBoundingClientRect().bottom>box?.top)?.dataset.messageId});requestAnimationFrame(sample);};requestAnimationFrame(sample);});
   await context.request.post(origin+'/fixture/login');
   let created;
   try{

@@ -23,17 +23,21 @@ const t=key=>translate(locale,key),button=key=>[...host.querySelectorAll('button
 const switchLocale=value=>{locale=value;document.documentElement.lang=value;window.dispatchEvent(new Event('pot:locale'));};
 async function run(){
   const loading=pages.assistant(assistant);await wait(()=>pending.length);
-  check(host.textContent.includes(t('loading.pending'))&&pages.hasParent,'Pending settings expose loading and a Back action');
+  check(!host.textContent.includes(t('loading.pending'))&&host.querySelector('[aria-busy="true"]')&&pages.hasParent,'Pending settings stay silent with busy state and a Back action');
+  const knownName=host.querySelector('input[aria-label]');knownName.value='Known draft while loading';knownName.dispatchEvent(new Event('input',{bubbles:true}));
+  check(!knownName.disabled,'Known profile fields remain editable while the authoritative read is pending');
   const readCount=calls.length;
   switchLocale(locale==='en'?'zh-CN':'en');
-  check(host.textContent.includes(t('loading.pending'))&&calls.length===readCount,'Language switch updates pending text without restarting IO');
+  check(!host.textContent.includes(t('loading.pending'))&&calls.length===readCount,'Language switch keeps pending state silent without restarting IO');
   pending.shift()();await loading;
   check(!host.textContent.includes(t('loading.pending'))&&host.querySelector('[role=alert]')&&button('retry'),'Failure replaces loading with an actionable error');
   check(host.textContent.includes(t('assistant.settingsLoadFailed')),'Load failure has a localized explanation');
+  check(host.querySelector('input[aria-label]')===knownName&&knownName.value==='Known draft while loading','Load failure keeps the same native field and unsaved input');
   switchLocale(params.get('locale')||'en');
   check(button('retry')&&host.textContent.includes(t('assistant.settingsLoadFailed')),'Load error and Retry follow live language changes');
   context={space:'other-space',owner:'other-assistant'};fail=false;button('retry').click();await wait(()=>pending.length);pending.shift()();await wait(()=>pages.editing);
   check(calls.at(-1).owner===assistant.id&&calls.at(-1).space==='local','Retry retains the original full target after selection changes');
+  check(host.querySelector('input[aria-label]')===knownName&&knownName.value==='Known draft while loading','Retry preserves the field identity and dirty draft');
   check(host.querySelectorAll('.form-row').length===1,'Profile capability opens only the name and avatar editor');
   check(!host.querySelector('.assistant-delete'),'Profile capability alone does not expose deletion');
   button('assistant.resetAvatar').click();await wait(()=>calls.at(-1).path.endsWith('default-avatar'));await Promise.resolve();
@@ -49,6 +53,9 @@ async function run(){
   check(abandoned.signal.aborted,'Back aborts the retired profile request');pending.shift()();await late;
   check(!host.querySelector('form')&&opened===2,'Late settings response cannot reopen a departed editor');
   context={space:'local',owner:assistant.id};switchLocale(params.get('locale')||'en');
+  const writesBeforeNoop=calls.filter(call=>call.method==='POST').length;
+  const noop=pages.assistant(assistant);await wait(()=>pending.length);button('assistant.save').click();pending.shift()();await noop;await wait(()=>opened===3);
+  check(calls.filter(call=>call.method==='POST').length===writesBeforeNoop&&profile.name==='Edited remote','Saving an unchanged form during a late profile read cannot overwrite newer server fields');
   const final=pages.assistant(assistant);await wait(()=>pending.length);pending.shift()();await final;
   window.assistantSettingsResults={passed:true,checks};document.querySelector('#result').textContent=checks.join('\n');
   if(params.has('capture'))document.querySelector('#result').hidden=true;

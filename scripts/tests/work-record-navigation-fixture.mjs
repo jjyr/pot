@@ -20,13 +20,13 @@ async function run(){
   const view=createTaskConversation({root,task,record:{info:task,request:{text:'Synthetic navigation task'},capabilities:{version:1,operations:['task.read']}},locale:()=> 'en',client,scope,draft:'',onDraft:()=>{},toolMemory:new Map(),approvalFor:()=>null,assistantName:'Synthetic coordinator'});
   try{
    view.update({state});view.start();await frame();
-   const history=root.querySelector('.task-history');history.dispatchEvent(new WheelEvent('wheel',{deltaY:-100000,bubbles:true}));history.scrollTop=0;history.dispatchEvent(new Event('scroll'));await frame();
-   await wait(()=>root.querySelector('.work-record-summary'));
-   root.querySelector('.work-record-summary').click();await wait(()=>root.querySelector('[data-call-id="parent"] .tool-failure'));
-   if(split)check(!root.querySelector('[data-call-id="target"]'),'Cross-prose target starts outside the mounted virtual range');
-   root.querySelector('[data-call-id="parent"] .tool-failure').click();
-   await wait(()=>root.querySelector('[data-call-id="target"]')?.open);
-   const destination=root.querySelector('[data-call-id="target"]'),group=destination.closest('.work-records'),box=destination.getBoundingClientRect(),viewport=history.getBoundingClientRect();
+   const history=root.querySelector('.task-history:not([data-preparation-surface])');history.dispatchEvent(new WheelEvent('wheel',{deltaY:-100000,bubbles:true}));history.scrollTop=0;history.dispatchEvent(new Event('scroll'));await frame();
+   await wait(()=>history.querySelector('.work-record-summary'));
+   history.querySelector('.work-record-summary').click();await wait(()=>history.querySelector('[data-call-id="parent"] .tool-failure'));
+   if(split)check(!history.querySelector('[data-call-id="target"]'),'Cross-prose target starts outside the mounted virtual range');
+   history.querySelector('[data-call-id="parent"] .tool-failure').click();
+   await wait(()=>history.querySelector('[data-call-id="target"]')?.open);
+   const destination=history.querySelector('[data-call-id="target"]'),group=destination.closest('.work-records'),box=destination.getBoundingClientRect(),viewport=history.getBoundingClientRect();
    check(group.open&&box.bottom>viewport.top&&box.top<viewport.bottom,(split?'Cross-prose':'Same-group')+' Task failure link mounts, opens and reveals its target');
    check(!split||!group.querySelector('[data-call-id="parent"]'),'Cross-prose navigation retains separate groups');
   }finally{view.dispose();root.replaceChildren();}

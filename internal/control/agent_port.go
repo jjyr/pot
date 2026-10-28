@@ -671,7 +671,7 @@ func (p agentPort) taskCall(ctx context.Context, owner string, op agentlink.Oper
 	}
 	if record.Execution != nil {
 		if op == agentlink.TaskEvents {
-			return map[string]any{"events": []any{}, "cursor": 0, "has_more": false, "unavailable": true}, nil
+			return tasks.EventPage{RunID: record.Execution.Receipt.RunID, Events: []tasks.Event{}, Unavailable: true}, nil
 		}
 		if op == agentlink.TaskInput && call.Action == "write" {
 			var input protocol.TaskInput

@@ -24,8 +24,12 @@ func TestMCPUpgradePreservesHistory(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
+			cutoff := "0005"
+			if kind == ControlDatabase {
+				cutoff = "0006"
+			}
 			for _, entry := range entries {
-				if entry.Name() >= "0005" {
+				if entry.Name() >= cutoff {
 					continue
 				}
 				name := "migrations/" + string(kind) + "/" + entry.Name()
@@ -57,11 +61,36 @@ func TestMCPUpgradePreservesHistory(t *testing.T) {
 				preserved[`SELECT body FROM run_workspaces WHERE task_id='historical-task'`] = `{"path":"/original/readonly/archive"}`
 				preserved[`SELECT phase FROM retired_execution_receipts WHERE command_id='uncertain-command'`] = `unknown`
 			} else {
+				intent := `{"task_default":{"profile_id":"p","model":"keep"},"other":true}`
+				if _, e = db.Exec(`INSERT INTO assistant_initial_intent(id,intent) VALUES('preserved-assistant',?)`, intent); e != nil {
+					t.Fatal(e)
+				}
+				preserved[`SELECT intent FROM assistant_initial_intent WHERE id='preserved-assistant'`] = intent
 				if _, e = db.Exec(`INSERT INTO agent_link_received_tasks VALUES('old-receipt','{"node_id":"old-peer","kind":"assistant","agent_id":"old-owner"}','old-request','old-owner','{"text":"immutable historical request"}','historical-task')`); e != nil {
 					t.Fatal(e)
 				}
 				preserved[`SELECT payload FROM agent_link_received_tasks WHERE id='old-receipt'`] = `{"text":"immutable historical request"}`
 			}
+			// Released migration identities and timestamps must survive the pending
+			// batch and a subsequent reopen without being replaced or replayed.
+			receipts, e := db.Query(`SELECT id, CAST(applied_at AS TEXT) FROM pot_migrations`)
+			if e != nil {
+				t.Fatal(e)
+			}
+			for receipts.Next() {
+				var id, appliedAt string
+				if e = receipts.Scan(&id, &appliedAt); e != nil {
+					receipts.Close()
+					t.Fatal(e)
+				}
+				query := "SELECT CAST(applied_at AS TEXT) FROM pot_migrations WHERE id='" + strings.ReplaceAll(id, "'", "''") + "'"
+				preserved[query] = appliedAt
+			}
+			if e = receipts.Err(); e != nil {
+				receipts.Close()
+				t.Fatal(e)
+			}
+			receipts.Close()
 			// Preserve the entire prior schema, including all historical task/report tables.
 			rows, e := db.Query("SELECT name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND name!='pot_migrations' ORDER BY name")
 			if e != nil {

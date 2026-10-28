@@ -38,7 +38,7 @@ async function run(){
     };
     const dispose=mountApp(root,client);
     window.chatSwitchingIO=()=>({requests:requestCalls.length,history:historyReads.length,settings:settingsReads.slice()});
-    const history=()=>root.querySelector('.history');
+    const history=()=>root.querySelector('.history:not([data-preparation-surface])');
     const bottom=()=>history().scrollHeight-history().clientHeight-history().scrollTop<2;
     const select=async(owner,{beforeSnapshot=false}={})=>{
       if(matchMedia('(max-width: 719px)').matches&&!root.classList.contains('show-directory')){
@@ -47,7 +47,7 @@ async function run(){
       }
       root.querySelector(`.assistant-row[data-view-key='["one","${owner}"]']`).click();
       await wait(()=>scope.owner===owner);
-      if(!beforeSnapshot)await wait(()=>subscription?.ready);
+      if(!beforeSnapshot)await wait(()=>subscription?.ready&&!history().hidden&&getComputedStyle(history()).visibility!=='hidden'&&root.querySelector('.assistant-row.is-selected')?.dataset.viewKey===JSON.stringify(['one',owner]));
       await settle();
     };
     const latest=async()=>{root.querySelector('.latest-button').click();await settle();};
@@ -127,9 +127,15 @@ run().catch(error=>results.textContent+='FAIL '+error.message+'\n'+error.stack+'
 // Sample every rendered frame, rather than just waiting for a final position.
 // The first visible frame must already have the correct measured message window.
 async function navigationFrames({root,client,select,snapshot,historyReads,emit}){
-  const history=()=>root.querySelector('.history');
+  const history=()=>root.querySelector('.history:not([data-preparation-surface])');
   const visible=()=>!history().hidden&&getComputedStyle(history()).visibility!=='hidden'&&!root.classList.contains('show-directory');
-  const row=id=>[...root.querySelectorAll('article.message')].find(node=>node.dataset.messageId===id);
+  const row=id=>[...history().querySelectorAll('article.message')].find(node=>node.dataset.messageId===id);
+  const referenceEvidence=window.chatSwitchingReferenceEvidence=[];
+  const openReference=async(title,{source}={})=>{
+    const scope={...client.scope()},owner=JSON.stringify([scope.space,scope.owner]);let button;
+    await wait(()=>{button=[...history().querySelectorAll('.message-reference-open')].find(node=>node.title===title);const article=button?.closest('article.message');return visible()&&root.querySelector('.assistant-row.is-selected')?.dataset.viewKey===owner&&!history().querySelector('.message-window[aria-busy]')&&button?.isConnected&&!button.disabled&&getComputedStyle(button).visibility==='visible'&&(!source||article?.dataset.messageId===source.id&&article.dataset.sequence===source.sequence);});
+    const article=button.closest('article.message');referenceEvidence.push({at:performance.now(),scope,selected:root.querySelector('.assistant-row.is-selected')?.dataset.viewKey,title:button.title,source:article?.dataset.messageId,sequence:article?.dataset.sequence,expected:source&&{id:source.id,sequence:source.sequence,target:source.references?.find(ref=>ref.quote===title)?.message_id},visible:visible(),busy:!!history().querySelector('.message-window[aria-busy]'),disabled:button.disabled});button.click();
+  };
   const offset=id=>row(id)?.getBoundingClientRect().top-history().getBoundingClientRect().top;
   const capture=()=>{const top=history().getBoundingClientRect().top;const node=[...history().querySelectorAll('article.message')].find(node=>{const box=node.getBoundingClientRect();return box.height&&box.bottom>top&&box.top<top+history().clientHeight;});return {id:node?.dataset.messageId,offset:node?.getBoundingClientRect().top-top};};
   async function frames(label,action,validate){
@@ -196,11 +202,12 @@ async function navigationFrames({root,client,select,snapshot,historyReads,emit})
   }
   root.querySelector('.latest-button').click();await settle();
   const target=`${client.scope().owner}-2`;
-  await frames('Reference jump mounts and centers its target in one frame',async()=>{
+  const beforeReference=capture();
+  await frames('Reference jump retains the old reading frame until its prepared target commits centered',async()=>{
     root.querySelector('.message-reference-open').click();
     await wait(()=>!!row(target));
   },()=>{
-    if(!row(target))throw Error('Reference destination is not mounted');
+    if(!row(target)){atAnchor(beforeReference)();return;}
     const box=row(target).getBoundingClientRect(),h=history().getBoundingClientRect();
     if(Math.abs((box.top+box.bottom-h.top-h.bottom)/2)>2)throw Error('Reference destination is not centered');
   });
@@ -212,19 +219,30 @@ async function navigationFrames({root,client,select,snapshot,historyReads,emit})
   parent.tool.script={failureID:'child-tool-25'};parent.tool.diagnostic='Synthetic nested failure';
   nested.cursor='90';nested.messages.splice(-2,0,parent,...children);nested.messages.forEach((message,i)=>message.sequence=String(i+1));nested.messages.at(-2).references=[{message_id:'child-tool-25',quote:'Nested tool destination'}];
   root.querySelector('.latest-button').click();emit(nested);await settle();
-  root.querySelector('.message-reference-open').click();await settle();
+  await openReference('Nested tool destination',{source:nested.messages.at(-2)});await wait(()=>!!row('child-tool-25')&&row('parent-tool')?.querySelector('details')?.open);
   check(!!row('child-tool-25')&&row('parent-tool').querySelector('details').open,'Reference mounts its target inside an expanded virtual tool tree');
   const nestedAnchor=capture();await settings();await frames('Nested tool reading survives settings',returnFromSettings,atAnchor(nestedAnchor));
   const disclosure=row('parent-tool').querySelector('details');
-  disclosure.querySelector('summary').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));disclosure.querySelector('summary').click();await settle();
+  if(new URLSearchParams(location.search).has('trusted-parent-close')){
+    const nativeSummary=disclosure.querySelector('summary'),instances=new WeakMap();let instance=0,sampling=true;
+    const identity=node=>{if(!node)return null;if(!instances.has(node))instances.set(node,++instance);return instances.get(node);};
+    const expected={scope:{...client.scope()},id:'parent-tool',sequence:row('parent-tool').dataset.sequence,summary:identity(nativeSummary),tool:identity(disclosure)};
+    const evidence=window.chatSwitchingParentCloseEvidence={expected,events:[],frames:[]};
+    const sample=()=>{const live=row('parent-tool')?.querySelector('details');return {at:performance.now(),scope:{...client.scope()},id:live?.closest('article')?.dataset.messageId,sequence:live?.closest('article')?.dataset.sequence,tool:identity(live),open:live?.open,connected:live?.isConnected,candidates:[...document.querySelectorAll('[data-preparation-surface] article[data-message-id="parent-tool"] details.tool-call')].map(node=>({tool:identity(node),open:node.open,connected:node.isConnected}))};};
+    nativeSummary.addEventListener('click',event=>{evidence.events.push({kind:'click',trusted:event.isTrusted,sameSummary:event.currentTarget===nativeSummary,summary:identity(event.currentTarget),...sample()});queueMicrotask(()=>evidence.events.push({kind:'after-handler',...sample()}));},{once:true,capture:true});
+    const tick=()=>{if(sampling){evidence.frames.push(sample());requestAnimationFrame(tick);}};requestAnimationFrame(tick);
+    await new Promise(resolve=>window.chatSwitchingParentClose={ready:true,resume:resolve});
+    await settle();sampling=false;evidence.final=sample();
+    check(evidence.events.some(event=>event.kind==='click'&&event.trusted&&event.sameSummary&&event.id===expected.id&&event.sequence===expected.sequence),'Trusted close activated the exact native parent summary');
+  }else{disclosure.querySelector('summary').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));disclosure.querySelector('summary').click();await settle();}
   check(!disclosure.open,'User disclosure changes supersede the restored nested reading anchor');
-  row('parent-tool').querySelector('.tool-failure').click();await settle();
+  row('parent-tool').querySelector('.tool-failure').click();await wait(()=>!!row('child-tool-25')&&disclosure.open);
   check(!!row('child-tool-25')&&disclosure.open,'Tool failure navigation uses the cursor to mount a recycled child');
   const split=structuredClone(nested);split.cursor='91';
   split.messages.splice(split.messages.findIndex(message=>message.id==='child-tool-20'),0,{id:'work-boundary',role:'assistant',text:'Prose separates these work records.',status:'complete'});
   split.messages.forEach((message,i)=>message.sequence=String(i+1));
   root.querySelector('.latest-button').click();emit(split);await settle();
-  root.querySelector('.message-reference-open').click();await settle();
+  await openReference('Nested tool destination',{source:split.messages.at(-2)});await wait(()=>{const group=row('child-tool-25')?.closest('.work-record-group');return group?.querySelector('.work-records')?.open&&!group.querySelector('[data-message-id="parent-tool"]');});
   const splitTarget=row('child-tool-25'),splitGroup=splitTarget?.closest('.work-record-group');
   check(!!splitTarget&&splitGroup?.querySelector('.work-records').open&&!splitGroup.querySelector('[data-message-id="parent-tool"]'),'Reference mounts and opens the target work group across a prose boundary');
   root.querySelector('.latest-button').click();await settle();
@@ -232,12 +250,12 @@ async function navigationFrames({root,client,select,snapshot,historyReads,emit})
   check(historyReads.length===0,'Cached navigation and loaded references do not fetch history');
   // A delayed locate completing after an explicit Latest action cannot pull back.
   const read=client.history;let release;
-  const openReference=async title=>{await wait(()=>[...root.querySelectorAll('.message-reference-open')].some(node=>node.title===title));[...root.querySelectorAll('.message-reference-open')].find(node=>node.title===title).click();};
   client.history=query=>query.around?new Promise(resolve=>{const frame=snapshot(client.scope().owner);release=()=>resolve({...frame,cursor:'100',messages:[{id:query.around,sequence:'2',role:'assistant',reply_to:'alpha-1',text:'Late destination',status:'complete'}],history:{before:'2',after:'2',has_more:true,has_newer:true}});}):Promise.resolve({...snapshot(client.scope().owner),cursor:'100'});
   root.querySelector('.latest-button').click();await settle();
   const projected=snapshot(client.scope().owner);projected.cursor='100';projected.messages.at(-2).references=[{message_id:'missing-target',quote:'Delayed target'}];
   emit(projected);await openReference('Delayed target');await wait(()=>!!release);
-  await frames('Delayed reference mounts its destination before positioning',async()=>{release();await wait(()=>!!row('missing-target'));},()=>{if(!row('missing-target'))throw Error('Fetched reference destination is not mounted');});
+  const beforeDelayed=capture();
+  await frames('Delayed reference retains the old frame until its prepared destination mounts',async()=>{release();await wait(()=>!!row('missing-target'));},()=>{if(!row('missing-target'))atAnchor(beforeDelayed)();});
   root.querySelector('.latest-button').click();await settle();atLatest();
   projected.cursor='101';projected.messages.at(-2).references=[{message_id:'superseded-target',quote:'Superseded target'}];emit(projected);release=null;await openReference('Superseded target');await wait(()=>!!release);
   await frames('Latest supersedes an in-flight reference lookup',async()=>{root.querySelector('.latest-button').click();release();await settle();},atLatest);

@@ -1,8 +1,8 @@
 import {mountApp} from './components/ui.js';
 import {createBrowserClient} from './adapters/browser.js';
 import {ensureBrowserAccess, installPWA} from './adapters/access.mjs';
-import {APIError, createProductionClient} from './adapters/production.mjs';
-import {createStartupIdentity} from './state/startup-identity.mjs';
+import {APIError, createProductionClient, readDesktopStartup} from './adapters/production.mjs';
+import {createStartupIdentity,completeStartup} from './state/startup-identity.mjs';
 import {storedPreference} from './state/preferences.mjs';
 import {translate} from './locales/messages.mjs';
 
@@ -16,11 +16,14 @@ document.documentElement.dataset.platform = desktop ? 'desktop' : 'browser';
 let dispose=()=>{},client,identity,store,verifying=false,retryTimer,stopped=false,currentAbort,verification=0;
 const notice=document.createElement('aside');notice.className='startup-status';notice.setAttribute('role','status');
 function status(key){
+  if(key==='startup.loading'){root.setAttribute('aria-busy','true');notice.remove();return;}
+  root.removeAttribute('aria-busy');
   notice.replaceChildren(document.createTextNode(t(key)+' '));
-  const retry=document.createElement('button');retry.className='text-button';retry.textContent=t('retry');retry.onclick=()=>desktop?location.reload():verify(true);notice.append(retry);
+  const retry=document.createElement('button');retry.className='text-button';retry.textContent=t('retry');retry.onclick=()=>verify(true);notice.append(retry);
   if(!notice.isConnected)document.body.append(notice);
 }
 function mount(value){
+  root.removeAttribute('aria-busy');
   dispose();client?.resources?.clear();client=value;
   document.title=client.production?'Pot':'Pot — Go developer preview';
   window.potErrors?.configureIssueReport({version:client.runtime?.version,desktop,openExternal:client.openExternal});
@@ -34,37 +37,46 @@ function bindIdentity(value){
   value.rememberStartup=async(scope,surface)=>{
     // A retained identity may update its local selection, never its confirmed
     // Control/boot locator. No persistence failure may grant network authority.
-    if(value!==client||stopped)return;
+    if(value!==client||stopped||!value.onlineReady||!value.operationsReady)return;
+    if(desktop&&(!value.runtime.boot_id||!scope.space||!scope.owner||!value.operationScopeReady(scope)))return;
     const saved=await store.save(value.runtime,scope,surface);if(value===client&&!stopped)identity=saved;
   };
 }
 const online=()=>{if(!client||client.onlineReady===false)verify();};
-function suspend(){if(client?.production){client.suspendStartup();client.startupConfirmed();status('startup.local');}}
+function suspend(showNotice=true){if(client?.production){client.suspendStartup();client.startupConfirmed();if(showNotice)status('startup.local');}}
 async function verify(force=false,resetScope=false){
-  if(stopped||verifying&&force!==true)return;currentAbort?.abort();suspend();verifying=true;clearTimeout(retryTimer);
+  if(stopped||verifying&&force!==true)return;currentAbort?.abort();suspend(false);verifying=true;clearTimeout(retryTimer);
   const ticket=++verification,abort=new AbortController(),timer=setTimeout(()=>abort.abort(),10000);currentAbort=abort;
   try{
     if(!client&&!changingAccess){
-      try{identity=await store.read();if(identity){const value=await createProductionClient({startupIdentity:identity});bindIdentity(value);mount(value);status('startup.local');}}catch(error){console.error('Pot startup storage:',error);}
+      try{identity=await store.read();if(desktop&&!completeStartup(identity))identity=null;if(identity){const value=await createProductionClient({desktop,startupIdentity:identity});if(ticket!==verification||stopped)return;bindIdentity(value);mount(value);status('startup.loading');}}catch(error){console.error('Pot startup storage:',error);}
     }
-    const access=await ensureBrowserAccess(root,{signal:abort.signal,onSetup:()=>{if(ticket!==verification||stopped)return;dispose();client?.resources?.clear();client=null;identity=null;store?.clear().catch(()=>{});notice.remove();}});
-    const response=await fetch('/api/v1/runtime',{credentials:'same-origin',signal:abort.signal});
-    const runtime=await response.json().catch(()=>null);
+    let access,runtime,readBaselines;
+    if(desktop){({runtime,readBaselines}=await readDesktopStartup({signal:abort.signal}));}
+    else{
+      access=await ensureBrowserAccess(root,{signal:abort.signal,onSetup:()=>{if(ticket!==verification||stopped)return;dispose();client?.resources?.clear();client=null;identity=null;store?.clear().catch(()=>{});notice.remove();}});
+      const response=await fetch('/api/v1/runtime',{credentials:'same-origin',signal:abort.signal});
+      runtime=await response.json().catch(()=>null);
+      if(ticket!==verification||stopped)return;
+      if(!response.ok){
+        if(response.status===404&&!identity){const preview=createBrowserClient(),snapshot=await preview.snapshot();if(snapshot.runtime_id==='pot-ui-preview'){mount(preview);notice.remove();return;}}
+        throw new APIError(response.status,runtime);
+      }
+    }
     if(ticket!==verification||stopped)return;
-    if(!response.ok){
-      if(response.status===404&&!identity){const preview=createBrowserClient(),snapshot=await preview.snapshot();if(snapshot.runtime_id==='pot-ui-preview'){mount(preview);notice.remove();return;}}
-      throw new APIError(response.status,runtime);
-    }
     if(!(runtime?.runtime_id||runtime?.id))throw Error('Runtime identity unavailable');
     const id=runtime.runtime_id||runtime.id;
     if(client&&client.runtime.runtime_id===id&&!resetScope){
-      client.access=access;client.confirmStartup(runtime);client.startupConfirmed();
+      client.access=access;if(readBaselines)client.readBaselines=readBaselines;client.confirmStartup(runtime);client.startupConfirmed();
     }else{
       // A changed Control retires every old writer before opening its namespace.
       // Old drafts remain under their original full identity and are not copied.
       dispose();client?.resources?.clear();client=null;
       identity=await store.save(runtime).catch(()=>null);
-      const value=await createProductionClient({startupIdentity:{runtime_id:id,boot_id:runtime.boot_id||''}});
+      if(ticket!==verification||stopped)return;
+      const value=await createProductionClient({desktop,startupIdentity:{runtime_id:id,boot_id:runtime.boot_id||''}});
+      if(ticket!==verification||stopped){value.resources.clear();return;}
+      if(readBaselines)value.readBaselines=readBaselines;
       value.confirmStartup(runtime);value.access=access;bindIdentity(value);mount(value);
     }
     notice.remove();
@@ -75,20 +87,21 @@ async function verify(force=false,resetScope=false){
     // Retry only authentication/identity reads. No command or interrupted send
     // is queued here. Explicit access failures retain their existing flow.
     if(![401,403].includes(error.status))retryTimer=setTimeout(()=>verify(),3000);
-  }finally{clearTimeout(timer);if(ticket===verification)verifying=false;}
+  }finally{clearTimeout(timer);if(ticket===verification){verifying=false;root.removeAttribute('aria-busy');}}
 }
 try{
-  if(desktop){
-    mount(params.get('mode')==='preview'?(await import('./adapters/desktop.js')).createDesktopClient():await createProductionClient({desktop}));
+  if(desktop&&params.get('mode')==='preview'){
+    mount((await import('./adapters/desktop.js')).createDesktopClient());
   }else{
-    installPWA().catch(error=>console.error('Pot shell installation:',error));
+    if(!desktop)installPWA().catch(error=>console.error('Pot shell installation:',error));
     store=createStartupIdentity();status('startup.loading');
     try{identity=changingAccess?null:await store.read();}catch(error){console.error('Pot startup storage:',error);}
-    if(identity){const value=await createProductionClient({startupIdentity:identity});bindIdentity(value);mount(value);status('startup.local');}
+    if(desktop&&!completeStartup(identity))identity=null;
+    if(identity){const value=await createProductionClient({desktop,startupIdentity:identity});bindIdentity(value);mount(value);status('startup.loading');}
     else status('startup.loading');
     verify();
-    window.addEventListener('offline',suspend);
-    window.addEventListener('online',online);
+    // Losing the internet does not revoke a working local desktop Control.
+    if(!desktop){window.addEventListener('offline',suspend);window.addEventListener('online',online);}
   }
 }catch(error){console.error('Pot startup:',error);status('startup.unavailable');}
 window.addEventListener('pagehide',event=>{if(!event.persisted){stopped=true;clearTimeout(retryTimer);dispose();client?.resources?.clear();store?.close();window.removeEventListener('online',online);window.removeEventListener('offline',suspend);}});

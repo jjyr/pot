@@ -73,6 +73,19 @@ func TestOfflineDirectoryAndExactProviderDefaults(t *testing.T) {
 	if len(d.Options()) < 8 || len(d.Defaults()) < 100 {
 		t.Fatal("incomplete offline seed")
 	}
+	wantXAI, err := resources.ProviderLogos.ReadFile("provider-logos/xai.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundGrok := false
+	for _, option := range d.Options() {
+		if option.ID == "xai" {
+			foundGrok = option.Common && option.Name == "Grok" && option.Logo == string(wantXAI)
+		}
+	}
+	if !foundGrok {
+		t.Fatal("expected Grok (xai) as a common provider with bundled logo")
+	}
 	d.state = snapshot{Providers: fixture(), Logos: map[string]string{}}
 	p := profile()
 	automatic, err := d.Apply(p)

@@ -197,6 +197,12 @@ func (a *MCPAccess) tool(name string, schema any, fn func(context.Context, *mcp.
 		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 			return mcpToolError(agentlink.ErrUnauthorized), nil, nil
 		}
+		// Waiting for another dispatch must not retain a revoked, rotated or
+		// expired credential. Verify only after acquiring the dispatch lock.
+		if strings.HasPrefix(name, "pot_receiver_task_") || name == "pot_receiver_message" || name == "pot_receiver_execution_admit" || name == "pot_receiver_execution_end" || name == "pot_receiver_approval_pending" {
+			a.options.Queue.dispatchMu.Lock()
+			defer a.options.Queue.dispatchMu.Unlock()
+		}
 		current, e := a.options.OAuth.Verify(ctx, parts[1], nil)
 		if e != nil || current.UserID != request.Extra.TokenInfo.UserID {
 			return mcpToolError(agentlink.ErrUnauthorized), nil, nil
@@ -207,10 +213,6 @@ func (a *MCPAccess) tool(name string, schema any, fn func(context.Context, *mcp.
 			}
 			return nil
 		})
-		if strings.HasPrefix(name, "pot_receiver_task_") || name == "pot_receiver_message" || name == "pot_receiver_execution_admit" || name == "pot_receiver_execution_end" || name == "pot_receiver_approval_pending" {
-			a.options.Queue.dispatchMu.Lock()
-			defer a.options.Queue.dispatchMu.Unlock()
-		}
 		value, e := fn(ctx, request, raw)
 		if e != nil {
 			return mcpToolError(e), nil, nil

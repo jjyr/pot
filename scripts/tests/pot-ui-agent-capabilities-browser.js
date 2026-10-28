@@ -19,7 +19,7 @@ async page => {
   if(path==='/api/v1/tasks/outcomes')value={items:[],cursor:0,has_more:false};
   if(path==='/api/v1/tasks/catalog'||path==='/api/v1/tasks/query')value={items:[info],total:1,counts:{active:1}};
   if(path==='/api/v1/tasks/capability-task')value={run_id:'original-run',request:{text:'Use advertised task operations.'},info:{...info,paused},capabilities:{version:1,scope:'caller',operations:taskOps}};
-  if(path==='/api/v1/tasks/capability-task/events')value={events:[],cursor:0,has_more:false};
+  if(path==='/api/v1/tasks/capability-task/events')value={run_id:'original-run',events:[],cursor:0,has_more:false};
   if(path==='/api/v1/tasks/capability-task/messages')value=[];
   if(path==='/api/v1/tasks/capability-task/control'){paused=true;value={accepted:true};}
   await route.fulfill({json:value});

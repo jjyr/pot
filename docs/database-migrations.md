@@ -127,7 +127,9 @@ and clearing; see [Assistant drafts](assistant-drafts.md). The shared
 IndexedDB opener applies pending versions in the browser upgrade transaction;
 a failed upgrade rolls back its stores and converted values. Open clients close
 on `versionchange`, and a later open can retry an aborted upgrade. Existing
-databases upgrade in place without wiping unrelated browser state. The same
+databases upgrade in place without wiping unrelated browser state. `0007_chat_outbox.mjs` adds explicit submitted-message records and separate
+original-Blob records, preserving old drafts and confirmation receipts without
+automatically enqueuing them. See [Chat outbox](chat-outbox.md). The same
 schema serves the separate bounded Task transcript database. Retention, logout
 and failure behavior are described in
 [Shared UI](shared-ui.md#committed-local-projections).
@@ -193,6 +195,15 @@ only completion; executions without a receipt retain the existing uncertainty
 and recovery fences. A successfully acknowledged inbox batch may already be
 `interrupted` after a restart and is settled under its original batch identity.
 
+## Assistant Task model defaults
+
+`conversation/0003_task_default` initializes the optional Task model preference
+in assistant configuration intent and saved configuration responses.
+`control/0005_task_default` applies the same format to initial assistant intent.
+Existing assistants keep following their active model. Request hashes, generation
+and revision counters, pending specifications and existing Task snapshots remain
+unchanged; migration does not create or restart work.
+
 ## Shared native adapter storage
 
 `control/0003_agent_adapter` renames Codex host and endpoint tables to shared
@@ -227,8 +238,9 @@ registration/receipt protocol. This migration is new after the released Control
 Existing Control business tables and JSON records are unchanged. The native host
 uses its Control database; a standalone browser service keeps a Control database
 in its private service root. Lifecycle stream reconnection establishes a fresh
-access lifetime without storing business-source baselines or reading history. Browser interrupted sends become uncertain receipts, never an
-automatic resend. No retired Push store is imported.
+access lifetime without storing business-source baselines or reading history. Browser interrupted sends retain their request identity; explicit submitted
+messages reconcile durable receipts before an identical retry. Ordinary drafts
+never automatically send. No retired Push store is imported.
 
 The separate rebuildable notification installation database uses
 `ui-notifications/0001_installation.mjs`. It stores device identity/channel/intent,
@@ -236,9 +248,34 @@ a logout epoch and one pending navigation target. It does not share authenticati
 storage or disposable business projection retention. Existing browser preference,
 onboarding, token and native authorization records remain intact.
 
+`ui-cache/0008_resource_bytes.mjs` adds only independent `resourceCopies` and
+`resourceScopes` stores. Version-one copy rows bind complete display identities,
+kind/revision, Blob or bounded display DTO, digest, expiry and byte accounting;
+scope rows record revocation generations. Separate `cacheStats` keys hold resource
+capacity and the global compaction epoch. Pending browser upgrades apply this
+alongside preceding migrations in one upgrade transaction. Existing history,
+startup, views, composer originals and outbox originals remain in their existing
+stores. Display retention never changes their ownership or release rules; see
+[Display resources](display-resources.md#persistent-offline-display-copies).
+
+`ui-cache/0009_stable_projections.mjs` separates persistent display keys from
+service boot identity. Existing display projections are rekeyed within the same
+Control, Space, assistant and query; duplicate copies retain the latest confirmed
+projection and cache accounting is rebuilt. Command receipts retain their
+original keys. Boot provenance remains available to live read and write fences;
+restored display values do not restore operation authority. The upgrade leaves
+transcripts, startup identity, drafts, outbox records and original Blobs intact.
+
+`ui-cache/0010_mcp_connections.mjs` adds the MCP connection display domain with
+a strict metadata projection. It discards earlier projections and command
+receipts for that endpoint, including their boot-scoped and stable cache keys.
+OAuth authorization URLs, query credentials, state, codes and tokens remain
+transient. Cached connection status never authorizes a mutation; each command
+confirms the current connection and scope through a live read.
+
 ## MCP cutover
 
-`control/0008_mcp_cutover` converts saved old connections to version-1 minimal
+`control/0009_mcp_cutover` converts saved old connections to version-1 minimal
 unsupported history records, including their last known state. It drops obsolete
 invitation, handshake, TCP endpoint and native pairing-key configuration. It
 neither imports an OAuth grant nor changes Task phases, reports, receipts or

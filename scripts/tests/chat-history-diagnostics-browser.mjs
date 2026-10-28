@@ -14,9 +14,9 @@ try{
   await context.route('**/*',route=>new URL(route.request().url()).origin===fixture.origin?route.continue():route.abort());
   await context.addInitScript(()=>{
    window.historyDiagnosticFrames=[];window.historyDiagnosticPhase='initial';
-   const sample=()=>{const h=document.querySelector('.history'),box=h?.getBoundingClientRect();historyDiagnosticFrames.push({phase:historyDiagnosticPhase,at:Date.now(),top:h?.scrollTop,extent:h?.scrollHeight,visible:!!h&&getComputedStyle(h).visibility==='visible',rows:['alpha-690','alpha-692','alpha-694'].map(id=>{const row=h?.querySelector(`[data-message-id="${id}"]`),status=row?.querySelector('.reply-status'),r=row?.getBoundingClientRect();return {id,key:row?.dataset.windowKey,hidden:status?.hidden,status:status?.textContent,text:row?.querySelector('.reply-content')?.textContent,height:r?.height,top:r?.top,inView:!!r&&r.bottom>box.top&&r.top<box.bottom,failed:!!row?.querySelector('.is-failed')};})});requestAnimationFrame(sample);};requestAnimationFrame(sample);
+   const sample=()=>{const h=document.querySelector('.history:not([data-preparation-surface])'),box=h?.getBoundingClientRect();historyDiagnosticFrames.push({phase:historyDiagnosticPhase,at:Date.now(),top:h?.scrollTop,extent:h?.scrollHeight,visible:!!h&&getComputedStyle(h).visibility==='visible',rows:['alpha-690','alpha-692','alpha-694'].map(id=>{const row=h?.querySelector(`[data-message-id="${id}"]`),status=row?.querySelector('.reply-status'),r=row?.getBoundingClientRect();return {id,key:row?.dataset.windowKey,hidden:status?.hidden,status:status?.textContent,text:row?.querySelector('.reply-content')?.textContent,height:r?.height,top:r?.top,inView:!!r&&r.bottom>box.top&&r.top<box.bottom,failed:!!row?.querySelector('.is-failed')};})});requestAnimationFrame(sample);};requestAnimationFrame(sample);
   });
-  const ready=()=>page.waitForFunction(()=>document.querySelector('.connection-status.is-connected')&&document.querySelector('.history')&&getComputedStyle(document.querySelector('.history')).visibility==='visible');
+  const ready=()=>page.waitForFunction(()=>document.querySelector('.connection-status.is-connected')&&document.querySelector('.history:not([data-preparation-surface])')&&getComputedStyle(document.querySelector('.history:not([data-preparation-surface])')).visibility==='visible');
   const sample=()=>page.evaluate(()=>historyDiagnosticFrames.at(-1));
   const verify=async()=>{
    const state=await sample();
@@ -41,8 +41,8 @@ try{
    await page.evaluate(()=>window.historyDiagnosticPhase='paging');
    const reachHistory=async()=>{
    for(let i=0;i<40;i++){
-    const box=await page.locator('.history').boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.wheel(0,-600);
-    const reached=await page.evaluate(async()=>{for(let f=0;f<6;f++)await new Promise(requestAnimationFrame);const row=document.querySelector('[data-message-id="alpha-690"]');if(!row)return false;const r=row.getBoundingClientRect(),h=document.querySelector('.history').getBoundingClientRect();return r.bottom>h.top&&r.top<h.bottom;});
+    const box=await page.locator('.history:not([data-preparation-surface])').boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.wheel(0,-600);
+    const reached=await page.evaluate(async()=>{for(let f=0;f<6;f++)await new Promise(requestAnimationFrame);const row=document.querySelector('[data-message-id="alpha-690"]');if(!row)return false;const r=row.getBoundingClientRect(),h=document.querySelector('.history:not([data-preparation-surface])').getBoundingClientRect();return r.bottom>h.top&&r.top<h.bottom;});
     if(reached)break;
    }
    };
@@ -56,7 +56,7 @@ try{
     while(performance.now()<deadline){
      const data=await new Promise((resolve,reject)=>{const open=indexedDB.open('pot-chat-cache');open.onerror=()=>reject(open.error);open.onsuccess=()=>{const db=open.result,tx=db.transaction(['views','conversations','startup']),data={};for(const name of ['views','conversations','startup']){const read=tx.objectStore(name).getAll();read.onsuccess=()=>data[name]=read.result;}tx.oncomplete=()=>{db.close();resolve(data);};};});
      const view=data.views.find(view=>view.conversation_id==='alpha-conversation'&&view.position?.mode==='reading'&&view.window.some(row=>row.id==='alpha-690'));
-     if(view&&data.startup.some(value=>value.owner==='alpha')&&Math.abs((view.position.position?.top??-1)-document.querySelector('.history').scrollTop)<2)return {view,replies:data.conversations.find(row=>row.projection?.conversation_id==='alpha-conversation')?.replies};
+     if(view&&data.startup.some(value=>value.owner==='alpha')&&Math.abs((view.position.position?.top??-1)-document.querySelector('.history:not([data-preparation-surface])').scrollTop)<2)return {view,replies:data.conversations.find(row=>row.projection?.conversation_id==='alpha-conversation')?.replies};
      await new Promise(requestAnimationFrame);
     }
     throw Error('Historical reading view did not commit');

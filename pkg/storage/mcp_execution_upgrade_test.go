@@ -22,10 +22,7 @@ func TestMCPExecutionGatewayUpgrade(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			limit := "0007"
-			if kind == TasksDatabase {
-				limit = "0008"
-			}
+			limit := "0008"
 			for _, entry := range entries {
 				if entry.Name() >= limit {
 					continue

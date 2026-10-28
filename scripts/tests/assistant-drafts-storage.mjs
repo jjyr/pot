@@ -1,4 +1,4 @@
-import {UI_CACHE_VERSION} from '../../pkg/storage/migrations/ui-cache/0006_startup_identity.mjs';
+import {UI_CACHE_VERSION} from '../../pkg/storage/migrations/ui-cache/0010_mcp_connections.mjs';
 import {createIndexedStore,idbRequest} from '../../web/src/state/indexed-store.mjs';
 import {createDraftStore,assistantDraftKey} from '../../web/src/state/draft-store.mjs';
 import {createAssistantDrafts} from '../../web/src/state/assistant-drafts.mjs';

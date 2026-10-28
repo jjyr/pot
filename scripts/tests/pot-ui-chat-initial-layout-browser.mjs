@@ -4,19 +4,22 @@ import {createInitialChatLayout} from '../../web/src/components/initial-chat-lay
 import {createMessageFile} from '../../web/src/components/message-file.mjs';
 const root=document.querySelector('#app'),results=document.querySelector('#results');
 const frame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
-const wait=async test=>{for(let i=0;i<400;i++){if(test())return;await frame();}throw Error('Timed out: '+test);};
+const wait=async test=>{for(let i=0;i<400;i++){if(test())return;await frame();}throw Error('Timed out: '+test+' '+JSON.stringify({scope,releases:releases.map(release=>({owner:release.owner,at:release.at})),trace:leaseTrace}));};
 const check=(value,label)=>{if(!value)throw Error(label);results.textContent+='PASS '+label+'\n';};
 localStorage.setItem('pot-system-notifications-browser-v1','false');
 document.documentElement.dataset.platform='browser';
 const canvas=document.createElement('canvas');canvas.width=480;canvas.height=280;canvas.getContext('2d').fillRect(0,0,480,280);
 const image=URL.createObjectURL(await new Promise(resolve=>canvas.toBlob(resolve)));
 let scope={space:'layout',owner:'alpha'},receive,version=1;
-const releases=[];
+const releases=[],leaseTrace=[],leases=[];
+const pending=owner=>releases.filter(release=>release.owner===owner&&release.lease.active&&!release.done);
+const releaseVisible=async(owner,fail=false)=>{for(let i=0;i<400;i++){const current=pending(owner);for(const release of current)fail?release.fail():release();const history=root.querySelector('.history:not([data-preparation-surface])');if(history&&getComputedStyle(history).visibility!=='hidden'&&!history.hidden)return;await frame();}throw Error('Current attachment did not settle: '+owner);};
 const snapshot=()=>({kind:'reset',runtime_id:'layout',boot_id:'boot',owner_id:JSON.stringify(['layout',scope.owner]),conversation_id:scope.owner,cursor:String(version),replies:[],running:false,turn_id:null,
   messages:Array.from({length:24},(_,index)=>({id:scope.owner+'-'+index,sequence:String(index+1),role:index%2?'assistant':'user',...(index%2?{reply_to:scope.owner+'-'+(index-1)}:{}),text:index%2?'## Measured reply\n\n'+('A paragraph with **Markdown**. '.repeat(index%5+1))+'\n\n```js\nconst ready = true;\n```':'Short question',status:'complete',...(index===22?{attachments:[{id:'image',name:'image.png',mime_type:'image/png',size:1,width:480,height:280}]}:{})})),history:{before:'1',after:'24',has_more:false,has_newer:false}});
 const client={production:true,chatCacheName:'initial-layout-'+crypto.randomUUID(),runtime:{runtime_id:'layout',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>scope={...scope,...value},changes:()=>()=>{},
   subscribe(callback,status){receive=callback;queueMicrotask(()=>{status('connected');callback(snapshot());});return()=>{};},
-  attachmentURL:()=>new Promise((resolve,reject)=>{const release=()=>resolve(image);release.fail=()=>reject(Error('Offline fixture'));releases.push(release);}),downloadAttachment:async()=>{},
+  retainAttachment:(attachment,captured)=>{const lease={owner:captured.owner,active:true,requested:false};leases.push(lease);return()=>{lease.active=false;};},
+  attachmentURL:(attachment,captured)=>new Promise((resolve,reject)=>{const owner=captured?.owner||scope.owner,lease=leases.findLast(entry=>entry.owner===owner&&!entry.requested);lease.requested=true;leaseTrace.push({owner,at:performance.now()});const release=()=>{release.done=true;resolve(image);};release.lease=lease;release.owner=owner;release.at=performance.now();release.fail=()=>{release.done=true;reject(Error('Offline fixture'));};releases.push(release);}),downloadAttachment:async()=>{},
   async request(path){const url=new URL(path,location.href);
     if(url.pathname==='/api/v1/spaces')return {active_space_id:'layout',items:[{id:'layout',name:'Fixture',control_id:'layout',connected:true}]};
     if(url.pathname==='/api/v1/assistants')return {items:[{id:'alpha',name:'Alpha'},{id:'beta',name:'Beta'}]};
@@ -26,33 +29,33 @@ const client={production:true,chatCacheName:'initial-layout-'+crypto.randomUUID(
 let dispose;
 try{
   dispose=mountApp(root,client);
-  const history=()=>root.querySelector('.history'),visible=()=>getComputedStyle(history()).visibility!=='hidden'&&!history().hidden;
+  const history=()=>root.querySelector('.history:not([data-preparation-surface])'),visible=()=>getComputedStyle(history()).visibility!=='hidden'&&!history().hidden;
   const select=async owner=>{if(matchMedia('(max-width:719px)').matches&&!root.classList.contains('show-directory'))root.querySelector('.narrow-navigation').click();root.querySelector(`[data-view-key='["layout","${owner}"]']`).click();await wait(()=>scope.owner===owner);};
-  await wait(()=>releases.length===1);for(let i=0;i<8;i++)await frame();
+  await wait(()=>pending(scope.owner).length===1);for(let i=0;i<8;i++)await frame();
   check(!visible(),'Initial history remains hidden while its image has no final dimensions');
-  releases.shift()();await wait(visible);
+  await releaseVisible(scope.owner);await wait(visible);
   const geometry=()=>{const h=history();return JSON.stringify([h.scrollTop,h.scrollHeight,...[...h.querySelectorAll('article.message')].map(row=>[row.dataset.messageId,row.getBoundingClientRect().y,row.getBoundingClientRect().height])]);};
   const first=geometry();for(let i=0;i<12;i++)await frame();
   check(geometry()===first&&history().scrollHeight-history().clientHeight-history().scrollTop<2,'First visible history keeps its measured rows and final Latest offset');
-  await select('alpha');await wait(()=>releases.length===1);for(let i=0;i<4;i++)await frame();
+  await select('alpha');await wait(()=>pending(scope.owner).length===1);for(let i=0;i<4;i++)await frame();
   check(!visible(),'Returning through the directory prepares newly mounted historical images again');
-  releases.shift()();await wait(visible);
+  await releaseVisible(scope.owner);await wait(visible);
   history().dispatchEvent(new WheelEvent('wheel',{deltaY:-300,bubbles:true}));history().scrollTop-=300;history().dispatchEvent(new Event('scroll'));for(let i=0;i<4;i++)await frame();
   const top=history().getBoundingClientRect().top,anchor=[...history().querySelectorAll('article.message')].find(row=>row.getBoundingClientRect().bottom>top),anchorID=anchor.dataset.messageId,anchorY=anchor.getBoundingClientRect().y;
-  await select('alpha');await wait(()=>releases.length===1);releases.shift()();await wait(visible);
+  await select('alpha');await wait(()=>pending(scope.owner).length===1);await releaseVisible(scope.owner);await wait(visible);
   const restored=[...history().querySelectorAll('article.message')].find(row=>row.dataset.messageId===anchorID);
   check(restored&&Math.abs(restored.getBoundingClientRect().y-anchorY)<1,'Historical reading keeps its original anchor through provisional image heights');
   root.querySelector('.latest-button').click();await frame();await frame();
-  await select('beta');await wait(()=>releases.length===1);await select('alpha');await wait(()=>releases.length===2);
-  releases.shift()();for(let i=0;i<8;i++)await frame();
+  await select('beta');await wait(()=>pending('beta').length===1);const retiredBeta=pending('beta')[0];await select('alpha');await wait(()=>pending('alpha').length===1);
+  retiredBeta();for(let i=0;i<8;i++)await frame();
   check(!visible(),'A retired assistant image cannot reveal the next assistant');
-  releases.shift()();await wait(visible);
+  await releaseVisible(scope.owner);await wait(visible);
   // A new streaming update must remain visible after the initial preparation.
   version++;const stream=snapshot();stream.messages.at(-1).text+='\n\nStreaming tokens';stream.messages.at(-1).status='streaming';receive(stream);await wait(()=>{if(!visible())throw Error('Streaming hid the conversation');return history().textContent.includes('Streaming tokens');});
   check(visible()&&history().textContent.includes('Streaming tokens'),'Live streaming continues visibly after the initial history');
-  await select('beta');await wait(()=>releases.length===1);releases.shift().fail();await wait(visible);
+  await select('beta');await wait(()=>pending(scope.owner).length===1);await releaseVisible(scope.owner,true);await wait(visible);
   check(!!history().querySelector('pot-resource[data-state="error"]'),'An offline historical image reveals its recoverable error state');
-  await select('alpha');await wait(()=>releases.length===1);dispose();dispose=null;releases.shift()();await frame();await frame();
+  await select('alpha');await wait(()=>pending(scope.owner).length===1);const late=pending(scope.owner)[0];dispose();dispose=null;late();await frame();await frame();
   check(root.childElementCount===0,'Disposal cancels pending preparation and late resource completion');
   // Short deadline exercises the production timeout policy without a slow test.
   // Hold the real file binding AND its subsequent resource read past reveal.
@@ -73,7 +76,7 @@ try{
   bind([{href:'notes.txt',state:'ready',resource},{href:'inline.txt',state:'ready',resource:{...resource,id:'inline'}}]);await wait(()=>file.querySelector('pot-resource')?.dataset.state==='loading');await frame();await frame();
   const bound=metrics();read(new Blob(['Late file content\n'.repeat(200)]));await wait(()=>file.querySelector('pot-resource')?.dataset.state==='ready');for(let i=0;i<4;i++)await frame();
   sampling=false;const ready=metrics();
-  check(samples.length>2&&samples.every(value=>JSON.stringify(value)===JSON.stringify(firstLayout))&&JSON.stringify(ready)===JSON.stringify(firstLayout),'Every visible sampled frame keeps row height, scroll and anchor through late binding and resource readiness');
+  check(samples.length>2&&samples.every(value=>JSON.stringify(value)===JSON.stringify(firstLayout))&&JSON.stringify(ready)===JSON.stringify(firstLayout),'Every visible sampled frame keeps row height, scroll and anchor through late binding and resource readiness'+(samples.every(value=>JSON.stringify(value)===JSON.stringify(firstLayout))&&JSON.stringify(ready)===JSON.stringify(firstLayout)?'':' '+JSON.stringify({firstLayout,bound,ready,samples})));
   const expand=file.querySelector('.resource-actions button');expand.click();await frame();await frame();const expanded=metrics();
   check(expanded.file>firstLayout.file&&expanded.row>firstLayout.row,'Explicit Expand releases the containing file-reference slot');
   expand.click();await frame();await frame();const collapsed=metrics();

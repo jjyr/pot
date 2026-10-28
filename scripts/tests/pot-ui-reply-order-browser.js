@@ -21,7 +21,7 @@ async page=>{
       check(rows.length===5,'Four inputs and one agent-authored reply leave no empty outcome rows');
       for(let i=0;i<4;i++)check(rows[i].role==='user','Inputs remain in chronological order after silent completion');
       check(rows[4].role==='assistant'&&!rows[4].id.startsWith('waiting:'),'Only the actual reply creates a completed assistant bubble');
-      check(await page.locator('.history').evaluate(node=>node.scrollHeight-node.clientHeight-node.scrollTop<3),'Chat keeps following the latest message');
+      check(await page.locator('.history:not([data-preparation-surface])').evaluate(node=>node.scrollHeight-node.clientHeight-node.scrollTop<3),'Chat keeps following the latest message');
     };
     await page.locator('#pot-composer').fill('New message after three silent turns');
     await page.locator('#pot-composer').press('Enter');

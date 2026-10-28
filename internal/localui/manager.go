@@ -186,13 +186,21 @@ func changedEvent(event Event, previous map[string]json.RawMessage) (Event, map[
 		return event, previous, true
 	}
 	current := raw
+	if current == nil {
+		return event, previous, true
+	}
 	if nested := raw["versions"]; nested != nil {
-		if json.Unmarshal(nested, &current) != nil {
+		if json.Unmarshal(nested, &current) != nil || current == nil {
 			return event, previous, true
 		}
 		if boot := raw["boot_id"]; boot != nil {
 			current["boot_id"] = boot
 		}
+	}
+	// Production /changes carries the Runtime boot in its SSE ID, not its
+	// version-map body. Preserve that identity across the native broadcast.
+	if boot, _, ok := strings.Cut(event.ID, ":"); ok && boot != "" {
+		current["boot_id"], _ = json.Marshal(boot)
 	}
 	dirty := map[string]json.RawMessage{}
 	bootChanged := !bytes.Equal(current["boot_id"], previous["boot_id"])

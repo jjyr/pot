@@ -78,6 +78,15 @@ credential; a response started before credential rotation cannot become facts fo
 the replacement route. Authorization or permission failures invalidate the affected
 saved snapshot. A quota permission failure does not disable inference.
 
+Assistant creation and settings use one editable model input with native cached
+suggestions. The connection type's directory binding selects the public catalog,
+falling back to the profile's explicit directory binding. Unbound Custom API
+connections can suggest IDs across the public directory. Cached connection facts
+take precedence for duplicate IDs; known non-conversation models are omitted,
+while saved defaults and current selections remain available. Typing an arbitrary
+model ID is always allowed and browsing suggestions performs no discovery or
+inference request.
+
 ## Connection ownership and editing
 
 Connections belong to the local node and are available to its assistants. Saving one

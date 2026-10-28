@@ -11,7 +11,7 @@ import (
 )
 
 func TestMCPCutoverUpgradeRetiresPairingPreservesSavedHistory(t *testing.T) {
-	for _, start := range []string{"0004", "0007"} {
+	for _, start := range []string{"0004", "0005", "0008"} {
 		t.Run(start, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "control.sqlite")
 			db, e := OpenSQLite(path)

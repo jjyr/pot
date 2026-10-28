@@ -1,3 +1,10 @@
+import {outboxIndicator} from './outbox-controls.mjs';
+import {createOutboxDialog} from './outbox-dialog.mjs';
+import {createChatOutbox} from '../state/chat-outbox.mjs';
+import {outboxTarget,outboxIdentityKey} from '../state/chat-outbox-store.mjs';
+import {projectOutboxRows} from '../state/chat-outbox-projection.mjs';
+import {moveConversationNode} from './conversation-dom.mjs';
+import {currentPreparedRender,preparedAsset,consumePreparationSurrogates} from './prepared-render.mjs';
 import {domainsFor} from '../state/domains/index.mjs';
 import {machinePresentation} from '../state/machine-identity.mjs';
 import {storedPreference} from '../state/preferences.mjs';
@@ -13,7 +20,7 @@ import {createAssistantDrafts} from '../state/assistant-drafts.mjs';
 import {bindMessageSelection,renderMessageReferences,referenceProblem} from './message-references.mjs';
 import {createSystemNotifications} from '../adapters/notifications.mjs';
 import {createToolCall} from './tool-call.mjs';
-import {messageIdentities} from '../state/message-identities.mjs';
+import {messageIdentities,resolveMessageRenderIdentity,messageRenderIssuer} from '../state/message-identities.mjs';
 import {toolForest} from '../state/tool-calls.mjs';
 import {projectScriptRuns} from '../state/script-runs.mjs';
 import {avatar} from './avatar.mjs';
@@ -24,7 +31,7 @@ import {messages,translate} from '../locales/messages.mjs';
 import {acceptSnapshot, beginSend, beginSubscription, createConversationState, draft, draftReferences, setDraftReferences, ownerKey, setDraft, validSnapshot} from '../state/conversation.mjs';
 import {bindComposer} from './composer.mjs';
 import {createAttachmentComposer,renderMessageAttachments,failedMessageInput} from './attachments.mjs';
-import {renderMarkdown} from './markdown.mjs';
+import {updateMarkdown} from './markdown.mjs';
 import {createPages} from './pages.mjs';
 import {createReplies,replyKey} from '../state/replies.mjs';
 import {bindCompletions} from './completions.mjs';
@@ -37,6 +44,7 @@ import {bindTaskClock} from './task-time.mjs';
 import {createBackgroundTasks} from './background-tasks.mjs';
 import {bindResumeRecovery} from '../state/resume.mjs';
 import {bindViewport} from './viewport.mjs';
+import {createSettingsAccess,configurationRoute} from '../state/settings-access.mjs';
 import {settleMotion,copyFeedback} from './motion.mjs';
 
 function el(tag, className = '', text) {
@@ -84,20 +92,22 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let error = '',chatCacheFailed=false,directoryStorageFailed=false;
   const sendCacheFailures=new Map();
   let connectionError = '';
-  let directoryOpen = !params.has('conversation');
+  const restoredDirectory = client.production && window.history.state?.potRoute === 'chat' && window.history.state.potDirectory === true;
+  let directoryOpen = restoredDirectory || !params.has('conversation');
   let directoryCollapsed = false;
   let cancelPending = false;
   let editorOwner = null;
-  let assistantDrafts=null;
+  let assistantDrafts=null,outbox=null,outboxDialog=null,enqueuePending=false;
+  const queueEditors=new Map();
   let menuOpen = false;
   let preferencesOpen = false,restoringHistory=false;
   let assistants = [], spaces = [], selectedAssistant = null, pendingSelection = null;
   let unsubscribe = () => {}, stopChanges = () => {};
   let directoryEpoch = 0, directorySignature = '';
-  let activeView=null,viewWrite=Promise.resolve(),viewTimer,chatSession=null,selectionGeneration=0;
+  let activeView=null,viewWrite=Promise.resolve(),viewTimer,chatSession=null,selectionGeneration=0,chatHydration=0;
   let chatPreparing=false,initialIntent=null;
   let chatShown=false,pendingTaskToggle=null;
-  let chatPosition=null,chatNavigation=0;
+  let chatPosition=null,chatNavigation=0,chatRestore=null;
   let awaitingSnapshot=false;
   const t = key => translate(locale,key);
   root.replaceChildren();
@@ -117,10 +127,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   history.setAttribute('role', 'log');
   history.setAttribute('aria-label', t('chat'));
   const messageColumn = el('div', 'message-column');
-  const taskClock=bindTaskClock(messageColumn,{locale:()=>locale,active:()=>!disposed&&route==='chat'&&!root.classList.contains('show-directory')});
+  const taskClock=bindTaskClock(messageColumn,{locale:()=>locale,active:()=>!disposed&&route==='chat'&&!root.classList.contains('show-directory'),prepare:()=>requestMessageRender(false)});
   const historyStatus=el('button','history-page-status text-button');historyStatus.type='button';
   const windowHost=el('div','message-window');
-  messageColumn.append(historyStatus,windowHost,chatApprovals);
+  const emptyChat=el('p','empty-chat');emptyChat.hidden=true;
+  messageColumn.append(historyStatus,windowHost,chatApprovals,emptyChat);
   history.append(messageColumn);
   const latest = button('down', t('latest'), 'latest-button');
   latest.hidden = true;
@@ -131,6 +142,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   input.rows = 1;
   input.setAttribute('autocapitalize', 'sentences');
   const send = button('send', t('send'), 'send-button');
+  const sendModes=['refresh','play','stop','send'];
+  const sendIcons=Object.fromEntries(sendModes.map(name=>[name,icon(name)]));
+  const showSendIcon=(node,visible)=>{const display=visible?'':'none';if(node.style.display!==display)node.style.display=display;};
+  for(const name of sendModes)showSendIcon(sendIcons[name],name==='send');
+  send.replaceChildren(...sendModes.map(name=>sendIcons[name]));
+  send.setAttribute('aria-label', t('send'));
+  let sendMode='send';
   form.append(input, send);
   composerArea.append(latest, form);
   const continuation=client.production?createTurnContinuation({client,locale:()=>locale,changed:()=>{if(!disposed)updateControls();}}):null;
@@ -147,10 +165,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   root.append(rail, titlebar, directory, workspace, menu, preferences, assistantProfile);
   chatApprovals.dataset.scrollAnchor='chat-approvals';
   const messageNodes=new Map(),toolMemory=new Map(),windowHeights=new Map();
+  const renderIdentities=()=>currentPreparedRender()?.context.renderContext?.identities;
+  const resolveRenderIdentity=address=>renderIdentities()?resolveMessageRenderIdentity(renderIdentities(),address):messageIdentities(client).resolve(address);
+  const renderTasks=scope=>currentPreparedRender()?.context.renderContext?.tasks||projectedTasks(scope);
   const messageWindow=createWorkRecordWindow({
     blocked:message=>!!pages?.approvalFor(message.tool),
     scroller:history,host:windowHost,render:(...args)=>renderMessage(...args),dispose:entry=>disposeMessage(entry),heights:windowHeights,
-    locale:()=>locale,actor:()=>messageIdentities(client).actor(client.scope?.()),resolveIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,scope:()=>JSON.stringify(client.scope?.()),
+    locale:()=>locale,actor:()=>renderIdentities()?.actor||messageIdentities(client).actor(client.scope?.()),resolveIdentity:resolveRenderIdentity,memory:toolMemory,scope:()=>JSON.stringify(messageRenderIssuer(client,client.scope?.())),
     active:()=>chatShown&&!disposed,
     requestRender:()=>renderMessages(true),
     interact:()=>cancelChatPosition(),
@@ -200,7 +221,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   const updates=client.production?createUpdates({client,locale:()=>locale,changed:()=>{if(!disposed)renderShell();},notify:message=>{error=message;updateControls();}}):null;
  if(updates)root.append(updates.dialog);
- const pages = client.production ? createPages({updates,chatVisible:()=>route==='chat'&&!root.classList.contains('show-directory'),onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, chatApprovalHost:chatApprovals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: async value => {if(value?.assistant)pendingSelection=value.assistant;const removed=value?.deletedAssistant;if(removed){attachmentUI?.forget(removed);await assistantDrafts?.forget(removed).catch(()=>{error=t('drafts.cleanupFailed');});const selected=selectedAssistant?.id===removed.owner&&selectedAssistant?.space_id===removed.space;if(selected)clearSelectedAssistant();await domains.chat.remove(removed).catch(cacheFailure);}await loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:async target=>{if(target?.assistant)directoryEpoch++;if(target?.owner&&(!selectedAssistant||selectedAssistant.id!==target.owner||selectedAssistant.space_id!==target.space)){let assistant=assistants.find(item=>item.id===target.owner&&item.space_id===target.space);if(!assistant&&target.assistant){assistant={...target.assistant,space_id:target.space};assistants=[...assistants,assistant];client.assistants=assistants;}if(assistant)await selectAssistant(assistant,false,false);}route='chat';directoryOpen=!!target?.directory&&!selectedAssistant;renderShell();renderMessages();pages.permissions();if(!selectedAssistant&&!target?.directory)loadDirectory();}}) : null;
+ const pages = client.production ? createPages({updates,chatVisible:()=>route==='chat'&&!root.classList.contains('show-directory'),onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, chatApprovalHost:chatApprovals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: async value => {if(value?.assistant)pendingSelection=value.assistant;const removed=value?.deletedAssistant;if(removed){attachmentUI?.forget(removed);await assistantDrafts?.forget(removed).catch(()=>{error=t('drafts.cleanupFailed');});const selected=selectedAssistant?.id===removed.owner&&selectedAssistant?.space_id===removed.space;if(selected)clearSelectedAssistant();await domains.chat.remove(removed).catch(cacheFailure);}}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:async target=>{if(target?.assistant)directoryEpoch++;if(target?.owner&&(!selectedAssistant||selectedAssistant.id!==target.owner||selectedAssistant.space_id!==target.space)){let assistant=assistants.find(item=>item.id===target.owner&&item.space_id===target.space);if(!assistant&&target.assistant){assistant={...target.assistant,space_id:target.space};assistants=[...assistants,assistant];client.assistants=assistants;}if(assistant)await selectAssistant(assistant,false,false);}route='chat';directoryOpen=!!target?.directory;if(target?.created)saveNavigation('chat',true);renderShell();renderMessages();pages.permissions();if(!selectedAssistant&&!target?.directory)loadDirectory();}}) : null;
   const media = matchMedia('(max-width: 719px)');
   const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
   const saveReads=()=>{if(!client.desktop)persist('pot-ui-read-v1',JSON.stringify(replies.records()));};
@@ -233,6 +254,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const stopViewport = bindViewport(document.documentElement, {onWidthChange: () => editor.resize()});
   const restoredAttachmentFailures=new Set(),attachmentAttempts=new Map();
   const can=(operation,item=selectedAssistant)=>!client.production||client.operationsReady!==false&&client.operationScopeReady?.({space:item?.space_id,owner:item?.id})!==false&&!directoryStorageFailed&&supportsCapability(client.assistants?.find(current=>current.id===item?.id&&current.space_id===item?.space_id&&current.control_id===item?.control_id),operation);
+  const settingsAccess=createSettingsAccess(client);
+  const canOpenSettings=(operation,item=selectedAssistant)=>settingsAccess(operation,item,client.assistants);
   const attachmentUI=client.production?createAttachmentComposer({client,form,input,getKey:()=>editorOwner,getCaps:()=>state.snapshot?.agent?.attachments,canSelect:()=>route==='chat'&&!!editorOwner&&!!assistantDrafts?.ready(editorOwner),canUpload:()=>can('chat.attachments')&&route==='chat'&&!!state.snapshot&&editorOwner===ownerKey(state.snapshot)&&connection==='connected'&&!selectedAssistant?.offline,changed:()=>updateControls(),draftChanged:key=>assistantDrafts?.change(key,true),locale:()=>locale}):null;
   if(attachmentUI){form.classList.add('has-attachments');attachmentUI.toolbar.append(send);}
   const referenceDraftHost=el('div','composer-references');form.prepend(referenceDraftHost);
@@ -240,34 +263,60 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const draftStatus=el('div','draft-storage-status');draftStatus.hidden=true;draftStatus.setAttribute('role','status');composerArea.append(draftStatus);
   let draftStatusSignature='';
   let referenceDraftSignature='',referenceNotice='';
-  let historyLoading=false,historyFailure='',historyGeneration=0,historyFlight=null,historyRecovery=null,historyAbort=new AbortController();
+  let historyLoading=false,historyFailure='',historyGeneration=0,historyRequests=new Map(),historyDemand=null,historyAbort=new AbortController();
   let historyScrollTime=0,historySpeed=0,historyLatency=200;
   const historyPrefetch=()=>Math.max(360,Math.min(history.clientHeight*4,history.clientHeight*2+historySpeed*historyLatency));
   function readHistory(query,options={}){
     if(options.positionTicket&&!currentChatPosition(options.positionTicket))return Promise.resolve(false);
-    const receivedEpoch=epoch;
-    if(historyLoading&&(historyRecovery||historyFlight))return (historyRecovery||historyFlight).then(()=>receivedEpoch===epoch?readHistory(query,options):false);
-    historyFlight=readHistoryNow(query,options);return historyFlight;
+    if(!chatSession?.hasHistory||!state.snapshot)return Promise.resolve(false);
+    // Coalesce work only for the same reader intention. A later click on the
+    // same missing target must not inherit the first click's retired ticket;
+    // the domain independently shares the underlying historical HTTP request.
+    const ticket=options.positionTicket;
+    const requests=historyRequests,key=JSON.stringify([query,!!options.around,ticket?[ticket.epoch,ticket.generation]:null]);
+    if(requests.has(key))return requests.get(key).promise;
+    const request={remote:false};requests.set(key,request);
+    request.promise=readHistoryNow(query,options,request).finally(()=>{
+      requests.delete(key);
+      if(requests===historyRequests){historyLoading=!!historyDemand||[...requests.values()].some(value=>value.remote);renderMessages();}
+    });return request.promise;
   }
-  async function readHistoryNow(query,{around=false,positionTicket}={}) {
-    if(!chatSession?.hasHistory||!state.snapshot||historyLoading)return false;
-    const receivedEpoch=epoch,generation=++historyGeneration;
-    historyLoading=true;historyFailure='';renderMessages();
+  function resumeHistory(){
+    const demand=historyDemand;if(!demand||client.onlineReady===false)return;
+    historyDemand=null;historyLoading=[...historyRequests.values()].some(value=>value.remote);renderMessages();
+    if(demand.epoch===epoch&&demand.generation===historyGeneration)readHistory(demand.query,demand.options);
+  }
+  async function readHistoryNow(query,{around=false,positionTicket,restoreIntent,recovery}={},request) {
+    const session=chatSession,receivedEpoch=epoch,generation=historyGeneration;
+    const current=()=>!disposed&&receivedEpoch===epoch&&generation===historyGeneration&&session===chatSession;
+    const currentPosition=()=>!positionTicket||currentChatPosition(positionTicket);
+    const options={around,signal:historyAbort.signal,valid:current,currentPosition};
+    historyFailure='';
     try {
       const started=performance.now();
-      const merged=await chatSession.history(query,{around,signal:historyAbort.signal,valid:()=>!disposed&&receivedEpoch===epoch&&generation===historyGeneration&&(!positionTicket||currentChatPosition(positionTicket))});
-      if(disposed||receivedEpoch!==epoch||generation!==historyGeneration||positionTicket&&!currentChatPosition(positionTicket))return false;
+      // Every request probes committed local coverage independently. A slow
+      // network page must never put another cached page behind its flight.
+      let merged=await session.history(query,{...options,cachedOnly:true});
+      if(!current())return false;
+      if(!merged){
+        if(!currentPosition())return false;
+        if(client.onlineReady===false){historyDemand={query,options:{around,positionTicket,restoreIntent,recovery},epoch:receivedEpoch,generation};historyLoading=true;renderMessages();return false;}
+        request.remote=true;historyLoading=true;renderMessages();
+        merged=await session.history(query,options);
+      }
+      if(!current()||!currentPosition())return false;
       historyLatency=historyLatency*.5+(performance.now()-started)*.5;
       if(!merged)return false;
-      state.snapshot=merged;renderMessagesNow();scheduleViewSave();
+      if(restoreIntent){chatRestore=null;positionChat(restoreIntent);}
+      if(recovery)await applySnapshot(merged,receivedEpoch,recovery.receivedMessages,{live:recovery.live});
+      else {state.snapshot=merged;renderMessagesNow();scheduleViewSave();}
       return true;
-    }catch(reason){if(!disposed&&receivedEpoch===epoch&&generation===historyGeneration&&(!positionTicket||currentChatPosition(positionTicket))){historyFailure=reason?.status===404?'history.missing':'history.failed';if(reason.storage)cacheFailure(reason);}return false;}
-    finally{if(!disposed&&receivedEpoch===epoch&&generation===historyGeneration){historyLoading=false;renderMessages();}}
+    }catch(reason){if(current()&&currentPosition()&&reason.name!=='AbortError'){historyFailure=reason?.status===404?'history.missing':'history.failed';if(reason.storage)cacheFailure(reason);}return false;}
   }
   async function jumpToMessage(id,{expand=false}={}){
     const ticket=positionChat({kind:'message',id,expand});
     let message=state.snapshot?.messages.find(message=>message.id===id&&!message.context_only);
-    if(!message){prepareChat();if(!await readHistory({around:id},{around:true,positionTicket:ticket})){if(currentChatPosition(ticket))chatPosition=null;return;}message=state.snapshot?.messages.find(message=>message.id===id);}
+    if(!message){if(!await readHistory({around:id},{around:true,positionTicket:ticket})){if(currentChatPosition(ticket))chatPosition=null;return;}message=state.snapshot?.messages.find(message=>message.id===id);}
     if(!currentChatPosition(ticket))return;
     if(!message){chatPosition=null;historyFailure='history.missing';renderMessages();return;}
     state.uiAnchor=message.sequence;
@@ -333,8 +382,36 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   if(client.production){
     assistantDrafts=createAssistantDrafts({client,state,attachments:attachmentUI,changed:()=>updateControls(),restored:key=>{if(key===editorOwner){if(!chatPreparing)prepareChat();syncEditor();}},restorePending:(receipt,scope)=>confirmations.restore(receipt,scope)});
     state.draftChanged=key=>assistantDrafts.change(key);
+    outbox=createChatOutbox({client,cacheFailed:(receipt,reason,retry)=>{sendCacheFailures.set(receipt,retry);updateControls();},changed:()=>{if(!disposed){outboxDialog?.update();updateControls();}}});
+    outboxDialog=createOutboxDialog({client,outbox,locale:()=>locale,notify:value=>{error=value;updateControls();}});root.append(outboxDialog.root);
+  }
+  function localSubmissionReady(){
+    const snapshot=state.snapshot;
+    if(!selectedAssistant||!snapshot||editorOwner!==ownerKey(snapshot)||enqueuePending||!assistantDrafts?.ready(editorOwner)||state.pending.has(editorOwner))return false;
+    try{outboxTarget(client,client.scope(),snapshot);}catch{return false;}
+    return !!(draft(state,editorOwner).trim()||attachmentUI?.items(editorOwner).length)&&new TextEncoder().encode(draft(state,editorOwner)).byteLength<=65536&&!attachmentUI?.localProblem()&&!referenceProblem(draftReferences(state,editorOwner));
+  }
+  async function enqueueSubmission(){
+    if(!localSubmissionReady())return;
+    const key=editorOwner,scope={...client.scope()},snapshot=state.snapshot;
+    const value={destination:{name:selectedAssistant.name,space:spaces.find(item=>item.id===scope.space)?.name||''},target:outboxTarget(client,scope,snapshot),request:{request_id:requestID(),conversation_id:snapshot.conversation_id,text:draft(state,key),references:structuredClone(draftReferences(state,key)),attachments:structuredClone(attachmentUI?.refs()||[]),...(snapshot.running?{user_message_id:snapshot.turn_id}:{}),...(retryAttachmentInput()?{retry_user_message_id:retryAttachmentInput()}:{})},draftVersion:state.draftVersions.get(key)||0,referenceVersion:state.referenceVersions.get(key)||0,created_at_ms:Date.now()};
+    const unmark=attachmentUI?.markSubmitted(key,value.request.attachments);
+    let committed=false;enqueuePending=true;error='';updateControls();
+    try{
+      await assistantDrafts.enqueue(key,value,()=>{
+        committed=true;
+        // IDB transaction completion is the ownership boundary. A newer edit,
+        // including typing during the save, belongs to the composer and survives.
+        if((state.draftVersions.get(key)||0)===value.draftVersion&&draft(state,key)===value.request.text)setDraft(state,'',key);
+        if((state.referenceVersions.get(key)||0)===value.referenceVersion&&JSON.stringify(draftReferences(state,key))===JSON.stringify(value.request.references))setDraftReferences(state,[],key);
+        attachmentUI?.clearSubmitted(key,value.request.attachments);
+      });
+      if(!disposed){if(editorOwner===key){syncEditor();positionChat({kind:'latest'});}await outbox.refresh();outbox.wake();}
+    }catch{if(!committed)unmark?.();if(!disposed)error=t(committed?'outbox.storageFailed':'outbox.saveFailed');}
+    finally{enqueuePending=false;if(!disposed)updateControls();}
   }
   async function submit() {
+    if(client.production)return enqueueSubmission();
     if(continuation?.state().pending)return;
     if (!can('chat.send')||chatCacheFailed||(!client.production&&state.snapshot?.running) || selectedAssistant?.offline || connection !== 'connected' || editorOwner !== (state.snapshot && ownerKey(state.snapshot))) return;
     if(attachmentUI?.problem())return;
@@ -381,6 +458,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   });
   function updateControls() { return updateControlsLayout(); }
   function updateControlsLayout() {
+    if(outbox?.error())error=t('outbox.storageFailed');
     if(chatCacheFailed)error=t('chatCache.failed');
     if(directoryStorageFailed)error=t('storage.failed');
     const snapshot = state.snapshot;
@@ -396,17 +474,19 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const running = snapshot?.running;
     const draftReady=!assistantDrafts||assistantDrafts.ready(editorOwner);
     continuation?.update(snapshot,{connected:draftReady&&connection==='connected'&&can('chat.continue')&&!selectedAssistant?.offline&&!pending&&!!snapshot&&editorOwner===ownerKey(snapshot)});
-    const recovery=continuation?.state(),restoring=recovery?.pending,resuming=client.operationsReady!==false&&draftReady&&recovery?.available&&!hasComposerInput();
+    const recovery=continuation?.state(),restoring=recovery?.pending&&!hasComposerInput(),resuming=client.operationsReady!==false&&draftReady&&recovery?.available&&!hasComposerInput();
     const stopping=running&&(!client.production||(!draft(state).trim()&&!attachmentUI?.items().length));
     const label = restoring||resuming ? recovery.label : stopping ? (cancelPending ? t('stopping') : t('stop')) : running?t('send.guidance'):t('send');
-    send.replaceChildren(icon(restoring ? 'refresh' : resuming ? 'play' : stopping ? 'stop' : 'send'));
+    const mode=restoring?'refresh':resuming?'play':stopping?'stop':'send';
+    if(mode!==sendMode){sendMode=mode;for(const name of sendModes)showSendIcon(sendIcons[name],name===mode);}
     send.setAttribute('aria-busy',String(!!restoring));
     send.title = label;
     send.setAttribute('aria-label', label);
-    send.disabled = restoring || (resuming ? recovery.disabled : stopping ? !can('chat.cancel')||selectedAssistant?.offline||cancelPending || connection !== 'connected' : !can('chat.send')||chatCacheFailed||saved?.loading||selectedAssistant?.offline|| !snapshot || editorOwner !== ownerKey(snapshot) || pending || (!draft(state).trim()&&!attachmentUI?.items().length) || !!attachmentUI?.problem() || connection !== 'connected');
+    const disabled = restoring || (resuming ? recovery.disabled : stopping ? !can('chat.cancel')||selectedAssistant?.offline||cancelPending || connection !== 'connected' : client.production ? !localSubmissionReady() : !can('chat.send')||chatCacheFailed||saved?.loading||selectedAssistant?.offline|| !snapshot || editorOwner !== ownerKey(snapshot) || pending || (!draft(state).trim()&&!attachmentUI?.items().length) || !!attachmentUI?.problem() || connection !== 'connected');
+    if(send.disabled!==disabled)send.disabled=disabled;
     attachmentUI?.update();
     updateReferenceDraft();
-    input.disabled = !snapshot && !editorOwner;
+    const inputDisabled=!snapshot&&!editorOwner;if(input.disabled!==inputDisabled)input.disabled=inputDisabled;
     completions?.refresh();
     const status=titlebar.querySelector('.connection-status');
     if(status)reconcile(status,connectionStatus());
@@ -443,11 +523,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function saveNavigation(next,replace=false){const value={potRoute:next,potScope:client.scope?.()||{},potDirectory:directoryOpen};window.history[replace?'replaceState':'pushState'](value,'',location.href);}
   async function navigate(next,{replace=false,record=true}={}) {
-    if(client.operationsReady===false&&next!=='chat')return;
+    if(client.operationsReady===false&&!['chat','tasks','usage','extensions'].includes(next)&&!configurationRoute(next))return;
     if (pages && !await pages.leave()) return;
+    if(client.production&&record&&next==='add-assistant'&&route==='chat'){const prior=directoryOpen;directoryOpen=true;saveNavigation('chat',true);directoryOpen=prior;}
     route = next;
     menuOpen = false;
     if (next === 'chat') directoryOpen = true;
+    if (next === 'add-assistant') directoryOpen = false;
     if(client.production&&record)saveNavigation(next,replace);
     renderShell();
     if(pages&&next==='chat')pages.permissions();if (pages && next !== 'chat') pages.show(next);
@@ -461,8 +543,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (inMenu) item.append(el('span', '', t(name === 'chat' ? 'assistants' : name)));
       item.classList.toggle('is-selected', route === name);
       if (route === name) item.setAttribute('aria-current', 'page');
-      item.disabled=client.operationsReady===false&&name!=='chat';
-      item.onclick = () => {if(client.operationsReady===false&&name!=='chat')return;navigate(name);};
+      item.disabled=client.operationsReady===false&&!['chat','tasks','usage','extensions'].includes(name)&&!configurationRoute(name);
+      item.onclick = () => navigate(name);
       fragment.append(item);
     }
     return fragment;
@@ -478,12 +560,12 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       // fresh capability removal and storage/offline failures still remove them.
       // Reconciliation may remove a button or replace its handler. A retained
       // node/callback must still validate authority and its original destination.
-      const current=()=>!disposed&&receivedEpoch===epoch&&selection===selectionGeneration&&linkGeneration===connectionGeneration&&boot===client.runtime.boot_id&&JSON.stringify(captured)===JSON.stringify(client.scope())&&captured.owner===selectedAssistant?.id&&captured.space===selectedAssistant?.space_id&&identity===JSON.stringify([selectedAssistant?.space_id,selectedAssistant?.id,controlOf(selectedAssistant)])&&!selectedAssistant?.offline;
+      const current=(configuration=false)=>!disposed&&receivedEpoch===epoch&&selection===selectionGeneration&&linkGeneration===connectionGeneration&&boot===client.runtime.boot_id&&JSON.stringify(captured)===JSON.stringify(client.scope())&&captured.owner===selectedAssistant?.id&&captured.space===selectedAssistant?.space_id&&identity===JSON.stringify([selectedAssistant?.space_id,selectedAssistant?.id,controlOf(selectedAssistant)])&&(configuration||!selectedAssistant?.offline);
       const retaining=preferences.open&&assistant?.retained&&!directoryStorageFailed&&context===preferenceContext&&current();
       const visible=(key,allowed)=>allowed||retaining&&!!preferences.querySelector('[data-view-key="'+key+'"]');
       preferences.classList.add('product-actions');const projection=preferences.cloneNode(false),close=button('close',t('close'));close.dataset.viewKey='close';close.onclick=()=>preferences.close();projection.append(close);
       const action=(key,label,run,valid=()=>true)=>{const choice=el('button','menu-destination',label);choice.type='button';choice.dataset.viewKey=key;if(!valid()){if(retaining)choice.setAttribute('aria-disabled','true');else choice.disabled=true;}choice.onclick=event=>{if(disposed||event.currentTarget.getAttribute('aria-disabled')==='true'||!valid())return;preferences.close();run();};projection.append(choice);};
-      if(selectedAssistant&&visible('assistant-settings',can('assistant.configure')||can('assistant.profile')))action('assistant-settings',t('assistantSettings'),()=>{route='settings';pages.assistant(selectedAssistant);renderShell();},()=>current()&&(can('assistant.configure')||can('assistant.profile')));
+      if(selectedAssistant&&visible('assistant-settings',canOpenSettings('assistant.configure')||canOpenSettings('assistant.profile')))action('assistant-settings',t('assistantSettings'),openAssistantSettings,()=>current(true)&&(canOpenSettings('assistant.configure')||canOpenSettings('assistant.profile')));
       if(selectedAssistant&&visible('usage',can('assistant.usage')))action('usage',t('usage'),()=>{route='usage';pages.conversationUsage(selectedAssistant.name);renderShell();},()=>current()&&can('assistant.usage'));
       if(state.snapshot?.running&&visible('turn-control',can('chat.control'))){
         const snapshot=state.snapshot,target=snapshot.turn_id,paused=!!snapshot.turn?.paused;
@@ -548,7 +630,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     clearTimeout(viewTimer);
     if(!state.snapshot||chatPreparing)return viewWrite;
     while(toolMemory.size>1280)toolMemory.delete(toolMemory.keys().next().value);
-    activeView={position:messageWindow.snapshot(),layout:layoutKey(),heights:[...windowHeights],tools:[...toolMemory]};
+    const position=chatRestore&&currentChatPosition(chatRestore.ticket)?chatRestore.intent.position:messageWindow.snapshot();
+    activeView={position,layout:layoutKey(),heights:messageWindow.prepared?[...windowHeights]:[],tools:[...toolMemory]};
     const savedScope=client.scope?.();
     if(chatSession)viewWrite=chatSession.saveView(activeView).then(()=>client.rememberStartup?.(savedScope,viewSurface)).catch(reason=>{if(!disposed){error=t('chatCache.positionFailed');console.error('Chat view storage:',reason);updateControls();}});
     return viewWrite;
@@ -562,7 +645,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   // cached history arrives. Include that geometry in the hidden first layout.
   const draftLayoutReady=()=>{const status=assistantDrafts?.status(editorOwner);return !assistantDrafts||assistantDrafts.ready(editorOwner)||!!status?.error&&!status.cleanup;};
   const initialLayout=createInitialChatLayout({history,
-    ready:()=>!disposed&&chatPreparing&&!!state.snapshot&&!historyLoading&&chatShown&&draftLayoutReady(),
+    ready:()=>!disposed&&chatPreparing&&!!state.snapshot&&chatShown&&draftLayoutReady()&&messageWindow.prepared,
     layout:()=>{editor.resize();renderMessagesNow(true);},
     position:()=>{if(initialIntent)applyChatPosition(initialIntent);},
     fontFallback:()=>root.classList.add('chat-font-fallback'),
@@ -575,7 +658,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     root.classList.remove('chat-font-fallback');
   }
   function revealChat(){
-    if(chatPreparing&&!initialLayout.pending&&state.snapshot&&!historyLoading&&chatShown&&draftLayoutReady())initialLayout.start();
+    if(chatPreparing&&!initialLayout.pending&&state.snapshot&&chatShown&&draftLayoutReady())initialLayout.start();
   }
   const closeAssistantProfile = () => assistantProfile.hidePopover();
   window.addEventListener('resize', closeAssistantProfile);
@@ -587,14 +670,18 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function openAssistantSettings() {
     assistantProfile.hidePopover();
-    route = 'settings'; pages.assistant(selectedAssistant); renderShell();
+    const item=client.assistants?.find(item=>item.id===selectedAssistant?.id&&item.space_id===selectedAssistant?.space_id&&item.control_id===selectedAssistant?.control_id);
+    if(!item||!(canOpenSettings('assistant.configure')||canOpenSettings('assistant.profile')))return;
+    route = 'settings'; pages.assistant(settingsAccess.definition(item,client.assistants)); renderShell();
   }
   assistantProfile.addEventListener('toggle', event => {
     root.querySelector('.assistant-profile-trigger')?.setAttribute('aria-expanded', String(event.newState === 'open'));
   });
+  function setInert(node,value){if(node.inert!==value)node.inert=value;}
   function renderShell() {
+    outboxDialog?.update();
     root.classList.toggle('is-local-startup',client.operationsReady===false);
-    unavailable.inert=client.operationScopeReady?.()===false||pages?.authorityReady===false;approvals.inert=client.operationScopeReady?.()===false;
+    setInert(unavailable,!['tasks','usage','extensions'].includes(route)&&!configurationRoute(route)&&!pages?.editing&&(client.operationScopeReady?.()===false||pages?.authorityReady===false));setInert(approvals,client.operationScopeReady?.()===false);
     root.classList.toggle('is-background',document.visibilityState==='hidden');
     const showingChat=route==='chat'&&!(media.matches&&directoryOpen);
     if(chatShown&&!showingChat){rememberChatPosition();cancelChatPosition();initialLayout.cancel();messageWindow.suspend();}
@@ -661,7 +748,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         heading.append(assistantAvatar(selectedAssistant, 40), info);
         const settings = button('sliders', t('assistantSettings'), 'assistant-profile-settings');
         settings.append(el('span', '', t('assistantSettings'))); settings.onclick = openAssistantSettings;
-        projection.append(heading);if(can('assistant.configure')||can('assistant.profile'))projection.append(settings);reconcile(assistantProfile, projection);
+        projection.append(heading);if(canOpenSettings('assistant.configure')||canOpenSettings('assistant.profile'))projection.append(settings);reconcile(assistantProfile, projection);
       }
       title.append(identity,connectionStatus());
     } else title.append(el('span', '', titleText));
@@ -672,8 +759,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       open.onclick = async () => { try { await client.openMain(); } catch (reason) { error = reason.message; updateControls(); } };
       titlebar.append(open);
     }
-    if (client.production && route === 'chat' && selectedAssistant && (can('assistant.configure')||can('assistant.profile'))) { const settings = button('sliders', t('assistantSettings')); settings.dataset.viewKey='assistant-settings';settings.onclick = openAssistantSettings; titlebar.append(settings); }
+    if (client.production && route === 'chat' && selectedAssistant && (canOpenSettings('assistant.configure')||canOpenSettings('assistant.profile'))) { const settings = button('sliders', t('assistantSettings')); settings.dataset.viewKey='assistant-settings';settings.onclick = openAssistantSettings; titlebar.append(settings); }
     if(!client.production){const cloud=el('span','icon-button');cloud.title=t('remote');cloud.append(icon('cloud'));titlebar.append(cloud);}
+    if(outbox){const saved=button('clock',t('outbox.title'));saved.onclick=()=>outboxDialog.open();titlebar.append(saved);}
     const more = button('more', t(client.production ? 'chat.actions' : 'more'));more.dataset.viewKey='conversation-actions';
     more.setAttribute('aria-haspopup', 'dialog');
     more.onclick = () => { preferencesOpen = true; renderPreferences(); preferences.showModal(); };
@@ -704,7 +792,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     const add = button('plus', t(client.production ? 'assistantStart.title' : 'preview'));
     add.disabled = !client.production||client.operationsReady===false||!creationSpace()||creationSpace()?.connected===false;
-    add.onclick = () => {directoryOpen=false;navigate('add-assistant');};
+    add.onclick = () => navigate('add-assistant');
     heading.append(add);
     const search = el('input', 'assistant-search');
     search.type = 'search'; search.placeholder = t('search'); search.setAttribute('aria-label', t('search')); search.value = searchValue;
@@ -737,7 +825,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     menuContent.append(menuHeading, navigation(true));menu.append(menuContent);
     menu.hidden = !menuOpen || !narrow;
     menu.setAttribute('aria-label', t('menu'));
-    workspace.inert = directory.inert = titlebar.inert = !menu.hidden;
+    const menuInert=!menu.hidden;setInert(workspace,menuInert);setInert(directory,menuInert);setInert(titlebar,menuInert);
     reconcile(shellRoots.rail,rail);reconcile(shellRoots.titlebar,titlebar);reconcile(shellRoots.menu,menu);
     if(!menu.hidden&&!shellRoots.menu.contains(document.activeElement))shellRoots.menu.querySelector('.icon-button')?.focus({preventScroll:true});
     if (preferencesOpen) renderPreferences();
@@ -750,7 +838,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function nearBottom() { return history.scrollHeight - history.clientHeight - history.scrollTop < 80; }
   let renderFrame=0,fullRender=false,chatProjection;
   function currentChatPosition(ticket){return !disposed&&ticket.generation===chatNavigation&&ticket.epoch===epoch;}
-  function cancelChatPosition(){chatNavigation++;chatPosition=null;initialIntent=null;}
+  function cancelChatPosition(){chatNavigation++;chatPosition=null;initialIntent=null;chatRestore=null;}
   function applyChatPosition(intent){
     if(intent.kind==='restore')messageWindow.restore(intent.position);
     else if(intent.kind==='latest')messageWindow.scrollToLatest();
@@ -765,19 +853,19 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function pauseFollowing(){cancelChatPosition();messageWindow.pause();}
   function loadEarlierNearTop(){
-    if(!historyLoading&&!historyFailure&&history.scrollTop<historyPrefetch()&&state.snapshot?.history?.has_more){
+    if(!historyFailure&&history.scrollTop<historyPrefetch()&&state.snapshot?.history?.has_more){
       pauseFollowing();readHistory({before:state.snapshot.history.before});
     }
   }
   function loadNewerNearBottom(){
-    if(!historyLoading&&!historyFailure&&history.scrollHeight-history.clientHeight-history.scrollTop<historyPrefetch()&&state.snapshot?.history?.has_newer){
+    if(!historyFailure&&history.scrollHeight-history.clientHeight-history.scrollTop<historyPrefetch()&&state.snapshot?.history?.has_newer){
       pauseFollowing();readHistory({after:state.snapshot.history.after});
     }
   }
-  latest.onclick = async()=>{const ticket=positionChat({kind:'latest'});if(state.snapshot?.history?.has_newer){prepareChat();await readHistory({},{around:true,positionTicket:ticket});}if(!currentChatPosition(ticket))return;state.uiAnchor=null;renderMessagesNow();};
-  historyStatus.onclick=()=>{pauseFollowing();if(historyFailure==='history.missing'){historyFailure='';renderMessages();}else if(!historyLoading&&state.snapshot?.history?.has_more)readHistory({before:state.snapshot.history.before});};
+  latest.onclick = async()=>{const ticket=positionChat({kind:'latest'});if(state.snapshot?.history?.has_newer)await readHistory({},{around:true,positionTicket:ticket});if(!currentChatPosition(ticket))return;state.uiAnchor=null;renderMessagesNow();};
+  historyStatus.onclick=()=>{pauseFollowing();if(historyFailure==='history.missing'){historyFailure='';renderMessages();}else if(state.snapshot?.history?.has_more)readHistory({before:state.snapshot.history.before});};
   let backgroundProjection={key:'',items:[]};
-  const projectedTasks=scope=>backgroundProjection.key===JSON.stringify([scope.space,scope.owner])?backgroundProjection.items:[];
+  const projectedTasks=scope=>backgroundProjection.key===JSON.stringify([scope.space,scope.owner])?backgroundProjection.items.map(task=>({...task,_stale:!!task._stale||client.onlineReady===false||!can('task.list')})):[];
   const openChatTask=(task,scope=client.scope())=>{route='tasks';pages.openTask({...task,_space_id:task._space_id||scope.space,assistant_id:task.assistant_id||scope.owner},{returnTo:{route:'chat',scope:{...scope}}});renderShell();};
   const backgroundTaskView=createBackgroundTasks({locale:()=>locale,
     onOpen:openChatTask,
@@ -789,11 +877,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(!can('task.list')){backgroundTasks?.close();backgroundTasks=null;backgroundTaskKey='';backgroundProjection={...backgroundProjection,items:backgroundProjection.items.map(task=>({...task,_stale:true}))};if(route==='chat')renderMessages();return Promise.resolve();}
     const scope={...client.scope()},key=JSON.stringify([scope.space,scope.owner]);
     if(!backgroundTasks||key!==backgroundTaskKey){backgroundTasks?.close();backgroundTaskKey=key;
-      const stop=domains.tasks.watchActive(scope,snapshot=>{if(disposed||key!==JSON.stringify([client.scope().space,client.scope().owner])||!snapshot.data)return;const items=snapshot.data;backgroundProjection={key,items};messageIdentities(client).rememberTasks(items);pages.rememberTasks(items);if(route==='chat')renderMessages();});
+      const stop=domains.tasks.watchActive(scope,snapshot=>{if(disposed||key!==JSON.stringify([client.scope().space,client.scope().owner])||!snapshot.data)return;const items=snapshot.data.map(task=>({...task,_stale:!!task._stale||!snapshot.fresh}));backgroundProjection={key,items};messageIdentities(client).rememberTasks(items);pages.rememberTasks(items);if(route==='chat')renderMessages();});
       backgroundTasks={close:stop,run:()=>domains.tasks.active(scope).refresh()};
     }return backgroundTasks.run();
   }
-  const disposeMessage=record=>{record.attachmentNode?.dispose?.();record.row.remove();messageNodes.delete(record.row.dataset.windowKey);};
+  const disposeMessage=record=>{record.attachmentNode?.dispose?.();record.row.remove();const key=record.row.dataset.windowKey;if(messageNodes.get(key)===record)messageNodes.delete(key);};
   const requestMessageRender=resize=>{
     renderMessages(true);
   };
@@ -807,14 +895,16 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     downloadFile:client.downloadFile?async({task,path})=>{try{await client.downloadFile(task,path,scope);}catch(reason){error=reason.message;updateControls();}}:undefined,
   });
   const renderMessage=(message,existing)=>{
-    const snapshot=renderingSnapshot,sending=renderingSending,forest=renderingForest;
+    const context=currentPreparedRender()?.context.renderContext||{snapshot:renderingSnapshot,sending:renderingSending,forest:renderingForest,scope:client.scope?.(),assistant:selectedAssistant,t,offline:connection==='offline'||disconnected,canRetrySend:connection==='connected'&&!pendingSend()&&draft(state)===renderingSending?.request.text};
+    const {snapshot,sending,forest}=context;
     let record = existing;
     if (!record) {
       const row = el('article', `message role-${message.role}`);
       const bubble = el('div', 'message-body');
       row.append(bubble);
       record = {row, bubble};
-      messageNodes.set(message.viewKey, record);
+      record.commit=()=>{messageNodes.set(message.viewKey,record);record.childrenWindow?.commitPrepared();return record;};
+      if(currentPreparedRender()?.context.phase!=='prepare')record.commit();
     }
     const {row, bubble} = record;
     row.classList.toggle('is-activity',!!message.activity);
@@ -824,59 +914,63 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
  if(!record.compact){record.compact=createCompaction({locale:()=>locale});bubble.append(record.compact.element);}
  record.compact.update(message);
  }else if(message.role==='tool'&&message.tool){
-      const scope=client.scope?.()||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
-      if(!record.tool){record.tool=createToolCall({messageActor:()=>messageIdentities(client).actor(scope),resolveTask:id=>projectedTasks(scope).find(task=>task.id===id),onOpenTask:task=>openChatTask(task,scope),resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key,locale:()=>locale,machineLabel:id=>machinePresentation(client).label(id,scope,locale),onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>messageWindow.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
-      record.tool.update(message,{offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
+      const scope=context.scope||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
+      if(!record.tool){record.tool=createToolCall({messageActor:()=>renderIdentities()?.actor||messageIdentities(client).actor(scope),resolveTask:id=>renderTasks(scope).find(task=>task.id===id),onOpenTask:task=>openChatTask(task,scope),resolveMessageIdentity:resolveRenderIdentity,memory:toolMemory,key,locale:()=>locale,machineLabel:id=>currentPreparedRender()?.context.renderContext?.machineLabels?.[id]??machinePresentation(client).label(id,scope,locale),onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>messageWindow.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
+      record.tool.update(message,{expanded:messageWindow.revealing&&messageWindow.visibilityPath.has(message.id)||messageWindow.destination?.expand&&messageWindow.destination.id===message.id,offline:context.offline,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
     }else if(message.role==='assistant'){
       record.reply ||= createReplyBubble(bubble);
-      const scope=client.scope?.();
+      const scope=context.scope;
       record.reply.update(message,{t,...markdownFiles(scope),
         onSettings:async()=>{if(!await pages?.leave())return;route='settings';await pages.showProviders();renderShell();},
-        onRetrySend:submit,canRetrySend:connection==='connected'&&!pendingSend()&&draft(state)===sending?.request.text});
+        onRetrySend:submit,canRetrySend:context.canRetrySend});
       record.text=message.text;record.role=message.role;
     }else if (record.text !== message.text || record.role !== message.role) {
-      bubble.replaceChildren();
-      if (message.role === 'tool') bubble.append(el('pre','',message.text));
-      else if (message.role === 'system') bubble.textContent = message.text;
-      else {const scope=client.scope?.(),prose=el('div','message-prose');prose.append(renderMarkdown(message.text,{...markdownFiles(scope)}));bubble.append(prose);}
+      if(message.role==='user'){
+        if(!record.prose){record.prose=preparedAsset('user-prose-host','user',()=>el('div','message-prose'));bubble.prepend(record.prose);}
+        updateMarkdown(record.prose,message.text,{...markdownFiles(context.scope),renderSlot:'user-prose'});
+      }else bubble.replaceChildren(preparedAsset('plain-body',JSON.stringify([message.role,message.text]),()=>message.role==='tool'?el('pre','',message.text):document.createTextNode(message.text)));
       record.text = message.text; record.role = message.role;
       row.className = `message role-${message.role}`;
     }
     if(message.role==='assistant'&&!message.activity){
-      const name=selectedAssistant?.name||'Pot',image=selectedAssistant?.avatar;
+      const name=context.assistant?.name||'Pot',image=context.assistant?.avatar;
       if(!record.speaker||record.speakerName!==name||record.speakerImage!==image){
         record.speaker?.remove();record.speakerName=name;record.speakerImage=image;
-        record.speaker=el('div','message-speaker');
-        record.speaker.append(assistantAvatar(selectedAssistant,25),el('span','',name));
-        row.prepend(record.speaker);
+        record.speaker=preparedAsset('speaker',JSON.stringify([name,image]),()=>{const speaker=el('div','message-speaker');speaker.append(assistantAvatar(context.assistant,25),el('span','',name));return speaker;});
+        moveConversationNode(row,record.speaker,row.firstChild);
       }
     }else if(record.speaker){record.speaker.remove();record.speaker=null;}
-    const source=message.role==='assistant'?bubble.querySelector('.reply-content'):message.role==='user'?bubble.querySelector('.message-prose'):null;
+    const source=message.queue?null:message.role==='assistant'?bubble.querySelector('.reply-content'):message.role==='user'?bubble.querySelector('.message-prose'):null;
     if(source&&message.text&&!message.id.startsWith('pending:'))source.dataset.referenceSource=message.id;
-    const referenceSignature=JSON.stringify([message.references||[],locale]);
+    const referenceSignature=JSON.stringify([message.references||[],locale,(message.references||[]).map(ref=>{const source=snapshot?.messages?.find(row=>row.id===ref.message_id);return [source?.role,ref.quote?null:source?.text];})]);
     if(message.role==='user'&&(record.referenceSignature!==referenceSignature||record.referenceNode&&!record.referenceNode.isConnected)){
       record.referenceNode?.remove();record.referenceSignature=referenceSignature;
-      if(message.references?.length){record.referenceNode=renderMessageReferences(message.references,{messages:snapshot?.messages||[],locale:()=>locale,onJump:jumpToMessage});bubble.prepend(record.referenceNode);}
+      if(message.references?.length){record.referenceNode=preparedAsset('references',referenceSignature,()=>renderMessageReferences(message.references,{messages:snapshot?.messages||[],locale:()=>locale,onJump:jumpToMessage}));moveConversationNode(bubble,record.referenceNode,bubble.firstChild);}
     }
-    const attachmentSignature=JSON.stringify([message.attachments||[],state.snapshot?.agent?.attachments]);
+    const attachmentSignature=JSON.stringify([message.attachments||[],snapshot?.agent?.attachments,!!message.queue]);
     if(message.role==='user'&&(record.attachmentSignature!==attachmentSignature||!record.attachmentNode?.isConnected)){
-      record.attachmentNode?.dispose?.();record.attachmentNode?.remove();record.attachmentSignature=attachmentSignature;
-      if(message.attachments?.length){record.attachmentNode=renderMessageAttachments(message.attachments,{client,caps:state.snapshot?.agent?.attachments,scope:{...client.scope()},locale:()=>locale,onError:reason=>{error=reason.message;updateControls();}});bubble.append(record.attachmentNode);}
+      const prepared=message.attachments?.length?preparedAsset('attachments',attachmentSignature,()=>renderMessageAttachments(message.attachments,{client,originalResource:message.queue?(attachment=>outbox.acquireOriginal(message.queue.target.key,message.queue.request.request_id,attachment,{space:message.queue.target.space,owner:message.queue.target.owner})):undefined,caps:snapshot?.agent?.attachments,scope:{...context.scope},locale:()=>locale,onError:reason=>{error=reason.message;updateControls();}})):null;
+      if(prepared&&currentPreparedRender()?.context.phase==='commit')consumePreparationSurrogates(prepared);
+      record.attachmentNode?.dispose?.();record.attachmentNode?.remove();record.attachmentSignature=attachmentSignature;record.attachmentNode=prepared;
+      if(prepared)moveConversationNode(bubble,prepared);
     }
+    if(message.queue){
+      const queued=message.queue,editing=queueEditors.has(outboxIdentityKey(queued)),signature=JSON.stringify([outboxIdentityKey(queued),queued.revision,locale,editing]);
+      if(record.queueSignature!==signature||!record.queueNode?.isConnected){
+        const controls=preparedAsset('outbox-controls',signature,()=>outboxIndicator(queued,locale));
+        record.queueNode?.remove();record.queueNode=controls;record.queueSignature=signature;moveConversationNode(bubble,controls);
+      }
+    }else if(record.queueNode){record.queueNode.remove();record.queueNode=null;record.queueSignature='';}
     if ((message.role === 'assistant'||message.role==='user') && message.text && !record.copy) {
-      const copy = button('copy',t('copy'),'copy-message');
-      copy.type = 'button';
-      copyFeedback(copy,{text:()=>record.text,locale:()=>locale,translate,onError:reason=>{error=reason.message;updateControls();}});
-      row.append(copy); record.copy = copy;
+      const copy=preparedAsset('copy-control','message-copy',()=>{const control=button('copy',t('copy'),'copy-message');control.type='button';copyFeedback(control,{text:()=>control.copyRecord.text,locale:()=>locale,translate,onError:reason=>{error=reason.message;updateControls();}});return control;});
+      copy.copyRecord=record;moveConversationNode(row,copy);record.copy=copy;
     }
     if (record.copy) {const label=t(record.copy.dataset.copied?'copied':'copy');record.copy.title=label;record.copy.setAttribute('aria-label',label);}
     if (message.role==='tool'&&!message.tool&&message.status === 'streaming' && !record.dot) {
       record.dot = el('span', 'activity-dot'); row.append(record.dot);
     } else if (message.status !== 'streaming' && record.dot) { record.dot.remove(); record.dot = null; }
     record.dot?.setAttribute('aria-label', t('working'));
-    if(message.role==='user'&&message.steering&&message.status==='accepted'){
-      if(!record.received){record.received=el('span','guidance-received');record.received.append(icon('clock'));row.append(record.received);}record.received.title=locale==='zh-CN'?'已接收':'Received';record.received.setAttribute('aria-label',record.received.title);
-    }else if(record.received){record.received.remove();record.received=null;}
+
 
     if(record.tool){
       const entry=forest.byID.get(message.tool.turn_id+':'+message.tool.id),children=entry?.children.map(child=>child.message)||[];
@@ -888,47 +982,56 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const viewportObserver=new ResizeObserver(()=>requestMessageRender(true));viewportObserver.observe(history);
   function renderMessages(viewportOnly=false){fullRender ||= !viewportOnly;if(disposed||renderFrame)return;renderFrame=requestAnimationFrame(()=>{renderFrame=0;const viewportOnly=!fullRender;fullRender=false;renderMessagesNow(viewportOnly);});}
   function renderMessagesNow(viewportOnly=false) {
-    if(!chatShown)return;
+    // A missing/offline directory can replace the conversation with its own
+    // recovery view. Its retired row/region hosts are no longer a layout target.
+    // Selecting a confirmed assistant reconnects the normal column together.
+    if(!chatShown||windowHost.parentElement!==messageColumn)return;
     const navigation=chatPosition?.epoch===epoch?chatPosition:null;
     const anchor=messageWindow.anchor;
     const snapshot=state.snapshot;
     const sending=state.sends.get(editorOwner||(snapshot&&ownerKey(snapshot)));
+    const queued=outbox?.rows().filter(row=>row.state!=='cancelled'&&row.target.host===client.runtime?.runtime_id&&row.target.space===selectedAssistant?.space_id&&row.target.owner===selectedAssistant?.id&&row.target.control===controlOf(selectedAssistant)&&row.target.conversation===snapshot?.conversation_id)||[];
+    const queueSignature=JSON.stringify(queued.map(row=>[outboxIdentityKey(row),row.revision,queueEditors.has(outboxIdentityKey(row))]));
     const activeTurn=snapshot?.running?(snapshot.messages.find(message=>message.id===snapshot.turn_id)?.request_id||snapshot.turn_id):null;
     const offline=connection!=='connected'||disconnected||selectedAssistant?.offline;
-    if(!chatProjection||chatProjection.snapshot!==snapshot||chatProjection.sending!==sending||chatProjection.phase!==sending?.phase||chatProjection.detail!==sending?.detail||chatProjection.offline!==offline||chatProjection.activeTurn!==activeTurn){
-      const messages=projectScriptRuns(projectChatReplies(snapshot,sending,{offline}),{activeTurn});
+    if(!chatProjection||chatProjection.queueSignature!==queueSignature||chatProjection.snapshot!==snapshot||chatProjection.sending!==sending||chatProjection.phase!==sending?.phase||chatProjection.detail!==sending?.detail||chatProjection.offline!==offline||chatProjection.activeTurn!==activeTurn){
+      const messages=projectScriptRuns(projectOutboxRows(projectChatReplies(snapshot,sending,{offline}),queued,{editing:queueEditors}),{activeTurn});
       const forest=toolForest(messages),roots=messages;
       const parents=new Map(messages.flatMap(message=>{const parent=message.tool?.parent_id&&forest.byID.get(message.tool.turn_id+':'+message.tool.parent_id)?.message;return parent?[[message.id,parent.id]]:[];}));
-      chatProjection={snapshot,sending,phase:sending?.phase,detail:sending?.detail,offline,activeTurn,messages,forest,roots,parents};
+      chatProjection={snapshot,sending,queueSignature,phase:sending?.phase,detail:sending?.detail,offline,activeTurn,messages,forest,roots,parents};
     }
     const {messages:visibleMessages,forest,roots,parents}=chatProjection;
     renderingSnapshot=snapshot;renderingSending=sending;renderingForest=forest;
-    historyStatus.hidden=!chatSession?.hasHistory||!snapshot;
-    historyStatus.disabled=historyLoading||!historyFailure&&!snapshot?.history?.has_more;
-    historyStatus.textContent=t(historyLoading?'history.loading':historyFailure|| (snapshot?.history?.has_more?'history.earlier':'history.start'));
+    const historyChrome={hidden:!chatSession?.hasHistory||!snapshot,disabled:!historyFailure&&!snapshot?.history?.has_more,label:t(historyFailure|| (snapshot?.history?.has_more?'history.earlier':'history.start'))};
     const tasks=client.production?projectedTasks(client.scope()):[];
-    if(client.production&&!viewportOnly)backgroundTaskView.update(JSON.stringify(client.scope()),tasks,(id,phase)=>pages.taskNeedsApproval(id,phase));
-    // The task region stays outside recycled message rows and shares the chat scroller.
-    if(client.production&&tasks.length){
+    // Regions outside recycled rows join the same prepared geometry transaction.
+    if(client.production){
       if(backgroundTaskView.element.parentElement!==messageColumn)messageColumn.insertBefore(backgroundTaskView.element,chatApprovals);
-    }else backgroundTaskView.element.remove();
+    }
     if(pendingTaskToggle&&!pendingTaskToggle.expanded&&messageWindow.position?.anchors[0]?.key.startsWith('task:')){
       const retained=new Set([...backgroundTaskView.element.querySelectorAll('[data-scroll-anchor]')].map(node=>node.dataset.scrollAnchor));
       if(!retained.has(messageWindow.position.anchors[0].key))messageWindow.locate({key:'background-tasks-heading',align:'nearest'});
     }
     pendingTaskToggle=null;
-    if(!viewportOnly)taskClock.refresh();
-    if (snapshot && !visibleMessages.length) {
-      if(!messageColumn.querySelector('.empty-chat'))messageColumn.append(el('p', 'empty-chat', t('first')));
-    }else if(visibleMessages.length){
-      messageColumn.querySelector('.empty-chat')?.remove();
-    }
     if(!viewportOnly)pages?.renderApprovals();
     if(!chatApprovals.hidden&&locateApprovals===JSON.stringify(client.scope?.())){
       locateApprovals='';cancelChatPosition();messageWindow.locate({key:'chat-approvals',align:'nearest'});
     }
-    messageWindow.setMessages(roots,{parents});
-    if(navigation&&snapshot&&!historyLoading&&navigation.kind!=='message')chatPosition=null;
+    const empty={hidden:!snapshot||!!visibleMessages.length,text:t('first')};
+    const toolOffline=connection==='offline'||disconnected;
+    const canRetrySend=connection==='connected'&&!pendingSend()&&draft(state)===sending?.request.text;
+    const regions=[{key:'chat-history-status',host:historyStatus,revision:JSON.stringify(historyChrome),render:target=>{target.hidden=historyChrome.hidden;target.disabled=historyChrome.disabled;target.textContent=historyChrome.label;}},
+      {key:'chat-empty',host:emptyChat,revision:JSON.stringify(empty),render:target=>{target.hidden=empty.hidden;target.textContent=empty.text;}},
+      ...(client.production?[backgroundTaskView.region(JSON.stringify(client.scope()),tasks,(id,phase)=>pages.taskNeedsApproval(id,phase)),pages.approvalRegion()]:[])];
+    const identities=messageIdentities(client).snapshot(client.scope?.());
+    const machineLabels=Object.fromEntries(roots.flatMap(message=>[message.tool?.target?.runtime_id]).filter(Boolean).map(id=>[id,machinePresentation(client).label(id,client.scope?.(),locale)]));
+    const referenceProps=roots.flatMap(message=>(message.references||[]).map(ref=>{const source=snapshot?.messages?.find(row=>row.id===ref.message_id);return [ref.message_id,source?.role,ref.quote?null:source?.text];}));
+    // Task updates change tool presentation, not the layout generation of every
+    // reply or embedded document. Only dependent rows prepare a new version.
+    const taskPresentation=tasks.map(task=>[task.id,task.address,task.title,task.phase,task.run_id,task.agent_link,task.capabilities,task._space_id,task.assistant_id,task._stale]);
+    const presentationEpoch=JSON.stringify([identities,taskPresentation]);
+    messageWindow.setMessages(roots,{parents,regions,afterCommit:()=>taskClock.refresh(),presentationEpoch,presentationKey:message=>message.tool||message.members?presentationEpoch:null,layoutEpoch:[layoutKey(),snapshot?.runtime_id,snapshot?.boot_id,snapshot?.owner_id,snapshot?.conversation_id,selectedAssistant?.name,selectedAssistant?.avatar,snapshot?.agent?.attachments,toolOffline,canRetrySend,referenceProps,machineLabels],renderContext:{identities,tasks,machineLabels,snapshot,sending,forest,scope:{...client.scope?.()},assistant:selectedAssistant,t,offline:toolOffline,canRetrySend}});
+    if(navigation&&snapshot&&navigation.kind!=='message')chatPosition=null;
     latest.hidden=messageWindow.following;
     state.uiAnchor=messageWindow.following?null:selectedSequence()||messageWindow.anchor?.sequence||null;
     revealChat();
@@ -938,7 +1041,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     state.uiAnchor=messageWindow.anchor?.sequence||null;
   }
   function pendingSend(){return state.snapshot&&state.pending.has(ownerKey(state.snapshot));}
-  function readyFromSnapshot(){connection='connected';connectionError='';disconnected=false;if(chatCacheFailed){chatCacheFailed=false;error='';}}
+  function readyFromSnapshot(){connection='connected';connectionError='';disconnected=false;if(chatCacheFailed){chatCacheFailed=false;error='';}resumeHistory();}
   async function applySnapshot(snapshot, receivedEpoch = epoch, receivedMessages=snapshot.messages,{live=true}={}) {
     if (disposed || receivedEpoch !== state.epoch) return;
     if(state.snapshot&&validSnapshot(snapshot)&&state.snapshot.boot_id!==snapshot.boot_id){
@@ -955,15 +1058,18 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     const readingBeforeReset=snapshot.kind==='reset'&&!messageWindow.following?messageWindow.anchor:null;
     if(chatSession&&readingBeforeReset&&!snapshot.messages.some(message=>message.id===readingBeforeReset.id&&!message.context_only)){
-      const ticket={generation:chatNavigation,epoch},generation=++historyGeneration;
-      let finish;const recovery=new Promise(resolve=>{finish=resolve;});historyRecovery=recovery;
-      historyLoading=true;connection='connecting';updateControls();
+      const ticket={generation:chatNavigation,epoch},generation=historyGeneration;
+      connection='connecting';updateControls();
       try{
-        const restored=await chatSession.history({around:readingBeforeReset.id},{around:true,signal:historyAbort.signal,valid:()=>receivedEpoch===epoch&&generation===historyGeneration&&currentChatPosition(ticket)});
-        if(!restored||receivedEpoch!==epoch||generation!==historyGeneration||!currentChatPosition(ticket))return;
+        const restored=await chatSession.history({around:readingBeforeReset.id},{around:true,cachedOnly:true,signal:historyAbort.signal,valid:()=>receivedEpoch===epoch&&generation===historyGeneration,currentPosition:()=>currentChatPosition(ticket)});
+        if(receivedEpoch!==epoch||generation!==historyGeneration||!currentChatPosition(ticket))return;
+        if(!restored){
+          // Keep the existing prepared window while recovery fills the cache.
+          // The stream commit/retirement must not await this network request.
+          readHistory({around:readingBeforeReset.id},{around:true,positionTicket:ticket,recovery:{receivedMessages,live}});return;
+        }
         snapshot=restored;
       }catch(reason){if(receivedEpoch===epoch&&generation===historyGeneration&&currentChatPosition(ticket)){historyFailure=reason?.status===404?'history.missing':'history.failed';if(reason.storage)cacheFailure(reason);}return;}
-      finally{finish();if(historyRecovery===recovery)historyRecovery=null;if(receivedEpoch===epoch&&generation===historyGeneration){historyLoading=false;renderMessages();}}
     }
     const initialSnapshot = !state.snapshot;
     if(live&&validSnapshot(snapshot)){awaitingSnapshot=false;}
@@ -980,15 +1086,25 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(markVisibleRead())renderShell();
     renderMessages();updateControls();
     if(client.production)pages.syncApprovals();
-    if(readingBeforeReset&&!snapshot.messages.some(message=>message.id===readingBeforeReset.id&&!message.context_only)){
-      readHistory({around:readingBeforeReset.id},{around:true});
-    }
     if(initialSnapshot){if(client.production)pages.permissions();renderShell();}
     scheduleViewSave();
   }
   async function loadSnapshot(reattach = false) {
     if (disposed) return;
-    if(reattach){const retained=state.snapshot;historyGeneration++;historyLoading=false;epoch=beginSubscription(state);if(retained)acceptSnapshot(state,retained,epoch,{committed:true});disconnected=false;return attach();}
+    // Startup confirmation can arrive while the selected session queries IDB.
+    // That selection will attach with the latest connection authority after
+    // hydration. Reattaching here would retire its epoch and discard the only
+    // cached snapshot while the backend's initial frame is still unavailable.
+    if(reattach&&chatHydration===selectionGeneration)return;
+    if(reattach){
+      const retained=state.snapshot,demand=historyDemand,restore=chatRestore;
+      const resume=demand&&(!demand.options.positionTicket||currentChatPosition(demand.options.positionTicket));
+      const retainRestore=restore&&currentChatPosition(restore.ticket);
+      historyGeneration++;historyRequests=new Map();historyDemand=null;historyLoading=false;epoch=beginSubscription(state);
+      if(resume)historyDemand={...demand,epoch,generation:historyGeneration,options:{...demand.options,positionTicket:demand.options.positionTicket?{...demand.options.positionTicket,epoch}:undefined}};
+      chatRestore=retainRestore?{...restore,ticket:{...restore.ticket,epoch}}:null;
+      if(retained)acceptSnapshot(state,retained,epoch,{committed:true});disconnected=false;const attached=attach();resumeHistory();return attached;
+    }
     const receivedEpoch = epoch;
     connection = 'connecting'; error = ''; connectionError = ''; updateControls();
     try {
@@ -1008,14 +1124,17 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (value === 'offline') {disconnected = true;connectionError = reason?.uiKey?reason:reason?.message || t('streamDisconnected');}
       if (value === 'connected') connectionError = '';
       if(value==='connecting'&&client.production)awaitingSnapshot=true;
-      if (value === 'connected' && disconnected && client.desktop) { disconnected = false; loadSnapshot(true); }
-      else { connection = value==='connected'&&awaitingSnapshot?'connecting':value; updateControls(); }
+      connection = value==='connected'&&awaitingSnapshot?'connecting':value; updateControls();
     }});
     if(!client.production)return loadSnapshot();
     // Both SSE and the desktop subscription send an authoritative initial snapshot.
     return Promise.resolve();
   }
   async function selectAssistant(item, initial = false,record=true) {
+    if(!disposed&&route==='chat'&&!pages?.editing&&chatSession&&state.snapshot&&selectedAssistant&&selectedAssistant.id===item.id&&selectedAssistant.space_id===item.space_id&&selectedAssistant.control_id===item.control_id){
+      if(media.matches&&directoryOpen){directoryOpen=false;renderShell();}
+      return;
+    }
     const selection=++selectionGeneration;
     completions?.reset();
     if(editor.composing){input.blur();if(editor.composing)return;}
@@ -1030,11 +1149,12 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     pages?.clearApprovals();locateApprovals=item.pending_approvals?JSON.stringify({owner:item.id,space:item.space_id||''}):'';selectedAssistant=item;
     client.setScope({owner:item.id,space:item.space_id||''});updates?.refresh(client.scope());
     chatSession=domains.chat.open(client.scope(),{surface:viewSurface,initialSurface:client.startup?.space===item.space_id&&client.startup?.owner===item.id?client.startup.surface:undefined,context:chatContext});
-    epoch=beginSubscription(state);const receivedEpoch=epoch;editorOwner=null;activeView=null;route='chat';if(!initial||client.startup?.owner===item.id)directoryOpen=false;
+    epoch=beginSubscription(state);const receivedEpoch=epoch;editorOwner=null;activeView=null;route='chat';if(!initial||client.startup?.owner===item.id&&!restoredDirectory)directoryOpen=false;
     pendingTaskToggle=null;chatProjection=null;renderingSnapshot=null;renderingSending=null;renderingForest=null;historyScrollTime=0;historySpeed=0;historyLatency=200;messageWindow.reset();
     messageWindow.setMessages([]);windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);messageNodes.clear();windowHeights.clear();toolMemory.clear();
-    historyGeneration++;historyLoading=false;historyFailure='';state.uiAnchor=null;error='';chatCacheFailed=false;connectionError='';disconnected=false;connection='connecting';
+    historyGeneration++;historyRequests=new Map();historyDemand=null;historyLoading=false;historyFailure='';state.uiAnchor=null;error='';chatCacheFailed=false;connectionError='';disconnected=false;connection='connecting';
     renderShell();
+    chatHydration=selection;
     try{
       const cached=await chatSession.query();
       if(disposed||selection!==selectionGeneration||receivedEpoch!==epoch)return;
@@ -1042,17 +1162,23 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if(activeView?.layout===layoutKey())for(const [key,height]of activeView.heights||[])windowHeights.set(key,height);
       for(const [key,value]of activeView?.tools||[])toolMemory.set(key,value);
       restoreSavedPosition(activeView?.position);
+      const restoreIntent=initialIntent;
+      const restoreAnchor=activeView?.position?.position?.anchor;
       if(cached?.snapshot){acceptSnapshot(state,cached.snapshot,epoch,{committed:true});syncEditor();}
+      chatHydration=0;
       if(client.production&&record)saveNavigation('chat',initial);
       renderShell();attach();pages?.permissions();refreshBackgroundTasks();
-      const anchor=messageWindow.anchor;
-      if(anchor&&!state.snapshot?.messages.some(message=>message.id===anchor.id))await readHistory({around:anchor.id},{around:true});
-      else if(messageWindow.following&&state.snapshot?.history?.has_newer)await readHistory({},{around:true});
+      const anchor=messageWindow.anchor,ticket={generation:chatNavigation,epoch};
+      const missing=restoreAnchor&&!state.snapshot?.messages.some(message=>message.id===restoreAnchor.id)?restoreAnchor:anchor&&!state.snapshot?.messages.some(message=>message.id===anchor.id)?anchor:null;
+      if(missing){chatRestore={ticket,intent:restoreIntent};readHistory({around:missing.id},{around:true,positionTicket:ticket,restoreIntent});}
+      else if(messageWindow.following&&state.snapshot?.history?.has_newer)readHistory({},{around:true,positionTicket:ticket});
     }catch(reason){if(!disposed&&receivedEpoch===epoch){cacheFailure(reason);}}
+    finally{if(chatHydration===selection)chatHydration=0;}
   }
   function creationSpace(){return selectedAssistant?spaces.find(space=>space.id===selectedAssistant.space_id):spaces.find(space=>space.kind==='local')||spaces[0];}
   function clearSelectedAssistant() {
     initialLayout.cancel();
+    historyGeneration++;historyRequests=new Map();historyDemand=null;historyLoading=false;
     const space=selectedAssistant?.space_id||client.scope().space;
     attachmentUI?.forget({space,owner:selectedAssistant?.id||client.scope().owner});
     selectionGeneration++;unsubscribe();historyAbort.abort();historyAbort=new AbortController();chatSession?.close().catch(()=>{});chatSession=null;epoch=beginSubscription(state);activeView=null;selectedAssistant=null;editorOwner=null;pendingSelection=null;
@@ -1076,22 +1202,24 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       const changed=[];if(previousMachines!==machinePresentation(client).revision)changed.push('machines');if(previousSpaces!==JSON.stringify(spaces))changed.push('spaces');if(previousOwners!==JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.profile_name,item.avatar,item.origin,item.offline,item.capabilities])))changed.push('assistants');if(changed.length)pages.refresh(changed,{domainNotified:true});
       for(const item of assistants){const arrival=replies.observe(controlOf(item),item.id,item.reply_id||'',item.reply_count||0,!item.offline);if(arrival.arrived&&route==='chat'&&document.visibilityState!=='hidden'&&!reducedMotion.matches){reactions.set(replyKey(controlOf(item),item.id),performance.now());setTimeout(()=>{if(!disposed){directorySignature='';renderShell();}},650);}}saveReads();
       if(directory.partial)error=t('partialOffline');else if(error===t('partialOffline'))error='';
-      if(selectedAssistant&&!pages.editing&&!assistants.some(item=>item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id)){
+      const directoryLoading=!!directory.loading;
+      if(selectedAssistant&&!directoryLoading&&!pages.editing&&!assistants.some(item=>item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id)){
         const missing=selectedAssistant;try{const confirmed=await domains.directory.confirm(missing);if(ticket!==directoryEpoch||disposed)return;if(confirmed){assistants=[...assistants,confirmed];client.assistants=assistants;}else clearSelectedAssistant();}catch(reason){if(reason.storage){directoryStorageFailed=true;error=t('storage.failed');}else error=t('partialOffline');}
       }
-      if (selectedAssistant){const taskAccess=can('task.list');selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;if(selectedAssistant.offline)connection='offline';if(taskAccess!==can('task.list'))refreshBackgroundTasks();}
+      if (selectedAssistant){const watchingTasks=!!backgroundTasks;selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;if(selectedAssistant.offline)connection='offline';if(watchingTasks!==can('task.list'))refreshBackgroundTasks();}
       renderShell();renderMessages();
-      if(!assistants.length&&route==='chat'&&!pages.editing){
+      if(!assistants.length&&!directoryLoading&&route==='chat'&&!pages.editing){
         const available=!directory.partial&&spaces.some(space=>space.connected!==false);
-        if(available){directoryOpen=false;route='add-assistant';renderShell();await pages.show('add-assistant');}else{directoryOpen=false;renderShell();const empty=el('div','empty-chat');empty.append(el('p','hint',t('partialOffline')));const retry=el('button','control',t('retry'));retry.onclick=()=>loadDirectory();empty.append(retry);messageColumn.replaceChildren(empty);}
+        if(available){directoryOpen=true;saveNavigation('chat',true);directoryOpen=false;route='add-assistant';saveNavigation('add-assistant');renderShell();await pages.show('add-assistant');}else{directoryOpen=false;renderShell();const empty=el('div','empty-chat');empty.append(el('p','hint',t('partialOffline')));const retry=el('button','control',t('retry'));retry.onclick=()=>loadDirectory();empty.append(retry);messageColumn.replaceChildren(empty);}
       }
       mainReady();
-      if(pendingSelection){const chosen=assistants.find(item=>item.id===pendingSelection.id&&item.space_id===pendingSelection.space_id);pendingSelection=null;if(chosen){await selectAssistant(chosen);notifications?.directory({epoch:notificationEpoch});return;}}
+      if(pendingSelection){const chosen=assistants.find(item=>item.id===pendingSelection.id&&item.space_id===pendingSelection.space_id);if(chosen||!directoryLoading){pendingSelection=null;if(chosen){await selectAssistant(chosen);notifications?.directory({epoch:notificationEpoch});return;}}}
       if (route==='chat' && !selectedAssistant && assistants.length && !pages.editing) {
-        const requested=params.get('assistant_id')||client.startup?.owner;const requestedSpace=params.get('space_id')||client.startup?.space;
+        const retained=restoredDirectory&&client.startup?.owner?client.startup:null;
+        const requested=retained?.owner||params.get('assistant_id')||client.startup?.owner;const requestedSpace=retained?.space||params.get('space_id')||client.startup?.space;
         const selected=requested?assistants.find(item=>item.id===requested&&(!requestedSpace||item.space_id===requestedSpace)):assistants[0];
-        if(!selected){error=t('missingAssistant');connection='offline';updateControls();notifications?.directory({epoch:notificationEpoch});return;}
-        await selectAssistant(selected,!params.get('assistant_id'));
+        if(!selected){if(directoryLoading){notifications?.directory({epoch:notificationEpoch});return;}error=t('missingAssistant');connection='offline';updateControls();notifications?.directory({epoch:notificationEpoch});return;}
+        await selectAssistant(selected,restoredDirectory||!params.get('assistant_id'));
       }
       notifications?.directory({epoch:notificationEpoch});
     } catch (reason) { if (ticket===directoryEpoch&&!disposed) {error = reason.storage?t('storage.failed'):reason.message;if(reason.storage)directoryStorageFailed=true;else connection='offline';updateControls();if(!assistants.length){const empty=el('div','empty-chat',error);const retry=el('button','control',t('retry'));retry.onclick=()=>domains.directory.refresh().catch(reason=>{error=reason.storage?t('storage.failed'):reason.message;updateControls();});empty.append(document.createElement('br'),retry);messageColumn.replaceChildren(empty);}} }
@@ -1108,7 +1236,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(!client.production)return;restoringHistory=true;
     try{
       const value=event.state||{},scope=value.potScope||{};
-      if(((value.potRoute||'chat')==='chat'||value.potUsage&&!value.potUsage.returnTask)&&scope.owner&&(!selectedAssistant||selectedAssistant.id!==scope.owner||selectedAssistant.space_id!==scope.space)){const item=assistants.find(item=>item.id===scope.owner&&item.space_id===scope.space);if(!item){error=t('missingAssistant');updateControls();return;}await selectAssistant(item,false,false);}
+      // A directory entry retains its former scope only as history metadata.
+      // Returning to the list must not retire the current conversation for it.
+      if(((value.potRoute||'chat')==='chat'&&!value.potDirectory||value.potUsage&&!value.potUsage.returnTask)&&scope.owner&&(!selectedAssistant||selectedAssistant.id!==scope.owner||selectedAssistant.space_id!==scope.space)){const item=assistants.find(item=>item.id===scope.owner&&item.space_id===scope.space);if(!item){error=t('missingAssistant');updateControls();return;}await selectAssistant(item,false,false);}
       if(value.potResource){route='settings';await pages.openResources(false);return;}
       if(value.potSchedule){route='tasks';await pages.openSchedule(value.potSchedule,false);return;}
       if(value.potTask){route='tasks';await pages.openTask(value.potTask,{recordHistory:false,returnTo:value.potTaskReturn});return;}
@@ -1159,11 +1289,15 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     settling=true;
     await Promise.all(targets.map(target=>settleMotion(target,{transform:target.style.transform},{transform:`translateX(${end}px)`})));
     if(disposed)return;
-    if(commit){if(gesture.mode==='back'){if(pages?.hasParent)await pages.back();else directoryOpen=true;}else menuOpen=gesture.mode==='open';}
+    if(commit){if(gesture.mode==='back'){if(pages?.hasParent)await pages.back();else {directoryOpen=true;if(client.production)saveNavigation('chat',true);}}else menuOpen=gesture.mode==='open';}
     clearSwipe();settling=false;renderShell();
   };
   const pointerUp=event=>{finishSwipe(event).catch(reason=>{clearSwipe();settling=false;error=reason.message;updateControls();});};
   const pointerCancel=event=>{finishSwipe(event,true).catch(()=>{clearSwipe();settling=false;});};
+  // Cancelling pointermove alone does not suppress native touch panning. Claim
+  // only an active horizontal edge gesture; ordinary scrolling remains native.
+  const touchMove=event=>{if(swipe?.active)event.preventDefault();};
+  root.addEventListener('touchmove',touchMove,{passive:false});
   root.addEventListener('pointerdown',pointerDown,{passive:true});root.addEventListener('pointermove',pointerMove,{passive:false});root.addEventListener('pointerup',pointerUp);root.addEventListener('pointercancel',pointerCancel);
   const mediaChanged = () => { menuOpen = false; closeAssistantProfile(); renderShell(); };
   document.addEventListener('keydown', keydown);
@@ -1175,15 +1309,14 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       domains.changed(keys,source);
  if(relevantChange(keys,['updates','spaces','runtime'],client.scope().space,source))updates?.refresh(client.scope());
       if(source.boot&&state.snapshot&&(!source.space||source.space===client.scope().space)&&state.snapshot.boot_id!==source.boot)loadSnapshot(true);
-      if(source.reset){notifications?.refresh({reset:true,space:source.space});loadDirectory();}
+      if(source.reset){notifications?.refresh({reset:true,space:source.space});}
       else if(relevantChange(keys,['task-outcomes','permissions']))notifications?.refresh({topics:keys,space:source.space});
-      if(relevantChange(keys,['spaces','assistants','assistant-mail','agent-links','conversation','runtime','permissions','tasks']))loadDirectory();
       if(relevantChange(keys,['tasks'],client.scope().space,source))refreshBackgroundTasks();
       pages.refresh(keys,{...source,domainNotified:true});if(relevantChange(keys,['permissions','spaces','runtime'],pages.approvalSpace,source))pages.permissions();
     },{space:''});
   }
   if(client.production){attachChanges();loadDirectory();updates?.refresh(client.scope());}else attach();
-  const startupConfirmed=()=>{if(disposed)return;if(client.onlineReady!==false){attachChanges();domains.directory.refresh().catch(()=>{});if(selectedAssistant)loadSnapshot(true);}renderShell();updateControls();};
+  const startupConfirmed=()=>{if(disposed)return;if(client.onlineReady!==false){attachChanges();domains.directory.refresh().catch(()=>{});if(selectedAssistant)loadSnapshot(true);resumeHistory();}renderShell();updateControls();};
   const stopStartup=client.onStartupConfirmed?.(startupConfirmed);
   const stopResume=bindResumeRecovery(async()=>{
     if(disposed)return;
@@ -1205,10 +1338,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     window.removeEventListener('pagehide',pageHidden);window.removeEventListener('offline',offline);document.removeEventListener('visibilitychange',persistChat);
     for(const name of ['focus','pageshow','online'])window.removeEventListener(name,resumeSends);
     chatSession?.close().catch(()=>{});
-    stopStartup?.();assistantDrafts?.close();disposed = true;updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);viewportObserver.disconnect();stopReading();messageWindow.close();stopResources?.();releaseDomains();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();backgroundTaskView.close();directoryEpoch++; unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    stopStartup?.();assistantDrafts?.close();outboxDialog?.close();outbox?.close();disposed = true;updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);viewportObserver.disconnect();stopReading();messageWindow.close();stopResources?.();releaseDomains();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();backgroundTaskView.close();directoryEpoch++; unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     stopMessageSelection();completions?.dispose();attachmentUI?.destroy();client.releaseAttachments?.();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
-    root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);
+    root.removeEventListener('touchmove',touchMove);root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);
     window.removeEventListener('pot:preference',preferencesChanged);window.removeEventListener('pot:cache-forgotten',forgotten);
     document.removeEventListener('keydown', keydown);window.removeEventListener('popstate',popNavigation);
     media.removeEventListener('change', mediaChanged);

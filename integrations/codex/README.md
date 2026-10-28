@@ -108,6 +108,28 @@ caller/request and actual Task/run. Ordinary messages cannot approve. The same
 receiver path carries configured assistant mail and lifecycle results. Files in
 native results are path metadata, not transferred bytes.
 
+The App Server reader binds and persists the turn ID exactly once from the
+outstanding `turn/start` response before processing subsequent events. A
+`turn/started` notification cannot replace that identity. Handled events arriving
+before the response are held in order, bounded to 64 messages and 4 MiB total;
+overflow reports `codex_turn_event_buffer_exceeded_outcome_unknown` and cleans up
+the supervised session. Replayed approvals retain their existing review policy.
+Turn lifecycle and item events require nonempty, unambiguous matching thread and
+turn IDs; missing or foreign identities are ignored. Terminal results cannot be
+changed by later events.
+
+Failed terminal turns retain only a whitelisted `codexErrorInfo` category and
+valid HTTP status from the matching terminal event. Unknown or malformed details
+remain `codex_turn_failed`; free-form native messages, additional details and
+stderr are not forwarded. Independent `error` notifications do not finish a turn
+or supply guessed diagnostics. JSONL lines are limited to 4 MiB independently of
+the final answer limit. Oversized events and read failures report
+`codex_jsonl_read_failed_outcome_unknown` separately from process EOF. Unsupported
+interaction diagnostics retain only known protocol methods and safe field-shape
+metadata; elicitation is cancelled and never automatically approved. See the
+[receiver Host](../../docs/mcp-receiver-host.md) for admission, FIFO input,
+recovery and review boundaries.
+
 Execution context replaces inherited reserved actor/job/run variables for each
 supervised process while retaining native login configuration. The explicit
 `execution-tools` entry connects only to an already running Host and verifies

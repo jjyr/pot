@@ -54,8 +54,9 @@ func (c *Conversation) Control(ctx context.Context, r TurnControl) error {
 	return nil
 }
 
-// Steer atomically records exact-turn guidance and its visible user message.
-// Repeating the original receipt cannot steer a later turn with the same text.
+// Steer atomically records guidance for the named turn, or queues it as a new
+// user input when that turn can no longer consume it. Retries retain the same
+// receipt and never steer a successor turn.
 func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.SendMessageAccepted, error) {
 	r.Attachments = slices.Clone(r.Attachments)
 	r.References = slices.Clone(r.References)
@@ -81,25 +82,10 @@ func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.Send
 		}
 		return protocol.SendMessageAccepted{MessageID: old.ID, Duplicate: true}, nil
 	}
-	if c.turn != nil && c.turn.UserMessageID == r.UserMessageID && (strings.HasPrefix(c.turn.Request.RequestID, "pot-result-") || isCompactRequest(c.turn.Request.RequestID)) {
-		request := protocol.SendMessage{RequestID: r.RequestID, ConversationID: c.options.ConversationID, Text: r.Text, Attachments: r.Attachments, References: r.References}
-		old, err := c.store.Duplicate(ctx, r.RequestID)
-		if err != nil {
-			return protocol.SendMessageAccepted{}, err
-		}
-		if old != nil {
-			if old.Role != protocol.User || old.Text != r.Text || (!slices.Equal(old.Attachments, r.Attachments) || !slices.Equal(old.References, r.References)) {
-				return protocol.SendMessageAccepted{}, errors.New("steering identity has different content")
-			}
-			return protocol.SendMessageAccepted{MessageID: old.ID, Duplicate: true}, nil
-		}
-		if err := c.validateReferencesLocked(r.References); err != nil {
-			return protocol.SendMessageAccepted{}, err
-		}
-		if err := c.validateAttachmentsLocked(ctx, r.Attachments); err != nil {
-			return protocol.SendMessageAccepted{}, err
-		}
-		return c.queueUserFromLocked(ctx, request, r.UserMessageID)
+	if old, err := c.store.Duplicate(ctx, r.RequestID); err != nil {
+		return protocol.SendMessageAccepted{}, err
+	} else if old != nil {
+		return protocol.SendMessageAccepted{}, errors.New("guidance identity already used")
 	}
 	messageID := steeringMessageID(r.RequestID, r.UserMessageID)
 	var priorTurn, priorText string
@@ -109,26 +95,23 @@ func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.Send
 		return protocol.SendMessageAccepted{}, err
 	}
 	if duplicate {
-		validTarget := false
-		for _, m := range c.messages {
-			if m.ID == r.UserMessageID && m.RequestID != nil && *m.RequestID == priorTurn {
-				validTarget = true
-				break
-			}
+		target, err := c.store.Message(ctx, r.UserMessageID)
+		if err != nil {
+			return protocol.SendMessageAccepted{}, err
 		}
-		if !validTarget || priorText != r.Text {
+		if target == nil || target.RequestID == nil || *target.RequestID != priorTurn || priorText != r.Text {
 			return protocol.SendMessageAccepted{}, errors.New("steering request identity has different target or content")
 		}
-		for _, m := range c.messages {
-			if m.ID == messageID {
-				if !slices.Equal(m.Attachments, r.Attachments) || !slices.Equal(m.References, r.References) {
-					return protocol.SendMessageAccepted{}, errors.New("steering attachment identity changed")
-				}
-				return protocol.SendMessageAccepted{MessageID: messageID, Duplicate: true}, nil
-			}
+		m, err := c.store.Message(ctx, messageID)
+		if err != nil {
+			return protocol.SendMessageAccepted{}, err
 		}
-	} else if c.closed || c.turn == nil || c.turn.UserMessageID != r.UserMessageID || c.turn.Cancelling || c.finalizing {
-		return protocol.SendMessageAccepted{}, errors.New("turn is not accepting steering")
+		if m != nil {
+			if !slices.Equal(m.Attachments, r.Attachments) || !slices.Equal(m.References, r.References) {
+				return protocol.SendMessageAccepted{}, errors.New("steering attachment identity changed")
+			}
+			return protocol.SendMessageAccepted{MessageID: messageID, Duplicate: true}, nil
+		}
 	}
 	if !duplicate {
 		if err := c.validateReferencesLocked(r.References); err != nil {
@@ -136,6 +119,32 @@ func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.Send
 		}
 		if err := c.validateAttachmentsLocked(ctx, r.Attachments); err != nil {
 			return protocol.SendMessageAccepted{}, err
+		}
+	}
+	if !duplicate {
+		if c.closed || c.ctx.Err() != nil {
+			return protocol.SendMessageAccepted{}, errors.New("conversation closed")
+		}
+		// Validate the captured target in durable storage, not a paged UI view.
+		target, err := c.store.Message(ctx, r.UserMessageID)
+		if err != nil {
+			return protocol.SendMessageAccepted{}, err
+		}
+		if target == nil || target.ConversationID != c.options.ConversationID || target.RequestID == nil {
+			return protocol.SendMessageAccepted{}, errors.New("unknown guidance target")
+		}
+		if c.turn == nil || c.turn.UserMessageID != r.UserMessageID || c.turn.Cancelling || c.finalizing || strings.HasPrefix(c.turn.Request.RequestID, "pot-result-") || isCompactRequest(c.turn.Request.RequestID) {
+			request := protocol.SendMessage{RequestID: r.RequestID, ConversationID: c.options.ConversationID, Text: r.Text, Attachments: r.Attachments, References: r.References}
+			receipt, err := c.queueUserFromLocked(ctx, request, r.UserMessageID)
+			if err != nil {
+				return receipt, err
+			}
+			// The queue commit is the acceptance boundary. A scheduling failure
+			// remains recoverable from that inbox, including after restart.
+			if err := c.startNextUserLocked(ctx); err != nil {
+				return protocol.SendMessageAccepted{}, err
+			}
+			return receipt, nil
 		}
 	}
 	var turn string

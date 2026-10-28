@@ -1,4 +1,5 @@
 import {createChatCache} from '../../web/src/state/chat-cache.mjs';
+import {createIndexedStore} from '../../web/src/state/indexed-store.mjs';
 
 export async function chatCacheContract({name='pot-chat-contract-'+crypto.randomUUID(),report=()=>{}}={}) {
   const check=(value,label)=>{if(!value)throw Error(label);report('PASS '+label);};
@@ -64,6 +65,14 @@ export async function chatCacheContract({name='pot-chat-contract-'+crypto.random
     await small.writePage('bounded',{...page,cursor:'1'},{anchor:'40',around:true});
     check((await small.read('bounded')).snapshot.messages.length===80&&await small.readPage('bounded',{})===null,'evicted history intervals require a backend read');
     check((await small.read('bounded','tray')).snapshot.messages.length===80,'another window never restores a partially evicted message list');small.close();
+    await cache.writeFrames('late-position',[frame(1,'reset',Array.from({length:80},(_,i)=>message(i+81)))]);
+    const gateStore=createIndexedStore({name});let releaseGate=false,readyGate;
+    const ready=new Promise(resolve=>{readyGate=resolve;});
+    const gate=gateStore.transaction(['conversations'],'readwrite',tx=>{const pump=()=>{const get=tx.objectStore('conversations').get('late-position');get.onsuccess=()=>{readyGate();if(!releaseGate)pump();};};pump();});
+    await ready;let currentPosition=true;
+    const delayed=cache.writePage('late-position',{...page,cursor:'1'},{around:true,currentPosition:()=>currentPosition,context:()=>({anchor:'140',window:Array.from({length:80},(_,i)=>({id:'m'+(i+81)}))})});
+    currentPosition=false;releaseGate=true;await gate;gateStore.close();const delayedResult=await delayed;
+    check(delayedResult.messages.some(message=>message.id==='m140')&&delayedResult.messages.some(message=>message.id==='m1'),'a page queued behind IDB rechecks reader intent before replacing its window');
     const global=createChatCache({name,totalBytes:2048});
     await global.writeFrames('active',[frame(1,'reset',[message(1)])]);
     check(await cache.read('bounded')===null&&(await cache.read('active')).snapshot.messages.length===1,'global eviction removes inactive scopes and preserves the active projection');global.close();
@@ -73,6 +82,10 @@ export async function chatCacheContract({name='pot-chat-contract-'+crypto.random
     let denyOpen=true;const recovering=createChatCache({name,indexedDB:{open(...args){if(denyOpen)throw Error('temporarily unavailable');return indexedDB.open(...args);}}});
     try{await recovering.read('active');}catch{}
     denyOpen=false;check(!!(await recovering.read('active')),'a failed storage open can be retried after recovery');recovering.close();
+    await cache.writeFrames('incomplete',[frame(1,'reset',[message(1)])]);cache.close();
+    const damaged=createIndexedStore({name});await damaged.transaction(['messages'],'readwrite',tx=>tx.objectStore('messages').delete(['incomplete','m1']));damaged.close();
+    cache=createChatCache({name});let incomplete=false;try{await cache.read('incomplete');}catch(error){incomplete=error.message==='chat_cache_incomplete';}
+    check(incomplete,'a damaged committed window reports storage failure instead of an empty conversation');
     report('DONE cache contract');
   }finally{cache.close();await new Promise((resolve,reject)=>{const deletion=indexedDB.deleteDatabase(name);deletion.onsuccess=resolve;deletion.onerror=()=>reject(deletion.error);});}
 }
