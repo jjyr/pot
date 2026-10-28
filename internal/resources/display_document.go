@@ -77,7 +77,7 @@ func RenderDisplayDocument(resource Resource, read func(string) ([]byte, error))
 		return DisplayDocument{}, errors.New("HTML offline display limit")
 	}
 	// The independent frame response owns HTMLPolicy; retain the subresource CSP
-	// when document.write replaces its shell. iframe sandbox retains opaque origin.
+	// when the trusted factory navigates to its author Blob. The iframe stays opaque.
 	document := strings.Replace(string(raw), "<head>", `<head><meta http-equiv="Content-Security-Policy" content="`+strings.TrimSuffix(HTMLPolicy, "; sandbox allow-scripts")+`">`, 1)
 	digest := sha256.Sum256([]byte(document))
 	result := DisplayDocument{1, resource.ID, resource.Entry, resource.Files, token, document, hex.EncodeToString(digest[:])}

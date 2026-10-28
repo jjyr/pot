@@ -286,9 +286,13 @@ retirement, an observed read-authentication failure, or a confirmed directory
 removal/Control replacement deletes that scope's copies and retires active
 frames and URLs across tabs. A later live authorized binding/original read may
 reopen the scope at its new generation; older requests cannot commit after that
-recovery. Logout retires readers before clearing display stores and advances the durable global epoch in that same transaction, so a delayed cross-tab forget message cannot allow a pre-logout writer to restore bytes. Each resource's
-connected views share original-byte reads and Blob URLs, released after the last
-lease; no URL or per-mount bridge token is persisted.
+recovery. Directory observations retain their request's connection generation
+through local enumeration and the retirement transaction; a retired response cannot revoke a
+replacement connection's copies or return as a current directory read.
+Logout retires readers before clearing display stores and advances the durable
+global epoch in that same transaction, so a delayed cross-tab forget message
+cannot allow a pre-logout writer to restore bytes. Each resource's connected
+views share original-byte reads and Blob URLs, released after the last lease; no URL or per-mount bridge token is persisted.
 
 Complete HTML has a separate bounded display-document read:
 `GET /api/v1/resources/{id}/render-document`. The owner/Space-checked service

@@ -14,20 +14,21 @@ export function createResourceReader(client,request,{base='',desktop=false,copie
   const current=source=>!retired.has(resourceScope(source))&&sameSource(source);
   copies.subscribe(event=>{if(event.kind==='compact')retired.clear();if(event.kind==='retire')retired.add(event.scope);if(event.kind==='authorized')retired.delete(event.scope);if(event.kind==='clear')for(const key of known.keys())retired.add(key);});
   const check=source=>{if(!current(source))throw new DOMException('Resource source changed','NotAllowedError');};
-  const retire=async source=>{retired.add(resourceScope(source));await copies.retire(source);};
+  const retire=async(source,authority)=>{if(!authority)retired.add(resourceScope(source));await copies.retire(source,authority);};
   async function authorized(path,options,source,reconfirm=false){if(reconfirm?!sameSource(source):!current(source))throw new DOMException('Resource source changed','NotAllowedError');try{const value=await request(path,{...options,expectedControl:source.control});if(reconfirm?!sameSource(source):!current(source))throw new DOMException('Resource source changed','NotAllowedError');return value;}catch(error){if([401,403].includes(error.status)){await retire(source);}throw error;}}
   return {copies,identity,current,retire,read:(path,options)=>authorized(path,options,identity(options)),
     // Called only for transport-confirmed directory responses, never retained
     // display projections. An absent owner or replaced Control retires copies.
-    async observe(path,value,scope){
+    async observe(path,value,scope,{isCurrent=()=>true,signal}={}){
       if(!['/api/v1/spaces','/api/v1/assistants'].includes(path))return;
       const rows=Array.isArray(value)?value:value?.items;
       if(!Array.isArray(rows))return;
       const sources=new Map((await copies.sources()).map(source=>[resourceScope(source),source]));for(const [key,source]of known)sources.set(key,source);
       for(const source of sources.values()){
+        if(!isCurrent())throw new DOMException('Directory read retired','AbortError');
         if(source.host!==host())continue;
-        if(path==='/api/v1/spaces'&&!rows.some(row=>row.id===source.space&&row.control_id===source.control))await retire(source);
-        if(path==='/api/v1/assistants'&&scope.space===source.space&&!source.linked&&!rows.some(row=>row.id===source.owner))await retire(source);
+        if(path==='/api/v1/spaces'&&!rows.some(row=>row.id===source.space&&row.control_id===source.control))await retire(source,{isCurrent,signal});
+        if(path==='/api/v1/assistants'&&scope.space===source.space&&!source.linked&&!rows.some(row=>row.id===source.owner))await retire(source,{isCurrent,signal});
       }
     },
     async bindings(message,options={}){

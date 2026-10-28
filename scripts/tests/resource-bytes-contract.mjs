@@ -15,6 +15,14 @@ export async function resourceBytesContract(report=()=>{}){
   check(failed&&(await first.read(source,'bytes','rev')).value.size===5&&events.length===1,'request success followed by abort preserves old bytes and suppresses readiness notification');
   IDBObjectStore.prototype.put=function(...args){if(this.name==='resourceCopies')throw new DOMException('Synthetic quota','QuotaExceededError');return put.apply(this,args);};
   try{failed=false;try{await first.commit(source,'bytes','rev',new Blob(['new']),initial);}catch{failed=true;}check(failed&&await(await first.read(source,'bytes','rev')).value.text()==='saved','quota failure does not block readonly committed bytes');}finally{IDBObjectStore.prototype.put=put;}
+  let directoryCurrent=true;const priorEvents=events.length;
+  IDBObjectStore.prototype.put=function(...args){const op=put.apply(this,args);if(this.name==='resourceScopes')op.addEventListener('success',()=>{directoryCurrent=false;});return op;};
+  let directoryAborted=false;try{await first.retire(source,{isCurrent:()=>directoryCurrent});}catch(error){directoryAborted=error.name==='AbortError';}finally{IDBObjectStore.prototype.put=put;}
+  check(directoryAborted&&(await first.token(source)).generation===initial&&(await first.read(source,'bytes','rev')).value.size===blob.size&&events.length===priorEvents,'directory retirement during an IDB transaction rolls back copies and authority without publishing retirement');
+  const directoryAbort=new AbortController();
+  IDBObjectStore.prototype.put=function(...args){const op=put.apply(this,args);if(this.name==='cacheStats'&&args[0]?.key==='resourceCopies')op.addEventListener('success',()=>directoryAbort.abort());return op;};
+  directoryAborted=false;try{await first.retire(source,{signal:directoryAbort.signal});}catch(error){directoryAborted=error.name==='AbortError';}finally{IDBObjectStore.prototype.put=put;}
+  check(directoryAborted&&(await first.token(source)).generation===initial&&(await first.read(source,'bytes','rev')).value.size===blob.size&&events.length===priorEvents,'directory cancellation after final IDB request success still aborts before transactioncomplete');
   check(await first.read({...source,control:'replacement'},'bytes','rev')===null&&await first.read({...source,owner:'bob'},'bytes','rev')===null,'Control and owner identities never share copies');
   const remote=new Promise(resolve=>{const stop=second.subscribe(event=>{if(event.kind==='ready'){stop();resolve();}});});await first.commit(source,'bytes','remote',blob,initial);await remote;check((await second.read(source,'bytes','remote')).value.size===5,'cross-client ready event rereads committed IndexedDB');
   await second.retire(source);let rejected=false;try{await first.commit(source,'bytes','late',blob,initial);}catch{rejected=true;}check(rejected&&(await first.token(source)).retired,'retirement fences writes already prepared in another tab');

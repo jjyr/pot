@@ -144,6 +144,8 @@ export async function createProductionClient({desktop = false, base = '', resour
     if((client?.startup||options.configuration)&&options.requiredCapabilities?.length&&!options.requiredCapabilities.some(operation=>client.supports(operation,options)))throw localized(Object.assign(new APIError(403,{code:'agent_link_capability_unsupported'}),{uiKey:'agentLinks.capabilityUnavailable'}));
     const generation=client?.connectionGeneration;
     if(method==='GET')signal=signal?AbortSignal.any([signal,connectionAbort.signal]):connectionAbort.signal;
+    const readCurrent=()=>!signal?.aborted&&generation===client?.connectionGeneration;
+    const checkRead=()=>{if(method==='GET'&&!readCurrent())throw signal?.reason||new DOMException('Connection retired','AbortError');};
     const capturedScope={...context,...options};
     // Every assistant uses the same product routes. Agent Link resolves its
     // destination and authorization on the host; presentation IDs never choose
@@ -163,7 +165,7 @@ export async function createProductionClient({desktop = false, base = '', resour
         const raw = await pending;
         if (signal?.aborted) throw signal.reason;
         if(method==='GET'&&generation!==client?.connectionGeneration)throw new DOMException('Connection retired','AbortError');
-        let value;try{value=decodeDesktopResponse(raw);}catch(error){throw localized(error);}configurationResult();if(method==='GET')await displayReader?.observe(path,value,capturedScope).catch(error=>{client.resourceCopiesError=error;});if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);return value;
+        let value;try{value=decodeDesktopResponse(raw);}catch(error){throw localized(error);}configurationResult();if(method==='GET')await displayReader?.observe(path,value,capturedScope,{isCurrent:readCurrent,signal}).catch(error=>{client.resourceCopiesError=error;});checkRead();if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);return value;
       } finally { signal?.removeEventListener('abort', abort); }
     }
     const response = await fetch(`${base}${fullPath}`, {method, signal, credentials: 'same-origin',
@@ -173,7 +175,8 @@ export async function createProductionClient({desktop = false, base = '', resour
     if(method==='GET'&&generation!==client?.connectionGeneration)throw new DOMException('Connection retired','AbortError');
     if (!response.ok) throw localized(new APIError(response.status, value));
     configurationResult();
-    if(method==='GET')await displayReader?.observe(path,value,capturedScope).catch(error=>{client.resourceCopiesError=error;});
+    if(method==='GET')await displayReader?.observe(path,value,capturedScope,{isCurrent:readCurrent,signal}).catch(error=>{client.resourceCopiesError=error;});
+    checkRead();
     if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);
     return value;
   }

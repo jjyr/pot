@@ -45,24 +45,35 @@ export function createResourceCopies({name='pot-chat-cache',indexedDB=globalThis
         tx.objectStore('cacheStats').put(stats);
       });notify({kind:'ready',key,scope});
     },
-    async retire(identity){
+    async retire(identity,{isCurrent=()=>true,signal}={}){
       valid(identity);const scope=resourceScope(identity);let compacted=false,committed=false;
+      const check=()=>{if(signal?.aborted||!isCurrent())throw new DOMException('Directory read retired','AbortError');};
       try{await transaction('readwrite',async tx=>{
+        check();
+        // Abort even after the last request succeeds but before txncomplete.
+        const abort=()=>{try{tx.abort();}catch{}};
+        signal?.addEventListener('abort',abort,{once:true});
+        const cleanup=()=>signal?.removeEventListener('abort',abort);
+        tx.addEventListener('complete',cleanup,{once:true});tx.addEventListener('abort',cleanup,{once:true});
+        if(signal?.aborted){abort();check();}
         const scopes=tx.objectStore('resourceScopes'),permission=await authority(tx,scope),previous=permission.row;
+        check();
         // Epoch compaction bounds revocation metadata without resurrecting any
         // old read: remove all copies atomically and fence every prior writer.
         if(!previous&&await idbRequest(scopes.count())>=maxScopes){
+          check();
           scopes.clear();tx.objectStore('resourceCopies').clear();
           tx.objectStore('cacheStats').put({key:'resourceAuthority',generation:(permission.all?.generation||0)+1});
           tx.objectStore('cacheStats').put({key:'resourceCopies',bytes:0,count:0});compacted=true;
         }
-        scopes.put({schema_version:1,key:scope,generation:compacted?1:(previous?.generation||0)+1,retired:true});
+        check();scopes.put({schema_version:1,key:scope,generation:compacted?1:(previous?.generation||0)+1,retired:true});
         if(compacted)return;
         const store=tx.objectStore('resourceCopies'),rows=await indexedRows(store.index('scope'),IDBKeyRange.only(scope),{limit:maxEntries+1});
         const stats=await idbRequest(tx.objectStore('cacheStats').get('resourceCopies'))||{key:'resourceCopies',bytes:0,count:0};
+        check();
         for(const row of rows){store.delete(row.key);stats.bytes-=row.bytes;stats.count--;}
         tx.objectStore('cacheStats').put(stats);
-      });committed=true;}finally{if(compacted&&committed)notify({kind:'compact'});notify({kind:'retire',scope});}
+      });committed=true;}finally{if(compacted&&committed)notify({kind:'compact'});if(committed||!signal?.aborted&&isCurrent())notify({kind:'retire',scope});}
     },
     subscribe(listener){listeners.add(listener);return()=>listeners.delete(listener);},
     close(){stop();closed=true;listeners.clear();channel?.close();db.close();},
