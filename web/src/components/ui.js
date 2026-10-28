@@ -1112,8 +1112,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (value === 'offline') {disconnected = true;connectionError = reason?.uiKey?reason:reason?.message || t('streamDisconnected');}
       if (value === 'connected') connectionError = '';
       if(value==='connecting'&&client.production)awaitingSnapshot=true;
-      if (value === 'connected' && disconnected && client.desktop) { disconnected = false; loadSnapshot(true); }
-      else { connection = value==='connected'&&awaitingSnapshot?'connecting':value; updateControls(); }
+      if(value==='connected')disconnected=false;
+      connection = value==='connected'&&awaitingSnapshot?'connecting':value; updateControls();
     }});
     if(!client.production)return loadSnapshot();
     // Both SSE and the desktop subscription send an authoritative initial snapshot.

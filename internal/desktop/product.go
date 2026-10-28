@@ -4,7 +4,6 @@ package desktop
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -20,7 +19,6 @@ import (
 	"github.com/jjyr/pot/internal/selfupdate"
 	"github.com/jjyr/pot/internal/systemnotifications"
 	"github.com/jjyr/pot/internal/transport"
-	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	assets "github.com/jjyr/pot/web"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -38,7 +36,7 @@ type Service struct {
 
 	main, tray                *application.WebviewWindow
 	mu                        sync.Mutex
-	subscriptions             map[string]context.CancelFunc
+	subscriptions             *localui.NativeSubscriptions
 	reads                     *attention.Store
 	notificationStore         *systemnotifications.Store
 	notifier                  *notifications.NotificationService
@@ -68,35 +66,11 @@ func (s *Service) Call(ctx context.Context, method, path, body string) (string, 
 	return string(encoded), marshalErr
 }
 func (s *Service) OpenMain() { s.tray.Hide(); s.main.Show(); s.main.Focus() }
-func (s *Service) Subscribe(space, owner, locale string) (string, error) {
-	if _, err := s.spaces.Space(space); err != nil {
-		return "", err
-	}
-	if !core.Identifier(owner) {
-		return "", errors.New("invalid assistant identity")
-	}
-	ctx, cancel := context.WithCancel(s.ctx)
-	token := rand.Text()
-	s.mu.Lock()
-	if len(s.subscriptions) >= 128 {
-		s.mu.Unlock()
-		cancel()
-		return "", errors.New("too many subscriptions")
-	}
-	s.subscriptions[token] = cancel
-	s.mu.Unlock()
-	go func() { defer s.Unsubscribe(token); s.streamSpace(ctx, space, owner, locale) }()
-
-	return token, nil
+func (s *Service) Subscribe(token, space, owner, locale string) error {
+	return s.subscriptions.Subscribe(token, space, owner, locale)
 }
 func (s *Service) Unsubscribe(token string) {
-	s.mu.Lock()
-	cancel := s.subscriptions[token]
-	delete(s.subscriptions, token)
-	s.mu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
+	s.subscriptions.Unsubscribe(token)
 }
 func Run(root string) error {
 	ctx := context.Background()
@@ -140,7 +114,7 @@ func runProduct(parent context.Context, root string) (result error) {
 		return err
 	}
 	notifier := notifications.New()
-	service := &Service{notificationStore: notificationStore, notifier: notifier, notificationViews: map[string]NotificationView{}, ctx: ctx, api: api, subscriptions: map[string]context.CancelFunc{}, reads: reads, attentionWake: make(chan struct{}, 1)}
+	service := &Service{notificationStore: notificationStore, notifier: notifier, notificationViews: map[string]NotificationView{}, ctx: ctx, api: api, reads: reads, attentionWake: make(chan struct{}, 1)}
 
 	service.smoke = smoke
 	service.notificationAuthorization = &systemnotifications.Authorization{
@@ -162,9 +136,12 @@ func runProduct(parent context.Context, root string) (result error) {
 		app := service.app
 		service.mu.Unlock()
 		if app != nil {
-			var value any
+			var value map[string]json.RawMessage
 			if json.Unmarshal(topics, &value) == nil {
-				app.Event.Emit("pot:changed", map[string]any{"space_id": space, "topics": value})
+				var boot string
+				_ = json.Unmarshal(value["boot_id"], &boot)
+				delete(value, "boot_id")
+				app.Event.Emit("pot:changed", map[string]any{"space_id": space, "boot_id": boot, "topics": value})
 			}
 		}
 	}})
@@ -173,6 +150,14 @@ func runProduct(parent context.Context, root string) (result error) {
 	}
 	defer manager.Close()
 	service.spaces = manager
+	service.subscriptions = localui.NewNativeSubscriptions(ctx, manager, func(name string, value localui.NativeEvent) {
+		service.mu.Lock()
+		app := service.app
+		service.mu.Unlock()
+		if app != nil {
+			app.Event.Emit(name, value)
+		}
+	})
 	files := service.resourceAssets(application.AssetFileServerFS(assets.FS()))
 
 	var cleanupOnce sync.Once
@@ -180,11 +165,7 @@ func runProduct(parent context.Context, root string) (result error) {
 	cleanup := func() error {
 		cleanupOnce.Do(func() {
 			stop()
-			service.mu.Lock()
-			for _, cancel := range service.subscriptions {
-				cancel()
-			}
-			service.mu.Unlock()
+			service.subscriptions.Close()
 			cleanupResult = errors.Join(manager.Close(), runtime.Close())
 			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
