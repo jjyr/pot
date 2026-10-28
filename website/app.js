@@ -76,9 +76,59 @@ async function showStars(){
   if(valid(count))try{localStorage.setItem(key,JSON.stringify({count,time:Date.now()}));}catch{}
  }catch{}finally{clearTimeout(timeout);}
 }
+const choices=['codex','claude','gemini','antigravity','deepseek','qwen','grok','glm'];
+let selectedChoice=new URL(location.href).searchParams.get('character');
+if(!choices.includes(selectedChoice))selectedChoice='codex';
+function selectCharacter(id){
+ if(!choices.includes(id))return;
+ selectedChoice=id;
+ const board=$('.agent-select'),tile=$(`[data-choice="${id}"]`);
+ if(!board||!tile)return;
+ board.classList.add('selection-ready');
+ $$('.agent-tile').forEach(el=>{
+  const selected=el.dataset.choice===id;
+  el.setAttribute('role','button');el.setAttribute('aria-pressed',String(selected));
+  el.setAttribute('aria-controls','selection-info');
+ });
+ $$('.choice-panel').forEach(el=>{
+  const active=el.dataset.choicePanel===id;
+  el.classList.toggle('is-selected',active);el.inert=!active;
+  el.setAttribute('aria-hidden',String(!active));
+ });
+ $('.pot-portrait').dataset.facing=tile.dataset.direction;
+}
+// Delegate events so offline locale changes use the new localized DOM.
+document.addEventListener('pointerover',e=>{
+ if(e.pointerType==='touch')return;
+ const tile=e.target.closest('[data-choice]');if(tile)selectCharacter(tile.dataset.choice);
+});
+document.addEventListener('focusin',e=>{
+ const tile=e.target.closest('[data-choice]');if(tile)selectCharacter(tile.dataset.choice);
+});
+document.addEventListener('click',e=>{
+ const tile=e.target.closest('[data-choice]');if(!tile)return;
+ e.preventDefault();selectCharacter(tile.dataset.choice);
+});
+document.addEventListener('keydown',e=>{
+ const tile=e.target.closest('[data-choice]');if(!tile)return;
+ if(e.key===' '||e.key==='Enter'){e.preventDefault();selectCharacter(tile.dataset.choice);return;}
+ const grid=['codex','claude','gemini','antigravity',null,'deepseek','qwen','grok','glm'];
+ const steps={ArrowLeft:-1,ArrowRight:1,ArrowUp:-3,ArrowDown:3};
+ let index=grid.indexOf(tile.dataset.choice);
+ if(e.key==='Home')index=0;
+ else if(e.key==='End')index=8;
+ else if(e.key in steps){
+  const step=steps[e.key];let next=index+step;
+  if(grid[next]===null)next+=step;
+  if(next<0||next>8||(Math.abs(step)===1&&Math.floor(next/3)!==Math.floor(index/3)))return;
+  index=next;
+ }else return;
+ e.preventDefault();$(`[data-choice="${grid[index]}"]`).focus();
+});
+
 function section(){
  if(currentView!=='overview')return '#view-'+currentView;
- const ids=['main','philosophy','assistant','assistants','agent-link','models','project'];
+ const ids=['main','agent-link','philosophy','workflow','mcp','models','assistant','project'];
  return '#'+(ids.filter(id=>{const el=$('#'+id);return el&&el.getBoundingClientRect().top<innerHeight/2;}).pop()||'main');
 }
 function changeLanguage(next,persist=true){
@@ -91,7 +141,7 @@ function changeLanguage(next,persist=true){
   $('#language-select').focus({preventScroll:true});
  }else{
   const url=new URL(data.assetBase+next+'/',location.href);
-  url.search=new URLSearchParams({install:installChannel}).toString();url.hash=hash;location.assign(url.href);
+  url.search=new URLSearchParams({install:installChannel,character:selectedChoice}).toString();url.hash=hash;location.assign(url.href);
  }
 }
 const installChannels=['agent','macos','linux','web'];
@@ -119,7 +169,7 @@ document.addEventListener('keydown',e=>{
  else return;
  e.preventDefault();selectInstall(installChannels[index],true,true);
 });
-function renderAll(){selectView(currentView);selectInstall(installChannel);$('#language-select').value=lang;}
+function renderAll(){selectCharacter(selectedChoice);selectView(currentView);selectInstall(installChannel);$('#language-select').value=lang;}
 document.addEventListener('change',e=>{if(e.target.id==='language-select')changeLanguage(e.target.value);});
 document.addEventListener('click',e=>{
  const switchLink=e.target.closest('[data-switch-view],[data-view-tab]');

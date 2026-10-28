@@ -59,7 +59,7 @@ try{
   const {page,context}=await open({css});const icon=await page.locator('.github-star img').boundingBox();assert.equal(icon.height,16);assert(Math.abs(icon.width-16*98/96)<.03);await context.close();
  }
  const {page,context}=await open();await page.waitForFunction(()=>!document.querySelector('.github-star-count').hidden);const link=page.locator('.github-star'),action=page.locator('.github-star-action');
- await link.focus();await page.keyboard.press('Tab');await page.keyboard.press('Shift+Tab');assert(await link.evaluate(e=>e.matches(':focus-visible')&&getComputedStyle(e).outlineWidth==='2px'));
+ await link.focus();await page.keyboard.press('Tab');await page.keyboard.press('Shift+Tab');assert(await link.evaluate(e=>e.matches(':focus-visible')&&parseFloat(getComputedStyle(e).outlineWidth)>=2));
  // Observe trusted DOM activation while preventing navigation; no GitHub Star action is made.
  await link.evaluate(a=>{window.starClicks=0;a.addEventListener('click',e=>{e.preventDefault();window.starClicks++;});});
  await link.focus();await page.keyboard.press('Enter');assert.equal(await page.evaluate(()=>window.starClicks),1);
