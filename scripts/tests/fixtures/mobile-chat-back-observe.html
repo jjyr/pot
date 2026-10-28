@@ -1,0 +1,11 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Mobile Back synthetic observation</title>
+<style>body{margin:12px;font:14px system-ui}button{margin-right:8px}iframe{position:absolute;left:20px;top:50px;width:390px;height:852px;transform:scale(.8);transform-origin:top left;border:1px solid #aaa}pre{position:absolute;left:355px;top:45px;white-space:pre-wrap;max-width:850px}</style>
+<script>localStorage.setItem('pot-system-notifications-browser-v1','false');</script>
+<button id="back">Fixture: browser Back</button><button id="reload">Fixture: reload phone</button><button id="read">Fixture: read route</button>
+<iframe id="phone" title="Actual product at 390 by 852" src="/?locale=en&amp;theme=light"></iframe><pre id="state">Synthetic data; product iframe has a 390×852 CSS viewport. Display scale is 0.8.</pre>
+<script>
+const phone=document.querySelector('#phone');
+document.querySelector('#back').onclick=()=>phone.contentWindow.history.back();
+document.querySelector('#reload').onclick=()=>phone.contentWindow.location.reload();
+document.querySelector('#read').onclick=()=>{const w=phone.contentWindow,d=w.document,h=d.querySelector('.history:not([data-preparation-surface])');document.querySelector('#state').textContent=JSON.stringify({viewport:[w.innerWidth,w.innerHeight],route:d.querySelector('#app')?.dataset.route,directory:d.querySelector('#app')?.classList.contains('show-directory'),directoryVisible:!!d.querySelector('.assistant-directory')?.getBoundingClientRect().height,chatVisible:!!h?.getBoundingClientRect().height&&getComputedStyle(h).visibility==='visible',selected:d.querySelector('.assistant-row.is-selected')?.dataset.viewKey,history:w.history.state,url:w.location.href},null,2);};
+</script></html>

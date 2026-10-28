@@ -163,6 +163,13 @@ that conversation. Selecting an assistant opens full-width Chat. Returning keeps
 the directory search and scroll, and each conversation retains its draft, cached
 history and reading position.
 
+Browser history records the directory presentation separately from conversation
+identity. Returning to a directory entry keeps the current conversation's scope,
+session, draft and reading position; its recorded former owner does not select a
+conversation. Reloading that entry keeps the directory visible while restoring
+the retained conversation from the startup cache. Explicit conversation entries
+continue to restore their recorded owner.
+
 Root pages expose a 44 × 44 px menu button. A rightward swipe beginning within
 24 px of the left edge also opens the full-screen menu with Assistants, Tasks,
 Topology, Extensions, Usage and Settings. A destination, Close, Escape or a leftward swipe

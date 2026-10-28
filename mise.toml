@@ -284,6 +284,10 @@ run = ["node scripts/tests/chat-activity-browser.mjs", "node scripts/tests/chat-
 description = "Trusted touch Back intermediate frames and keyed conversation navigation"
 run = "node scripts/tests/ui-regressions.mjs --group nav"
 
+[tasks."test:ui-mobile-chat-back"]
+description = "Phone edge Back, browser directory history and retained conversation identity"
+run = "node scripts/tests/mobile-chat-back-browser.mjs"
+
 [tasks."test:ui-history"]
 description = "Automatic Task history, bounded reads, retry and cancellation"
 run = "node scripts/tests/ui-regressions.mjs --group history"

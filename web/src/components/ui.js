@@ -84,7 +84,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let error = '',chatCacheFailed=false,directoryStorageFailed=false;
   const sendCacheFailures=new Map();
   let connectionError = '';
-  let directoryOpen = !params.has('conversation');
+  const restoredDirectory = client.production && window.history.state?.potRoute === 'chat' && window.history.state.potDirectory === true;
+  let directoryOpen = restoredDirectory || !params.has('conversation');
   let directoryCollapsed = false;
   let cancelPending = false;
   let editorOwner = null;
@@ -1032,7 +1033,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     pages?.clearApprovals();locateApprovals=item.pending_approvals?JSON.stringify({owner:item.id,space:item.space_id||''}):'';selectedAssistant=item;
     client.setScope({owner:item.id,space:item.space_id||''});updates?.refresh(client.scope());
     chatSession=domains.chat.open(client.scope(),{surface:viewSurface,initialSurface:client.startup?.space===item.space_id&&client.startup?.owner===item.id?client.startup.surface:undefined,context:chatContext});
-    epoch=beginSubscription(state);const receivedEpoch=epoch;editorOwner=null;activeView=null;route='chat';if(!initial||client.startup?.owner===item.id)directoryOpen=false;
+    epoch=beginSubscription(state);const receivedEpoch=epoch;editorOwner=null;activeView=null;route='chat';if(!initial||client.startup?.owner===item.id&&!restoredDirectory)directoryOpen=false;
     pendingTaskToggle=null;chatProjection=null;renderingSnapshot=null;renderingSending=null;renderingForest=null;historyScrollTime=0;historySpeed=0;historyLatency=200;messageWindow.reset();
     messageWindow.setMessages([]);windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);messageNodes.clear();windowHeights.clear();toolMemory.clear();
     historyGeneration++;historyLoading=false;historyFailure='';state.uiAnchor=null;error='';chatCacheFailed=false;connectionError='';disconnected=false;connection='connecting';
@@ -1090,10 +1091,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       mainReady();
       if(pendingSelection){const chosen=assistants.find(item=>item.id===pendingSelection.id&&item.space_id===pendingSelection.space_id);pendingSelection=null;if(chosen){await selectAssistant(chosen);notifications?.directory({epoch:notificationEpoch});return;}}
       if (route==='chat' && !selectedAssistant && assistants.length && !pages.editing) {
-        const requested=params.get('assistant_id')||client.startup?.owner;const requestedSpace=params.get('space_id')||client.startup?.space;
+        const retained=restoredDirectory&&client.startup?.owner?client.startup:null;
+        const requested=retained?.owner||params.get('assistant_id')||client.startup?.owner;const requestedSpace=retained?.space||params.get('space_id')||client.startup?.space;
         const selected=requested?assistants.find(item=>item.id===requested&&(!requestedSpace||item.space_id===requestedSpace)):assistants[0];
         if(!selected){error=t('missingAssistant');connection='offline';updateControls();notifications?.directory({epoch:notificationEpoch});return;}
-        await selectAssistant(selected,!params.get('assistant_id'));
+        await selectAssistant(selected,restoredDirectory||!params.get('assistant_id'));
       }
       notifications?.directory({epoch:notificationEpoch});
     } catch (reason) { if (ticket===directoryEpoch&&!disposed) {error = reason.storage?t('storage.failed'):reason.message;if(reason.storage)directoryStorageFailed=true;else connection='offline';updateControls();if(!assistants.length){const empty=el('div','empty-chat',error);const retry=el('button','control',t('retry'));retry.onclick=()=>domains.directory.refresh().catch(reason=>{error=reason.storage?t('storage.failed'):reason.message;updateControls();});empty.append(document.createElement('br'),retry);messageColumn.replaceChildren(empty);}} }
@@ -1110,7 +1112,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(!client.production)return;restoringHistory=true;
     try{
       const value=event.state||{},scope=value.potScope||{};
-      if(((value.potRoute||'chat')==='chat'||value.potUsage&&!value.potUsage.returnTask)&&scope.owner&&(!selectedAssistant||selectedAssistant.id!==scope.owner||selectedAssistant.space_id!==scope.space)){const item=assistants.find(item=>item.id===scope.owner&&item.space_id===scope.space);if(!item){error=t('missingAssistant');updateControls();return;}await selectAssistant(item,false,false);}
+      // A directory entry retains its former scope only as history metadata.
+      // Returning to the list must not retire the current conversation for it.
+      if(((value.potRoute||'chat')==='chat'&&!value.potDirectory||value.potUsage&&!value.potUsage.returnTask)&&scope.owner&&(!selectedAssistant||selectedAssistant.id!==scope.owner||selectedAssistant.space_id!==scope.space)){const item=assistants.find(item=>item.id===scope.owner&&item.space_id===scope.space);if(!item){error=t('missingAssistant');updateControls();return;}await selectAssistant(item,false,false);}
       if(value.potResource){route='settings';await pages.openResources(false);return;}
       if(value.potSchedule){route='tasks';await pages.openSchedule(value.potSchedule,false);return;}
       if(value.potTask){route='tasks';await pages.openTask(value.potTask,{recordHistory:false,returnTo:value.potTaskReturn});return;}
