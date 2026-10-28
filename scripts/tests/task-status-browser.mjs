@@ -48,9 +48,9 @@ export async function taskStatusBrowser(browser,{sourceOrigin,output}={}){
    await waitForOutbox(page,value=>value[0].every(row=>row.state==='cancelled'));
    // Send remains a local explicit submission while network authority is lost.
    await send.click();
-   const committed=await waitForOutbox(page,value=>value[0].some(row=>['queued','failed'].includes(row.state)&&!row.started));
+   const committed=await waitForOutbox(page,gate.capability===false?value=>value[0].some(row=>(row.state==='queued'||row.state==='failed'&&row.problem==='permission')&&!row.started):value=>value[0].some(row=>row.state==='queued'&&!row.started));
    const queued=committed.rows.find(row=>['queued','failed'].includes(row.state)&&!row.started);
-   if(queued.state==='failed')assert.equal(queued.problem,'permission','revoked capability retains the local submission without dispatch');
+   if(gate.capability===false){if(queued.state==='failed')assert.equal(queued.problem,'permission','revoked capability retains the local submission without dispatch');}else assert.equal(queued.state,'queued','temporary unavailability retains a queued submission');
    assert.equal(queued.request.text,'Synthetic guarded draft '+JSON.stringify(gate));
    assert.equal(queued.target.owner,'pot');assert.equal(queued.target.space,'review-local');
    assert.equal(queued.target.control,'review-local');assert.equal(queued.target.conversation,'main');
