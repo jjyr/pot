@@ -175,13 +175,13 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
       meta=await save(tx,key,meta,snapshot);await saveWindow(tx,key,surface,snapshot,position);return {meta,snapshot};
     });return committed(key,result);
   }
-  async function writeRecords(key,messages,history,{conversation,signal}={}){
+  async function writeRecords(key,messages,history,{conversation,signal,validate=()=>{}}={}){
     const result=await transaction('readwrite',async tx=>{
-      if(signal?.aborted)throw signal.reason;
+      validate();if(signal?.aborted)throw signal.reason;
       let meta=await request(tx.objectStore('conversations').get(key));if(!meta)return null;
       if(conversation&&meta.projection.conversation_id!==conversation)throw new DOMException('Task run changed','AbortError');
-      const snapshot=await projection(tx,key,meta);await upsert(tx,key,meta,messages);if(signal?.aborted)throw signal.reason;
-      meta.ranges=ranges([...(meta.ranges||[]),history]);meta=await save(tx,key,meta,snapshot);if(signal?.aborted)throw signal.reason;return {meta,snapshot};
+      validate();const snapshot=await projection(tx,key,meta);await upsert(tx,key,meta,messages);validate();if(signal?.aborted)throw signal.reason;
+      meta.ranges=ranges([...(meta.ranges||[]),history]);meta=await save(tx,key,meta,snapshot);validate();if(signal?.aborted)throw signal.reason;return {meta,snapshot};
     });return committed(key,result);
   }
   async function readPage(key,query,options={}){

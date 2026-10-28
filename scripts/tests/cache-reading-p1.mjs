@@ -4,6 +4,7 @@ import {createProductionClient} from '../../web/src/adapters/production.mjs';
 import {createResourceReads} from '../../web/src/state/resource-cache.mjs';
 import {createMemoryProjectionStore} from '../../web/src/state/projection-store.mjs';
 import {createQueryRegistry,createCommands} from '../../web/src/state/domains/query.mjs';
+import {createDirectoryDomain} from '../../web/src/state/domains/directory.mjs';
 import {createTasksDomain} from '../../web/src/state/domains/tasks.mjs';
 import {createSchedulesDomain} from '../../web/src/state/domains/schedules.mjs';
 import {createTaskTranscript,appendTaskEvents} from '../../web/src/state/task-transcript.mjs';
@@ -13,21 +14,23 @@ const scope={space:'s',owner:'o'},caps=operations=>({version:1,operations});
 const originalFetch=globalThis.fetch;
 // Real client.snapshot normalizes a UIFrame; request executes the standard
 // session/capability fences. No snapshot is committed or session confirmed.
-for(const change of ['none','turn','request','owner','control','boot','generation','page','request-generation','session','capability']){
+for(const change of ['none','turn','request','owner','control','boot','source-boot','snapshot-boot','generation','page','request-generation','session','capability']){
   let posts=0,entered=deferred(),release=deferred(),current=true,requestGeneration=1;
   globalThis.fetch=async(path,options)=>{
     if(path.startsWith('/api/v1/runtime'))return new Response(JSON.stringify({runtime_id:'r',boot_id:'b'}));
     if(options?.method==='POST'){posts++;return new Response('{}');}
-    if(path.startsWith('/api/v1/snapshot')){entered.resolve();await release.promise;return new Response(JSON.stringify({kind:'reset',base_cursor:0,view:{state:{boot_id:'b',cursor:1,conversation_id:'c',turn:{user_message_id:change==='turn'?'other':'m'}},messages:[{message:{id:'m',request_id:change==='request'?'other':'waiting',role:'user',text:'synthetic'},sequence:'1',version:1}],replies:[],history:{}}}));}
+    if(path.startsWith('/api/v1/snapshot')){entered.resolve();await release.promise;return new Response(JSON.stringify({kind:'reset',base_cursor:0,view:{state:{boot_id:change==='snapshot-boot'?'other':'b',cursor:1,conversation_id:'c',turn:{user_message_id:change==='turn'?'other':'m'}},messages:[{message:{id:'m',request_id:change==='request'?'other':'waiting',role:'user',text:'synthetic'},sequence:'1',version:1}],replies:[],history:{}}}));}
     throw Error('Unexpected IO '+path);
   };
   const client=await createProductionClient({resourceStorage:createMemoryProjectionStore()});
   client.spaces=[{id:'s',control_id:'r'}];client.assistants=[{id:'o',space_id:'s',capabilities:caps(['chat.cancel'])}];client.setScope(scope);
+  let sourceBoot='b';const describe=client.resources.describe;client.resources.describe=(...args)=>({...describe(...args),boot:sourceBoot});
   const cancel=captureUsageWait(client,scope,{turn:'waiting'},{current:()=>current});
   const pending=cancel('cancel-id',{current:()=>requestGeneration===1});await entered.promise;
   if(change==='owner')client.spaces=[];
   if(change==='control')client.spaces[0].control_id='other';
   if(change==='boot')client.runtime.boot_id='other';
+  if(change==='source-boot')sourceBoot='other';
   if(change==='generation')client.connectionGeneration++;
   if(change==='page')current=false;
   if(change==='request-generation')requestGeneration++;
@@ -170,3 +173,45 @@ console.log('PASS authoritative same-id continuation rebuilds cumulative journal
   domain.dispose();queries.dispose();commands.dispose();
 }
 console.log('PASS late lower-revision Task metadata and a retired view command cannot append or dispatch');
+
+// A metadata-to-events race must not relabel an old page with a newly confirmed run.
+{
+  const oldPage=deferred(),newPage=deferred(),oldEntered=deferred(),newEntered=deferred();let run='one',revision=1,appends=0;
+  const client={runtime:{runtime_id:'r',boot_id:'b'},spaces:[{id:'s',control_id:'r'}],request:async(_,options)=>{assert.equal(options.expectedControl,'r');if(run==='one'){oldEntered.resolve();return oldPage.promise;}newEntered.resolve();return newPage.promise;}};
+  const resources={describe:()=>({control:'r',boot:'b'}),read:async()=>({run_id:run,revision,capabilities:caps(['task.events'])}),state:()=>({freshness:'fresh'}),subscribe:()=>()=>{},subscribeInvalidation:()=>()=>{}};
+  const queries=createQueryRegistry(resources),commands=createCommands(client),domain=createTasksDomain(client,{resources,queries,commands,transcriptRepository:{read:async()=>null,append:async(task,_,page,{validate})=>{validate();appends++;const state=createTaskTranscript();appendTaskEvents(state,page.events);return state;},close(){}}});
+  const first=domain.detail({id:'t',run_id:'one'},scope),second=domain.detail({id:'t',run_id:'two'},scope),pending=first.value();await oldEntered.promise;
+  run='two';revision=2;const next=second.value();await newEntered.promise;
+  assert.equal(second.snapshot.data.record.run_id,'two');assert.equal(second.snapshot.data.state.cursor,0);assert.equal(second.snapshot.fresh,false,'confirmed new window is retained while events wait');
+  oldPage.resolve({run_id:'one',events:[{sequence:1,event:{update:{type:'message_started',id:'old'}}}],has_more:false});await assert.rejects(pending,{name:'AbortError'});assert.equal(appends,0);
+  newPage.resolve({run_id:'two',events:[{sequence:1,event:{update:{type:'message_started',id:'new'}}}],has_more:false});await next;assert.equal(appends,1);assert.equal(second.snapshot.fresh,true);
+  domain.dispose();queries.dispose();commands.dispose();
+}
+// Failure to confirm continuation leaves the previous committed run readable and stale.
+{
+  let run='one',freshness='fresh',reads=0;const state=createTaskTranscript();appendTaskEvents(state,[{sequence:1,event:{update:{type:'message_started',id:'retained'}}}]);
+  const client={request:async()=>{reads++;return {run_id:run,events:[],has_more:false};}},resources={read:async()=>({run_id:run,revision:run==='one'?1:2,capabilities:caps(['task.events'])}),state:()=>({freshness}),subscribe:()=>()=>{},subscribeInvalidation:()=>()=>{}};
+  const queries=createQueryRegistry(resources),commands=createCommands(client),domain=createTasksDomain(client,{resources,queries,commands,transcriptRepository:{read:async()=>state,append:async()=>state,close(){}}}),query=domain.detail({id:'t',run_id:'one'},scope);
+  await query.value();run='two';freshness='retained';await assert.rejects(query.refresh(true));assert.equal(query.snapshot.data.record.run_id,'one');assert.equal(query.snapshot.data.state,state);assert.equal(query.snapshot.fresh,false);assert.equal(reads,1);
+  domain.dispose();queries.dispose();commands.dispose();
+}
+console.log('PASS metadata→events run changes retire old pending pages and expose only the new retained window; unconfirmed continuation preserves old read-only output');
+
+// Directory display retention and dispatcher authority share one qualification.
+{
+  let fault=false,freshness='fresh';const client={runtime:{runtime_id:'r',boot_id:'b'},connectionGeneration:1,directoryGeneration:1,spaces:[{id:'s',control_id:'r'}],get operationsReady(){return this.directoryGeneration===this.connectionGeneration;}};
+  const resources={read:async path=>{if(path==='/api/v1/spaces')return {items:[{id:'s',control_id:'r',connected:true}]};if(path==='/api/v1/assistants'){if(fault)throw Object.assign(Error('synthetic storage'),{storage:true});return [{id:'o',capabilities:caps(['chat.send'])}];}return {items:[]};},state:()=>({freshness}),subscribe:()=>()=>{},subscribeInvalidation:()=>()=>{}};
+  const queries=createQueryRegistry(resources),commands=createCommands(client),domain=createDirectoryDomain(client,{resources,queries,commands});
+  const committed=await domain.refresh();const owners=client.assistants;fault=true;await assert.rejects(domain.refresh(),error=>error.storage);assert.equal(client.operationsReady,false);assert.equal(await domain.query(),committed.data);assert.equal(client.assistants,owners);assert.equal(client.assistants[0].offline,false);
+  fault=false;freshness='retained';await domain.refresh();assert.equal(client.operationsReady,false,'retained retry cannot restore command authority');freshness='fresh';await domain.refresh();assert.equal(client.operationsReady,true);
+  queries.dispose();commands.dispose();
+}
+for(const changed of ['confirmation','connection','boot','control']){
+  const blocked=deferred(),entered=deferred(),client={runtime:{runtime_id:'r',boot_id:'b'},connectionGeneration:1,directoryGeneration:1,directoryAuthorityRevision:1,spaces:[{id:'s',control_id:'r'}]};
+  const resources={read:async path=>{if(path==='/api/v1/spaces')return {items:[{id:'s',control_id:'r',connected:true}]};if(path==='/api/v1/assistants'){entered.resolve();return blocked.promise;}return {};},state:()=>({freshness:'fresh'}),subscribe:()=>()=>{},subscribeInvalidation:()=>()=>{}};
+  const queries=createQueryRegistry(resources),commands=createCommands(client),domain=createDirectoryDomain(client,{resources,queries,commands}),pending=domain.refresh();await entered.promise;
+  if(changed==='confirmation')client.directoryAuthorityRevision++;if(changed==='connection')client.connectionGeneration++;if(changed==='boot')client.runtime.boot_id='new';if(changed==='control')client.spaces[0].control_id='new';
+  blocked.resolve(Promise.reject(Object.assign(Error('old failure'),{storage:true})));await assert.rejects(pending);assert.equal(client.directoryGeneration,1,'old failure cannot revoke '+changed);
+  queries.dispose();commands.dispose();
+}
+console.log('PASS directory storage faults retire shared dispatch authority, retained Retry cannot restore it, and retired failures cannot revoke newer confirmation/connection/boot/Control');

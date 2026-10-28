@@ -25,12 +25,12 @@ export function createTasksDomain(client,{resources,queries,commands,transcriptR
       while(confirmedRuns.size>128)confirmedRuns.delete(confirmedRuns.keys().next().value);
     }
     check();const taskRef={...task,run_id:record.run_id};let state=await transcripts().read(taskRef,scope)||createTaskTranscript(),inputs=[],storageError=false,connectionError='';
-    check();if(state.cursor)publish({data:{authority,record,state,inputs:[],fresh:false},freshness:'retained'});
+    check();publish({data:{authority,record,state,inputs:[],fresh:false},freshness:'retained'});
     if(freshness!=='fresh')return {data:{authority,record,state,inputs:[],fresh:false},freshness:'retained'};
     try{
       const jobs=await Promise.allSettled([
         supportsCapability(record,'task.input')?resources.read(path(task.id)+'/messages',{...scope,authoritative:force}):Promise.resolve([]),
-        (async()=>{if(!supportsCapability(record,'task.events'))return {};let count=0,page;do{check();page=await client.request(path(task.id)+'/events?'+new URLSearchParams({after:state.cursor,limit:100}),scope);check();assertTaskEventRun(taskRef,page,client.uiLocale?.()||'en');const previous=state.cursor;state=await transcripts().append(taskRef,scope,page,{validate:check});check();if(page.has_more&&previous===state.cursor)throw Error('task_event_gap');count+=(page.events||[]).length;}while(page.has_more&&count<5000);return page;})(),
+        (async()=>{if(!supportsCapability(record,'task.events'))return {};let count=0,page;do{check();page=await client.request(path(task.id)+'/events?'+new URLSearchParams({after:state.cursor,limit:100}),{...scope,expectedControl:resources.describe?.(path(task.id),scope)?.control});check();assertTaskEventRun(taskRef,page,client.uiLocale?.()||'en');const previous=state.cursor;state=await transcripts().append(taskRef,scope,page,{validate:check});check();if(page.has_more&&previous===state.cursor)throw Error('task_event_gap');count+=(page.events||[]).length;}while(page.has_more&&count<5000);return page;})(),
       ]);
       check();if(jobs[0].status==='fulfilled')inputs=jobs[0].value;
       const failures=jobs.filter(job=>job.status==='rejected');storageError=failures.some(job=>job.reason.storage);connectionError=failures.map(job=>job.reason.message).join('\n');
@@ -40,7 +40,7 @@ export function createTasksDomain(client,{resources,queries,commands,transcriptR
       }
       return {data:{authority,record,state,catchingUp,inputs:Array.isArray(inputs)?inputs:inputs.items||[],inputsTruncated:!!inputs.cache_truncated,unavailable:!!jobs[1].value?.unavailable,storageError,connectionError,fresh:freshness==='fresh'&&!failures.length&&!catchingUp&&!jobs[1].value?.unavailable},freshness:failures.length?'stale':catchingUp||jobs[1].value?.unavailable?'retained':freshness,lastConfirmed:resources.state(record)?.lastConfirmed};
     }catch(error){throw Object.assign(error,{storage:storageError});}
-  },{paths:[path(task.id),path(task.id)+'/messages'],topics:['tasks','runner','spaces'],space:scope.space,owner:scope.owner});};
+  },{paths:[path(task.id),path(task.id)+'/messages'],topics:['tasks','runner','spaces'],space:scope.space,owner:scope.owner,publishIntermediate:true});};
   const active=scope=>queries.define('active-tasks:'+JSON.stringify(scope),async force=>{const items=[];let offset=0,stale=false;const seen=new Set();do{if(seen.has(offset))throw Error('task_pagination');seen.add(offset);const value=await resources.read('/api/v1/tasks/query?'+new URLSearchParams({scope:'active',limit:50,offset}),{...scope,authoritative:force});stale ||= resources.state(value)?.freshness!=='fresh';items.push(...(value.items||[]));offset=value.next_offset;}while(offset!=null);return {data:items.filter(task=>['queued','running','waiting','waiting_approval'].includes(task.phase)).map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner,_stale:stale})),freshness:stale?'retained':'fresh'};},{paths:['/api/v1/tasks/query'],topics:['tasks'],space:scope.space,owner:scope.owner});
   const command=(scope,task,operation,input,send,options)=>{
     const authority=task._authority||resourceAuthority(client,scope,resources);
@@ -60,7 +60,11 @@ export function createTasksDomain(client,{resources,queries,commands,transcriptR
     list:query=>pages(query),listQuery(query){const key='task-list:'+JSON.stringify({...query,signal:undefined,onProgress:undefined});return queries.define(key,async(force,publish)=>{const [data]=await Promise.all([pages({...query,signal:undefined,authoritative:force,onProgress:pages=>publish({data:{pages,partial:true},status:'loading',freshness:'retained'})}),...client.spaces.map(space=>machinePresentation(client).load({space:space.id}))]);return {data,freshness:data.partial?'retained':'fresh'};},{paths:['/api/v1/tasks/catalog','/api/v1/assistants','/api/v1/runtime'],topics:['tasks','assistants','spaces','machines','runtime']});},
     watchList(query,listener){return this.listQuery(query).watch(listener);},refreshList(query){return this.listQuery(query).refresh(true);},
     active,watchActive:(scope,listener)=>active({...scope}).watch(listener),
-    loadEarlier:(task,scope,before,options)=>transcripts().earlier(task,scope,before,options),latest:(task,scope)=>transcripts().read(task,scope),
+    loadEarlier:(task,scope,before,options={})=>{
+      const authority=resourceAuthority(client,scope,resources),runKey=JSON.stringify([authority,task.id]);
+      const validate=()=>{current();options.validate?.();if(confirmedRuns.get(runKey)?.run!==task.run_id||!resourceAuthorityCurrent(client,scope,authority,resources))throw new DOMException('Task authority retired','AbortError');};
+      return transcripts().earlier(task,scope,before,{...options,validate});
+    },latest:(task,scope)=>transcripts().read(task,scope),
     sendInput:(task,scope,text,requestID)=>command(scope,task,'input',{text},(input,id,captured)=>post(task,'/messages',{...input,request_id:id},captured),{requestID,idempotent:true}),
     interrupt:(task,scope)=>command(scope,task,'interrupt',{},(_,id,captured)=>post(task,'/interrupt',{request_id:id},captured),{idempotent:true}),
     cancel:(task,scope)=>command(scope,task,'cancel',{},(_,id,captured)=>post(task,'/cancel',{request_id:id},captured),{idempotent:true}),

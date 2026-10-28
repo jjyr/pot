@@ -1,3 +1,4 @@
+import {resourceAuthority,resourceAuthorityCurrent} from './resource-authority.mjs';
 import {mergeUIFrame} from './chat-history.mjs';
 import {translate} from '../locales/messages.mjs';
 import {createChatCache} from './chat-cache.mjs';
@@ -46,6 +47,7 @@ export function createTaskRepository(client){
   return {
     read,
     async append(task,scope,page,{validate=()=>{}}={}){
+      const captured=resourceAuthority(client,scope),callerValidate=validate;validate=()=>{callerValidate();if(!resourceAuthorityCurrent(client,scope,captured))throw new DOMException('Task authority retired','AbortError');};
       validate();assertTaskEventRun(task,page,client.uiLocale?.()||'en');const runtime={...client.runtime};const ref=identity(task,scope),previous=await read(task,scope)||createTaskTranscript(),state=working(previous),dirty=new Set(),known=new Set(state.messages.map(message=>message.id));
       validate();for(const row of page.events||[]){
         if(row.sequence<=state.cursor)continue;
@@ -65,15 +67,16 @@ export function createTaskRepository(client){
       validate();await stored(cache.writeFrames(ref.key,[{runtime_id:runtime.runtime_id,owner_id:ref.owner,conversation_id:ref.conversation,boot_id:runtime.boot_id||'task',kind:previous.cursor?'delta':'reset',base_cursor:String(previous.cursor),cursor:String(state.cursor),running:false,turn_id:null,replies:[],messages,history:{before:messages[0]?.sequence||'',after:messages.at(-1)?.sequence||'',has_more:false,has_newer:false}}],{validate,checkpoint,historyRange:{before:String(previous.cursor+1),after:String(state.cursor)}}));
       validate();const saved=await read(task,scope);validate();if(!saved)throw new DOMException('Task run retired','AbortError');return saved;
     },
-    async earlier(task,scope,before,{limit=80,signal}={}){
+    async earlier(task,scope,before,{limit=80,signal,validate=()=>{}}={}){
       const current=()=>{if(signal?.aborted)throw signal.reason;};current();
+      const captured=resourceAuthority(client,scope),check=()=>{current();validate();if(!resourceAuthorityCurrent(client,scope,captured))throw new DOMException('Task authority retired','AbortError');};
       const ref=identity(task,scope);let page=await stored(cache.readPage(ref.key,{before:String(before),limit}));
       if(!page){
         // The original event API has after-only pagination. Reconstruct a bounded
         // earlier window without resetting the live durable cursor/checkpoint.
         const history=createTaskTranscript();let more=true;
         while(more&&history.cursor<Number(before)-1){
-          current();const batch=await client.request(`/api/v1/tasks/${encodeURIComponent(task.id)}/events?${new URLSearchParams({after:history.cursor,limit:100})}`,{...scope,signal});current();assertTaskEventRun(task,batch,client.uiLocale?.()||'en');if(batch.unavailable)throw Error('task_history_unavailable');
+          check();const batch=await client.request(`/api/v1/tasks/${encodeURIComponent(task.id)}/events?${new URLSearchParams({after:history.cursor,limit:100})}`,{...scope,signal,expectedControl:client.resources?.describe?.('/api/v1/runtime',scope)?.control});check();assertTaskEventRun(task,batch,client.uiLocale?.()||'en');if(batch.unavailable)throw Error('task_history_unavailable');
           const events=(batch.events||[]).filter(row=>row.sequence<Number(before));if(!events.length)break;
           const cursor=history.cursor;appendTaskEvents(history,events);if(history.cursor<=cursor)throw Error('task_event_gap');
           for(const message of history.messages)boundMessage(message);
@@ -81,7 +84,7 @@ export function createTaskRepository(client){
           if(history.active)boundMessage(history.active);
           const ids=new Set(history.messages.map(message=>message.id));for(const [id,message]of history.tools)if(!ids.has(message.id))history.tools.delete(id);
           const messages=history.messages.map(message=>({...message,sequence:String(message.sequence),version:history.cursor,status:message.phase==='streaming'?'streaming':'complete'}));
-          await stored(cache.writeRecords(ref.key,messages,{before:String(cursor+1),after:String(history.cursor)},{conversation:ref.conversation,signal}));more=batch.has_more;
+          await stored(cache.writeRecords(ref.key,messages,{before:String(cursor+1),after:String(history.cursor)},{conversation:ref.conversation,signal,validate:check}));check();more=batch.has_more;
         }
         page=await stored(cache.readPage(ref.key,{before:String(before),limit}));
       }

@@ -17,7 +17,7 @@ export async function domainRepositoriesContract(report=()=>{}){
   };
   let client,domains,release;
   try{
-    client=await createProductionClient({resourceStorage:createProjectionStore({name})});domains=domainsFor(client);release=domains.retain();const scope={space:'local',owner:'alice'},one=[],two=[];
+    client=await createProductionClient({resourceStorage:createProjectionStore({name})});client.spaces=[{id:'local',control_id:'domain'}];domains=domainsFor(client);release=domains.retain();const scope={space:'local',owner:'alice'},one=[],two=[];
     const stopOne=domains.providers.watchCatalog(scope,snapshot=>one.push(snapshot)),stopTwo=domains.providers.watchCatalog({...scope,owner:'bob'},snapshot=>two.push(snapshot));
     await wait(()=>reads===1);stopOne();hold.resolve();await wait(()=>two.at(-1)?.fresh);
     check(reads===1&&two.at(-1).data.profiles[0].name==='Committed'&&one.at(-1).status==='loading','Two views share Provider IO; disposing one preserves the other');

@@ -50,6 +50,7 @@ async function run(){
       check((await session.history({around:'m30',limit:20},{around:true,cachedOnly:true})).messages.some(row=>row.id==='m30'),'failed position write does not hide a second cached window');
       failed=false;try{await session.history({after:'160'});}catch(error){failed=error.storage;}check(failed,'network history cannot publish before a successful commit');
     }finally{IDBDatabase.prototype.transaction=original;}
+    await session.saveView({position:{mode:'reading'},layout:'fixture-recovered'});report('view hint explicitly retries after storage recovery');
     await session.close();session=null;domain.dispose();domain=null;cache.close();cache=null;
 
     // Real resource store: failed namespace write and pending epoch do not hide read.
@@ -75,19 +76,40 @@ async function run(){
     const repository=createTaskRepository(client);
     const fenced={id:'fenced',run_id:'fenced'},seed=[{sequence:1,event:{update:{type:'message_started',id:'fenced'}}}];
     await repository.append(fenced,scope,{run_id:'fenced',events:seed});
-    let allowed=true,releaseGate=false,blocked=false;const gateReady=deferred(),originalAdmission=IDBDatabase.prototype.transaction;
-    IDBDatabase.prototype.transaction=function(stores,mode,...rest){
-      if(mode==='readwrite'&&!blocked){blocked=true;const gate=originalAdmission.call(this,['conversations'],'readwrite');const pump=()=>{const op=gate.objectStore('conversations').get('fixture-gate');op.onsuccess=()=>{gateReady.resolve();if(!releaseGate)pump();};};pump();}
-      return originalAdmission.call(this,stores,mode,...rest);
-    };
-    try{
-      const pending=repository.append(fenced,scope,{run_id:'fenced',events:[{sequence:2,event:{update:{type:'text_delta',text:'must not commit'}}}]},{validate:()=>{if(!allowed)throw new DOMException('Fixture retired','AbortError');}});
-      await gateReady.promise;allowed=false;releaseGate=true;let rejected=false;try{await pending;}catch(error){rejected=error.name==='AbortError';}
-      check(rejected&&(await repository.read(fenced,scope)).cursor===1,'Task append retired while queued behind real IDB performs zero commit');
-    }finally{releaseGate=true;IDBDatabase.prototype.transaction=originalAdmission;}
+    async function queuedWrite(work,retire){
+      let releaseGate=false,blocked=false;const gateReady=deferred(),originalAdmission=IDBDatabase.prototype.transaction;
+      IDBDatabase.prototype.transaction=function(stores,mode,...rest){
+        if(mode==='readwrite'&&!blocked){blocked=true;const gate=originalAdmission.call(this,['conversations'],'readwrite');const pump=()=>{const op=gate.objectStore('conversations').get('fixture-gate');op.onsuccess=()=>{gateReady.resolve();if(!releaseGate)pump();};};pump();}
+        return originalAdmission.call(this,stores,mode,...rest);
+      };
+      try{const pending=work();await gateReady.promise;retire();releaseGate=true;let rejected=false;try{await pending;}catch(error){rejected=error.name==='AbortError';}return rejected;}
+      finally{releaseGate=true;IDBDatabase.prototype.transaction=originalAdmission;}
+    }
+    for(const change of ['view','serving-boot','source-boot']){
+      let allowed=true;
+      const rejected=await queuedWrite(()=>repository.append(fenced,scope,{run_id:'fenced',events:[{sequence:2,event:{update:{type:'text_delta',text:'must not commit'}}}]},{validate:()=>{if(!allowed)throw new DOMException('Fixture retired','AbortError');}}),()=>{if(change==='view')allowed=false;if(change==='serving-boot')client.runtime.boot_id='retired';if(change==='source-boot')client.spaces[0].boot_id='retired';});
+      client.runtime.boot_id='b';delete client.spaces[0].boot_id;
+      check(rejected&&(await repository.read(fenced,scope)).cursor===1,'Task '+change+' retired while queued behind real IDB performs zero commit');
+    }
+    const actualRequest=client.request;let historicalRun='fenced',historyReads=0;
+    client.request=async()=>{historyReads++;return {run_id:historicalRun,events:[{sequence:1,event:{update:{type:'message_started',id:'history-only'}}},{sequence:2,event:{update:{type:'message_finished'}}}],has_more:false};};
+    for(const source of [undefined,'other']){
+      historicalRun=source;let rejected=false;try{await repository.earlier(fenced,scope,4);}catch(error){rejected=error.code==='task_run_changed';}
+      check(rejected&&(await repository.read(fenced,scope)).cursor===1,'missing or mismatched history run performs zero records commit');
+    }
+    historicalRun='fenced';const retiredHistory=await queuedWrite(()=>repository.earlier(fenced,scope,4),()=>{client.runtime.boot_id='retired';});client.runtime.boot_id='b';
+    check(retiredHistory&&(await repository.read(fenced,scope)).cursor===1,'historical backfill boot change during real IDB wait aborts records and coverage together');
+    client.request=actualRequest;
     let wrongSource=false;try{await repository.append(fenced,scope,{run_id:'other',events:[{sequence:2,event:{update:{type:'text_delta',text:'wrong run'}}}]});}catch(error){wrongSource=error.code==='task_run_changed';}
     check(wrongSource&&(await repository.read(fenced,scope)).cursor===1,'same-sequence page from another run cannot enter the actual repository');
 
+    const continued={id:'continued',run_id:'one'},oldRows=[{sequence:1,event:{turn_id:'one',update:{type:'message_started',id:'old-run'}}},{sequence:2,event:{turn_id:'one',update:{type:'text_delta',text:'old committed run'}}},{sequence:3,event:{turn_id:'one',update:{type:'message_finished'}}}];
+    await repository.append(continued,scope,{run_id:'one',events:oldRows});
+    const nextRun={...continued,run_id:'two'},nextRows=[...oldRows,{sequence:4,event:{turn_id:'two',update:{type:'message_started',id:'new-run'}}},{sequence:5,event:{turn_id:'two',update:{type:'text_delta',text:'new committed run'}}},{sequence:6,event:{turn_id:'two',update:{type:'message_finished'}}}];
+    await repository.append(nextRun,scope,{run_id:'two',events:nextRows});const continuation=await repository.read(nextRun,scope);
+    check(continuation.cursor===6&&continuation.messages.some(row=>row.text==='old committed run')&&continuation.messages.some(row=>row.text==='new committed run'),'actual IDB continuation retains cumulative journal under confirmed new run');
+    let retiredPage=false;try{await repository.append(nextRun,scope,{run_id:'one',events:oldRows});}catch(error){retiredPage=error.code==='task_run_changed';}
+    check(retiredPage&&(await repository.read(nextRun,scope)).cursor===6&&await repository.read(continued,scope)===null,'late old-run same-sequence page cannot replace committed continuation');
     await repository.append(task,scope,{run_id:'one',events:[{sequence:1,event:{update:{type:'message_started',id:'saved'}}},{sequence:2,event:{update:{type:'text_delta',text:'Committed Task content before metadata'}}},{sequence:3,event:{update:{type:'message_finished'}}}]});repository.close();
     pages=createPages({client,host,approvalHost:document.querySelector('#approvals'),chatApprovalHost:document.querySelector('#chat-approvals'),chatVisible:()=>false,locale:()=>language,notify:()=>{},changed:()=>{},titleChanged:()=>{},openChat:()=>{}});
     const openedAt=performance.now();await pages.openTask(task);await wait(()=>host.textContent.includes('Committed Task content before metadata')&&getComputedStyle(host.querySelector('.task-history')).visibility==='visible','visible retained Task text');report('retained Task visible after '+Math.round(performance.now()-openedAt)+'ms with measured real DOM');
