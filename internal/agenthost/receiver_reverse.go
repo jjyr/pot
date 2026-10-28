@@ -7,7 +7,7 @@ import (
 )
 
 func (h *agentHost) executionCall(ctx context.Context, in executionToolRequest) (any, error) {
-	binding, err := h.executionContext(ctx, hostToolInput{JobID: in.JobID, RunID: in.RunID, FromAssistantID: in.AssistantID})
+	binding, err := h.executionContext(ctx, executionContextInput{JobID: in.JobID, RunID: in.RunID, FromAssistantID: in.AssistantID})
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (h *agentHost) executionCall(ctx context.Context, in executionToolRequest) 
 	}
 	defer client.close()
 	// Check the active native run again after transport establishment.
-	if _, err = h.executionContext(ctx, hostToolInput{JobID: in.JobID, RunID: in.RunID, FromAssistantID: in.AssistantID}); err != nil {
+	if _, err = h.executionContext(ctx, executionContextInput{JobID: in.JobID, RunID: in.RunID, FromAssistantID: in.AssistantID}); err != nil {
 		return nil, err
 	}
 	var output any

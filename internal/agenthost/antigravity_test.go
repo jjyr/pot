@@ -88,7 +88,7 @@ func TestAntigravityManagementKeepsSessionsAndSavesWhileInboxPending(t *testing.
 	}
 }
 func TestAntigravityPersistsIdentityBeforeDispatchAndValidatesResults(t *testing.T) {
-	for _, scenario := range []string{"ok", "persistence-failure", "wrong-resume", "wrong-result", "unknown-state", "malformed", "startup-error", "cancel"} {
+	for _, scenario := range []string{"ok", "persistence-failure", "wrong-resume", "wrong-result", "unknown-state", "malformed", "startup-error", "native-error", "cancel"} {
 		t.Run(scenario, func(t *testing.T) {
 			workspace := t.TempDir()
 			worker, _ := os.Executable()
@@ -117,6 +117,15 @@ func TestAntigravityPersistsIdentityBeforeDispatchAndValidatesResults(t *testing
 				prompt = "hold"
 			}
 			result := runAgyTurn(ctx, s, prompt, events)
+			if strings.Contains(result.Error, "PRIVATE_NATIVE") || strings.Contains(result.Text, "PRIVATE_NATIVE") {
+				t.Fatal("native diagnostics escaped", result)
+			}
+			if scenario == "startup-error" && (result.Error != "antigravity_start_failed" || result.Text != "") {
+				t.Fatal(result)
+			}
+			if scenario == "native-error" && (result.Error != "antigravity_turn_failed" || result.Text != "") {
+				t.Fatal(result)
+			}
 			if result.CleanupUncertain {
 				t.Fatal("supervised cleanup unconfirmed", result)
 			}
@@ -173,5 +182,44 @@ func TestMCPEmptyRequiredIsAnArrayForStrictClients(t *testing.T) {
 	}
 	if string(value["required"]) != "[]" {
 		t.Fatal("Antigravity hides schemas with required:null", raw)
+	}
+}
+
+func TestAntigravityNativeDiagnosticsDoNotPersistInTasks(t *testing.T) {
+	b := agyBackend(t)
+	ctx := context.Background()
+	if err := b.ownerExecutor(ctx, t.TempDir(), "read-only", "model-one", ""); err != nil {
+		t.Fatal(err)
+	}
+	from := protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "owner"}
+	for _, scenario := range []string{"start-error", "native-error"} {
+		task, err := b.Submit(ctx, agentlink.TaskRequest{From: from, Target: agentlink.NodeTarget(b.nodeID), RequestID: scenario, Text: scenario})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The fake's startup fault is selected by its model; production catalog
+		// admission remains unchanged.
+		if scenario == "start-error" {
+			if _, err = b.db.Exec("UPDATE agent_adapter_sessions SET model='start-error' WHERE task_id=?", task.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		j, err := b.read(ctx, from, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.runTask(ctx, j)
+		saved, err := b.Status(ctx, from, task.ID)
+		want := "antigravity_turn_failed"
+		if scenario == "start-error" {
+			want = "antigravity_start_failed"
+		}
+		if err != nil || saved.State != "failed" || saved.Error != want || saved.Result != "" {
+			t.Fatal("native diagnostics persisted", saved, err)
+		}
+		var data string
+		if err = b.db.QueryRow("SELECT data FROM agent_adapter_jobs WHERE id=?", task.ID).Scan(&data); err != nil || strings.Contains(data, "PRIVATE_NATIVE") {
+			t.Fatal("raw diagnostics in durable job", err)
+		}
 	}
 }

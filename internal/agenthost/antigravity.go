@@ -55,7 +55,7 @@ func runAgyTurn(ctx context.Context, s Session, prompt string, events turnEvents
 		result.Error = "antigravity_unavailable"
 		return
 	}
-	if err = verifyAgyPlugin(ctx, binary); err != nil {
+	if err = verifyAgyPlugin(ctx, binary, s); err != nil {
 		result.Error = err.Error()
 		return
 	}
@@ -206,22 +206,22 @@ func runAgyTurn(ctx context.Context, s Session, prompt string, events turnEvents
 				_ = input.Close()
 			case "result":
 				if !sent && e.Result.Status == "ERROR" && e.Result.Conversation == "" {
-					result.Error = "antigravity_start_failed: " + trimBytes(e.Result.Error, 2048)
+					result.Error = "antigravity_start_failed"
 					return
 				}
 				if !sent || e.Result.Conversation != result.ThreadID {
 					result.Error = "antigravity_result_identity_mismatch"
 					return
 				}
-				result.Text = trimBytes(e.Result.Response, maxResult)
 				switch e.Result.Status {
 				case "SUCCESS":
+					result.Text = trimBytes(e.Result.Response, maxResult)
 					result.Status = "completed"
 				case "CANCELED", "INTERRUPTED":
 					result.Status = "cancelled"
 				default:
 					result.Status = "failed"
-					result.Error = "antigravity_turn_failed: " + trimBytes(e.Result.Error, 2048)
+					result.Error = "antigravity_turn_failed"
 				}
 				return
 			}
@@ -256,10 +256,12 @@ func (b *backend) agyModels(ctx context.Context) ([]agentlink.ExecutionModel, er
 
 // Read-only guarantees depend on the execution support actually being installed and
 // enabled. Refuse admission rather than quietly running without that boundary.
-func verifyAgyPlugin(ctx context.Context, binary string) error {
+func verifyAgyPlugin(ctx context.Context, binary string, s Session) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, binary, "plugin", "list", "--json")
+	cmd.Dir = s.Workspace
+	cmd.Env = nativeEnvironment(os.Environ(), s)
 	var out, log boundedLog
 	cmd.Stdout = &out
 	cmd.Stderr = &log

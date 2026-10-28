@@ -2,8 +2,9 @@
 
 Ordinary Antigravity calls use an independently configured remote Pot MCP server.
 The optional `pot` helper contains setup instructions only, starts no Host and
-contributes no MCP server or execution hook. The native driver baseline remains
-**agy 1.4.7**. Validate the installed client's actual commands and schema rather
+contributes no MCP server or execution hook. The native driver targets the
+**agy 1.4.8** stream-json and plugin interfaces. Validate the installed client's
+actual commands and schema rather
 than assuming a newer SDK applies to this CLI.
 
 ```text
@@ -15,7 +16,7 @@ Explicit shared receiver Host --> agy stream-json
   local execution-tools: exact active Task/run and role-gated callbacks
 ```
 
-## Ordinary setup and lifecycle
+## Install and connect
 
 ```sh
 python3 integrations/antigravity/install.py --source-only
@@ -68,8 +69,16 @@ python3 integrations/antigravity/install.py --receiver --source-only
   --root ~/.config/pot-antigravity/agent --connection CONNECTION_ID
 ```
 
+The support package invokes `execution-tools` without a fixed root or listener.
+The supervised process supplies the active job/run and absolute receiver root and
+listener together; incomplete or mismatched scope fails closed. Starting the
+local server does not start a Host. This also supports explicitly configured
+receiver roots and listener ports without rewriting the installed package.
+
 Installation never starts a receiver, changes HOME, logs in or changes network
-settings. Source-only installation requires explicit native support activation
+settings. `--home` chooses the staging location only; native activation still uses
+the current Antigravity profile. Use `--source-only` when staging an isolated
+package. Source-only installation requires explicit native support activation
 before execution. Stop the receiver before updating its executable/support files.
 Local package modifications and symlinks are rejected; historical data is retained.
 
@@ -78,12 +87,20 @@ allowed, while shell, writes, edits and subagents are denied. Other native
 execution remains under existing policy. The hook is inert outside supervised
 jobs; it does not disable users' other MCP globally. Trusted execution context
 replaces inherited reserved actor/job/run variables per process. The local
-`pot_receiver` service checks the current active Task/run. Task workers expose
+`pot_receiver` service checks the current active Task/run. AGY exposes this
+plugin-owned server at runtime as `pot-receiver_pot_receiver`
+(`<plugin name>_<MCP config key>`); the read-only hook matches that exact name,
+not an unqualified name or a suffix. Task workers expose
 only execution context and cannot delegate or message remote agents. Assistant
 message executions additionally expose typed sender-free reverse message and
 Task callbacks through the authenticated receiver gateway. The local hook and
 service gate preserve the role boundary. Ordinary OAuth cannot substitute for
 execution identity or supply human approval.
+
+The documented CLI workspace configuration files are `.agents/mcp_config.json`
+and `.agents/hooks.json`. They supplement global configuration and do not provide
+profile isolation. Do not invent a `--mcp-config` flag or a home override to load
+per-run support; native execution uses the explicitly activated support package.
 
 The hook uses `allow` to delegate to the next hook and native permission policy,
 as defined by the [Antigravity hook contract](https://antigravity.google/docs/hooks).

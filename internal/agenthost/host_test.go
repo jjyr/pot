@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -17,71 +18,30 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
-	"time"
 
-	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/protocol"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type hostRoundTripper func(*http.Request) (*http.Response, error)
 
 func (f hostRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-func TestAgentHostMCPDirectoryWithoutCompetingInboxReader(t *testing.T) {
-	t.Setenv("POT_AGENT_ASSISTANT_ID", "codex")
-	h, _ := testHost(t)
+func TestAgentHostRetiredToolsAreUnavailable(t *testing.T) {
+	h, root := testHost(t)
 	defer h.close()
-	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 10*time.Second))
-	defer cancel()
-	client := hostClient{token: h.token, client: &http.Client{Transport: hostRoundTripper(func(r *http.Request) (*http.Response, error) {
-		r.RemoteAddr = "127.0.0.1:12345"
-		r.Host = hostListen
-		w := httptest.NewRecorder()
-		h.handler().ServeHTTP(w, r)
-		return w.Result(), nil
-	})}}
-	a, b := mcp.NewInMemoryTransports()
-	go hostMCPServer(client).Run(ctx, a)
-	session, err := mcp.NewClient(&mcp.Implementation{Name: "codex-host-test", Version: "1"}, nil).Connect(ctx, b, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer session.Close()
-	listed, err := session.ListTools(ctx, nil)
-	if err != nil || len(listed.Tools) != 3 {
-		t.Fatal(listed, err)
-	}
-	for _, tool := range listed.Tools {
-		if tool.Name == "pot_messages" || tool.Name == "pot_message_ack" || strings.Contains(tool.Name, "invite") {
-			t.Fatal("session inbox or invitation authority exposed", tool.Name)
+	for _, operation := range []string{"execution_context", "assistants", "connections", "profile", "receipt", "acknowledge"} {
+		req := httptest.NewRequest("POST", "http://"+hostListen+"/api/v1/agent-host/tool", strings.NewReader(`{"operation":"`+operation+`"}`))
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Header.Set("Authorization", "Bearer "+h.token)
+		response := httptest.NewRecorder()
+		h.handler().ServeHTTP(response, req)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("retired operation %s returned %d", operation, response.Code)
 		}
 	}
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "pot_assistants", Arguments: map[string]any{}})
-	if err != nil || result.IsError {
-		t.Fatal(result, err)
-	}
-	raw, _ := json.Marshal(result)
-	if !strings.Contains(string(raw), "default_target") || strings.Contains(string(raw), h.token) {
-		t.Fatal("bad directory result", string(raw))
-	}
-	updated, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "pot_update_profile", Arguments: map[string]any{"assistant_id": "codex", "name": "MCP assistant"}})
-	if err != nil || updated.IsError {
-		t.Fatal(updated, err)
-	}
-	saved, err := h.backend.resolve(ctx, "codex")
-	if err != nil || saved.Name != "MCP assistant" {
-		t.Fatal("MCP rename was not saved", err)
-	}
-	blocked, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "pot_update_profile", Arguments: map[string]any{"assistant_id": "another", "name": "Wrong identity"}})
-	if err != nil || !blocked.IsError {
-		t.Fatal("bound MCP server accepted a different assistant", blocked, err)
-	}
-	for _, name := range []string{"pot_open_connections", "pot_connections", "pot_send"} {
-		result, e := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: map[string]any{}})
-		if e == nil && !result.IsError {
-			t.Fatal("legacy connection tool remains callable", name)
-		}
+	err := Main([]string{"host", "--root", root}, strings.NewReader(""), io.Discard)
+	if err == nil || err.Error() != "unknown_command" {
+		t.Fatal("retired host stdio remains callable", err)
 	}
 }
 
@@ -225,9 +185,6 @@ func TestAgentHostRestartStableIdentityAndMailbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertIncomingEnvelope(t, h.tasks, incoming, "read")
-	if _, err = h.tool(ctx, hostToolInput{Operation: "acknowledge", MessageID: incoming.ID}); err == nil {
-		t.Fatal("manual consumer can steal a session message")
-	}
 
 	pending, err := h.mailbox.PendingNode(ctx, identity.Address.NodeID, peer.NodeID)
 	if err != nil || len(pending) != 1 {

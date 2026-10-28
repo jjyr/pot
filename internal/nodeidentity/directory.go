@@ -16,7 +16,6 @@ import (
 	"sync"
 
 	"github.com/jjyr/pot/pkg/core"
-	"github.com/jjyr/pot/pkg/peer"
 	"github.com/jjyr/pot/pkg/storage"
 )
 
@@ -36,7 +35,6 @@ type Directory struct {
 	mu       sync.Mutex
 	db       *sql.DB
 	state    state
-	key      ed25519.PrivateKey
 	identity Identity
 }
 
@@ -77,8 +75,7 @@ func Open(path string, options Options) (*Directory, error) {
 			err = errors.New("invalid node identity state")
 		}
 		if err == nil {
-			d.key = ed25519.PrivateKey(key)
-			public := d.key.Public().(ed25519.PublicKey)
+			public := ed25519.PrivateKey(key).Public().(ed25519.PublicKey)
 			sum := sha256.Sum256(public)
 			d.identity = Identity{options.RuntimeID, base64.RawURLEncoding.EncodeToString(public), hex.EncodeToString(sum[:])}
 		}
@@ -89,11 +86,8 @@ func Open(path string, options Options) (*Directory, error) {
 	}
 	return d, nil
 }
-func (d *Directory) Close() error       { return d.db.Close() }
-func (d *Directory) Identity() Identity { return d.identity }
-func (d *Directory) TransportIdentity() (peer.Identity, ed25519.PrivateKey) {
-	return peer.Identity{NodeID: d.identity.RuntimeID, PublicKey: d.identity.PublicKey}, append(ed25519.PrivateKey(nil), d.key...)
-}
+func (d *Directory) Close() error                      { return d.db.Close() }
+func (d *Directory) Identity() Identity                { return d.identity }
 func (d *Directory) OwnerAction(fn func() error) error { d.mu.Lock(); defer d.mu.Unlock(); return fn() }
 func (d *Directory) LocalLabels() []string {
 	d.mu.Lock()

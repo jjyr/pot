@@ -18,7 +18,7 @@ import (
 )
 
 func TestAgentHostRunningDaemonNeverMigrates(t *testing.T) {
-	for _, version := range []string{"2", "9", hostVersion} {
+	for _, version := range []string{"2", "9", "12", hostVersion} {
 		t.Run("running-version-"+version, func(t *testing.T) {
 			// Bind first; never probe or send credentials to a user-owned service.
 			listener, err := net.Listen("tcp", hostListen)

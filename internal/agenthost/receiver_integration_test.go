@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -72,7 +74,7 @@ func receiverConsentBrowser(t *testing.T, origin string) func(string) error {
 	}
 }
 
-func receiverPotHTTP(t *testing.T) (string, *control.MCPAccessQueue) {
+func receiverPotHTTP(t *testing.T, runtimes ...Runtime) (string, *control.MCPAccessQueue) {
 	t.Helper()
 	root := t.TempDir()
 	db, err := storage.OpenDatabase(filepath.Join(root, "control.sqlite"), storage.ControlDatabase)
@@ -103,7 +105,7 @@ func receiverPotHTTP(t *testing.T) (string, *control.MCPAccessQueue) {
 		if target != agentlink.NodeTarget(receiver.NodeID()) {
 			return agentlink.Description{}, agentlink.ErrUnauthorized
 		}
-		return Codex().ReceiverCapabilities(), nil
+		return runtimeOrDefault(runtimes).ReceiverCapabilities(), nil
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -133,10 +135,45 @@ func TestReceiverRealPotHTTPAdmissionRecoveryAndContinuation(t *testing.T) {
 	}
 }
 
-func receiverHTTPContinuationFixture(t *testing.T, retiredCount int) {
+func receiverHTTPContinuationFixture(t *testing.T, retiredCount int, runtimes ...Runtime) {
 	t.Helper()
+	adapter := runtimeOrDefault(runtimes)
 	p, _, _ := receiverFixture(t)
-	origin, _ := receiverPotHTTP(t)
+	var agyHost *agentHost
+	var agyWorkspace string
+	if adapter.Kind == "antigravity" {
+		adapter.Binary = fakeAgyBinary
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		adapter.Listen = listener.Addr().String()
+		root := filepath.Join(t.TempDir(), "custom-agy-host")
+		h, err := openAgentHost(root, adapter)
+		if err != nil {
+			listener.Close()
+			t.Fatal(err)
+		}
+		defer h.close()
+		agyHost = h
+		server := &http.Server{Handler: h.handler()}
+		go server.Serve(listener)
+		defer server.Close()
+		p.backend = h.backend
+		agyWorkspace = t.TempDir()
+		binary, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(filepath.Join(agyWorkspace, "execution-tools-binary"), []byte(binary), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err = h.backend.ownerExecutor(context.Background(), agyWorkspace, "read-only", "model-one", ""); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("POT_AGENT_UNTRUSTED", "must-not-inherit")
+	}
+	origin, _ := receiverPotHTTP(t, adapter)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	token, connection, err := authorizeReceiver(ctx, origin+"/mcp", p.backend.nodeID, receiverConsentBrowser(t, origin))
@@ -147,7 +184,7 @@ func receiverHTTPContinuationFixture(t *testing.T, retiredCount int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = p.control.Exec("UPDATE mcp_receiver_connections SET id=?,url=? WHERE id=?", connection, origin+"/mcp", p.identity.ConnectionID()); err != nil {
+	if _, err = p.control.Exec("UPDATE mcp_receiver_connections SET id=?,url=?,node_id=? WHERE id=?", connection, origin+"/mcp", p.backend.nodeID, p.identity.ConnectionID()); err != nil {
 		t.Fatal(err)
 	}
 	p.identity = identity
@@ -156,7 +193,7 @@ func receiverHTTPContinuationFixture(t *testing.T, retiredCount int) {
 		t.Fatal(err)
 	}
 	defer client.close()
-	registration := agentlink.MCPReceiverRegistration{Version: 1, Receiver: agentlink.Identity{Address: agentlink.NodeTarget(p.backend.nodeID), Name: "Fixture native receiver", Adapter: "codex"}, Capabilities: Codex().ReceiverCapabilities()}
+	registration := agentlink.MCPReceiverRegistration{Version: 1, Receiver: agentlink.Identity{Address: agentlink.NodeTarget(p.backend.nodeID), Name: "Fixture native receiver", Adapter: adapter.Kind}, Capabilities: adapter.ReceiverCapabilities()}
 	if err = client.Register(ctx, registration); err != nil {
 		t.Fatal(err)
 	}
@@ -196,6 +233,13 @@ func receiverHTTPContinuationFixture(t *testing.T, retiredCount int) {
 		t.Fatal(err)
 	}
 	p.backend.runTask(ctx, j)
+	firstThread := ""
+	if agyHost != nil {
+		assertAgyExecutionProbe(t, agyHost, agyWorkspace, j.Task.ID, j.Task.RunID)
+		if err = p.backend.db.QueryRow("SELECT thread_id FROM agent_adapter_sessions WHERE task_id=?", j.Task.ID).Scan(&firstThread); err != nil || firstThread == "" {
+			t.Fatal("missing AGY conversation", err)
+		}
+	}
 	loss := &receiverLostEvent{receiverRemote: client}
 	p.remote = loss
 	if err = p.step(ctx); err == nil || !loss.lost {
@@ -238,6 +282,13 @@ func receiverHTTPContinuationFixture(t *testing.T, retiredCount int) {
 		t.Fatal("no real new run", current, err)
 	}
 	p.backend.runTask(ctx, current)
+	if agyHost != nil {
+		assertAgyExecutionProbe(t, agyHost, agyWorkspace, current.Task.ID, current.Task.RunID)
+		var nextThread string
+		if err = p.backend.db.QueryRow("SELECT thread_id FROM agent_adapter_sessions WHERE task_id=?", current.Task.ID).Scan(&nextThread); err != nil || nextThread != firstThread {
+			t.Fatal("AGY continuation changed conversation", err)
+		}
+	}
 	receiverMustStep(t, p)
 	if err = caller.call(ctx, "pot_task_read", read, &task); err != nil || task.State != string(protocol.TaskComplete) || task.RunID != current.Task.RunID {
 		t.Fatal(task, err)
@@ -284,5 +335,24 @@ func TestReceiverRealPotOAuthRenewalPreservesConnectionAndPendingClaim(t *testin
 	var pending, state string
 	if err = h.db.QueryRow("SELECT claim_request_id,state FROM mcp_receiver_connections WHERE id=?", id).Scan(&pending, &state); err != nil || pending != "pending-claim" || state != "active" {
 		t.Fatal("renewal erased recovery boundary", pending, state, err)
+	}
+}
+
+func TestAntigravityReceiverHTTPExecutionContextAndContinuation(t *testing.T) {
+	receiverHTTPContinuationFixture(t, 0, Antigravity())
+}
+
+func assertAgyExecutionProbe(t *testing.T, h *agentHost, workspace, jobID, runID string) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(workspace, "context-"+runID+".json"))
+	var binding agentlink.MCPExecutionBinding
+	if err != nil || json.Unmarshal(raw, &binding) != nil || binding.Task != (protocol.AgentRef{NodeID: h.backend.nodeID, Kind: "task", AgentID: jobID}) || binding.Actor != binding.Task || binding.RunID != runID {
+		t.Fatalf("missing exact AGY execution context: %s %v", raw, err)
+	}
+	raw, err = os.ReadFile(filepath.Join(workspace, "preflight-"+runID+".json"))
+	var preflight map[string]string
+	realWorkspace, _ := filepath.EvalSymlinks(workspace)
+	if err != nil || json.Unmarshal(raw, &preflight) != nil || preflight["workspace"] != realWorkspace || preflight["root"] != h.backend.root || preflight["listen"] != h.runtime().Listen || preflight["job"] != jobID || preflight["run"] != runID || preflight["inherited"] != "" {
+		t.Fatalf("AGY preflight differs from execution scope: %s %v", raw, err)
 	}
 }

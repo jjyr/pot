@@ -142,9 +142,10 @@ MCP client / receiver ---> browser publication ---> private Control socket
 ```
 
 The receiver initiates one connection and claims both directions of work.
-There is no dedicated product TCP/P2P listener or pairing handshake. The reusable
-`pkg/peer` library remains for its public Go API and shared node identity types;
-its presence does not publish a product service.
+Codex and Antigravity use the same receiver lifecycle and Agent contracts, with
+native protocol drivers behind `internal/agenthost`. Node identity remains local;
+MCP authentication binds each connection and execution context. There is no
+separate peer transport library, TCP/P2P listener or pairing handshake.
 
 UI identity includes node, assistant and conversation. Drafts, history and
 notifications retain their owner; navigation generations reject late responses.

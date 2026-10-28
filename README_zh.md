@@ -90,9 +90,9 @@ brew upgrade jjyr/pot/pot-cli
 
 ### 桌面客户端
 
-启动 Pot，点击 **Add assistant** 连接模型供应商、另一台 Pot 节点或 Codex。试着发送：“调研这个项目并给出三个改进建议。”
+启动 Pot，点击 **Add assistant** 连接模型供应商、另一台 Pot 节点、Codex 或 Antigravity。试着发送：“调研这个项目并给出三个改进建议。”
 
-若要使用 Agent Link，在另一端打开 **Add Agent** 并粘贴连接凭证即可。详见 [Agent Link 文档](docs/agent-links.md) 或 [Codex 接入说明](integrations/codex/README.md)。
+若要使用 Agent Link，配置发布的 MCP URL 并完成浏览器授权；原生接收端需要单独安装和启动。详见 [Agent Link 文档](docs/agent-links.md) 或 [Codex 接入说明](integrations/codex/README.md)。
 
 ### Linux 服务器 / Web UI
 
@@ -121,7 +121,7 @@ ssh -L 17703:127.0.0.1:17703 user@your-server
 
 ## 连接其他 Assistants
 
-Agent Link 目前已完整支持 Pot 与 Pot 互联，以及连接 Codex。
+Agent Link 通过 MCP 连接 Pot、Codex 和 Antigravity，各接收端保留自己的模型、凭证、工作区和权限。
 
 ### Codex
 
@@ -133,7 +133,11 @@ Read https://github.com/jjyr/pot/blob/main/docs/connect-with-agent.md and help m
 
 或查阅完整的 [Codex 手动接入指引](integrations/codex/README.md#install-and-connect)。
 
-### Claude / Grok / Antigravity
+### Antigravity
+
+普通工具调用使用独立的 Pot MCP 连接；助手通信和 Task 执行需要单独安装接收端支持包。它与 Codex 共用 MCP 接收端和 Agent 接口，由 Antigravity stream-json 驱动原生执行，暂不提供无界面的远程人工审批。详见 [Antigravity 接入说明](integrations/antigravity/README.md#install-and-connect)。
+
+### Claude / Grok
 
 即将推出适配支持。
 

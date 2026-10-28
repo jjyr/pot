@@ -155,14 +155,21 @@ when processing assistant mail. A directly submitted Task remains a Task actor,
 even when its original caller is an OAuth user. Receiver OAuth credentials never
 enter native MCP configuration or model arguments.
 
-`execution-tools --root ROOT` connects only to an already-running Host and checks
-the persisted Task/run plus the active native execution on every dispatch. Direct
+`execution-tools` resolves its root and loopback listener from the complete
+supervised job/run environment. Explicit root/listener flags must match that
+scope; missing or conflicting values are rejected. It connects only to an
+already-running Host and checks the persisted Task/run plus the active native
+execution on every dispatch. Direct
 Task workers expose only `pot_execution_context`; they gain no delegation or
 cross-node message tools. Assistant message execution additionally exposes typed
 sender-free discovery, messaging and Task operations through the authenticated
 receiver gateway. Codex injects this service through thread-scoped configuration;
-Antigravity retains its mandatory independent execution-support hook and native
-read-only policy. Neither path replaces execution binding with a global login.
+Antigravity loads the same scoped service through its mandatory independent
+receiver-support package. Plugin preflight uses the execution workspace and
+environment, and the native read-only policy remains enforced. Neither path
+replaces execution binding with a global login. The former generic stdio `host`
+command and local tool-dispatch endpoint are removed; owner management uses the
+separate management APIs.
 
 The service's existing human review UI receives Codex pending requests through
 the receiver extension. Decisions are once-only controls bound to the original

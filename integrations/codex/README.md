@@ -14,7 +14,7 @@ Explicit receiver Host -- outbound authorized MCP --> Pot
   execution-tools: trusted active Task/run context, no owner API
 ```
 
-## Ordinary setup
+## Install and connect
 
 Use a Codex client supporting independent Streamable HTTP MCP and standard OAuth
 with PKCE. The existing App Server/plugin baseline is Codex CLI **0.163.0**;

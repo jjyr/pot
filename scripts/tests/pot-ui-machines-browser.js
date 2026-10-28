@@ -6,7 +6,7 @@ async (page,{origin=new URL(page.url()).origin}={}) => {
  await page.goto(origin+'/machine-policy-fixture');
  await page.evaluate(async()=>{
   const {createPages}=await import('/components/pages.mjs'),{node:n}=await import('/components/primitives.mjs');
-  const fixture=window.machineFixture={policy:{machines:{host:{execution_access:'ask',revision:1}},rules:[],task_grants:[],application:{}},calls:[],notices:[],offline:false,hold:false,language:'en'};
+  const fixture=window.machineFixture={policy:{machines:{host:{execution_access:'ask',revision:1}},rules:[],task_grants:[],application:{}},calls:[],notices:[],offline:false,hold:false,holdPolicy:false,language:'en'};
   const shell=n('div','pot-app surface-main'),host=n('main'),approvals=n('div');shell.style.display='block';host.className='page-host';host.style.height='100%';shell.append(host,approvals);document.body.append(shell);
   const client={desktop:false,runtime:{boot_id:'fixture-boot'},spaces:[{id:'local',control_id:'local-node',name:'Local Pot',connected:true}],scope:()=>({space:'local',owner:'selected-assistant'}),request:async(path,options)=>{
    fixture.calls.push({path,...options});
@@ -20,6 +20,7 @@ async (page,{origin=new URL(page.url()).origin}={}) => {
      if(body.action==='save_rule'){fixture.policy.rules.push({...body.rule,id:'local-rule'});fixture.policy.machines.host.revision++;}
      return {};
     }
+    if(fixture.holdPolicy)await new Promise(resolve=>fixture.releasePolicy=resolve);
     if(fixture.offline)throw Error('Policy unavailable');return {policy:structuredClone(fixture.policy)};
    }
    throw Error('Unmocked endpoint '+path);
@@ -30,12 +31,28 @@ async (page,{origin=new URL(page.url()).origin}={}) => {
  });
  const selectMachine=()=>page.locator('.topology-node.machine').click(),card=()=>page.locator('.topology-inspector .machine-card');
  await selectMachine();assert(await card().getByLabel('Default execution',{exact:true}).inputValue()==='ask','Local execution policy is retained');
+ await page.evaluate(()=>{machineFixture.originalSelect=document.querySelector('.machine-card select');machineFixture.originalCard=document.querySelector('.topology-inspector .machine-card');});
  await card().getByLabel('Default execution',{exact:true}).selectOption('deny');await page.evaluate(()=>machineFixture.hold=true);await card().getByRole('button',{name:'Save permissions',exact:true}).click();
  await page.waitForFunction(()=>!!machineFixture.release);await page.evaluate(()=>machineFixture.pages.show('machines'));
  assert(await card().getByLabel('Default execution',{exact:true}).isDisabled(),'Pending saves remain disabled through refresh');
  assert(!await page.evaluate(()=>machineFixture.pages.leave()),'Navigation cannot abandon an in-flight permission write');
+ assert(await page.evaluate(()=>machineFixture.originalSelect===document.querySelector('.machine-card select')&&machineFixture.originalCard===document.querySelector('.topology-inspector .machine-card')),'Pending save and refresh retain the original controls and card');
  await page.evaluate(()=>{machineFixture.hold=false;machineFixture.release();});await page.waitForFunction(()=>document.querySelector('.machine-card select')?.value==='deny'&&document.querySelector('.machine-card .permission-changes')?.hidden);
  assert(await page.evaluate(()=>machineFixture.calls.some(call=>call.method==='POST'&&call.space==='local'&&call.owner===''&&call.body.machine_id==='host'&&call.body.machine_policy.revision===1)),'Permission save captures the local machine and revision independently of Chat');
+ assert(await page.evaluate(()=>machineFixture.originalSelect===document.querySelector('.machine-card select')),'Saved policy updates the original select');
+ await page.evaluate(()=>{const f=machineFixture;f.read= f.client.read;f.metadataReads=[];f.client.read=async(path,options)=>{if(['/api/v1/runtime','/api/v1/agent-links'].includes(path))await new Promise(resolve=>f.metadataReads.push(resolve));return f.read(path,options);};f.holdPolicy=true;f.originalSelect.focus();f.postCount=f.calls.filter(call=>call.method==='POST').length;f.policyRefresh=f.pages.refresh(['permissions']);});
+ await page.waitForFunction(()=>!!machineFixture.releasePolicy&&machineFixture.metadataReads.length===2);
+ await page.waitForFunction(()=>document.querySelector('.machine-card .permission-changes .primary').disabled);
+ await card().getByLabel('Default execution',{exact:true}).selectOption('allow');
+ assert(await page.evaluate(()=>machineFixture.originalSelect===document.activeElement&&machineFixture.originalSelect===document.querySelector('.machine-card select')),'Pending authority read preserves focused local editing');
+ assert(await card().getByRole('button',{name:'Save permissions',exact:true}).isDisabled(),'Unconfirmed authority cannot save a local edit');
+ await page.evaluate(()=>document.querySelector('.machine-card .permission-changes .primary').click());
+ assert(await page.evaluate(()=>machineFixture.calls.filter(call=>call.method==='POST').length===machineFixture.postCount),'Pending authority cannot issue a command');
+ await page.evaluate(()=>{machineFixture.holdPolicy=false;machineFixture.client.read=machineFixture.read;for(const release of machineFixture.metadataReads)release();machineFixture.releasePolicy();return machineFixture.policyRefresh;});
+ assert(await card().getByLabel('Default execution',{exact:true}).inputValue()==='allow','Fresh policy preserves a dirty local edit');
+ assert(await page.evaluate(()=>machineFixture.originalSelect===document.activeElement),'Fresh policy preserves the original select focus');
+ await card().getByRole('button',{name:'Cancel',exact:true}).click();
+ assert(await card().getByLabel('Default execution',{exact:true}).inputValue()==='deny','Cancel uses the confirmed saved policy');
  await card().locator('.permission-rules>summary').click();await card().getByRole('button',{name:'Add permission',exact:true}).click();await page.getByLabel('Exact command',{exact:true}).fill('npm test');await page.getByLabel('Working directory',{exact:true}).fill('/Projects/local');await page.getByRole('button',{name:'Save',exact:true}).click();await card().getByText('npm test',{exact:true}).waitFor();
  assert(await page.evaluate(()=>machineFixture.calls.some(call=>call.body?.action==='save_rule'&&call.space==='local'&&call.owner===''&&call.body.expected_revision===2)),'Nested command editor retains the local authority');
  await card().getByLabel('Default execution',{exact:true}).selectOption('allow');await page.evaluate(()=>{machineFixture.language='zh-CN';window.dispatchEvent(new Event('pot:locale'));});await card().getByLabel('默认执行方式',{exact:true}).waitFor();

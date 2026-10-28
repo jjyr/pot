@@ -3,9 +3,6 @@ package agenthost
 import (
 	"context"
 	"database/sql"
-	"io"
-	"os"
-	"strings"
 
 	assistantprofile "github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/pkg/agentlink"
@@ -78,37 +75,4 @@ func (b *backend) Profile(ctx context.Context, r agentlink.ProfileRequest) (agen
 	})
 	result.Revision = r.Revision + 1
 	return result, err
-}
-
-// MCP image paths are bounded to the selected assistant's existing workspace.
-func (b *backend) profileImage(ctx context.Context, id, path string) (string, error) {
-	a, err := b.resolve(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(path) == "" {
-		return "", agentlink.ErrInvalid
-	}
-	root, err := os.OpenRoot(a.Workspace)
-	if err != nil {
-		return "", err
-	}
-	defer root.Close()
-	file, err := root.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return "", err
-	}
-	if !info.Mode().IsRegular() || info.Size() > assistantprofile.AvatarSourceLimit {
-		return "", agentlink.ErrInvalid
-	}
-	raw, err := io.ReadAll(io.LimitReader(file, assistantprofile.AvatarSourceLimit+1))
-	if err != nil {
-		return "", err
-	}
-	return assistantprofile.NormalizeAvatar(raw)
 }

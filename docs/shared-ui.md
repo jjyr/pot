@@ -284,7 +284,7 @@ a local commit failure retries that accepted receipt without sending the command
 again. Provider monitor revisions and exact-intent recovery retain their existing
 compare-and-swap behavior.
 
-Permissions, pairing/authentication, binary resources,
+Permissions, authentication, binary resources,
 Topology and detailed Usage retain their specialized interfaces. These combine
 live authority, transport lifecycle or route-specific aggregation that is outside
 the migrated display domains; they still use the shared storage boundary where
@@ -319,7 +319,7 @@ it must establish its own operation authority. Command receipts remain bound to
 their original identities and do not become reusable across boots.
 Provider summaries share one local entry across assistant contexts. Credential
 bytes and authorization URLs/codes are excluded from persisted provider,
-integration and Agent Link display projections. Authentication, pairing, live
+integration and Agent Link display projections. Authentication, live
 permissions, authoritative editor revision reads, binary resources and conversation transport
 keep their specialized interfaces. The machine editor stores only its derived
 policy summary; a failed live read exposes that summary as read-only and never

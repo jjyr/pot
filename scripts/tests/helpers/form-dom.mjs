@@ -22,6 +22,7 @@ export class Element extends EventTarget {
  querySelector(selector){return this.querySelectorAll(selector)[0]||null;}closest(selector){return this.matches(selector)?this:this.parentElement?.closest(selector);}
  showModal(){this.open=true;}close(){this.open=false;this.dispatchEvent(new Event('close'));}
  remove(){if(this.parentElement)this.parentElement.children=this.parentElement.children.filter(child=>child!==this);this.parentElement=this.parentNode=null;}
+ cloneNode(deep=false){const clone=new Element(this.tagName);for(const {name,value}of this.attributes)clone.setAttribute(name,value);clone.style={...this.style};for(const key of ['disabled','open','value','checked','type','selected'])if(key in this)clone[key]=this[key];if(deep)for(const child of this.children)clone.append(child.cloneNode(true));return clone;}
  focus(){document.activeElement=this;}click(){if(!this.disabled)return this.onclick?.({currentTarget:this,preventDefault(){}});}
  reportValidity(){return true;}getBoundingClientRect(){return {width:1000,height:700,top:0,left:0};}
  get clientWidth(){return 1000;}
@@ -30,6 +31,7 @@ export class Element extends EventTarget {
 class Text {
  constructor(value){this.nodeType=3;this.data=value;}
  get textContent(){return this.data;}set textContent(value){this.data=String(value);}
+ cloneNode(){return new Text(this.data);}
  matches(){return false;}querySelectorAll(){return [];}contains(node){return node===this;}
  remove(){Element.prototype.remove.call(this);}
  get isConnected(){return !!this.parentElement?.isConnected;}

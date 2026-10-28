@@ -8,7 +8,6 @@
     "./pkg/executor",
     "./pkg/processscope",
     "./pkg/pluginhost",
-    "./pkg/peer",
     "./pkg/agentlink",
     "./pkg/storage",
     "./pkg/storage/migrations",

@@ -629,7 +629,7 @@ packaging, deterministic CLI, public API, hook and license checks, plus macOS
 source/release checks. `test:core` replaces the complete normal/race suites in
 this local gate. Its explicit plan in
 [`scripts/go-test-core.json`](../scripts/go-test-core.json) runs the full Agent,
-model protocol, execution, process supervision, plugin host, peer/Agent Link,
+model protocol, execution, process supervision, plugin host, MCP/Agent Link,
 storage/migration, access, secrets, inbox and scheduler packages without race
 instrumentation. Selected integration tests cover Control approvals and exact
 command grants, task cancellation/idempotency/rollback/retry, conversation

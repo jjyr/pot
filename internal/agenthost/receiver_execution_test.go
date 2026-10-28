@@ -25,12 +25,12 @@ func TestReceiverExecutionContextUsesActualActiveTaskActorRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.backend.active[task.ID] = func() {}
-	input := hostToolInput{Operation: "execution_context", JobID: task.ID, RunID: task.RunID}
+	input := executionContextInput{JobID: task.ID, RunID: task.RunID}
 	binding, err := h.executionContext(ctx, input)
 	if err != nil || binding.Actor.Kind != "task" || binding.Actor != binding.Task || binding.Task.AgentID != task.ID || binding.RunID != task.RunID {
 		t.Fatal("wrong execution actor", binding, err)
 	}
-	for _, mutate := range []func(*hostToolInput){func(in *hostToolInput) { in.RunID = "old-run" }, func(in *hostToolInput) { in.JobID = "foreign-task" }, func(in *hostToolInput) { in.FromAssistantID = "codex" }} {
+	for _, mutate := range []func(*executionContextInput){func(in *executionContextInput) { in.RunID = "old-run" }, func(in *executionContextInput) { in.JobID = "foreign-task" }, func(in *executionContextInput) { in.FromAssistantID = "codex" }} {
 		invalid := input
 		mutate(&invalid)
 		if _, err = h.executionContext(ctx, invalid); err == nil {
