@@ -19,10 +19,10 @@ export async function preparedResourceMatrix(page){
     acquired++;let done=false;return {release(){if(!done){done=true;released++;}},read:async()=>new Blob([value.mime_type==='text/markdown'?'# Nested ready\n\n```mermaid\ngraph TD\n A --> B\n```':'Bound resource'],{type:value.mime_type}),url:()=>{
      if(value.mime_type==='image/png')return png;
      const url=URL.createObjectURL(new Blob(['%PDF-1.4\n1 0 obj <</Type /Catalog /Pages 2 0 R>> endobj\n2 0 obj <</Type /Pages /Kids [] /Count 0>> endobj\ntrailer <</Root 1 0 R>>\n%%EOF'],{type:'application/pdf'}));urls.push(url);return url;
-    },renderDocument:async token=>{
+    },renderURL:token=>{
      const script=`const send=(action,value)=>parent.postMessage({type:'pot-resource',token:${JSON.stringify(token)},action,value},'*');send('resize',180);send('ready');addEventListener('message',event=>{if(event.data==='grow')send('resize',900)});`;
-     return '<!doctype html><p>Isolated synthetic HTML</p><script>'+script+'</script>';
-    },trackDocumentURL:url=>urls.push(url)};
+     const url=URL.createObjectURL(new Blob(['<!doctype html><p>Isolated synthetic HTML</p><script>'+script+'</script>'],{type:'text/html'}));urls.push(url);return url;
+    }};
    }};
    const rows=Array.from({length:100},(_,index)=>({id:'matrix-'+index,viewKey:'matrix-'+index,role:'assistant',text:'Synthetic row '+index,...(index===99?{resources:true}:{})}));
    let window;const render=(message,old)=>{
@@ -40,7 +40,7 @@ export async function preparedResourceMatrix(page){
     const live=f.host.querySelector('[data-message-id="matrix-99"]'),nodes=[...live.querySelectorAll('pot-resource')],diagram=live.querySelector('pot-mermaid'),height=live.getBoundingClientRect().height;
     if(nodes.length!==5||nodes.some(node=>node.dataset.state!=='ready')||diagram?.dataset.state!=='ready')throw Error('Recursive ready includes image decode, PDF frame, isolated HTML and nested Markdown diagram');
     if(acquired!==5||released!==0)throw Error('Initial candidate transfer restarted a lease');
-    live.querySelector('iframe.resource-interactive').contentWindow.postMessage('grow','*');await wait(()=>live.querySelector('iframe.resource-interactive').style.getPropertyValue('--resource-height')==='900px'&&window.prepared);await frames();
+    live.querySelector('iframe.resource-interactive').contentWindow.postMessage('grow','*');await wait(()=>live.querySelector('iframe.resource-interactive').style.getPropertyValue('--resource-height')==='900px');await frames();
     if(live.getBoundingClientRect().height!==height)throw Error('Late isolated HTML resize changed the committed row frame');
     const ready={elapsed:performance.now()-start,height,acquired,released,kinds:nodes.map(node=>node.dataset.kind),sameNodes:nodes.every(node=>node.isConnected)};
     document.body.tabIndex=-1;document.body.focus({preventScroll:true});window.locate({id:'matrix-0'});await wait(()=>window.prepared&&!live.isConnected);
