@@ -1,4 +1,4 @@
-import {UI_CACHE_VERSION} from '../../pkg/storage/migrations/ui-cache/0007_chat_outbox.mjs';
+import {UI_CACHE_VERSION} from '../../pkg/storage/migrations/ui-cache/0008_resource_bytes.mjs';
 import {createIndexedStore,idbRequest} from '../../web/src/state/indexed-store.mjs';
 import {clearBusinessCaches} from '../../web/src/state/cache-lifecycle.mjs';
 import {createProductionClient} from '../../web/src/adapters/production.mjs';

@@ -66,7 +66,7 @@ func TestCompleteVersionedShell(t *testing.T) {
 		}
 		found[asset.URL] = true
 	}
-	for _, name := range []string{"/index.html", "/errors.js", "/app.js", "/components/ui.js", "/styles.css", "/assets/IBMPlexSans-Regular.ttf", "/locales/server.json", "/pkg/storage/migrations/ui-cache/0006_startup_identity.mjs"} {
+	for _, name := range []string{"/index.html", "/errors.js", "/app.js", "/components/ui.js", "/styles.css", "/assets/IBMPlexSans-Regular.ttf", "/locales/server.json", "/pkg/storage/migrations/ui-cache/0006_startup_identity.mjs", "/pkg/storage/migrations/ui-cache/0008_resource_bytes.mjs", "/resource-document.html", "/state/resource-bytes.mjs", "/state/resource-reader.mjs"} {
 		if !found[name] {
 			t.Fatal("startup dependency missing", name)
 		}

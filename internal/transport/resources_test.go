@@ -317,6 +317,14 @@ func TestResourceHTTPToolsRangeDownloadAndIsolation(t *testing.T) {
 			if response.Code != 200 || response.Header().Get("Content-Security-Policy") != resources.HTMLPolicy || !strings.Contains(response.Body.String(), "data:text/javascript;base64,") {
 				t.Fatal("HTML sandbox", response.Code)
 			}
+			document := get("/api/v1/resources/"+resource.ID+"/render-document", ownerID, "")
+			var saved resources.DisplayDocument
+			if document.Code != 200 || json.Unmarshal(document.Body.Bytes(), &saved) != nil || saved.Resource != resource.ID || saved.Version != 1 || saved.Token != "pot-resource-mount-token-v1" || !strings.Contains(saved.HTML, "data:text/javascript;base64,") {
+				t.Fatalf("offline display document: %d %s", document.Code, document.Body.String())
+			}
+			if get("/api/v1/resources/"+resource.ID+"/render-document", "other", "").Code < 400 {
+				t.Fatal("cross-owner offline display document")
+			}
 			if resource.Download.MIMEType != "application/zip" {
 				t.Fatal("bundle not downloadable")
 			}

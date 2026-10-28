@@ -28,7 +28,7 @@ func resourceRoute(path string) (string, string, bool) {
 	if len(parts) == 1 {
 		return parts[0], "", true
 	}
-	return parts[0], parts[1], parts[1] == "chunk" || parts[1] == "content" || parts[1] == "download" || parts[1] == "render"
+	return parts[0], parts[1], parts[1] == "chunk" || parts[1] == "content" || parts[1] == "download" || parts[1] == "render" || parts[1] == "render-document"
 }
 func (a *Application) resourceCall(ctx context.Context, method string, u *url.URL, owner string) (any, error, bool) {
 	if strings.HasPrefix(u.Path, "/api/v1/message-files/") {
@@ -53,6 +53,21 @@ func (a *Application) resourceCall(ctx context.Context, method string, u *url.UR
 	if operation == "" {
 		value, err := a.Control.Resources.Get(ctx, owner, id)
 		return value, err, true
+	}
+	if operation == "render-document" {
+		resource, err := a.Control.Resources.Get(ctx, owner, id)
+		if err != nil {
+			return nil, err, true
+		}
+		document, err := resources.RenderDisplayDocument(resource, func(path string) ([]byte, error) {
+			file, _, err := a.Control.Resources.OpenFile(ctx, owner, id, path)
+			if err != nil {
+				return nil, err
+			}
+			defer file.Close()
+			return io.ReadAll(io.LimitReader(file, resources.BundleLimit+1))
+		})
+		return document, err, true
 	}
 	if operation == "chunk" {
 		offset := uint64(0)

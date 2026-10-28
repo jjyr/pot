@@ -28,7 +28,7 @@ export function createReplyBubble(host) {
       if(text!==version){const shown=new Set();markdown.update(message.text,{downloadFile,acquireFileImage,revision:complete,renderFileReference:messageFiles?reference=>{
         const normalized=reference.href.replace(/:[1-9][0-9]*$/,'');
         if(reference.block&&shown.has(normalized))reference={...reference,block:false};if(reference.block)shown.add(normalized);
-        return createMessageFile(reference,message.id,{messageFiles,retryMessageFile,acquireResource,downloadResource,previewClaims,pending:!complete});
+        return createMessageFile(reference,message.id,{messageFiles,retryMessageFile,acquireResource,downloadResource,previewClaims,sourceText:message.text,pending:!complete});
       }:undefined});text=version;}
       const nextResource=JSON.stringify(message.presentation||null);
       if(resourceKey!==nextResource){resourceNode?.remove();resourceNode=null;resourceKey=nextResource;if(message.presentation){resourceNode=createResourceView(message.presentation,{acquireResource,downloadResource});moveConversationNode(content,resourceNode);}}
