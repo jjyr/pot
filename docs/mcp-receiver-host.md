@@ -111,6 +111,10 @@ receipts. Pending messages survive a journal reopen and lost ACK/admission/input
 receipt responses reconcile without launching another turn. Cancellation intent
 keeps messages pending; confirmed cancellation discards the preceding unconsumed
 guidance. Later owner guidance can continue from the confirmed terminal run.
+A queued cancel still targets its original run. If that run finishes naturally
+and a continuation advances before dispatch, the Host verifies the old terminal
+receipt and journals the intent as reconciled without cancelling the new run or
+changing the original result. The settled control cannot poison later polling.
 
 Native submission and terminal continuation exclude retired jobs from capacity
 checks. Retired jobs retain their saved bytes and last state; current work still

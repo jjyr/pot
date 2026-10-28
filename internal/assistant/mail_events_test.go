@@ -110,3 +110,26 @@ func testCompletionInboxClaimsAndReportsTheSameResultOnce(t *testing.T, origin p
 		t.Fatal("remote transport forged a Runtime lifecycle event")
 	}
 }
+
+func TestCompletionNotificationRequiresLocalDestinationNode(t *testing.T) {
+	m, err := openMailbox(t, filepath.Join(t.TempDir(), "tasks.sqlite"), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range []string{"local", "foreign"} {
+		run := newConversation()
+		event := protocol.Envelope{ID: "result-" + node, Kind: "task_result", From: address("local", "runtime"), To: address(node, "main"), ConversationID: run, Text: "done", Result: &protocol.TaskResultEvent{TaskID: "task-" + node, RunID: run, Title: "Result", Phase: protocol.TaskComplete, Text: "done", Origin: protocol.TaskOrigin{Kind: "manual"}}}
+		event.From.Kind = "runtime"
+		if err = storage.Transaction(t.Context(), m.db, func(tx *sql.Tx) error { return inbox.EnqueueTx(t.Context(), tx, event, "in", "queued") }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	events, err := m.Notifications(t.Context(), "main")
+	if err != nil || len(events) != 1 || events[0].To.NodeID != "local" {
+		t.Fatal("notification crossed local node ownership", events, err)
+	}
+	var state string
+	if err = m.db.QueryRow("SELECT state FROM agent_messages WHERE id='result-foreign'").Scan(&state); err != nil || state != "queued" {
+		t.Fatal("foreign historical receipt changed", state, err)
+	}
+}

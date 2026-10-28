@@ -220,3 +220,73 @@ func TestReceiverHTTPMailboxWaitsForNativeBoundaryAndRecoversFIFO(t *testing.T) 
 	}
 	assertRetired()
 }
+
+func TestReceiverEndedCancelCannotStopNativeContinuation(t *testing.T) {
+	p, remote, d := receiverFixture(t)
+	d.Work.Request.Text = "hold-after-answer"
+	ctx, cancel := context.WithTimeout(t.Context(), testutil.Timeout(t, 20*time.Second))
+	defer cancel()
+	receiverMustStep(t, p)
+	receiverMustStep(t, p)
+	original := receiverRecordFixture(t, p, d)
+	j, err := p.backend.read(ctx, d.Work.Request.From, original.Admission.Binding.Task.AgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workspace string
+	if err = p.backend.db.QueryRow("SELECT workspace FROM agent_adapter_sessions WHERE task_id=?", j.Task.ID).Scan(&workspace); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { p.backend.runTask(ctx, j); close(done) }()
+	for {
+		if _, err = os.Stat(filepath.Join(workspace, "answer-ready")); err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("native turn did not start")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	receiverMustStep(t, p)
+	input := agentlink.MCPControlDelivery{Version: 1, DeliveryID: "boundary-input", Dispatch: d.Claim.Binding, Binding: original.Admission.Binding, Caller: d.Work.Request.From, InputPhase: "running", Input: &agentlink.MCPTaskInput{RequestID: "next", TaskID: d.Claim.Binding.Task.AgentID, RunID: j.Task.RunID, Text: "native continuation"}}
+	cancelControl := agentlink.MCPControlDelivery{Version: 1, DeliveryID: "boundary-cancel", Dispatch: d.Claim.Binding, Binding: original.Admission.Binding, Caller: d.Work.Request.From, Cancel: &agentlink.MCPCancelInput{RequestID: "cancel", TaskID: d.Claim.Binding.Task.AgentID, RunID: j.Task.RunID}}
+	inputClaim := agentlink.MCPClaim{ConnectionID: p.identity.ConnectionID(), DeliveryID: input.DeliveryID, ClaimID: "input", Binding: d.Claim.Binding}
+	cancelClaim := agentlink.MCPClaim{ConnectionID: p.identity.ConnectionID(), DeliveryID: cancelControl.DeliveryID, ClaimID: "cancel", Binding: d.Claim.Binding}
+	remote.queue = append(remote.queue, receiverDelivery{Claim: &inputClaim, Control: &input}, receiverDelivery{Claim: &cancelClaim, Control: &cancelControl})
+	receiverMustStep(t, p)
+	receiverMustStep(t, p)
+	if err = os.WriteFile(filepath.Join(workspace, "complete-turn"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("native turn did not finish")
+	}
+	receiverMustStep(t, p)
+	receiverMustStep(t, p)
+	records, err := p.Records(ctx)
+	if err != nil || len(records) != 3 {
+		t.Fatal(records, err)
+	}
+	if records[0].LastPhase != "complete" || records[1].Admission == nil || !records[2].ControlApplied || records[2].Admission != nil {
+		t.Fatal("ended cancel poisoned native mailbox", records)
+	}
+	current, err := p.backend.read(ctx, d.Work.Request.From, j.Task.ID)
+	if err != nil || current.Task.RunID == j.Task.RunID || current.Task.State != "queued" {
+		t.Fatal("old cancel changed native continuation", current, err)
+	}
+	p.backend.runTask(ctx, current)
+	receiverMustStep(t, p)
+	current, err = p.backend.read(ctx, d.Work.Request.From, j.Task.ID)
+	if err != nil || current.Task.State != "completed" || current.Task.Result != "result: native continuation\n" {
+		t.Fatal("native continuation did not execute", current, err)
+	}
+	// A delayed duplicate delivery is reconciled, never applied to the new run.
+	if err = p.accept(ctx, receiverDelivery{Claim: &cancelClaim, Control: &cancelControl}); err != nil {
+		t.Fatal(err)
+	}
+	receiverMustStep(t, p)
+}

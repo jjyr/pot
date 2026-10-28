@@ -176,6 +176,9 @@ func (p *potMCPReceiver) Admit(ctx context.Context, r *agentlink.MCPReceiverReco
 	// repeat cancellation intent against this same run, never start a new run.
 	if r.Control != nil && r.Control.Cancel != nil {
 		if e = p.s.Tasks.StopExpectedRun(ctx, r.Claim.Binding.Receiver.AgentID, r.Control.Binding.Task.AgentID, r.Control.Binding.RunID); e != nil {
+			if errors.Is(e, agentlink.ErrFenced) {
+				return p.reconcileEndedCancel(ctx, r)
+			}
 			return e
 		}
 		r.ControlApplied = true
@@ -253,6 +256,42 @@ func (p *potMCPReceiver) Admit(ctx context.Context, r *agentlink.MCPReceiverReco
 	}
 	return e
 }
+
+// A durable cancel still names its original run after a mailbox continuation.
+// Once that run's terminal report is reconciled, settle the intent without
+// stopping the newer run or changing the original completion into cancellation.
+func (p *potMCPReceiver) reconcileEndedCancel(ctx context.Context, r *agentlink.MCPReceiverRecord) error {
+	return storage.Transaction(ctx, p.s.Tasks.DB(), func(tx *sql.Tx) error {
+		current, err := mcpreceiver.Read(ctx, tx, r.Claim.ConnectionID, r.Claim.DeliveryID)
+		if err != nil {
+			return err
+		}
+		*r = current
+		if r.ControlApplied {
+			return nil
+		}
+		if r.Control == nil || r.Control.Cancel == nil || !r.Ack.Accepted || !r.Acknowledged {
+			return agentlink.ErrFenced
+		}
+		prior, err := p.prior(ctx, tx, r.Control)
+		if err != nil {
+			return err
+		}
+		if prior.Outbox != nil || prior.Receipt == nil || !potMCPTerminal(prior.LastPhase) {
+			return agentlink.ErrFenced
+		}
+		execution, err := p.s.Tasks.ReadReceiverTx(ctx, tx, r.Claim.Binding.Receiver.AgentID, r.Control.Binding.Task.AgentID)
+		if err != nil {
+			return err
+		}
+		if execution == nil || execution.RunID == r.Control.Binding.RunID {
+			return agentlink.ErrFenced
+		}
+		r.ControlApplied = true
+		return mcpreceiver.Save(ctx, tx, r)
+	})
+}
+
 func (p *potMCPReceiver) Snapshot(ctx context.Context, r *agentlink.MCPReceiverRecord) error {
 	if r.Admission == nil || r.Outbox != nil || potMCPTerminal(r.LastPhase) {
 		return nil

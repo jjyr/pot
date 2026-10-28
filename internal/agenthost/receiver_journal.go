@@ -118,7 +118,9 @@ func (p *receiverPump) validateControl(ctx context.Context, tx *sql.Tx, c *agent
 		return err
 	}
 	if current.Task.RunID != c.Binding.RunID && c.Input == nil {
-		return agentlink.ErrFenced
+		if c.Cancel == nil || prior.Outbox != nil || prior.Receipt == nil || !receiverTerminal(prior.LastPhase) {
+			return agentlink.ErrFenced
+		}
 	}
 	if c.Approval != nil {
 		if c.Approval.Epoch != p.epoch || current.Task.State != "waiting_approval" {
@@ -227,7 +229,14 @@ func (p *receiverPump) admit(ctx context.Context, r *receiverRecord) error {
 						return err
 					}
 					if accepted.Task.RunID != c.Binding.RunID {
-						return agentlink.ErrFenced
+						if c.Cancel == nil || prior.Outbox != nil || prior.Receipt == nil || !receiverTerminal(prior.LastPhase) {
+							return agentlink.ErrFenced
+						}
+						// The original run ended before its accepted cancel was
+						// dispatched. Journal that reconciliation, never stop
+						// the continuation or rewrite the actual terminal result.
+						r.ControlApplied = true
+						return saveReceiverRecord(ctx, tx, r)
 					}
 					if !terminal(accepted.Task.State) {
 						if accepted.Task.State == "queued" {

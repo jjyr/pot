@@ -124,7 +124,12 @@ The execution Task and receiver remain the same. Commit this comparison with the
 mapping; reconcile exact duplicate admissions before checking a new transition.
 The Host supplies the actual backend Task/run, not a caller-selected replacement.
 Cancellation creates no new execution run: its ack records intent, and terminal
-evidence is reported under the executing claim.
+evidence is reported under the executing claim. If the named run already ended
+and a continuation advanced the Task before the cancel was dispatched, reconcile
+the original claim/caller/dispatch and terminal receipt, then durably settle that
+intent in the receiver journal. It cannot stop the newer run or rewrite the old
+run's actual result as cancelled. An ended cancel never blocks later mailbox
+polling or unrelated accepted work.
 
 `MCPInputReceipt` separates consumption from acceptance and completion. A
 `consumed` receipt binds the input to its admitted execution run; it does not
@@ -138,10 +143,13 @@ confirmed cancellation, unconsumed guidance accepted before that boundary is
 marked cancelled; new owner guidance accepted against the cancelled terminal run
 can continue after cleanup. Cancelled deliveries cannot later be admitted.
 
-Terminal receiver projections for assistant-directed Tasks enqueue their stable
+Terminal receiver projections directed by this Control's own assistant enqueue their stable
 per-run completion envelope and notification receipt in the same Tasks
 transaction. An immediately consumed next input cannot hide the preceding run's
-result from the background notification scan. Completion envelopes retain the
+result from the background notification scan. A remote origin's same-named actor
+never owns a local notification inbox or a local notification receipt; its owned
+status/get mapping remains available. Notification reads also enforce the full
+local destination node and assistant identity. Completion envelopes retain the
 actual execution run identifier, including native hash identifiers; a non-UUID
 conversation identifier is accepted only when it equals that Task result's run.
 

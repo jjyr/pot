@@ -234,6 +234,12 @@ func (s *Service) syncTaskExecutions(ctx context.Context) {
 			continue
 		}
 		d := it.d
+		// Receiver service projections are not this Control's directing actor.
+		// Their original node reads the owned result through the saved mapping.
+		// A matching assistant ID on this node grants no notification ownership.
+		if d.Execution.Request.From.NodeID != s.options.RuntimeID {
+			continue
+		}
 		expectedRun := d.Execution.Receipt.RunID
 		if terminalLinkTask(d.Execution.Receipt.State) && it.notified != 0 {
 			continue
@@ -297,6 +303,9 @@ func (s *Service) syncTaskExecutions(ctx context.Context) {
 	}
 }
 func (s *Service) taskExecutionNotification(ctx context.Context, id, owner string, d *tasks.Record) error {
+	if d.Execution.Request.From.NodeID != s.options.RuntimeID {
+		return agentlink.ErrUnauthorized
+	}
 	if d.Execution.Request.From.Kind == "user" {
 		return s.userTaskExecutionNotification(ctx, id, owner, d)
 	}
@@ -312,6 +321,9 @@ func (s *Service) taskExecutionNotification(ctx context.Context, id, owner strin
 // Terminal mailbox runs may advance before the background notification scan.
 // Commit their completion envelope alongside the terminal Task projection.
 func taskExecutionNotificationTx(ctx context.Context, tx *sql.Tx, node string, d *tasks.Record) error {
+	if d.Execution.Request.From.NodeID != node || d.Execution.Request.From.Kind != "assistant" {
+		return agentlink.ErrUnauthorized
+	}
 	run := d.Info.RunID
 	if run == "" {
 		run = linkRunID(d.Info.ID)
