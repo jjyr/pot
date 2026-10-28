@@ -163,6 +163,13 @@ that conversation. Selecting an assistant opens full-width Chat. Returning keeps
 the directory search and scroll, and each conversation retains its draft, cached
 history and reading position.
 
+Browser history records the directory presentation separately from conversation
+identity. Returning to a directory entry keeps the current conversation's scope,
+session, draft and reading position; its recorded former owner does not select a
+conversation. Reloading that entry keeps the directory visible while restoring
+the retained conversation from the startup cache. Explicit conversation entries
+continue to restore their recorded owner.
+
 Root pages expose a 44 × 44 px menu button. A rightward swipe beginning within
 24 px of the left edge also opens the full-screen menu with Assistants, Tasks,
 Topology, Extensions, Usage and Settings. A destination, Close, Escape or a leftward swipe
@@ -286,6 +293,17 @@ appear in this order: Create an assistant with API, Connect another Pot, Connect
 Codex. Only the explicit API creation action creates a local assistant, using the
 node default or the shared Provider editor. Visiting the page never creates an
 assistant. Linked chats do not require a local model connection.
+
+Runtime choices retain their button identity during directory refreshes. Selecting
+a runtime shows loading progress and permits one configuration lookup at a time;
+language changes preserve that lookup. Leaving the page or retiring its Space,
+Control, boot or connection prevents a late lookup from opening a form.
+After the current connection is confirmed again, runtime choices recover in
+place. Finishing an old lookup releases its pending state without replacing the
+current choices' authority.
+Configuration steps share one Add assistant history entry. Successful creation
+replaces it with the returned assistant's conversation; browser Back and the
+narrow conversation Back gesture return to the assistant directory.
 
 Each choice pairs its heading and description with a consistent rounded icon
 holder: a blue plug for API creation and the existing Pot/Codex brand assets for

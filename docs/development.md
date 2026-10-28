@@ -299,6 +299,17 @@ authentication state for provider probes. The real HTTP contract keeps its two
 independent authenticated clients. Set `TMPDIR` to a private directory when the
 default temporary filesystem is quota constrained.
 
+`mise run test:ui-assistant-create` exercises the phone creation flow in English
+and Chinese with the production HTTP adapter, SSE, IndexedDB and trusted Chromium
+touch input. Its loopback API holds configuration and creation responses, counts
+requests and supplies only synthetic assistants; it does not connect a real peer
+or call a model. The runner also checks late catalogs after navigation, scope and
+identity changes. Use the existing `POT_PLAYWRIGHT_MODULE` and
+`POT_CHROMIUM_EXECUTABLE` overrides. `POT_CREATION_OUTPUT` selects the untracked
+evidence directory; `POT_CREATION_SOURCE` selects an extracted source tree and
+`--baseline` records its behavior. These checks do not establish physical iOS
+browser or installed PWA gesture behavior.
+
 For Markdown resource previews, start `POT_MARKDOWN_RESOURCE_FIXTURE=1
 POT_RESOURCE_FIXTURE_URL_FILE=/tmp/pot-markdown-url mise exec -- go test
 ./internal/transport -run '^TestResourceBrowserFixture$' -count=1 -v -timeout=30m`.
