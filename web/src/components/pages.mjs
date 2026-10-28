@@ -1,3 +1,4 @@
+import {resourceAuthorityCurrent} from '../state/resource-authority.mjs';
 import {captureUsageWait} from '../state/usage-wait.mjs';
 import {domainsFor} from '../state/domains/index.mjs';
 import {mergeTaskHistory} from '../state/task-repository.mjs';
@@ -681,8 +682,9 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     const view={task,record,token,returnTo,initialRead:!saved,scope:fileScope,state:saved||createTaskTranscript(),inputs:[],storageError:!!transcriptError?.storage,connectionError:transcriptError?.message||'',fresh:false,busy:false,again:false,unavailable:false};
     const current=()=>gate.current(token)&&taskView===view;
 
+    const commandTask=()=>{const run=view.record.run_id,authority=view.authority;return {...task,run_id:run,_authority:authority,_valid:()=>current()&&view.fresh&&view.record.run_id===run&&view.authority===authority};};
     const taskAction=(capability,work)=>{
-      if(!current()||!view.fresh||client.operationScopeReady?.(fileScope)===false||!supportsCapability(view.record,capability))throw Object.assign(Error(translate(locale(),'identityChanged')),{uiKey:'identityChanged'});
+      if(!current()||!view.fresh||!resourceAuthorityCurrent(client,fileScope,view.authority)||!supportsCapability(view.record,capability)||client.supports?.(capability,fileScope)===false)throw Object.assign(Error(translate(locale(),'identityChanged')),{uiKey:'identityChanged'});
       return work();
     };
     const ui=createTaskConversation({root,task,record,locale,client,scope:fileScope,draft:taskDrafts.get(draftKey)||'',onDraft:text=>{taskDraftVersions.set(draftKey,(taskDraftVersions.get(draftKey)||0)+1);if(text)taskDrafts.set(draftKey,text);else taskDrafts.delete(draftKey);},
@@ -690,16 +692,17 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       assistantName:(client.assistants||[]).find(item=>item.id===task.assistant_id&&item.space_id===task._space_id)?.name||task.assistant_id,
       downloadFile:({task:id,path})=>client.downloadFile(id,path,fileScope),toolMemory,approvalFor:tool=>approvalFor(tool,task.id),onDecision:decideApproval,
       onSend:async text=>{
-        const version=taskDraftVersions.get(draftKey);
-        await taskAction('task.input',()=>taskDomain.sendInput({...task,run_id:view.record.run_id},fileScope,text));
+        const version=taskDraftVersions.get(draftKey),submittedTask=commandTask();
+        await taskAction('task.input',()=>taskDomain.sendInput(submittedTask,fileScope,text));
+        if(!submittedTask._valid())return false;
         if(taskDrafts.get(draftKey)===text&&taskDraftVersions.get(draftKey)===version)taskDrafts.delete(draftKey);
 
       },
-      onStop:()=>taskAction('task.interrupt',()=>taskDomain.interrupt({...task,run_id:view.record.run_id},fileScope)),
-      onCancel:()=>taskAction('task.cancel',()=>taskDomain.cancel({...task,run_id:view.record.run_id},fileScope)),
-      onPause:()=>taskAction('task.control',()=>taskDomain.pause({...task,run_id:view.record.run_id},fileScope,!view.record.info?.paused)),
-      onArchive:()=>taskAction('task.archive',()=>taskDomain.archive({...task,run_id:view.record.run_id},fileScope,!view.record.info?.archived)),
-      onUsage:()=>openUsageView({...fileScope,name:task.title,scope:task.id,returnTask:{...task},taskReturn:returnTo}),
+      onStop:()=>taskAction('task.interrupt',()=>taskDomain.interrupt(commandTask(),fileScope)),
+      onCancel:()=>taskAction('task.cancel',()=>taskDomain.cancel(commandTask(),fileScope)),
+      onPause:()=>taskAction('task.control',()=>taskDomain.pause(commandTask(),fileScope,!view.record.info?.paused)),
+      onArchive:()=>taskAction('task.archive',()=>taskDomain.archive(commandTask(),fileScope,!view.record.info?.archived)),
+      onUsage:()=>openUsageView({...fileScope,name:task.title,scope:task.id,returnTask:{...task,run_id:view.record.run_id},taskReturn:returnTo}),
       onEarlier:async({before,signal})=>{const generation=view.windowGeneration=(view.windowGeneration||0)+1,run=view.record.run_id;view.historyBefore=Number(view.state.messages.filter(message=>!message.context_only).at(-1)?.sequence||0)+1;
         const earlier=await taskDomain.loadEarlier({...view.task,run_id:run},fileScope,before,{signal});if(!current()||generation!==view.windowGeneration||run!==view.record.run_id||signal.aborted)return;
         if(earlier?.messages.length){const anchor=view.ui.position()?.position?.anchor?.sequence;view.state=mergeTaskHistory(view.state,earlier,anchor||before);}else view.state={...view.state,has_more:false};
@@ -714,7 +717,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     restoreView(`task:${draftKey}`,token);
     view.stop=taskDomain.watchDetail(task,fileScope,snapshot=>{
       if(!current())return;const data=snapshot.data;if(!data){if(snapshot.error){view.fresh=false;view.connectionError=snapshot.error.message;view.storageError=!!snapshot.error.storage;renderTaskTranscript(view);}return;}
-      if(view.record.run_id!==data.record.run_id){view.windowGeneration=(view.windowGeneration||0)+1;view.historyBefore=null;}view.record=data.record;view.inputs=data.inputs;view.inputsTruncated=data.inputsTruncated;view.fresh=snapshot.fresh&&data.fresh;view.catchingUp=!!data.catchingUp;view.unavailable=data.unavailable;view.storageError=!!snapshot.error?.storage||data.storageError;view.connectionError=snapshot.error?.message||data.connectionError||'';
+      if(view.record.run_id!==data.record.run_id){view.windowGeneration=(view.windowGeneration||0)+1;view.historyBefore=null;}view.record=data.record;view.inputs=data.inputs;view.inputsTruncated=data.inputsTruncated;view.authority=data.authority;view.fresh=snapshot.fresh&&data.fresh&&resourceAuthorityCurrent(client,fileScope,data.authority);view.catchingUp=!!data.catchingUp;view.unavailable=data.unavailable;view.storageError=!!snapshot.error?.storage||data.storageError;view.connectionError=snapshot.error?.message||data.connectionError||'';
       if(!view.historyBefore)view.state=data.state;
       else{const updates=new Map(data.state.messages.map(message=>[message.id,message]));view.state={...view.state,cursor:data.state.cursor,inputs:data.state.inputs,messages:view.state.messages.map(message=>updates.get(message.id)||message)};}
       rememberTasks([{...view.record.info,_space_id:fileScope.space,assistant_id:fileScope.owner}]);renderTaskTranscript(view);
@@ -734,7 +737,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     await permissions();
   }
   async function schedules(root,token) {
-    const t=key=>translate(locale(),key);root.classList.add('schedules-content');root.append(toolbar(action(t('schedule.new'),()=>scheduleEditor())));
+    const t=key=>translate(locale(),key);root.classList.add('schedules-content');const canCreate=()=>(client.assistants||[]).some(item=>supportsCapability(item,'schedules.manage')&&!item.retained&&!item.offline&&client.operationScopeReady?.({space:item.space_id,owner:item.id})!==false);root.append(toolbar(action(t('schedule.new'),()=>{if(canCreate())scheduleEditor();},{disabled:!canCreate()})));
     const search=field(t('tasks.scheduleSearch'),filter.scheduleQuery,{kind:'search'});search.row.classList.add('task-search');search.input.placeholder=t('tasks.scheduleSearch');
     const owner=field(t('tasks.assistantFilter'),filter.listOwner,{choices:ownerChoices(client,locale())});owner.row.classList.add('record-filter','record-owner-filter');
     const line=toolbar(search.row,owner.row);line.classList.add('record-search-line');root.append(line,n('p','record-view-help',t('tasks.scheduleHelp')));
@@ -785,7 +788,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     const selectedScope={space:item._space_id,owner:item._assistant_id},selectedQuery={selected:item.id,runsOffset,limit:20};
     await connectDomain(root,token,listener=>domains.schedules.watch(selectedScope,selectedQuery,listener),()=>domains.schedules.refresh(selectedScope,selectedQuery),(value,snapshot)=>{
       if(!value.selected||value.selected.deleted){scheduleView=null;return show('tasks',{force:true});}
-      view.fresh=snapshot.fresh;view.busy=!!snapshot.pending;view.item={...item,...value.selected};const projection=n('div');renderScheduleHistory(projection,view,value,runsOffset);reconcile(content,projection);
+      view.authority=snapshot.authority;view.fresh=snapshot.fresh&&resourceAuthorityCurrent(client,selectedScope,view.authority);view.busy=!!snapshot.pending;view.item={...item,...value.selected};const projection=n('div');renderScheduleHistory(projection,view,value,runsOffset);reconcile(content,projection);
     });
     if(gate.current(token))restoreView(JSON.stringify(['schedule-history',item._space_id,item._assistant_id,item.id,runsOffset]),token);
   }
@@ -796,11 +799,11 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     for(const name of ['run',selected.spec.enabled?'pause':'resume','edit','delete']) {
       const button=action(tr({run:'Run now',pause:'Pause',resume:'Resume',edit:'Edit',delete:'Remove'}[name],{run:'立即运行',pause:'暂停',resume:'恢复',edit:'编辑',delete:'移除'}[name]),async event=>{
         const button=event.currentTarget,actions=button.parentElement;
-        if(!view.fresh||view.busy||scheduleView!==view||!gate.current(view.token)||client.operationScopeReady?.({space:selected._space_id,owner:selected._assistant_id})===false||!supportsCapability(recordOwner(selected,client).profile,'schedules.manage'))return;
+        if(!view.fresh||!resourceAuthorityCurrent(client,{space:selected._space_id,owner:selected._assistant_id},view.authority)||view.busy||scheduleView!==view||!gate.current(view.token)||client.operationScopeReady?.({space:selected._space_id,owner:selected._assistant_id})===false||!supportsCapability(recordOwner(selected,client).profile,'schedules.manage'))return;
         if(name==='edit'){scheduleEditor(selected);return;}
         if(name==='delete'&&!view.confirmed){view.confirmed=true;button.textContent=tr('Confirm removal','确认移除');return;}
         view.busy=true;for(const control of actions.querySelectorAll('button'))control.disabled=true;
-        const captured={space:selected._space_id,owner:selected._assistant_id};
+        const captured={space:selected._space_id,owner:selected._assistant_id,_authority:view.authority};
         try{await (name==='run'?domains.schedules.run(captured,selected.id):name==='delete'?domains.schedules.remove(captured,selected.id):domains.schedules.pause(captured,selected.id,name==='pause'));if(scheduleView===view&&gate.current(view.token)&&name==='delete'){scheduleView=null;await show('tasks',{force:true});}}
         catch(reason){if(scheduleView===view&&gate.current(view.token))errorView(reason,view.content);}
         finally{view.busy=false;for(const control of actions.querySelectorAll('button'))control.disabled=!view.fresh;}

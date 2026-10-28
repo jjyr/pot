@@ -39,7 +39,7 @@ async function mountFixture(){
       }
       const task=items.find(item=>url.pathname==='/api/v1/tasks/'+item.id);
       if(task)return {run_id:'run',info:task,request:{text:task.title},capabilities};
-      if(url.pathname.endsWith('/events')){const events=(f.taskEvents||[]).filter(row=>row.sequence>Number(url.searchParams.get('after')||0));return {events,cursor:events.at(-1)?.sequence||0,has_more:false};}
+      if(url.pathname.endsWith('/events')){const events=(f.taskEvents||[]).filter(row=>row.sequence>Number(url.searchParams.get('after')||0));return {run_id:'run',events,cursor:events.at(-1)?.sequence||0,has_more:false};}
       if(url.pathname.endsWith('/messages'))return [];
       return {items:[]};
     },send:async()=>{throw Error('Sending is disabled in this fixture');},cancel:async()=>{},markRead:async value=>value,

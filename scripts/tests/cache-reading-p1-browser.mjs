@@ -1,3 +1,5 @@
+import {createTasksDomain} from '../../web/src/state/domains/tasks.mjs';
+import {createQueryRegistry,createCommands} from '../../web/src/state/domains/query.mjs';
 import {createChatCache} from '../../web/src/state/chat-cache.mjs';
 import {createChatDomain} from '../../web/src/state/domains/chat.mjs';
 import {createTaskRepository} from '../../web/src/state/task-repository.mjs';
@@ -25,7 +27,7 @@ const client={production:true,chatCacheName:name,runtime,spaces:[{id:'s',control
     if(url.pathname==='/api/v1/runtime'){machineEntered=true;await machine.promise;return {runtime_id:'r',host:{hostname:'Fixture'}};}
     if(url.pathname==='/api/v1/usage/summary')return {total:{input:1,output:1,cache:0},lifetime:{input:1,output:1,cache:0},quota:{policy:{period:'none'},active:false},waiting:{turn:'wait-request',since:42},buckets:[]};
     if(url.pathname==='/api/v1/permissions')return {pending:[],policy:{}};
-    if(url.pathname.endsWith('/events'))return {events:[],has_more:false};
+    if(url.pathname.endsWith('/events'))return {run_id:'two',events:[],has_more:false};
     return {items:[],next_offset:null};
   },downloadFile:()=>{},
 };
@@ -58,10 +60,37 @@ async function run(){
     IDBDatabase.prototype.transaction=function(stores,mode,...rest){if(mode==='readwrite')throw new DOMException('Synthetic write failure','QuotaExceededError');return originalTx.call(this,stores,mode,...rest);};
     try{await retained.invalidate(['usage'],{space:'s'});const value=await retained.read('/api/v1/usage/summary',scope);check(value.total.input===1&&retained.state(value).freshness!=='fresh','real IDB committed resource remains retained while epoch writes fail');let failed=false;try{await retained.read('/api/v1/usage/summary',{...scope,authoritative:true});}catch(error){failed=error.storage;}check(failed,'failed epoch cannot authorize a fresh resource');}finally{IDBDatabase.prototype.transaction=originalTx;retained.clear();}
 
+    // Actual domain, scheduler and Task repository: no new server event wakes it.
+    {
+      const events=[{sequence:1,event:{update:{type:'message_started',id:'long'}}},...Array.from({length:6201},(_,i)=>({sequence:i+2,event:{update:{type:'text_delta',text:'x'}}})),{sequence:6203,event:{update:{type:'message_finished'}}}];
+      const snapshots=[];let reads=0;
+      const resources={read:async()=>({run_id:'long',revision:1,capabilities:caps(['task.events'])}),state:()=>({freshness:'fresh'}),subscribe:()=>()=>{},subscribeInvalidation:()=>()=>{}};
+      const longClient={...client,request:async path=>{reads++;const after=Number(new URL(path,location.origin).searchParams.get('after'));return {run_id:'long',events:events.slice(after,after+100),has_more:after+100<events.length};}};
+      const queries=createQueryRegistry(resources),commands=createCommands(longClient),tasks=createTasksDomain(longClient,{resources,queries,commands});
+      const stop=tasks.watchDetail({id:'long',run_id:'long'},scope,value=>snapshots.push({cursor:value.data?.state.cursor,fresh:value.fresh,catchingUp:value.data?.catchingUp}));
+      await wait(()=>snapshots.at(-1)?.fresh&&snapshots.at(-1).cursor===6203,'real committed 6203 journal');
+      check(reads===63&&snapshots.some(value=>value.cursor===5000&&value.catchingUp&&!value.fresh),'real IDB Task journal catches up 6203 events in 63 serial pages with no premature fresh');
+      stop();tasks.dispose();queries.dispose();commands.dispose();
+    }
     const repository=createTaskRepository(client);
-    await repository.append(task,scope,{events:[{sequence:1,event:{update:{type:'message_started',id:'saved'}}},{sequence:2,event:{update:{type:'text_delta',text:'Committed Task content before metadata'}}},{sequence:3,event:{update:{type:'message_finished'}}}]});repository.close();
+    const fenced={id:'fenced',run_id:'fenced'},seed=[{sequence:1,event:{update:{type:'message_started',id:'fenced'}}}];
+    await repository.append(fenced,scope,{run_id:'fenced',events:seed});
+    let allowed=true,releaseGate=false,blocked=false;const gateReady=deferred(),originalAdmission=IDBDatabase.prototype.transaction;
+    IDBDatabase.prototype.transaction=function(stores,mode,...rest){
+      if(mode==='readwrite'&&!blocked){blocked=true;const gate=originalAdmission.call(this,['conversations'],'readwrite');const pump=()=>{const op=gate.objectStore('conversations').get('fixture-gate');op.onsuccess=()=>{gateReady.resolve();if(!releaseGate)pump();};};pump();}
+      return originalAdmission.call(this,stores,mode,...rest);
+    };
+    try{
+      const pending=repository.append(fenced,scope,{run_id:'fenced',events:[{sequence:2,event:{update:{type:'text_delta',text:'must not commit'}}}]},{validate:()=>{if(!allowed)throw new DOMException('Fixture retired','AbortError');}});
+      await gateReady.promise;allowed=false;releaseGate=true;let rejected=false;try{await pending;}catch(error){rejected=error.name==='AbortError';}
+      check(rejected&&(await repository.read(fenced,scope)).cursor===1,'Task append retired while queued behind real IDB performs zero commit');
+    }finally{releaseGate=true;IDBDatabase.prototype.transaction=originalAdmission;}
+    let wrongSource=false;try{await repository.append(fenced,scope,{run_id:'other',events:[{sequence:2,event:{update:{type:'text_delta',text:'wrong run'}}}]});}catch(error){wrongSource=error.code==='task_run_changed';}
+    check(wrongSource&&(await repository.read(fenced,scope)).cursor===1,'same-sequence page from another run cannot enter the actual repository');
+
+    await repository.append(task,scope,{run_id:'one',events:[{sequence:1,event:{update:{type:'message_started',id:'saved'}}},{sequence:2,event:{update:{type:'text_delta',text:'Committed Task content before metadata'}}},{sequence:3,event:{update:{type:'message_finished'}}}]});repository.close();
     pages=createPages({client,host,approvalHost:document.querySelector('#approvals'),chatApprovalHost:document.querySelector('#chat-approvals'),chatVisible:()=>false,locale:()=>language,notify:()=>{},changed:()=>{},titleChanged:()=>{},openChat:()=>{}});
-    await pages.openTask(task);await wait(()=>host.textContent.includes('Committed Task content before metadata'),'retained Task text');
+    const openedAt=performance.now();await pages.openTask(task);await wait(()=>host.textContent.includes('Committed Task content before metadata')&&getComputedStyle(host.querySelector('.task-history')).visibility==='visible','visible retained Task text');report('retained Task visible after '+Math.round(performance.now()-openedAt)+'ms with measured real DOM');
     check(metadataEntered&&machineEntered,'Task committed transcript mounts while metadata and runtime are still unresolved');
     pages.taskMenu();check(!button('Cancel task'),'retained Task transcript exposes no cancel action');host.querySelector('dialog[open]')?.close();
     await pages.openTask({...task,run_id:'two'});await pause(80);check(!host.textContent.includes('Committed Task content before metadata'),'explicit new Task run cannot borrow the previous run transcript');

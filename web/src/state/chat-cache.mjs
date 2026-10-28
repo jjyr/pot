@@ -130,11 +130,12 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
       return {snapshot,view,checkpoint:checkpoints?await request(tx.objectStore('taskCheckpoints').get(key)):null};
     });
   }
-  async function writeFrames(key,frames,{anchor,surface,window,position,checkpoint,historyRange}={}){
+  async function writeFrames(key,frames,{anchor,surface,window,position,checkpoint,historyRange,validate=()=>{}}={}){
     const result=await transaction('readwrite',async tx=>{
-      if(await request(tx.objectStore('cacheStats').get('retired:'+key)))return null;
+      validate();if(await request(tx.objectStore('cacheStats').get('retired:'+key)))return null;
       let meta=await request(tx.objectStore('conversations').get(key)),snapshot=await projection(tx,key,meta,window||meta?.window),changed=false;
       for(let frame of frames){
+        validate();
         if(meta?.projection&&(meta.projection.runtime_id!==frame.runtime_id||meta.projection.owner_id!==frame.owner_id))throw Error('chat_cache_identity');
         if(meta?.projection&&!sameOwner(meta.projection,frame)){
           if(meta.retired_conversations?.includes(frame.conversation_id))continue;
@@ -147,13 +148,13 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
         }
         if(snapshot&&BigInt(frame.cursor)<BigInt(snapshot.cursor)||snapshot&&frame.kind==='delta'&&frame.cursor===snapshot.cursor)continue;
         meta||={};frame={...frame,messages:await upsert(tx,key,meta,frame.messages)};
-        const previousCursor=snapshot?.cursor;snapshot=mergeUIFrame(snapshot,frame,anchor);
+        validate();const previousCursor=snapshot?.cursor;snapshot=mergeUIFrame(snapshot,frame,anchor);
         const replies=new Map((meta.replies||[]).map(reply=>[reply.input_id,reply]));for(const reply of frame.replies)replies.set(reply.input_id,reply);
         meta={...meta,history_floor:frame.kind==='reset'&&previousCursor!==frame.cursor?frame.cursor:meta.history_floor||'0',replies:[...replies.values()].slice(-maxMessages),ranges:ranges([...(frame.kind==='delta'||previousCursor===frame.cursor?meta.ranges||[]:[]),...(frame.kind==='reset'&&frame.history?[{before:frame.history.before,after:frame.history.after}]:frame.messages.filter(message=>!message.context_only).map(message=>({before:message.sequence,after:message.sequence})))])};
         if(historyRange)meta.ranges=ranges([...(meta.ranges||[]),historyRange]);
         meta=capture(meta,snapshot);changed=true;
       }
-      if(!snapshot)return null;if(changed){meta=await save(tx,key,meta,snapshot);if(checkpoints&&checkpoint)tx.objectStore('taskCheckpoints').put({schema_version:1,...checkpoint,key,cursor:snapshot.cursor,conversation_id:snapshot.conversation_id});}await saveWindow(tx,key,surface,snapshot,position);return {meta,snapshot};
+      if(!snapshot)return null;if(changed){meta=await save(tx,key,meta,snapshot);if(checkpoints&&checkpoint)tx.objectStore('taskCheckpoints').put({schema_version:1,...checkpoint,key,cursor:snapshot.cursor,conversation_id:snapshot.conversation_id});}validate();await saveWindow(tx,key,surface,snapshot,position);validate();return {meta,snapshot};
     });
     // The transaction's projection becomes query-visible only after complete.
     return committed(key,result);

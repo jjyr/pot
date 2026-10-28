@@ -20,7 +20,7 @@ const client={chatCacheName:cacheName,production:true,desktop:false,runtime:{run
     if((base==='/api/v1/tasks/query'||base==='/api/v1/tasks/catalog')){if(options.space==='b')return {items:[],total:0,counts:{}};const offset=Number(url.searchParams.get('offset')||0);return {items:taskItems.slice(offset,offset+50),next_offset:offset===0?50:null,counts:{active:51,attention:0,archived:0},total:51};}
     if(base==='/api/v1/tasks/t0')return {info:taskItems[0],run_id:'run',request:{text:'Fixture task input'},capabilities:{version:1,operations:['task.read','task.input','task.events']}};
     if(base==='/api/v1/tasks/t0/messages')return {items:[]};
-    if(base==='/api/v1/tasks/t0/events')return {events:Number(url.searchParams.get('after'))===0?[{sequence:1,event:{update:{type:'message_started'}}},{sequence:2,event:{update:{type:'text_delta',text:'Cached task transcript'}}},{sequence:3,event:{update:{type:'message_finished'}}}]:[],has_more:false};
+    if(base==='/api/v1/tasks/t0/events')return {run_id:'run',events:Number(url.searchParams.get('after'))===0?[{sequence:1,event:{update:{type:'message_started'}}},{sequence:2,event:{update:{type:'text_delta',text:'Cached task transcript'}}},{sequence:3,event:{update:{type:'message_finished'}}}]:[],has_more:false};
     if(base==='/api/v1/schedules')return {items:[],next_offset:null};
     if(base==='/api/v1/permissions')return {pending:[],machines:[],policy:{}};
     if(base==='/api/v1/integrations'){const loggedIn=counts.get(key)>1;return {items:[{id:'github',name:'GitHub',login_available:true,status:loggedIn?'connected':'disconnected',...(loggedIn?{account:{revision:1,identity:{username:'fixture-login'}}}:{login:{id:'fixture-login',status:'pending'}})}]};}

@@ -77,6 +77,7 @@ console.log('PASS registration and pending epoch faults retain legal data, autho
   const queries=createQueryRegistry(resources),commands=createCommands(client),domain=createSchedulesDomain(client,{resources,queries,commands});
   const values=[];const stop=domain.watchList(value=>values.push(value));await tick();
   assert.deepEqual(calls.map(value=>[value.space,value.owner]),[['s','o']]);assert.equal(values.at(-1).data[0].value.items[0].id,'cached-schedule');assert.equal(values.at(-1).fresh,false);assert.deepEqual(client.assistants[0].capabilities.operations,['chat.read']);
+  await assert.rejects(domain.run(scope,'cached-schedule'));assert.throws(()=>domain.preview(scope,{}));
   stop();queries.dispose();commands.dispose();
 }
 console.log('PASS schedules query only known scoped retained identities without manage restoration');
@@ -89,7 +90,7 @@ for(const mode of ['complete','stop','storage-failure','stale-metadata']){
   const resources={read:async()=>record,state:()=>({freshness:mode==='stale-metadata'?'retained':'fresh'}),subscribe:()=>()=>{},subscribeInvalidation:()=>()=>{}};
   const queries=createQueryRegistry(resources),commands=createCommands({});
   const repository={read:async()=>state,append:async(_,__,page)=>{if(mode==='storage-failure'&&state.cursor===5000)throw Object.assign(Error('commit failed'),{storage:true});appendTaskEvents(state,page.events);return state;},close(){}};
-  const domain=createTasksDomain({request:async path=>{inflight++;maxInflight=Math.max(inflight,maxInflight);reads++;await Promise.resolve();const after=Number(new URL(path,'http://fixture').searchParams.get('after'));inflight--;return {events:events.slice(after,after+100),has_more:after+100<events.length};}},{resources,queries,commands,transcriptRepository:repository});
+  const domain=createTasksDomain({request:async path=>{inflight++;maxInflight=Math.max(inflight,maxInflight);reads++;await Promise.resolve();const after=Number(new URL(path,'http://fixture').searchParams.get('after'));inflight--;return {run_id:'run',events:events.slice(after,after+100),has_more:after+100<events.length};}},{resources,queries,commands,transcriptRepository:repository});
   stop=domain.watchDetail({id:'t',run_id:'run'},scope,value=>{updates.push({cursor:value.data?.state.cursor,fresh:value.fresh,catchingUp:value.data?.catchingUp});if(value.data?.catchingUp){batches.push(reads);if(mode==='stop'&&!stopped){stopped=true;stop();}}});
   for(let i=0;i<50;i++){await tick();if(mode==='complete'&&updates.at(-1)?.fresh||mode==='storage-failure'&&reads===51||mode==='stop'&&stopped||mode==='stale-metadata')break;}
   assert.equal(maxInflight,mode==='stale-metadata'?0:1);
@@ -100,3 +101,72 @@ for(const mode of ['complete','stop','storage-failure','stale-metadata']){
   stop();queries.dispose();domain.dispose();commands.dispose();
 }
 console.log('PASS static 6203-event journal auto-catches up in bounded serial batches; stop, commit failure and stale metadata cannot publish fresh or start extra IO');
+
+// Metadata provenance, rather than a view's attachment time, grants action IO.
+for(const change of ['connection','serving-boot','source-boot','control']){
+  const response=deferred();let sourceBoot='remote-one',eventReads=0,appends=0;
+  const client={connectionGeneration:1,runtime:{runtime_id:'serving',boot_id:'serving-one'},spaces:[{id:'s',control_id:'remote'}],operationScopeReady:()=>true,request:async()=>{eventReads++;return {run_id:'run',events:[],has_more:false};}};
+  const resources={describe:()=>({control:client.spaces[0].control_id,boot:sourceBoot}),read:()=>response.promise,state:()=>({freshness:'fresh'}),subscribe:()=>()=>{},subscribeInvalidation:()=>()=>{}};
+  const queries=createQueryRegistry(resources),commands=createCommands(client),domain=createTasksDomain(client,{resources,queries,commands,transcriptRepository:{read:async()=>null,append:async()=>{appends++;},close(){}}});
+  const pending=domain.detail({id:'t',run_id:'run'},scope).value();
+  if(change==='connection')client.connectionGeneration++;
+  if(change==='serving-boot')client.runtime.boot_id='serving-two';
+  if(change==='source-boot')sourceBoot='remote-two';
+  if(change==='control')client.spaces[0].control_id='replacement';
+  response.resolve({run_id:'run',capabilities:caps(['task.events'])});await assert.rejects(pending,{name:'AbortError'});assert.equal(eventReads,0);assert.equal(appends,0);
+  domain.dispose();queries.dispose();commands.dispose();
+}
+{
+  const reads=[],observedRuns=[],client={runtime:{runtime_id:'r',boot_id:'b'},spaces:[{id:'s',control_id:'r'}],request:async()=>({run_id:'new-run',events:[],has_more:false})};
+  const resources={read:async(_,options)=>{reads.push(options.authoritative);return {run_id:options.authoritative===true?'new-run':'old-run',capabilities:caps(['task.events'])};},state:()=>({freshness:'fresh'}),subscribe:()=>()=>{},subscribeInvalidation:()=>()=>{}};
+  const queries=createQueryRegistry(resources),commands=createCommands(client),domain=createTasksDomain(client,{resources,queries,commands,transcriptRepository:{read:async task=>{observedRuns.push(task.run_id);return null;},append:async()=>createTaskTranscript(),close(){}}});
+  const result=await domain.detail({id:'t',run_id:'new-run'},scope).value();assert.deepEqual(reads,['invalidated',true]);assert.deepEqual(observedRuns,['new-run']);assert.equal(result.record.run_id,'new-run');
+  resources.read=async()=>({run_id:'old-run',capabilities:caps(['task.events'])});const mismatched=await domain.detail({id:'t',run_id:'unknown-run'},scope).value();assert.equal(mismatched.fresh,false);assert.ok(mismatched.connectionError);assert.deepEqual(observedRuns,['new-run','old-run']);
+  domain.dispose();queries.dispose();commands.dispose();
+}
+{
+  const client={connectionGeneration:0,runtime:{runtime_id:'r',boot_id:'b'},spaces:[{id:'s',control_id:'r'}],assistants:[{id:'o',space_id:'s',capabilities:caps(['schedules.manage'])}],request:async()=>{throw Error('Wrong-identity POST');}};
+  const resources={describe:()=>({control:'r',boot:'source'}),subscribe:()=>()=>{},subscribeInvalidation:()=>()=>{}};
+  const queries=createQueryRegistry(resources),commands=createCommands(client),domain=createTasksDomain(client,{resources,queries,commands});
+  const pending=domain.cancel({id:'t',run_id:'run'},scope);client.connectionGeneration++;await assert.rejects(pending,error=>error.uiKey==='identityChanged');
+  const schedules=createSchedulesDomain(client,{resources,queries,commands}),schedule=schedules.run(scope,'s');client.connectionGeneration++;await assert.rejects(schedule,error=>error.uiKey==='identityChanged');
+  domain.dispose();queries.dispose();commands.dispose();
+}
+console.log('PASS metadata and command IO fence serving/source boot, Control and connection changes; known new runs require matching authoritative metadata');
+
+// A Task journal has cumulative sequence numbers across authoritative run changes.
+{
+  let run='one',revision=1,eventRun='one',appends=0;const reads=[],states=new Map(),updates=[];
+  const journal=[{sequence:1,event:{update:{type:'message_started',id:'old'}}},{sequence:2,event:{update:{type:'text_delta',text:'old run'}}},{sequence:3,event:{update:{type:'message_finished'}}},{sequence:4,event:{update:{type:'message_started',id:'new'}}},{sequence:5,event:{update:{type:'text_delta',text:'new run'}}},{sequence:6,event:{update:{type:'message_finished'}}}];
+  const client={runtime:{runtime_id:'r',boot_id:'b'},spaces:[{id:'s',control_id:'r'}],request:async path=>{const after=Number(new URL(path,'http://fixture').searchParams.get('after'));return {run_id:eventRun,events:journal.slice(after,eventRun==='one'?3:6),has_more:false};}};
+  const resources={read:async(_,options)=>{reads.push(options.authoritative);return {run_id:run,revision,capabilities:caps(['task.events'])};},state:()=>({freshness:'fresh'}),subscribe:()=>()=>{},subscribeInvalidation:()=>()=>{}};
+  const queries=createQueryRegistry(resources),commands=createCommands(client),repository={read:async task=>states.get(task.run_id)||null,append:async(task,_,page,{validate})=>{validate();appends++;const state=states.get(task.run_id)||createTaskTranscript();appendTaskEvents(state,page.events);states.set(task.run_id,state);return state;},close(){}};
+  const domain=createTasksDomain(client,{resources,queries,commands,transcriptRepository:repository}),task={id:'t',run_id:'one'},query=domain.detail(task,scope);const stop=query.watch(value=>updates.push({record:value.data?.record.run_id,fresh:value.fresh}));
+  await query.value();assert.equal(query.snapshot.data.state.cursor,3);
+  run=eventRun='two';revision=2;await query.refresh(true);
+  assert.equal(query.snapshot.data.record.run_id,'two');assert.equal(query.snapshot.data.state.cursor,6);assert.ok(query.snapshot.data.state.messages.some(row=>row.text==='old run'));assert.ok(query.snapshot.data.state.messages.some(row=>row.text==='new run'));assert.equal(query.snapshot.fresh,true);assert.ok(reads.filter(value=>value===true).length>=2);
+  const before=appends;eventRun='one';await query.refresh(true);assert.equal(appends,before,'late old-run page performs zero append');assert.equal(query.snapshot.fresh,false);assert.equal(query.snapshot.data.state.cursor,6);
+  eventRun='two';await query.refresh(true);assert.equal(query.snapshot.fresh,true);
+  stop();domain.dispose();queries.dispose();commands.dispose();
+}
+for(const returnedRun of [undefined,'old-run']){
+  let appends=0;const record={run_id:'new-run',revision:2,capabilities:caps(['task.events'])},resources={read:async()=>record,state:()=>({freshness:'fresh'}),subscribe:()=>()=>{},subscribeInvalidation:()=>()=>{}};
+  const client={request:async()=>({run_id:returnedRun,events:[{sequence:1,event:{update:{type:'text_delta',text:'wrong source'}}}],has_more:false})},queries=createQueryRegistry(resources),commands=createCommands(client),domain=createTasksDomain(client,{resources,queries,commands,transcriptRepository:{read:async()=>null,append:async()=>{appends++;return createTaskTranscript();},close(){}}});
+  const value=await domain.detail({id:'t',run_id:'new-run'},scope).value();assert.equal(appends,0);assert.equal(value.fresh,false);assert.ok(value.connectionError);
+  domain.dispose();queries.dispose();commands.dispose();
+}
+console.log('PASS authoritative same-id continuation rebuilds cumulative journal; old/missing run and reused sequences perform zero append and never become fresh');
+
+// Metadata from a retired run cannot supersede a newer revision, nor can a
+// command queued by an old view dispatch after that view's run has changed.
+{
+  const oldMetadata=deferred();let reads=0,appends=0,valid=true;
+  const client={runtime:{runtime_id:'r',boot_id:'b'},spaces:[{id:'s',control_id:'r'}],request:async()=>({run_id:'two',events:[],has_more:false})};
+  const resources={read:async()=>++reads===1?oldMetadata.promise:{run_id:'two',revision:2,capabilities:caps(['task.events'])},state:()=>({freshness:'fresh'}),subscribe:()=>()=>{},subscribeInvalidation:()=>()=>{}};
+  const queries=createQueryRegistry(resources),commands=createCommands(client),domain=createTasksDomain(client,{resources,queries,commands,transcriptRepository:{read:async()=>null,append:async()=>{appends++;return createTaskTranscript();},close(){}}});
+  const old=domain.detail({id:'t',run_id:'one'},scope).value();await domain.detail({id:'t',run_id:'two'},scope).value();const before=appends;
+  oldMetadata.resolve({run_id:'one',revision:1,capabilities:caps(['task.events'])});await assert.rejects(old,{name:'AbortError'});assert.equal(appends,before);
+  const pending=domain.cancel({id:'t',run_id:'two',_valid:()=>valid},scope);valid=false;await assert.rejects(pending,error=>error.uiKey==='identityChanged');
+  domain.dispose();queries.dispose();commands.dispose();
+}
+console.log('PASS late lower-revision Task metadata and a retired view command cannot append or dispatch');

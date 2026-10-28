@@ -95,7 +95,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   async function submit(){
     if(!fresh||!can('task.input')||busy||editor.composing||!completion.value().trim()||connectionError)return;
     const text=completion.value(),version=draftVersion;
-    await run(async()=>{await onSend(text);if(disposed)return;if(completion.value()===text&&version===draftVersion){completion.setValue('');onDraft('');}completion.reset();});
+    await run(async()=>{const acknowledged=await onSend(text);if(disposed||acknowledged===false)return;if(completion.value()===text&&version===draftVersion){completion.setValue('');onDraft('');}completion.reset();});
   }
   form.onsubmit=event=>{event.preventDefault();if(!editor.mobile)submit();};send.onclick=()=>completion.value().trim()?submit():run(onStop);
   function updateComposer(){return updateComposerLayout();}
@@ -226,7 +226,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     update(next){
       if(disposed)return;
       projection=null;
-      if(next.catchingUp!==undefined)catchingUp=next.catchingUp;if(next.storageError!==undefined)storageError=next.storageError;if(next.fresh!==undefined)fresh=next.fresh;cacheTruncated=!!(next.state?.cache_truncated||next.record?.cache_truncated||next.cacheTruncated);const nextRun=next.record?.run_id||task.id;if(nextRun!==historyRun){if(historyRun)transcriptWindow.reset();historyAbort?.abort();historyAbort=null;historyBusy=false;historyFailure=null;historyAttempt='';historyRun=nextRun;showHistoryStatus();}if(next.record)record=next.record;messageIdentities(client).rememberTasks([record.info||task]);if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
+      if(next.catchingUp!==undefined)catchingUp=next.catchingUp;if(next.storageError!==undefined)storageError=next.storageError;if(next.fresh!==undefined)fresh=next.fresh;cacheTruncated=!!(next.state?.cache_truncated||next.record?.cache_truncated||next.cacheTruncated);const nextRun=next.record?.run_id||task.id;if(nextRun!==historyRun){if(historyRun){draftVersion++;transcriptWindow.reset();}historyAbort?.abort();historyAbort=null;historyBusy=false;historyFailure=null;historyAttempt='';historyRun=nextRun;showHistoryStatus();}if(next.record)record=next.record;messageIdentities(client).rememberTasks([record.info||task]);if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
       updateIdentity();renderStage();renderTranscript();scheduleFollow();updateComposer();renderMenu();
     },
     openMenu(){menuMode='actions';menuSignature='';renderMenu(true);dialog.showModal();},

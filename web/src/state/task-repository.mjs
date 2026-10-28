@@ -26,6 +26,9 @@ export function mergeTaskHistory(state,page,anchor){
   const window=mergeUIFrame(null,{kind:'reset',cursor:String(state.cursor),messages,replies:[],history:{}},anchor);
   return {...state,messages:window.messages,has_more:Number(window.messages.find(message=>!message.context_only)?.sequence||0)>Number(state.firstSequence||0),cache_truncated:window.messages.some(message=>message.cache_truncated)};
 }
+export function assertTaskEventRun(task,page,locale='en'){
+  if(typeof page.run_id!=='string'||page.run_id!==(task.run_id||task.id))throw Object.assign(Error(translate(locale,'identityChanged')),{code:'task_run_changed',uiKey:'identityChanged'});
+}
 export function createTaskRepository(client){
   const cache=createChatCache({name:(client.chatCacheName||'pot-chat-cache')+'-tasks',checkpoints:true,totalBytes:64*1024*1024});
   const stored=promise=>promise.catch(error=>{if(error.name==='AbortError')throw error;throw Object.assign(new Error(translate(client.uiLocale?.()||'en','storage.failed'),{cause:error}),{storage:true,uiKey:'storage.failed',diagnostic:error.message});});
@@ -42,9 +45,9 @@ export function createTaskRepository(client){
   }
   return {
     read,
-    async append(task,scope,page){
-      const ref=identity(task,scope),previous=await read(task,scope)||createTaskTranscript(),state=working(previous),dirty=new Set(),known=new Set(state.messages.map(message=>message.id));
-      for(const row of page.events||[]){
+    async append(task,scope,page,{validate=()=>{}}={}){
+      validate();assertTaskEventRun(task,page,client.uiLocale?.()||'en');const runtime={...client.runtime};const ref=identity(task,scope),previous=await read(task,scope)||createTaskTranscript(),state=working(previous),dirty=new Set(),known=new Set(state.messages.map(message=>message.id));
+      validate();for(const row of page.events||[]){
         if(row.sequence<=state.cursor)continue;
         if(row.sequence!==state.cursor+1)throw Error('task_event_gap');
         const update=row.event?.update;
@@ -59,8 +62,8 @@ export function createTaskRepository(client){
       if(state.cursor===previous.cursor)return previous;
       const messages=state.messages.filter(message=>!known.has(message.id)||dirty.has(message.id)).map(message=>({...boundMessage(message),sequence:String(message.sequence),version:state.cursor,status:message.phase==='streaming'?'streaming':'complete'}));
       const inputs=[...state.inputs].slice(-256),checkpoint={firstSequence:previous.firstSequence||state.messages[0]?.sequence,active:state.active?.id,tools:[...state.tools].map(([id,message])=>[id,message.id]),inputs};
-      await stored(cache.writeFrames(ref.key,[{runtime_id:client.runtime.runtime_id,owner_id:ref.owner,conversation_id:ref.conversation,boot_id:client.runtime.boot_id||'task',kind:previous.cursor?'delta':'reset',base_cursor:String(previous.cursor),cursor:String(state.cursor),running:false,turn_id:null,replies:[],messages,history:{before:messages[0]?.sequence||'',after:messages.at(-1)?.sequence||'',has_more:false,has_newer:false}}],{checkpoint,historyRange:{before:String(previous.cursor+1),after:String(state.cursor)}}));
-      return read(task,scope);
+      validate();await stored(cache.writeFrames(ref.key,[{runtime_id:runtime.runtime_id,owner_id:ref.owner,conversation_id:ref.conversation,boot_id:runtime.boot_id||'task',kind:previous.cursor?'delta':'reset',base_cursor:String(previous.cursor),cursor:String(state.cursor),running:false,turn_id:null,replies:[],messages,history:{before:messages[0]?.sequence||'',after:messages.at(-1)?.sequence||'',has_more:false,has_newer:false}}],{validate,checkpoint,historyRange:{before:String(previous.cursor+1),after:String(state.cursor)}}));
+      validate();const saved=await read(task,scope);validate();if(!saved)throw new DOMException('Task run retired','AbortError');return saved;
     },
     async earlier(task,scope,before,{limit=80,signal}={}){
       const current=()=>{if(signal?.aborted)throw signal.reason;};current();
@@ -70,7 +73,7 @@ export function createTaskRepository(client){
         // earlier window without resetting the live durable cursor/checkpoint.
         const history=createTaskTranscript();let more=true;
         while(more&&history.cursor<Number(before)-1){
-          current();const batch=await client.request(`/api/v1/tasks/${encodeURIComponent(task.id)}/events?${new URLSearchParams({after:history.cursor,limit:100})}`,{...scope,signal});current();if(batch.unavailable)throw Error('task_history_unavailable');
+          current();const batch=await client.request(`/api/v1/tasks/${encodeURIComponent(task.id)}/events?${new URLSearchParams({after:history.cursor,limit:100})}`,{...scope,signal});current();assertTaskEventRun(task,batch,client.uiLocale?.()||'en');if(batch.unavailable)throw Error('task_history_unavailable');
           const events=(batch.events||[]).filter(row=>row.sequence<Number(before));if(!events.length)break;
           const cursor=history.cursor;appendTaskEvents(history,events);if(history.cursor<=cursor)throw Error('task_event_gap');
           for(const message of history.messages)boundMessage(message);

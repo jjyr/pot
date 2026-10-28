@@ -127,7 +127,17 @@ or machine labels finish loading. Current metadata gates commands and new event
 reads. A changed run retires the old transcript window. Task event catch-up reads
 at most 5000 events per batch, then schedules a serial next batch while the active
 detail remains subscribed. It reports catching up until the last page is committed;
-a storage failure or removed subscriber stops that continuation.
+a storage failure or removed subscriber stops that continuation. Event pages carry
+`run_id` from the journal run actually queried, including a previous-launch
+fallback or unavailable source. The journal sequence remains cumulative across
+Task runs. Detail and earlier reads reject a missing or different run before any
+local write. A continuation follows freshly confirmed metadata, retires the old
+window and reconstructs the new run's checkpoint from that cumulative journal.
+
+Metadata results retain their Control, source boot and connection generation.
+Views compare this provenance when consuming a query and again before command IO;
+a late query cannot adopt a newer connection's authority. A local Task transaction
+also validates its captured generation after waiting for storage admission.
 
 Cached Chat history windows are projected in a readonly transaction from committed
 records and coverage, with the current conversation and reader-intent fences.
