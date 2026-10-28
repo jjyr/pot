@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="/styles.css">
+<title>Background tasks preparation regression</title>
+<style>
+  html,body{margin:0}
+  #results{font:12px/1.5 monospace;white-space:pre-wrap}
+  #scroller{position:relative;width:720px;height:520px;overflow:auto;border:1px solid #ccc}
+  #host{position:relative;min-height:520px}
+  #tasks{position:relative;width:720px}
+  #tasks .background-task{display:flex;align-items:center;gap:8px;min-height:44px;width:100%}
+  #tasks .background-task-elapsed{white-space:nowrap}
+  #tasks .background-tasks-heading{margin:0}
+  article.message{display:block;height:120px;overflow:hidden}
+</style>
+</head>
+<body>
+<pre id="results"></pre>
+<div id="scroller" class="history"><div class="message-column"><div id="tasks"></div><div id="host" class="message-window"></div></div></div>
+<script type="module">
+import {createMessageWindow} from '/web/src/components/message-window.mjs';
+import {createBackgroundTasks} from '/web/src/components/background-tasks.mjs';
+import {currentPreparedRender} from '/web/src/components/prepared-render.mjs';
+
+window.runBackgroundTaskRegression=async()=>{
+  const results=[];
+  const assert=(ok,label)=>{if(!ok)throw new Error('FAIL '+label);results.push('PASS '+label);};
+  const frame=()=>new Promise(resolve=>requestAnimationFrame(()=>resolve()));
+  const waitFor=async(check,label)=>{const deadline=performance.now()+8000;while(performance.now()<deadline){if(check())return;await frame();}throw new Error('Timed out: '+label);};
+  const scroller=document.querySelector('#scroller'),host=document.querySelector('#host'),tasksHost=document.querySelector('#tasks');
+  const messages=[{id:'m1',viewKey:'m1',title:'Hello'},{id:'tool',viewKey:'tool',title:'Tool',tool:true}];
+  const preparations={m1:0,tool:0};
+  const heights=new Map();
+  let opened=null,toggled=null;
+  const background=createBackgroundTasks({locale:()=>'en',onOpen:source=>{opened=source;},onToggle:intent=>{toggled=intent;}});
+  tasksHost.append(background.element);
+  const view=createMessageWindow({
+    scroller,host,heights,
+    render(message,old){
+      if(!old&&currentPreparedRender()?.context.phase==='prepare')preparations[message.id]++;
+      const row=old?.row||document.createElement('article');
+      row.className='message';row.dataset.messageId=message.id;row.textContent=message.tool?currentPreparedRender()?.context.renderContext?.title||message.title:message.title;
+      return old||{row};
+    },
+    dispose(record){record.row.remove();},
+    requestRender(){},
+    active:()=>true,interact:()=>{},upward:()=>false,downward:()=>false,scrolled:()=>{},
+    canReadEarlier:()=>false,
+  });
+  let taskStart=Date.now()-5000;
+  const task=extra=>Object.assign({_space_id:'s',assistant_id:'a',id:'task-1',phase:'running',title:'Committed task',started_at_ms:taskStart,finished_at_ms:null,address:{node_id:'node-1',agent_id:'agent-1'}},extra||{});
+  const region=()=>background.region('scope-1',[task()],()=>false);
+  const elapsed=()=>tasksHost.querySelector('.background-task-elapsed')?.textContent||'';
+  try{
+    view.setMessages(messages,{regions:[region()]});
+    await waitFor(()=>view.prepared&&!!tasksHost.querySelector('.background-task'),'initial prepared commit');
+    const button=tasksHost.querySelector('.background-task');
+    assert(!!button,'initial task row mounted');
+    const initialHeight=button.getBoundingClientRect().height;
+    button.focus();
+    let previous=elapsed();
+    for(let tick=1;tick<=3;tick++){
+      taskStart-=1500;
+      view.setMessages(messages,{regions:[region()]});
+      await waitFor(()=>view.prepared,'clock tick '+tick+' commit');
+      assert(document.activeElement===button,'focus retained across tick '+tick);
+      assert(tasksHost.querySelector('.background-task')===button,'task node retained across tick '+tick);
+      const now=elapsed();
+      assert(now!==previous,'elapsed advances across tick '+tick);
+      assert(Math.abs(button.getBoundingClientRect().height-initialHeight)<.5,'row height stable across tick '+tick);
+      previous=now;
+    }
+    // Render a candidate into an uncommitted surface. A cancelled preparation
+    // must not redirect the live button at the committed source.
+    const pending=background.region('scope-1',[task({title:'Pending task',phase:'waiting_approval'})],()=>true);
+    const surface=document.createElement('div');
+    pending.render(surface);
+    assert(tasksHost.querySelector('.background-task')===button,'cancelled preparation keeps live node');
+    assert(!tasksHost.textContent.includes('Pending task'),'cancelled preparation keeps committed text');
+    button.click();
+    assert(opened&&opened.title==='Committed task','committed click target after cancelled preparation');
+    assert(toggled===null,'no toggle from committed click');
+    const before={...preparations};
+    view.setMessages(messages,{regions:[region()],presentationEpoch:'new-title',presentationKey:message=>message.tool?'new-title':undefined,renderContext:{title:'Updated task title'}});
+    await waitFor(()=>view.prepared,'dependent presentation commit');
+    assert(host.querySelector('[data-message-id="tool"]').textContent==='Updated task title','dependent tool receives new captured presentation');
+    assert(preparations.m1===before.m1&&preparations.tool>before.tool,'task presentation does not prepare unrelated reply');
+    return {assertions:results.length,results};
+  }finally{
+    try{view.close();}catch{}
+    background.close?.();
+  }
+};
+</script>
+</body>
+</html>

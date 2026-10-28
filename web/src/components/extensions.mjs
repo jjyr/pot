@@ -34,7 +34,7 @@ export function createExtensions({root,client,locale,memory={},onSettings,onPerm
   stopCatalog?.();catalog=next;const captured=scope(),generation=connectionIdentity();
   stopCatalog=next.watch(state=>{if(!current(captured,generation))return;if(state.data)adopt(state.data);if(state.error){failed=true;showError(state.error);status.append(button('retry',()=>load(true).catch(()=>{})));}});return next;
  }
- async function load(force=false){const captured=scope(),generation=connectionIdentity();status.replaceChildren(text('p','hint','loading'));try{const value=await query().value(force);if(current(captured,generation))adopt(value);return value;}catch(reason){if(current(captured,generation)){failed=true;showError(reason);status.append(button('retry',()=>load(true).catch(()=>{})));renderList();}throw reason;}}
+ async function load(force=false){const captured=scope(),generation=connectionIdentity();shell.setAttribute('aria-busy','true');try{const value=await query().value(force);if(current(captured,generation))adopt(value);return value;}catch(reason){if(current(captured,generation)){failed=true;showError(reason);status.append(button('retry',()=>load(true).catch(()=>{})));renderList();}throw reason;}finally{if(current(captured,generation))shell.setAttribute('aria-busy','false');}}
  function matches(item){return (memory.source==='all'||(item.source||'user')===memory.source)&&(memory.status==='all'||memory.status==='enabled'&&item.enabled||memory.status==='disabled'&&!item.enabled||memory.status==='attention'&&item.kind==='mcp'&&item.status!=='ready')&&`${itemName(item)} ${itemDescription(item)||''}`.toLowerCase().includes(memory.query.toLowerCase())}
  function itemName(item){return item.kind==='plugins'&&['github','computer-use','codex'].includes(item.id)?t(key('plugin.'+item.id)):item.name}
  function itemDescription(item){return item.kind==='plugins'&&['github','computer-use','codex'].includes(item.id)?t(key('plugin.'+item.id+'.description')):item.kind==='mcp'?(item.transport==='stdio'?item.command:item.url):item.description}
@@ -69,13 +69,13 @@ export function createExtensions({root,client,locale,memory={},onSettings,onPerm
   });
  }
  function modal(name){closeDialog();dialog=n('dialog','extensions-dialog');label(dialog,name);const heading=n('div','extensions-dialog-heading'),title=text('h2','',name),close=label(n('button','icon-button'),'close');close.type='button';close.append(icon('close'));close.onclick=leave;heading.append(title,close);dialog.append(heading);dialog.addEventListener('cancel',event=>{event.preventDefault();leave()});const state={version:0,pending:false,scope:scope(),identity:connectionIdentity()};panels.set(dialog,state);const edited=()=>{state.version++;dirty=true;};dialog.addEventListener('input',edited);dialog.addEventListener('change',edited);document.body.append(dialog);dialog.showModal();return dialog}
- async function mutate(body,mcp=false,{after,ack}={}){
+ async function mutate(body,mcp=false,{after,ack,allowCreate=false}={}){
   const captured=scope(),generation=connectionIdentity(),target=dialog,state=target&&panels.get(target),editVersion=state?.version,operation=(mcp?'mcp':body.kind)+':'+(body.server?.id||body.id||'new');
   if(pending.has(operation)||state?.pending)return;
   if(target?!paneCurrent(target):snapshotIdentity!==generation){showError(Error(t('identityChanged')),target||status);return;}
   const submitted=structuredClone(mcp?{action:body.action,server:cleanServer(body.server),...(body.credentials?{credentials:body.credentials}:{})}:body);
   pending.add(operation);if(state)state.pending=true;setBusy();renderList();
-  try{const value=await client.request('/api/v1/extensions'+(mcp?'/mcp':''),{...captured,method:'POST',body:submitted});if(!current(captured,generation))return;
+  try{await domain.confirm(captured,mcp?{...submitted.server,kind:'mcp',allowMissing:submitted.action==='save'&&allowCreate}:submitted.id?{kind:submitted.kind,id:submitted.id,revision:submitted.revision}:null);if(!current(captured,generation))return;const value=await client.request('/api/v1/extensions'+(mcp?'/mcp':''),{...captured,method:'POST',body:submitted});if(!current(captured,generation))return;
    await ack?.(value,submitted);if(!current(captured,generation))return;
    if(!client.production)await client.resources.invalidate(['extensions'],captured);
    if(dialog===target&&state?.version===editVersion){dirty=false;if(after)await after(value);else closeDialog();}
@@ -116,18 +116,18 @@ export function createExtensions({root,client,locale,memory={},onSettings,onPerm
  function editMCP(item){const pane=modal(item?'editMCP':'addMCP');const name=formField(pane,'name',item?.name),transport=formField(pane,'transport',item?.transport||'http',{choices:[['http','HTTP'],['stdio','stdio']]}),fields=n('div');pane.append(fields);let command,args,cwd,url,env,headers,auth,clientID,oauthScope;const credentials=text('details','','credentials');credentials.replaceChildren(text('summary','','credentials'));pane.append(credentials);env=formField(credentials,'environment','',{kind:'textarea'});headers=formField(credentials,'headers','',{kind:'textarea'});env.classList.add('extension-code');headers.classList.add('extension-code');pane.append(text('p','hint',item?.has_credentials?'credentialsRetained':'credentialsHint'));
  function transportFields(){fields.replaceChildren();if(transport.value==='stdio'){command=formField(fields,'command',item?.command);args=formField(fields,'arguments',(item?.args||[]).join('\n'),{kind:'textarea'});cwd=formField(fields,'cwd',item?.cwd)}else {url=formField(fields,'url',item?.url);auth=formField(fields,'authentication',item?.auth||'none',{choices:[['none',t(key('authHeaders'))],['oauth',t(key('authOAuth'))]]});clientID=formField(fields,'clientID',item?.client_id);oauthScope=formField(fields,'oauthScope',item?.scope);const visibility=()=>{clientID.closest('.extension-field').hidden=oauthScope.closest('.extension-field').hidden=auth.value!=='oauth'};auth.onchange=visibility;visibility()}}transport.onchange=transportFields;transportFields();
  const enabled=formField(pane,'enabled',item?.enabled??true,{kind:'checkbox'});
- pane.append(button('save',()=>{let credentials;try{if(env.value.trim()||headers.value.trim())credentials={env:JSON.parse(env.value||'{}'),headers:JSON.parse(headers.value||'{}')}}catch{showError(Error('invalid_mcp_credentials_json'),pane);return}return mutate({action:'save',server:{id:item?.id||(name.value.trim().toLowerCase().replace(/[^a-z0-9-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,32)||crypto.randomUUID().slice(0,16)),name:name.value.trim(),revision:item?.revision||0,enabled:enabled.checked,transport:transport.value,...(transport.value==='stdio'?{command:command.value.trim(),args:args.value.split('\n').filter(Boolean),cwd:cwd.value.trim()}:{url:url.value.trim(),auth:auth.value,client_id:clientID.value.trim(),scope:oauthScope.value.trim()})},...(credentials?{credentials}:{})},true,{ack:value=>{if(value?.id&&value?.revision)item={...item,id:value.id,revision:value.revision};}})},{primary:true}));
+ pane.append(button('save',()=>{let credentials;try{if(env.value.trim()||headers.value.trim())credentials={env:JSON.parse(env.value||'{}'),headers:JSON.parse(headers.value||'{}')}}catch{showError(Error('invalid_mcp_credentials_json'),pane);return}return mutate({action:'save',server:{id:item?.id||(name.value.trim().toLowerCase().replace(/[^a-z0-9-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,32)||crypto.randomUUID().slice(0,16)),name:name.value.trim(),revision:item?.revision||0,enabled:enabled.checked,transport:transport.value,...(transport.value==='stdio'?{command:command.value.trim(),args:args.value.split('\n').filter(Boolean),cwd:cwd.value.trim()}:{url:url.value.trim(),auth:auth.value,client_id:clientID.value.trim(),scope:oauthScope.value.trim()})},...(credentials?{credentials}:{})},true,{allowCreate:!item,ack:value=>{if(value?.id&&value?.revision)item={...item,id:value.id,revision:value.revision};}})},{primary:true}));
  if(!item)pane.append(button('importJSON',async()=>{if(await leave())importMCP()}));
  }
  function stopOAuth(){const run=oauthRun;oauthRun=null;if(run){clearTimeout(run.timer);run.cleanup?.();}}
  async function oauthConnect(item){
   if(oauthRun)return;if(dialog&&!paneCurrent(dialog)){showError(Error(t('identityChanged')),dialog);return;}const captured=scope(),generation=connectionIdentity(),authPane=dialog,popup=client.desktop?null:window.open('about:blank','pot-mcp-auth','popup,width=600,height=750');if(!client.desktop&&!popup){showError(Error(t(key('oauthPopup'))),dialog);return;}
   const run=oauthRun={started:Date.now(),delay:1500},alive=()=>oauthRun===run&&current(captured,generation);
-  try{const result=await client.request('/api/v1/extensions/mcp/oauth/begin',{...captured,transient:true,method:'POST',body:{id:item.id,revision:item.revision,redirect_uri:client.desktop?'':location.origin+'/mcp-oauth-callback.html?'+new URLSearchParams({space_id:captured.space})}});if(!alive()){popup?.close();return;}
+  try{await domain.confirm(captured,{...item,kind:'mcp'});if(!alive()){popup?.close();return;}const result=await client.request('/api/v1/extensions/mcp/oauth/begin',{...captured,transient:true,method:'POST',body:{id:item.id,revision:item.revision,redirect_uri:client.desktop?'':location.origin+'/mcp-oauth-callback.html?'+new URLSearchParams({space_id:captured.space})}});if(!alive()){popup?.close();return;}
    const finish=()=>{if(!alive())return;stopOAuth();if(dialog===authPane&&!dirty)closeDialog();};
    const poll=async()=>{
     if(!alive()||Date.now()-run.started>=600000){if(oauthRun===run)stopOAuth();return;}
-    try{const value=await query().value();if(!alive())return;const server=value.mcp?.find(server=>server.id===item.id);if(server&&server.revision!==item.revision){finish();return;}run.delay=Math.min(run.delay*1.5,15000);}
+    try{const value=await domain.confirm(captured);if(!alive())return;const server=value.mcp?.find(server=>server.id===item.id);if(server&&server.revision!==item.revision){finish();return;}run.delay=Math.min(run.delay*1.5,15000);}
     catch{run.delay=Math.min(run.delay*2,15000);}
     if(alive())run.timer=setTimeout(poll,run.delay);
    };
@@ -135,7 +135,7 @@ export function createExtensions({root,client,locale,memory={},onSettings,onPerm
    else{popup.location=result.authorization_url;const receive=async event=>{
     if(!alive()||event.origin!==location.origin||event.source!==popup||event.data?.type!=='pot:mcp-oauth'||event.data.state!==result.state)return;
     if(event.data.error||!event.data.completed){showError(Error(t(key('oauthFailed'))),dialog||status);stopOAuth();return;}
-    try{const value=await query().value();if(!alive())return;if(value.mcp?.find(server=>server.id===item.id)?.revision===item.revision){client.resources.invalidate(['extensions'],captured);await load();}if(alive())finish();}catch(reason){if(alive())showError(reason,dialog||status);}
+    try{const value=await domain.confirm(captured);if(!alive())return;if(value.mcp?.find(server=>server.id===item.id)?.revision===item.revision){client.resources.invalidate(['extensions'],captured);await load();}if(alive())finish();}catch(reason){if(alive())showError(reason,dialog||status);}
    };window.addEventListener('message',receive);run.cleanup=()=>window.removeEventListener('message',receive);}
    if(alive())run.timer=setTimeout(poll,run.delay);
   }catch(reason){popup?.close();if(alive()){showError(reason,dialog||status);stopOAuth();}}
@@ -152,6 +152,7 @@ export function createExtensions({root,client,locale,memory={},onSettings,onPerm
     if(!await confirmAction('importConfirm',{count:entries.length},'import')||disposed)return;
     if(!paneCurrent(pane)){showError(Error(t('identityChanged')),pane);return;}
     const editVersion=state.version,captured=scope(),generation=connectionIdentity();state.pending=true;pending.add('import');setBusy();
+    await domain.confirm(captured);
     for(const [id,config]of entries){
      if(!current(captured,generation))return;
      const credentials=Object.keys(config.env||{}).length||Object.keys(config.headers||{}).length?{env:config.env||{},headers:config.headers||{}}:undefined;

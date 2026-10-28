@@ -4,7 +4,7 @@ import {createCommands} from '../../web/src/state/domains/query.mjs';
 const testDomain=request=>createProvidersDomain({request},{resources:{read:request},queries:{},commands:createCommands({request})});
 import {createProviderSave,saveAllowanceConfiguration} from '../../web/src/state/provider-save.mjs';
 import {createProviderAllowances,allowanceFreshness} from '../../web/src/components/provider-allowances.mjs';
-import {providerConversationModels,catalogInputModalities} from '../../web/src/state/models.mjs';
+import {providerConversationModels,catalogInputModalities,profileModelChoices,profileDirectoryID} from '../../web/src/state/models.mjs';
 import {translate} from '../../web/src/locales/messages.mjs';
 
 const calls=[];let failMonitor=true;
@@ -90,3 +90,15 @@ const removedRoot=new Element('div'),removed=createProviderAllowances({root:remo
 
 let connectionAvailable=true;const lifecycleMemory={signature:JSON.stringify(['route',true]),binding:'plugin',view:{status:'ready',snapshot:{accounts:[{name:'Cached quota'}]},monitor:{...desired,revision:1},assistants:[]},draft:{...desired,threshold:96},baseline:{...desired},revision:1},lifecycleRoot=new Element('div');
 const lifecycle=createProviderAllowances({root:lifecycleRoot,providersDomain:testDomain(()=>assert.fail('Disabled plugin cannot refresh quota')),scope:{},profileID:'lifecycle',locale:()=> 'en',available:()=>connectionAvailable,identity:()=>['route',connectionAvailable],binding:()=> 'plugin',memory:lifecycleMemory});assert.match(lifecycleRoot.textContent,/Cached quota/);connectionAvailable=false;lifecycle();assert(!lifecycleRoot.textContent.includes('Cached quota'));assert.equal(lifecycleMemory.view.snapshot,null,'Plugin availability changes discard cached private quota data');assert.equal(lifecycleMemory.draft.enabled,false);assert.equal(lifecycleMemory.draft.threshold,96,'Disabling a plugin does not discard reminder intent');lifecycle.dispose();
+
+// Connection types, rather than optional profile overrides, bind public catalogs.
+const modelSnapshot={profiles:[{id:'a',model:'saved/opaque',model_settings:{}},{id:'b',model:'custom'}],provider_types:[{id:'standard/openai',directory_provider:'openai'}],connections:[{profile_id:'a',type_id:'standard/openai',catalog:{models:[{id:'cached',name:'Cached name'},{id:'embedding',output_modalities:['embedding']}]}}],directory:[{id:'openai',models:[{id:'cached',name:'Public name'},{id:'public'},{id:'embedding'}]},{id:'other',models:[{id:'other-model'}]}],configured_models:{a:['discovered']}};
+assert.equal(profileDirectoryID(modelSnapshot,'a'),'openai');
+const choices=profileModelChoices(modelSnapshot,'a','typed/custom');
+assert.deepEqual(choices.map(model=>model.id),['cached','public','discovered','saved/opaque','typed/custom']);
+assert.equal(choices[0].name,'Cached name');
+assert(profileModelChoices(modelSnapshot,'b').some(model=>model.id==='other-model'),'Unbound custom connections use public suggestions');
+assert(profileModelChoices(modelSnapshot,'a','embedding').some(model=>model.id==='embedding'),'Current owner intent remains visible');
+assert.deepEqual(profileModelChoices(modelSnapshot,'missing'),[]);
+assert.equal(profileDirectoryID({profiles:[{id:'legacy',model_settings:{catalog_provider:'other'}}]},'legacy'),'other');
+console.log('Assistant model suggestions: type binding, local catalogs, precedence, filtering and custom IDs passed');

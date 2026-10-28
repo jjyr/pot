@@ -18,7 +18,7 @@ export async function preparedNativeLifecycle(browser,origin){
       }
       await page.waitForFunction(()=>window.preparedNativeResult);
       const result=await page.evaluate(()=>window.preparedNativeResult);
-      assert.equal(result.failure,null);assert.deepEqual(errors,[]);
+      assert.equal(result.failure,null,'Native scenario '+query+': '+JSON.stringify(result.observations.slice(-3)));assert.deepEqual(errors,[]);
       assert.deepEqual(result.errors,[]);assert.equal(result.acquired,result.released);
       assert.equal(result.observations.find(item=>item.label==='fresh-current-width-reference').parity,0);
       results.push({query,...result});

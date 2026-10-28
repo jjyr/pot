@@ -4,6 +4,8 @@ const namespace=meta=>JSON.stringify([meta.control,meta.space]);
 const failure=error=>Object.assign(error,{storage:true,uiKey:'storage.failed'});
 const token=(epoch,topics)=>JSON.stringify([epoch?.all||0,...topics.map(topic=>epoch?.[topic]||0)]);
 const estimate=value=>new TextEncoder().encode(JSON.stringify(value)).length;
+const isCommand=meta=>typeof meta?.path==='string'&&meta.path.startsWith('@command:');
+export const projectionKey=meta=>isCommand(meta)?JSON.stringify(meta):JSON.stringify({...meta,boot:undefined});
 
 // Display snapshots and domain invalidation receipts share one transaction.
 // Tokens fence HTTP reads against events/mutations in this or another tab.
@@ -21,18 +23,21 @@ export function createProjectionStore({name='pot-chat-cache',indexedDB=globalThi
       const row=await idbRequest(tx.objectStore('projections').get(key));if(!row||row.expires<Date.now())return null;
       return {...row,fresh:row.token===token(await epoch(tx,row.meta),row.meta.topics)};
     });},
-    async commit(key,meta,value,expectedToken){
+    async commit(key,meta,value,expectedToken,validate=null){
       const result=await transaction('readwrite',async tx=>{
         const current=token(await epoch(tx,meta),meta.topics);if(current!==expectedToken)return false;
         const store=tx.objectStore('projections'),previous=await idbRequest(store.get(key)),stats=await idbRequest(tx.objectStore('cacheStats').get('projections'))||{key:'projections',bytes:0,count:0};
-        const row={schema_version:1,key,meta,namespace:namespace(meta),value,token:current,lastConfirmed:Date.now(),used:Date.now(),expires:Date.now()+retention,bytes:estimate(value)};
+        if(validate)validate();
+        const row={schema_version:isCommand(meta)?1:2,key,meta,namespace:namespace(meta),value,token:current,lastConfirmed:Date.now(),used:Date.now(),expires:Date.now()+retention,bytes:estimate(value)};
         if(row.bytes>maxBytes)throw Error('projection_too_large');
         stats.bytes+=row.bytes-(previous?.bytes||0);stats.count+=previous?0:1;store.put(row);
         if(stats.count>maxEntries||stats.bytes>maxBytes){
           const victims=await indexedRows(store.index('used'),null,{limit:maxEntries+1});
           for(const victim of victims){if(stats.count<=maxEntries&&stats.bytes<=maxBytes)break;if(victim.key===key)continue;store.delete(victim.key);stats.count--;stats.bytes-=victim.bytes;}
         }
-        tx.objectStore('cacheStats').put(stats);return true;
+        tx.objectStore('cacheStats').put(stats);
+        if(validate)validate();
+        return true;
       });
       if(result)notify({kind:'commit',key,meta});return result;
     },
@@ -72,7 +77,7 @@ export function createMemoryProjectionStore(){
   return {
     async register(){},async token(meta){return token(epochs.get(namespace(meta)),meta.topics);},
     async read(key){const row=rows.get(key);return row?{...structuredClone(row),fresh:row.token===token(epochs.get(namespace(row.meta)),row.meta.topics)}:null;},
-    async commit(key,meta,value,expected){if(expected!==await this.token(meta))return false;rows.set(key,{key,meta,value:structuredClone(value),token:expected,lastConfirmed:Date.now()});for(const listener of listeners)listener({kind:'commit',key,meta},{remote:false});return true;},
+    async commit(key,meta,value,expected,validate=null){if(expected!==await this.token(meta))return false;if(validate)validate();const next={schema_version:isCommand(meta)?1:2,key,meta,value:structuredClone(value),token:expected,lastConfirmed:Date.now()};rows.set(key,next);for(const listener of listeners)listener({kind:'commit',key,meta},{remote:false});return true;},
     async invalidate(topics,source={}){for(const row of rows.values()){if(source.space&&row.meta.space!==source.space)continue;const key=namespace(row.meta),previous=epochs.get(key)||{};if(!topics.length)previous.all=(previous.all||0)+1;for(const topic of topics)previous[topic]=(previous[topic]||0)+1;epochs.set(key,previous);}},
     async command(key,meta,value){await this.invalidate(meta.topics,meta);await this.commit(key,meta,value,await this.token(meta));return (await this.read(key)).value;},
     async remove(key){rows.delete(key);},subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},close(){listeners.clear();},

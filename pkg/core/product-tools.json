@@ -12,7 +12,7 @@
         "profile": {
           "type": "string",
           "minLength": 1,
-          "description": "Configured Provider connection Profile ID for an ordinary local Task. Omit to use the invoking assistant’s active configuration. No user allowlist or route confirmation is needed. Unsupported for linked Tasks."
+          "description": "Configured Provider connection Profile ID for an ordinary local Task. Explicit profile or model overrides the assistant’s Task default. Omit both to use that default, or the assistant’s active configuration when unset. No user allowlist or route confirmation is needed. Unsupported for linked Tasks."
         },
         "requirements": {
           "type": "object",
@@ -49,7 +49,7 @@
         "model": {
           "type": "string",
           "minLength": 1,
-          "description": "Concrete model ID for an ordinary local Task. Omit to use the selected Provider’s default, or the invoking assistant’s active model when no Provider is selected. Unsupported for linked Tasks."
+          "description": "Concrete model ID for an ordinary local Task. A model alone uses the assistant’s active Provider and overrides its Task default. A profile alone uses that Provider’s default model. Omit both to use the assistant’s Task default, or its active configuration when unset. Unsupported for linked Tasks."
         },
         "workspace": {
           "type": "object",
@@ -437,7 +437,7 @@
             "profile": {
               "type": "string",
               "minLength": 1,
-              "description": "Configured Provider Profile ID chosen autonomously. Omit to snapshot the owning assistant’s configuration at each trigger."
+              "description": "Configured Provider Profile ID chosen autonomously. Explicit profile or model overrides the owning assistant’s Task default. Omit both to use that default, or its active configuration when unset, at each trigger."
             },
             "requirements": {
               "type": "object",

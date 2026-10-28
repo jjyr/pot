@@ -22,7 +22,7 @@ export async function chatOutboxBrowser(browser,{sourceOrigin,captureDir,baselin
   else{
    assert.equal(await page.getByRole('button',{name:'Send',exact:true}).isEnabled(),true);await page.getByRole('button',{name:'Send',exact:true}).click();
    let saved=await disk(page,([rows,drafts])=>rows.length===1&&rows[0].target.control==='picker-control'&&rows[0].target.space==='local'&&rows[0].target.owner==='alpha'&&rows[0].target.conversation==='main'&&rows[0].state==='queued'&&drafts[0].text==='');assert.equal(await page.locator('#pot-composer').inputValue(),'');assert.equal(saved.rows[0].started,false);
-   await page.locator('.history:not([data-preparation-surface]) .outbox-status').filter({hasText:'Waiting to send'}).waitFor();await waitVisible(page);results.push({name:'offline-explicit-submission',ok:true,request:saved.rows[0].request.request_id});
+   await page.locator('.history:not([data-preparation-surface]) .message-pending:not([hidden])').waitFor();assert.equal(await page.locator('.history:not([data-preparation-surface]) .outbox-controls').count(),0);await waitVisible(page);results.push({name:'offline-explicit-submission',ok:true,request:saved.rows[0].request.request_id});
   }
   if(captureDir){await mkdir(captureDir,{recursive:true});await page.screenshot({path:captureDir+'/outbox-desktop-'+(baseline?'before':'after')+'.png'});}
   if(baseline)return results;
@@ -32,10 +32,13 @@ export async function chatOutboxBrowser(browser,{sourceOrigin,captureDir,baselin
   await send('Second FIFO message');await disk(page,([rows])=>rows.length===2&&rows.every(row=>row.state==='queued'));
   await page.locator('#pot-composer').fill('Ordinary unsent draft');
   // Cancellation and editing operate on the actual prepared row controls.
-  const queued=page.locator('.history:not([data-preparation-surface]) article.message').filter({hasText:'Second FIFO message'});
+  await page.getByRole('button',{name:'Saved messages',exact:true}).click();
+  const queued=page.locator('.outbox-dialog article.message').filter({hasText:'Second FIFO message'});
   await queued.getByRole('button',{name:'Edit',exact:true}).click();await queued.getByRole('textbox',{name:'Edit queued message'}).fill('Second FIFO edited');await queued.getByRole('button',{name:'Save',exact:true}).click();await disk(page,([rows])=>rows[1]?.request.text==='Second FIFO edited');
+  await page.locator('.outbox-dialog').getByRole('button',{name:'Close',exact:true}).click();
   await send('Cancel this queued message');let saved=await disk(page,([rows])=>rows.length===3);const cancelled=saved.rows[2].request.request_id;
-  await page.locator('.history:not([data-preparation-surface]) article.message').filter({hasText:'Cancel this queued message'}).getByRole('button',{name:'Cancel queued message',exact:true}).click();await disk(page,([rows])=>rows[2].state==='cancelled');
+  await page.getByRole('button',{name:'Saved messages',exact:true}).click();
+  await page.locator('.outbox-dialog article.message').filter({hasText:'Cancel this queued message'}).getByRole('button',{name:'Cancel queued message',exact:true}).click();await disk(page,([rows])=>rows[2].state==='cancelled');await page.locator('.outbox-dialog').getByRole('button',{name:'Close',exact:true}).click();
   await page.locator('#pot-composer').fill('Ordinary unsent draft');await disk(page,([rows,drafts])=>drafts.some(row=>row.text==='Ordinary unsent draft'));
   const queuedIDs=saved.rows.slice(0,2).map(row=>row.request.request_id);
   // Close and reopen the page while offline: local content remains committed.
@@ -75,7 +78,7 @@ export async function outboxBrowserRestart({chromium,sourceOrigin,profile,captur
   await page.goto(fixture.origin+'/?locale=en&theme=light&assistant_id=alpha&conversation=main');await page.waitForFunction(()=>document.querySelector('.connection-status.is-connected')&&document.querySelector('.attachment-plus:not(:disabled)'));await page.evaluate(()=>navigator.serviceWorker.ready);await page.reload();await page.waitForFunction(()=>!!navigator.serviceWorker.controller&&document.querySelector('.connection-status.is-connected')&&document.querySelector('.attachment-plus:not(:disabled)'));
   await context.setOffline(true);await page.locator('#pot-composer').fill('Explicit submission survives browser process exit');await page.getByRole('button',{name:'Send',exact:true}).click();const before=await disk(page,([rows,drafts])=>rows.length===1&&rows[0].state==='queued'&&drafts[0].text==='');
   await page.locator('#pot-composer').fill('Ordinary draft must remain unsent after browser restart');await disk(page,([rows,drafts])=>drafts[0].text==='Ordinary draft must remain unsent after browser restart');await context.close();context=null;
-  context=await open();await context.setOffline(true);page=context.pages()[0]||await context.newPage();page.setDefaultTimeout(20000);await page.goto(fixture.origin+'/?locale=en&theme=light&assistant_id=alpha&conversation=main');await page.waitForFunction(()=>!!document.querySelector('.outbox-status')&&document.querySelector('#pot-composer')?.value==='Ordinary draft must remain unsent after browser restart');
+  context=await open();await context.setOffline(true);page=context.pages()[0]||await context.newPage();page.setDefaultTimeout(20000);await page.goto(fixture.origin+'/?locale=en&theme=light&assistant_id=alpha&conversation=main');await page.waitForFunction(()=>!!document.querySelector('.message-pending:not([hidden])')&&document.querySelector('#pot-composer')?.value==='Ordinary draft must remain unsent after browser restart');
   const offline=await disk(page,([rows])=>rows.length===1&&rows[0].state==='queued'&&!rows[0].started);assert.equal(offline.rows[0].request.request_id,before.rows[0].request.request_id);
   if(captureDir){await mkdir(captureDir,{recursive:true});await page.screenshot({path:captureDir+'/outbox-phone-offline-reopen-after.png'});}
   await context.setOffline(false);await disk(page,([rows])=>rows[0].state==='accepted'&&!rows[0].projection_pending,{timeout:45000});const state=await(await context.request.get(fixture.origin+'/fixture/state')).json(),posts=state.trace.filter(row=>row.kind==='post');assert.equal(posts.length,1);assert.equal(posts[0].body.request_id,before.rows[0].request.request_id);assert.equal(posts[0].body.text,'Explicit submission survives browser process exit');assert.equal(await page.locator('#pot-composer').inputValue(),'Ordinary draft must remain unsent after browser restart');return {name:'real-browser-process-offline-restart',ok:true,id:before.rows[0].request.request_id,posts};

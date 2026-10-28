@@ -117,13 +117,28 @@ operations outside its message permissions and returns the denial.
 
 The invoking assistant selects a configured Provider and model using the task,
 explicit user instructions, its AGENTS.md and current model capabilities. Routing
-requires no user confirmation, Profile allowlist, worker default or Follow Chat
-setting. Omitted selection snapshots the invoking assistant's active model
-configuration. Explicit unavailable selections fail visibly. Capacity and token
-allowances still apply, and choosing a model grants no machine/tool authority.
+requires no user confirmation or Profile allowlist. Each assistant can optionally
+save a default Task Provider and concrete model in its settings. Capacity and
+token allowances still apply, and choosing a model grants no machine/tool authority.
 `create_task` accepts an optional configured connection `profile` ID and concrete
-`model` ID. A selected connection without a model uses its default model. When
-both are omitted, the invoking assistant's active configuration is copied.
+`model` ID. Explicit Task selection takes precedence over the assistant's Task
+default. A selected connection without a model uses that connection's default;
+a model alone uses the assistant's active connection. When both are omitted,
+Control uses the assistant's saved Task default, or copies its active model
+configuration if the Task default is unset.
+
+```text
+New ordinary local Task
+  explicit profile/model? -> resolve explicit selection
+  otherwise Task default? -> resolve saved Provider + model
+  otherwise               -> snapshot active assistant configuration
+```
+
+A Task default stores a Provider ID and concrete model; each new Task resolves
+the Provider's current saved revision. Saving or clearing this preference takes
+effect for new Tasks immediately, including while a main-model change is pending
+for the next assistant turn. Unavailable explicit or default routes fail visibly;
+they never silently fall back. Remote receivers keep their own routing policy.
 Existing Tasks retain their model snapshots; each schedule occurrence creates a
 new Task and resolves its selection then. Local model selection does not select a remote execution node.
 

@@ -32,7 +32,7 @@ const resources=createResourceReads(client);
 await resources.read('/api/v1/providers');scope.owner='two';await resources.read('/api/v1/providers');assert.equal(calls.length,1,'Provider reads share one Space cache across assistant contexts');
 scope.space='b';await resources.read('/api/v1/providers');assert.equal(calls.length,2,'Spaces and Controls cannot share values');
 await resources.read('/api/v1/permissions');await resources.read('/api/v1/permissions');assert.equal(calls.length,4,'Approval and permission authority is never cached');
-await resources.read('/api/v1/agent');await resources.read('/api/v1/agent');assert.equal(calls.length,6,'Editor revisions are always authoritative');
+await resources.read('/api/v1/agent',{authoritative:true});await resources.read('/api/v1/agent',{authoritative:true});assert.equal(calls.length,6,'Editor revisions are always authoritative');
 await resources.read('/api/v1/usage/requests?offset=0');await resources.read('/api/v1/usage/requests?offset=20');assert.equal(calls.length,8,'Pagination is part of resource identity');
 resources.invalidate(['providers'],{space:'a'});await resources.read('/api/v1/providers');assert.equal(calls.length,8,'Invalidating another Space leaves this one fresh');
 resources.invalidate([],{space:'b',boot:'new-boot'});await resources.read('/api/v1/providers');assert.equal(calls.length,9,'A Control boot cannot reuse previous data');

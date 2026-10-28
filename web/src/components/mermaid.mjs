@@ -16,7 +16,7 @@ function registerDiagram() {
       const canvas=this.querySelector('.mermaid-canvas'),source=this.querySelector('.mermaid-source');
       const t=key=>translate(this.ownerDocument.documentElement.lang,`markdown.${key}`);
       this.dataset.state='loading';this.setAttribute('aria-busy','true');
-      if(!this.closed){canvas.textContent=t('diagramLoading');canvas.setAttribute('role','status');source.open=false;this.preparationTicket?.release();return;}
+      if(!this.closed){canvas.replaceChildren();source.open=false;this.preparationTicket?.release();return;}
       const current=()=>this.isConnected&&generation===this.generation;
       const failed=()=>{if(!current())return;this.dataset.state='error';this.removeAttribute('aria-busy');canvas.hidden=false;source.open=true;};
       loadPele().then(({mount})=>{

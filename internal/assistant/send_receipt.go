@@ -9,8 +9,8 @@ import (
 )
 
 // SendReceipt reads durable storage independently of transcript paging. An absent
-// receipt is unknown while the original request can still arrive. A closed steer
-// target, however, cannot subsequently accept that request under the same lock.
+// receipt is unknown while the original request can still arrive, including
+// guidance that will join the durable inbox after its original turn ends.
 func (c *Conversation) SendReceipt(ctx context.Context, q protocol.SendReceiptQuery) (protocol.SendReceipt, error) {
 	result := protocol.SendReceipt{SendReceiptQuery: q, State: "unconfirmed", RuntimeID: c.options.RuntimeID, OwnerID: c.options.Owner}
 	if !core.Identifier(q.RequestID) || q.ConversationID != c.options.ConversationID ||
@@ -63,8 +63,14 @@ func (c *Conversation) SendReceipt(ctx context.Context, q protocol.SendReceiptQu
 	if message != nil && message.Role == protocol.User && message.ConversationID == q.ConversationID {
 		result.State = "accepted"
 		result.MessageID = message.ID
-	} else if q.UserMessageID != "" && (c.closed || c.turn == nil || c.turn.UserMessageID != q.UserMessageID || c.turn.Cancelling || c.finalizing) {
-		result.State = "rejected"
+	} else if q.UserMessageID != "" {
+		target, err := c.store.Message(ctx, q.UserMessageID)
+		if err != nil {
+			return result, err
+		}
+		if target == nil || target.RequestID == nil || target.ConversationID != q.ConversationID {
+			result.State = "rejected"
+		}
 	}
 	return result, nil
 }

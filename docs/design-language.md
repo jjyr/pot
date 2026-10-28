@@ -590,9 +590,11 @@ The first saved Provider becomes the default automatically. Each configured row
 retains its brand icon and offers a star to choose the default; the selected row
 has a filled blue star and a Default badge. There is no separate default picker.
 Changing these defaults affects new form selections, not existing assistants or
-Task snapshots. There is no global Main Agent selection. Task Configuration
-contains execution capacity and Provider allowances, not model-routing defaults,
-Follow Chat switches, independent worker profiles or model-selection allowlists.
+Task snapshots. There is no global Main Agent selection. Each assistant's settings
+offer an optional default Task Provider and editable model picker; Follow assistant
+leaves this preference unset. Explicit Task routing overrides this preference.
+Task Configuration contains execution capacity and Provider allowances; model
+defaults belong to the individual assistant.
 
 ### Usage and Topology
 

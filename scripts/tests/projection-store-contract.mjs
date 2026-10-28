@@ -1,8 +1,8 @@
-import {UI_CACHE_VERSION} from '../../pkg/storage/migrations/ui-cache/0008_resource_bytes.mjs';
+import {UI_CACHE_VERSION} from '../../pkg/storage/migrations/ui-cache/0009_stable_projections.mjs';
 import {createIndexedStore,idbRequest} from '../../web/src/state/indexed-store.mjs';
 import {clearBusinessCaches} from '../../web/src/state/cache-lifecycle.mjs';
 import {createProductionClient} from '../../web/src/adapters/production.mjs';
-import {createProjectionStore} from '../../web/src/state/projection-store.mjs';
+import {createProjectionStore,projectionKey} from '../../web/src/state/projection-store.mjs';
 import {createResourceReads,displayProjection} from '../../web/src/state/resource-cache.mjs';
 import {createTaskRepository} from '../../web/src/state/task-repository.mjs';
 import {createChatCache} from '../../web/src/state/chat-cache.mjs';
@@ -46,7 +46,7 @@ export async function projectionStoreContract(report=()=>{}){
     const retained=await cold.read('/api/v1/assistants?q=one');check(retained.items[0].id.endsWith('q=one')&&cold.state(retained).freshness==='retained','Cold repository renders committed retained data before network confirmation');gate.resolve();await updated.promise;stop();
     const fresh=await cold.read('/api/v1/assistants?q=one');check(fresh.items[0].id==='confirmed'&&cold.state(fresh).freshness==='fresh'&&cold.state(fresh).lastConfirmed>0,'Cold refresh publishes committed fresh data with confirmation time');
     const epochPut=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(...args){if(this.name==='epochs')throw new DOMException('Synthetic invalidation quota','QuotaExceededError');return epochPut.apply(this,args);};cold.invalidate(['assistants'],{space:'local'});let invalidationFailed=false;try{await cold.read('/api/v1/assistants?q=one',{authoritative:true});}catch(error){invalidationFailed=error.storage;}finally{IDBObjectStore.prototype.put=epochPut;}
-    const afterInvalidation=await cold.storage.read(JSON.stringify(cold.describe('/api/v1/assistants?q=one')));check(invalidationFailed&&afterInvalidation?.value.items[0].id==='confirmed','Failed invalidation cannot publish a volatile refresh or erase committed content');
+    const afterInvalidation=await cold.storage.read(projectionKey(cold.describe('/api/v1/assistants?q=one')));check(invalidationFailed&&afterInvalidation?.value.items[0].id==='confirmed','Failed invalidation cannot publish a volatile refresh or erase committed content');
     check((await cold.read('/api/v1/assistants?q=one',{authoritative:true})).items[0].id==='confirmed','A later read retries the pending invalidation and recovers from storage failure');
     let policyFail=false;const policyReads=make('node-policy','',async()=>{if(policyFail)throw Error('Offline permissions');return {policy:{machines:{fixture:{revision:1}}},pending:[{id:'must-not-persist',token:'private-approval'}]};});await policyReads.policySummary();policyFail=true;let policyRejected=false;try{await policyReads.policySummary();}catch{policyRejected=true;}const policySaved=await policyReads.query('@permissions-policy',{collection:true});check(policyRejected&&policySaved.value.policy.machines.fixture.revision===1&&!JSON.stringify(policySaved.value).includes('must-not-persist'),'Permission failure retains only a policy display summary and never pending approvals');
     const budget=createProjectionStore({name:resourceName,maxBytes:32});const meta=cold.describe('/api/v1/assistants');await budget.commit('budget',meta,{id:'old'},await budget.token(meta));let overflow=false;try{await budget.commit('budget',meta,{id:'x'.repeat(100)},await budget.token(meta));}catch(error){overflow=error.storage;}check(overflow&&(await budget.read('budget')).value.id==='old','Byte budget failure preserves the committed value');budget.close();

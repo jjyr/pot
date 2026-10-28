@@ -8,6 +8,7 @@ export function avatar(size = 32, image = '') {
   result.setAttribute('aria-hidden', 'true');
   if(!image?.startsWith('data:image/png;base64,'))return result;
   const photo = node('img', 'avatar-image');
+  photo.width = photo.height = size;
   photo.src = image;
   photo.alt = '';
   result.append(photo);

@@ -67,10 +67,9 @@ export function createChatOutbox({client,changed=()=>{},cacheFailed=()=>{},stora
           const receipt=await client.sendReceipt(value.request,scope),request=value.request;
           if(receipt.runtime_id!==value.target.control||receipt.owner_id!==value.target.owner||receipt.request_id!==request.request_id||receipt.conversation_id!==request.conversation_id||(receipt.user_message_id||'')!==(request.user_message_id||'')||(receipt.retry_user_message_id||'')!==(request.retry_user_message_id||''))throw fail('identityChanged');
           if(receipt.state==='accepted'){if(typeof receipt.message_id!=='string'||!receipt.message_id)throw fail('identityChanged');await update({state:'accepted',message_id:receipt.message_id,projection_pending:true,claim:null});commitAcceptance(value,{message_id:receipt.message_id,duplicate:true},scope,()=>acceptanceProjection(value,{message_id:receipt.message_id,duplicate:true},scope));return;}
-          if(receipt.state==='rejected')throw fail('turnRetired');
+          if(receipt.state==='rejected')throw fail('rejected');
           if(receipt.state!=='unconfirmed')throw fail('identityChanged');
         }
-        if(value.request.user_message_id&&(!snapshot.running||snapshot.turn_id!==value.request.user_message_id))throw fail('turnRetired');
         if(value.request.attachments?.length){
           if(!supportsCapability(assistant,'chat.attachments'))throw fail('permission');
           const files=await storage.files(value.target.key,value.request.request_id);
@@ -81,8 +80,8 @@ export function createChatOutbox({client,changed=()=>{},cacheFailed=()=>{},stora
           }
         }
         ensureAuthority();
-        // Freeze the actual active turn once, before the first POST. Guidance
-        // never follows a retired turn into a successor during reconciliation.
+        // Capture the turn once. The receiver atomically chooses guidance or
+        // its durable next-input queue; retries keep this identity unchanged.
         if(!value.started){
           const request={...value.request,...(!value.request.retry_user_message_id&&!value.request.user_message_id&&snapshot.running?{user_message_id:snapshot.turn_id}:{})};
           await update({started:true,request,state:'delivering'});
@@ -112,6 +111,10 @@ export function createChatOutbox({client,changed=()=>{},cacheFailed=()=>{},stora
       for(const value of rows)if(value.state==='accepted'&&value.projection_pending&&!repaired.has(outboxIdentityKey(value))&&client.runtime?.runtime_id===value.target.host&&client.spaces?.find(space=>space.id===value.target.space)?.control_id===value.target.control){
         const scope={space:value.target.space,owner:value.target.owner,expectedControl:value.target.control};commitAcceptance(value,{message_id:value.message_id,duplicate:true},scope,()=>acceptanceProjection(value,{message_id:value.message_id,duplicate:true},scope));
       }
+      // A retired turn was previously treated as a terminal local failure.
+      // Resume that submitted input with its original receipt; never retarget it.
+      for(const row of rows)if(row.state==='failed'&&row.problem==='turnRetired')await storage.retry(row);
+      if(rows.some(row=>row.state==='failed'&&row.problem==='turnRetired'))await refresh();
       // One head per immutable target; unrelated assistants progress independently.
       const lanes=new Map();for(const row of rows)if(!outboxTerminal(row)&&!lanes.has(row.target.key))lanes.set(row.target.key,row);
       await Promise.all([...lanes.values()].filter(row=>row.state!=='failed'&&!client.assistants?.find(item=>item.space_id===row.target.space&&item.id===row.target.owner)?.offline).map(dispatch));

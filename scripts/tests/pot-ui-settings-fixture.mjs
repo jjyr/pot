@@ -8,7 +8,7 @@ const outbox=process.env.POT_SETTINGS_OUTBOX==='1',accepted=new Map();
 const shell=await shellAssets(root),streams=new Map(),held=[],calls=[];
 for(const path of ['/scripts/tests/fixtures/assistant-settings.html','/scripts/tests/pot-ui-assistant-settings-browser.mjs'])shell.files.set(path,await readFile(resolve(import.meta.dirname,'../..'+path)));
 let evidence=[];
-const state={control:'settings-control',boot:'settings-boot',phase:'running',snapshot:true,hold:[],revoked:false,failSave:false,failRead:false,revision:1,configRevision:0,rulesRevision:'rules-1',name:'Synthetic Assistant',model:'synthetic-original',rules:'Synthetic fixture rules',pending:false,cursor:1};
+const state={control:'settings-control',boot:'settings-boot',phase:'running',snapshot:true,hold:[],revoked:false,failSave:false,failRead:false,revision:1,configRevision:0,rulesRevision:'rules-1',name:'Synthetic Assistant',model:'synthetic-original',task_default:null,rules:'Synthetic fixture rules',pending:false,cursor:1};
 const caps=()=>({version:1,operations:['chat.read','chat.events','chat.history',...(outbox?['chat.send','chat.steer','chat.subscribe','chat.attachments']:[]),...(state.revoked?[]:['assistant.configure','assistant.profile'])]});
 const frame=()=>({kind:'reset',base_cursor:0,view:{state:{api_version:3,cursor:state.cursor,boot_id:state.boot,conversation_id:'synthetic-conversation',turn:state.phase==='running'?{user_message_id:'synthetic-active-turn',paused:false}:null,agent:{phase:state.phase,model:'synthetic-original'}},replies:[],messages:Array.from({length:outbox?state.historyCount||1:1},(_,index)=>({sequence:String(index+1),version:state.cursor,message:{id:index?'synthetic-message-'+index:'synthetic-message',role:'assistant',status:'complete',text:'Synthetic assistant execution continues independently of settings.'+(index?'\n\nSynthetic reading paragraph '+index+'. '.repeat(12):'')}})),history:{before:'1',after:String(outbox?state.historyCount||1:1),has_more:false,has_newer:false}}});
 const json=(res,value,status=200)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
@@ -52,7 +52,7 @@ const server=createServer(async(req,res)=>{try{
     }
     if(path==='/api/v1/agent'){
      if(body.expected_revision!==state.configRevision)return fail('assistant_changed',409);
-     state.model=body.selection.model;state.configRevision++;state.pending=state.phase==='running';return answer({generation:1,revision:state.configRevision,pending:state.pending,selection:{...body.selection}});
+     state.model=body.selection.model;state.task_default=body.selection.task_default??null;state.configRevision++;state.pending=state.phase==='running';return answer({generation:1,revision:state.configRevision,pending:state.pending,selection:{...body.selection}});
     }
     if(path==='/api/v1/instructions'){state.rules=body.text;state.rulesRevision+='x';return answer({text:state.rules,revision:state.rulesRevision});}
     return fail('synthetic_forbidden_operation',400);
@@ -64,9 +64,9 @@ const server=createServer(async(req,res)=>{try{
    if(path==='/api/v1/assistants')return answer([{id:'alpha',name:state.name,revision:state.revision,phase:state.phase,executing:state.phase==='running',capabilities:caps()}]);
    if(path==='/api/v1/agent-links')return answer({items:[]});
    if(path==='/api/v1/assistants/profile')return answer({id:'alpha',name:state.name,avatar:'',revision:state.revision});
-   if(path==='/api/v1/agent')return answer({generation:1,revision:state.configRevision,pending:state.pending,selection:{profile_id:'synthetic-provider',profile_revision:1,model:state.model}});
+   if(path==='/api/v1/agent')return answer({generation:1,revision:state.configRevision,pending:state.pending,selection:{profile_id:state.profile_id||'synthetic-provider',profile_revision:1,model:state.model,task_default:state.task_default}});
    if(path==='/api/v1/instructions')return answer({text:state.rules,revision:state.rulesRevision});
-   if(path==='/api/v1/providers')return answer({default_provider_id:'synthetic-provider',profiles:[{id:'synthetic-provider',name:'Synthetic Provider',revision:1,model:'synthetic-original',models:['synthetic-original','synthetic-next']}],directory:[],provider_types:[],connections:[],configured_models:{'synthetic-provider':['synthetic-original','synthetic-next']}});
+   if(path==='/api/v1/providers')return answer(state.providers||{default_provider_id:'synthetic-provider',profiles:[{id:'synthetic-provider',name:'Synthetic Provider',revision:1,model:'synthetic-original',models:['synthetic-original','synthetic-next']}],directory:[],provider_types:[],connections:[],configured_models:{'synthetic-provider':['synthetic-original','synthetic-next']}});
    if(path==='/api/v1/permissions')return answer({pending:[],policy:{machines:{},rules:[],task_grants:[]}});
    if(path==='/api/v1/tasks/catalog'||path==='/api/v1/tasks/query')return answer({items:[],total:0,counts:{},next_offset:null});
    if(path==='/api/v1/assistants/bootstrap')return answer({assistant:null});

@@ -13,7 +13,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
   let requested=rows,requestedRevision='[]',committedRevision='[]',requestedOptions={},flight=null,layoutEpoch=0,layoutFingerprint='',committing=null,measuredOptions={},layoutReframe=false,queueUpdating=false,preparationError=false;
   const inheritedPreparation=currentPreparedRender();
   const nativePresentations=new Set();
-  function prepared(){return !closed&&!suspended&&!preparationError&&!nativePresentations.size&&!layoutReframe&&!flight&&requestedRevision===committedRevision&&(requestedOptions.regions||[]).every(region=>regionRevisions.get(region.key)===layoutEpoch+':'+region.revision);}
+  function prepared(){return !closed&&!suspended&&!preparationError&&!nativePresentations.size&&!layoutReframe&&!flight&&requestedRevision===committedRevision&&(nested||[...mounted.values()].every(record=>record.preparedSignature===signature(sources.get(record))))&&(requestedOptions.regions||[]).every(region=>regionRevisions.get(region.key)===layoutEpoch+':'+region.revision);}
   function nativePresentationChanged(presentation,pending){
     if(pending){if(closed){presentation.cancel();return;}nativePresentations.add(presentation);}
     else{nativePresentations.delete(presentation);if(!closed){if(prepared())afterPreparedCommit(requestedOptions);else invalidate();}}
@@ -309,7 +309,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     const path=controller?.visibilityPath,destination=controller?.destination;
     const reveal=!!controller?.revealing&&(path?.has(message.id)||destination?.expand&&destination.id===message.id||message.members?.some(member=>path?.has(member.id)||destination?.expand&&destination.id===member.id));
     if(reveal)revealedRows.add(message.viewKey);
-    return layoutEpoch+':'+(rowRevisions.get(message.viewKey)||0)+':'+Number(revealedRows.has(message.viewKey))+':'+JSON.stringify(message);
+    return layoutEpoch+':'+(rowRevisions.get(message.viewKey)||0)+':'+Number(revealedRows.has(message.viewKey))+':'+JSON.stringify([message,requestedOptions.presentationKey?.(message)]);
   }
   function measuredStart(current,index){
     let offset=0;for(let i=0;i<index;i++){const size=current.sizes.get(current.rows[i].viewKey);if(size===undefined)return;offset+=size;}
@@ -333,12 +333,13 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     const probe=createPreparationSurface(scroller,host),availableWidth=probe.host.clientWidth;probe.close();
     const style=getComputedStyle(scroller),fingerprint=JSON.stringify([availableWidth,style.font,style.lineHeight,style.letterSpacing,host.ownerDocument.documentElement.lang,requestedOptions.layoutEpoch]);
     if(fingerprint!==layoutFingerprint){layoutReframe||=!!layoutFingerprint;layoutFingerprint=fingerprint;layoutEpoch++;discardPreparation();}
-    if(flight&&flight.revision!==requestedRevision){
+    const presentationRevision=JSON.stringify(requestedOptions.presentationEpoch);
+    if(flight&&(flight.revision!==requestedRevision||flight.presentationRevision!==presentationRevision)){
       const current=flight,keys=new Set(requested.map(message=>message.viewKey));
       for(const [key,job]of current.jobs)if(!keys.has(key)){job.wait.cancel();disposePreparation(job);job.surface.close();current.jobs.delete(key);}
       for(const key of current.sizes.keys())if(!keys.has(key)){current.sizes.delete(key);current.measurements.delete(key);}
       const renderContext=requestedOptions.renderContext&&Object.fromEntries(Object.entries(requestedOptions.renderContext).map(([key,value])=>[key,typeof value==='function'?value:structuredClone(value)]));
-      current.rows=structuredClone(requested);current.revision=requestedRevision;current.options={...requestedOptions,regions:current.options.regions,renderContext};
+      current.rows=structuredClone(requested);current.revision=requestedRevision;current.presentationRevision=presentationRevision;current.options={...requestedOptions,regions:current.options.regions,renderContext};
     }
     // Measured overscan may prepare one more row than the measured live range
     // ultimately needs. That candidate is retired after commit. A later layout
@@ -358,7 +359,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       for(const region of requestedOptions.regions||[])layoutHosts.add(region.host);
       for(const element of layoutHosts)freezePreparedLayout(element);
       const renderContext=requestedOptions.renderContext&&Object.fromEntries(Object.entries(requestedOptions.renderContext).map(([key,value])=>[key,typeof value==='function'?value:structuredClone(value)]));
-      flight={rows:structuredClone(requested),revision:requestedRevision,options:{...requestedOptions,renderContext},jobs:new Map(),sizes:new Map(),measurements:new Map(),regions:new Map(),epoch:layoutEpoch,reframe:layoutReframe};
+      flight={rows:structuredClone(requested),revision:requestedRevision,presentationRevision,options:{...requestedOptions,renderContext},jobs:new Map(),sizes:new Map(),measurements:new Map(),regions:new Map(),epoch:layoutEpoch,reframe:layoutReframe};
     }
     const current=flight;
     for(const message of current.rows){
@@ -431,8 +432,11 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       job.context.phase='commit';commitPreparedResources(job.context);finishPreparedNative(job.context,{commit:true});consumePreparationSurrogates(job.surface.host);
       const attributes=new Set(['hidden','disabled','open',...[...job.region.host.attributes,...job.surface.host.attributes].map(attribute=>attribute.name).filter(name=>name.startsWith('aria-'))]);
       for(const attribute of attributes){if(job.surface.host.hasAttribute(attribute))job.region.host.setAttribute(attribute,job.surface.host.getAttribute(attribute));else job.region.host.removeAttribute(attribute);}
-      const preparedNodes=[...job.surface.host.childNodes];for(const node of preparedNodes)moveConversationNode(job.region.host,node);
-      for(const node of [...job.region.host.childNodes])if(!preparedNodes.includes(node))node.remove();
+      if(job.region.commit)job.region.commit(job.surface.host);
+      else{
+        const preparedNodes=[...job.surface.host.childNodes];for(const node of preparedNodes)moveConversationNode(job.region.host,node);
+        for(const node of [...job.region.host.childNodes])if(!preparedNodes.includes(node))node.remove();
+      }
       job.region.didCommit?.();job.context.phase='live';
       job.region.host.preparedContext=job.context.connectionContext;
       retirePreparedDeadlines(deadlines,[job.region.key],job.region.host,job.region.key);

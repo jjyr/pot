@@ -6,6 +6,30 @@ export function modelDefaults(snapshot,providerID,modelID) {
   return {context,input:Number(limits.input)||null,output:Math.min(Number(limits.output)||8192,context-1)};
 }
 
+export function profileDirectoryID(snapshot,profileID) {
+  const profile=snapshot.profiles?.find(value=>value.id===profileID);
+  const connection=snapshot.connections?.find(value=>value.profile_id===profileID);
+  const type=snapshot.provider_types?.find(value=>value.id===connection?.type_id);
+  return type?.directory_provider||profile?.model_settings?.catalog_provider||'';
+}
+
+// Suggestions are local metadata, never an allowlist or a discovery request.
+// Custom API connections without a directory binding can use any public ID.
+export function profileModelChoices(snapshot,profileID,selected='') {
+  const profile=snapshot.profiles?.find(value=>value.id===profileID);
+  if(!profile)return [];
+  const directoryID=profileDirectoryID(snapshot,profileID),connection=snapshot.connections?.find(value=>value.profile_id===profileID),models=new Map();
+  const unboundCustom=!connection?.type_id||connection.type_id==='standard-model-providers/custom';
+  const add=model=>{model=typeof model==='string'?{id:model}:model;if(model?.id)models.set(model.id,model);};
+  for(const directory of snapshot.directory||[])if(directoryID?directory.id===directoryID:unboundCustom)for(const model of directory.models||[])add(model);
+  for(const model of snapshot.configured_models?.[profileID]||profile.models||[])if(!models.has(typeof model==='string'?model:model.id))add(model);
+  for(const model of snapshot.connections?.find(value=>value.profile_id===profileID)?.catalog?.models||[])add(model);
+  const choices=providerConversationModels([...models.values()],selected);
+  // Owner intent remains selectable even if a refreshed catalog drops the ID.
+  for(const id of [profile.model,selected])if(id&&!choices.some(model=>model.id===id))choices.push({id});
+  return choices;
+}
+
 // Connection facts are discarded on an address/protocol change, including an
 // edit away and back before another discovery completes.
 export function createModelInputDiscovery(connection,initial={}) {
