@@ -7,7 +7,7 @@ async function issue(_body,{origin,phase,nonce,expectPolicy}){
  const path=kind=>new URL(`/api/v1/__resource-boundary/${kind}?phase=${phase}&nonce=${nonce}`,origin).href;
  const violations=[],nodes=[];let finish;
  const policy=new Promise(resolve=>finish=resolve),required=['connect-src','img-src','frame-src'];
- const listen=event=>{if(event.blockedURI.startsWith(origin+'/api/v1/__resource-boundary/')){violations.push({directive:event.effectiveDirective,blocked:event.blockedURI});if(required.every(value=>violations.some(event=>event.directive===value)))finish();}};
+ const listen=event=>{if(event.blockedURI===origin||event.blockedURI.startsWith(origin+'/api/v1/__resource-boundary/')){violations.push({directive:event.effectiveDirective,blocked:event.blockedURI});if(required.every(value=>violations.some(event=>event.directive===value)))finish();}};
  document.addEventListener('securitypolicyviolation',listen);
  const timer=expectPolicy?setTimeout(()=>finish(),2000):null;
  const image=new Image(),imageResult=new Promise(resolve=>{image.onload=()=>resolve('loaded');image.onerror=()=>resolve('error');});image.alt='';nodes.push(image);image.src=path('image');document.body.append(image);
@@ -18,7 +18,7 @@ async function issue(_body,{origin,phase,nonce,expectPolicy}){
  const action=form.action,method=form.method;let formError='';try{HTMLFormElement.prototype.submit.call(form);}catch(error){formError=error.name+': '+error.message;}
  let fetchRejected=false,fetchError='';try{await fetch(path('fetch'),{credentials:'omit',cache:'no-store'});}catch(error){fetchRejected=true;fetchError=error.name+': '+error.message;}
  const imageOutcome=await imageResult;if(expectPolicy)await policy;
- clearTimeout(timer);document.removeEventListener('securitypolicyviolation',listen);for(const node of nodes)node.remove();
+ clearTimeout(timer);document.removeEventListener('securitypolicyviolation',listen);if(expectPolicy)for(const node of nodes)node.remove();
  return {action,method,formSubmitCalled:true,formError,fetchURL:path('fetch'),fetchRejected,fetchError,imageOutcome,violations,origin:window.origin};
 }
 
