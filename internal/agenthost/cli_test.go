@@ -137,7 +137,11 @@ func TestCLIExecutionStdioKeepsListenerRootAndRunBound(t *testing.T) {
 				t.Fatal(err)
 			}
 			local := config["mcp_servers.pot_receiver"].(map[string]any)
-			command := exec.CommandContext(ctx, binary, local["args"].([]string)...)
+			args := local["args"].([]string)
+			if h == hosts[0] {
+				args = []string{"execution-tools"}
+			}
+			command := exec.CommandContext(ctx, binary, args...)
 			command.Env = append(nativeEnvironment(os.Environ(), s), "POT_AGENTHOST_CLI_FIXTURE=1")
 			input, err := command.StdinPipe()
 			if err != nil {
@@ -247,5 +251,59 @@ func TestCLIReceiverServeAndDisconnectUseSelectedListener(t *testing.T) {
 	var metadata receiverAuthorization
 	if err = client.call(ctx, "/api/v1/agent-host/receiver/authorization?connection_id="+connection, nil, &metadata); err != nil || metadata.NodeID != h.backend.nodeID {
 		t.Fatal("local management lost the receiver identity", err)
+	}
+}
+
+func TestCLIExecutionScopeRejectsIncompleteOrConflictingAuthority(t *testing.T) {
+	for _, adapter := range []Runtime{Codex(), Antigravity()} {
+		t.Run(adapter.Kind, func(t *testing.T) {
+			for _, scenario := range []string{"no-env", "job", "run", "root", "listen", "relative-root", "non-loopback", "zero-port", "root-override", "listen-override", "empty-root-override", "empty-listen-override"} {
+				t.Run(scenario, func(t *testing.T) {
+					root := filepath.Join(t.TempDir(), "must-not-open")
+					var requests atomic.Int32
+					server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests.Add(1) }))
+					defer server.Close()
+					env := map[string]string{"job": "task", "run": "run", "root": root, "listen": server.Listener.Addr().String()}
+					switch scenario {
+					case "no-env":
+						for key := range env {
+							env[key] = ""
+						}
+					case "job", "run", "root", "listen":
+						env[scenario] = ""
+					case "relative-root":
+						env["root"] = "relative"
+					case "non-loopback":
+						env["listen"] = "0.0.0.0:12345"
+					case "zero-port":
+						env["listen"] = "127.0.0.1:0"
+					}
+					for key, name := range map[string]string{"job": "POT_AGENT_JOB_ID", "run": "POT_AGENT_RUN_ID", "root": "POT_AGENT_HOST_ROOT", "listen": "POT_AGENT_HOST_LISTEN"} {
+						t.Setenv(name, env[key])
+					}
+					args := []string{"execution-tools"}
+					switch scenario {
+					case "root-override":
+						args = append(args, "--root", filepath.Join(t.TempDir(), "other"))
+					case "listen-override":
+						args = append(args, "--listen", "127.0.0.1:1")
+					case "empty-root-override":
+						args = append(args, "--root", "")
+					case "empty-listen-override":
+						args = append(args, "--listen", "")
+					}
+					err := MainRuntime(adapter, args, strings.NewReader(""), io.Discard)
+					if !errors.Is(err, agentlink.ErrUnauthorized) {
+						t.Fatal("unsafe execution scope accepted", err)
+					}
+					if _, err = os.Stat(root); !os.IsNotExist(err) {
+						t.Fatal("scope validation opened root", err)
+					}
+					if requests.Load() != 0 {
+						t.Fatal("scope validation contacted a host")
+					}
+				})
+			}
+		})
 	}
 }

@@ -125,7 +125,7 @@ Update Pot and relevant plugins/adapters on both ends and explicitly reconnect.
 Old TCP invitations are not parsed or imported. There is no listener, old pairing
 restoration, forwarding fallback or simultaneous legacy release mode.
 
-Control migration 0008 stores a minimal unsupported history row and last known
+Control migration 0009 stores a minimal unsupported history row and last known
 state, then drops pairing/listener/invitation configuration. It does not copy
 grants into OAuth. Tasks, reports, receipts, messages and saved local artifact
 content retain their original identities. Old remote work is excluded from
@@ -166,24 +166,14 @@ revoked grant. SDK sessions carry no owner authority. Renew expired access with
 the same client only after browser login and consent. Deployers manage
 reachability, HTTP/HTTPS and certificates.
 
-## User-managed native assistants
-
-A node may advertise `assistant.management` on its node endpoint. This narrow
-capability accepts only authenticated `user` callers, never assistants or tasks.
-The receiver returns its model catalog and opaque, locally configured workspace
-scope IDs. Creation is idempotent by caller and request ID; conflicting retries
-fail. Model/name edits require an idle assistant and its current revision and
-retain its native conversation. The operation cannot select arbitrary paths,
-credentials, tool policies or a different sender. Pairing with a host advertising
-this capability grants those bounded management operations to the peer's user.
-The Antigravity adapter implements it; Codex does not advertise it.
-
 ## Operator assistant management
 
 Codex and Antigravity advertise node-level `assistant.management`. This operation
 is available to the authenticated user interface, never an assistant tool. Control
 replaces supplied `from` data with its authenticated operator identity; the peer
-receiver independently checks the authenticated node and user kind.
+receiver independently checks the authenticated node and user kind. Creation is
+idempotent by caller and request ID; conflicting retries fail. The operation
+cannot select arbitrary paths, credentials, tool policies or a different sender.
 
 ```text
 Authenticated UI -> Control -> Agent Link -> receiver

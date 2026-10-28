@@ -1,11 +1,14 @@
 import {createPages} from '../../../web/src/components/pages.mjs';
 import {projectLinkedAssistants} from '../../../web/src/state/agent-links.mjs';
 const profileAvatar=color=>{const canvas=document.createElement('canvas');canvas.width=canvas.height=128;const context=canvas.getContext('2d');context.fillStyle=color;context.fillRect(0,0,128,128);context.fillStyle='#fff';context.font='64px system-ui';context.textAlign='center';context.textBaseline='middle';context.fillText('P',64,68);return canvas.toDataURL('image/png');};
-const assistant=(node,id,name,adapter)=>({address:{node_id:node,kind:'assistant',agent_id:id},name,adapter,...(id==='cloud-assistant'?{avatar:profileAvatar('#42736c')}:{})});
+const assistant=(node,id,name,adapter)=>({address:{node_id:node,kind:'assistant',agent_id:id},name,adapter,capabilities:{version:1,scope:'peer',operations:['chat.read']},...(id==='cloud-assistant'?{avatar:profileAvatar('#42736c')}:{})});
 const fixture=window.topologyFixture={calls:[],language:'en',scenario:'ready',links:[
- {id:'codex-link',peer:{node_id:'codex-control',kind:'codex',name:'Codex',address:'tcp://dev-box.example:8793'},status:'connected',revision:1,default_assistant_id:'review',assistants:[assistant('codex-control','review','Code review','codex'),assistant('codex-control','build','Development','codex')]},
- {id:'cloud-link',peer:{node_id:'cloud-id',kind:'pot',name:'Cloud Pot',address:'tcp://100.88.0.8:8793'},status:'connected',revision:1,default_assistant_id:'cloud-assistant',assistants:[assistant('cloud-id','cloud-assistant','Cloud assistant','pot')]}
+ {id:'codex-link',peer:{node_id:'codex-control',kind:'codex',name:'Codex',address:'https://dev-box.example/mcp'},status:'connected',revision:1,transport:'mcp',inbound:false,default_assistant_id:'review',assistants:[assistant('codex-control','review','Code review','codex'),assistant('codex-control','build','Development','codex')]},
+ {id:'cloud-link',peer:{node_id:'cloud-id',kind:'pot',name:'Cloud Pot',address:'https://100.88.0.8/mcp'},status:'connected',revision:1,transport:'mcp',inbound:false,default_assistant_id:'cloud-assistant',assistants:[assistant('cloud-id','cloud-assistant','Cloud assistant','pot')]},
+ {id:'retired-link',peer:{node_id:'retired-node',kind:'pot',name:'Retired peer',address:'tcp://retired.example:8793'},status:'unsupported',last_known_state:'connected',revision:1,last_exchange_at_ms:0,outbox:{pending:0,oldest_at_ms:0},observation:{},assistants:[]}
 ]};
+// Synthetic observation samples exercise topology presentation; the current MCP
+// directory API does not yet publish these remote telemetry fields.
 const activity=(assistant_id,values={})=>({assistant_id,running:0,queued:0,waiting_approval:0,waiting_allowance:0,chat_state:'idle',fenced:false,...values});
 const sample=(node_id,hostname,assistants)=>({observed_at_ms:Date.now(),value:{node_id,hostname,assistants,outbox:{pending:0,oldest_at_ms:0}}});
 fixture.links[0].observation=sample('codex-control','dev-box.local',[activity('review'),activity('build',{running:1,queued:2})]);
@@ -19,23 +22,10 @@ const policy=()=>({machines:{'my-mac':{execution_access:'ask',revision:1}},rules
 const localAssistants=[{id:'dev',name:'Development assistant',space_id:'local',avatar:profileAvatar('#5c609c')},{id:'pot',name:'Pot',space_id:'local',avatar:profileAvatar('#ad7630')}];
 const refreshDirectory=()=>{client.assistants=[...localAssistants,...projectLinkedAssistants({items:fixture.links},spaces[0])];};
 const client={desktop:true,production:true,runtime:{boot_id:'fixture-boot'},spaces,assistants:localAssistants,scope:()=>({space:'local',owner:'dev'}),request:async(path,options={})=>{
- fixture.calls.push({path,...options});const body=options.body||{},space=options.space||'local';
- if(path.startsWith('/api/v1/agent-links/invitation'))return {address:(body.endpoint||'tcp://fixture.example:8793')+'#synthetic-local-invitation',expires_at_ms:Date.now()+3600000};
- if(path.startsWith('/api/v1/agent-links')){
-  if(body.action==='preview'){
-   if(fixture.previewWait)await new Promise(resolve=>fixture.releasePreview=resolve);
-   if(fixture.scenario==='expired')throw Object.assign(Error('Synthetic invitation expired'),{code:'invitation_expired'});
-   const peer={...(fixture.agentPeer||{node_id:'second-codex-control',kind:'codex',name:'Second Codex'})};if(fixture.omitPreviewNodeID)delete peer.node_id;else if(fixture.previewNodeID!==undefined)peer.node_id=fixture.previewNodeID;
-   return {peer,endpoint:'tcp://100.88.0.5:8793',fingerprint:'7c9e83a26d412fb8a05c91e473b602df8a19c7e354b068fda2e6c08b91f437ad',expires_at_ms:Date.now()+3600000};
-  }
-  if(body.action==='connect'){
-   if(fixture.connectWait)await new Promise(resolve=>fixture.releaseConnect=resolve);
-   if(fixture.scenario==='expired')throw Object.assign(Error('Synthetic invitation expired'),{code:'invitation_expired'});
-   const link={id:fixture.agentLinkID||'new-agent',peer:fixture.agentPeer||{node_id:'second-codex-control',kind:'codex',name:'Second Codex'},status:'connected',revision:1,default_assistant_id:'main',assistants:[assistant('second-codex-control','main','Codex assistant','codex')]};
-   if(!fixture.links.some(item=>item.id===link.id))fixture.links.push(link);refreshDirectory();return fixture.rawConnectionResult?{...link,peer:{address:{node_id:link.peer.node_id,kind:'assistant',agent_id:link.peer.id||'main'},adapter:link.peer.kind,name:link.peer.name}}:link;
-  }
-  if(['disconnect','reconnect'].includes(body.action)){const link=fixture.links.find(item=>item.id===body.id);link.status=body.action==='disconnect'?'disconnected':'connected';link.state=link.status;refreshDirectory();return link;}
-  if(body.action==='delete'){fixture.links=fixture.links.filter(item=>item.id!==body.id);refreshDirectory();return {deleted:true};}
+ fixture.calls.push({path,...options});const space=options.space||'local';
+ if(['/api/v1/agent-links','/api/v1/agent-links/mcp'].includes(path)&&options.method==='POST')throw Error('Unexpected connection mutation');
+ if(path==='/api/v1/agent-links/mcp')return [];
+ if(path==='/api/v1/agent-links'){
   const network=fixture.networks[space],needsAccess=fixture.scenario==='access',endpoint=needsAccess?'':network.endpoint;
   if(!fixture.freezeObservations){fixture.localObservation.observed_at_ms=Date.now();for(const link of fixture.links)if(link.observation)link.observation.observed_at_ms=Date.now();}
   return {addresses:fixture.addresses||[{kind:'tailscale',endpoint:'tcp://local-pot.fixture-tailnet.ts.net:8793'},{kind:'public',interface:'en0',endpoint:'tcp://203.0.113.10:8793'},{kind:'private',interface:'en0',endpoint:'tcp://192.168.1.24:8793'},{kind:'loopback',endpoint:'tcp://127.0.0.1:8793'}],self:{node_id:'local-id',kind:'pot',name:'Local Pot',address:endpoint,endpoint,status:needsAccess?'needs_access':'ready',observation:fixture.localObservation},items:fixture.links,network:{...network,endpoint}};

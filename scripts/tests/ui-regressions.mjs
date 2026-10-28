@@ -13,6 +13,7 @@ import {taskHistoryBrowser,taskHistoryEdges} from './task-history-browser.mjs';
 import {referenceCancellation} from './reference-cancel-browser.mjs';
 import {queryResourceCommits} from './query-resource-commits-browser.mjs';
 import {taskStatusBrowser} from './task-status-browser.mjs';
+import {mcpOnboardingBrowser} from './mcp-onboarding-browser.mjs';
 const {values}=parseArgs({options:{group:{type:'string',default:'all'},list:{type:'boolean'},fault:{type:'string'},case:{type:'string'}}});
 let selected=select(values.group);
 if(values.case){if(!selected.includes(values.case))throw Error('Unknown scenario in selected group: '+values.case);selected=[values.case];}
@@ -35,6 +36,7 @@ else {
       }
       else if(name==='query-resource-commits')result=await queryResourceCommits(browser,{sourceOrigin:server.origin});
       else if(name==='task-status')result=await taskStatusBrowser(browser,{sourceOrigin:server.origin});
+      else if(name==='mcp-onboarding')result=await mcpOnboardingBrowser(browser,{sourceOrigin:server.origin});
       else if(name==='composer-continuation-drafts')result=await composerContinuationDraftsBrowser(browser,{sourceOrigin:server.origin});
       else if(name==='composer-continuation')result=await composerContinuationBrowser(browser,{sourceOrigin:server.origin});
       else if(name==='attachment-picker')result=await attachmentPickerBrowser(browser,{sourceOrigin:server.origin});
@@ -45,7 +47,7 @@ else {
       else if(name==='composer-enter')result=await contract('pot-ui-mobile-enter-browser.js',null,{browser,origin:server.origin,base:server.origin+'/web/src'});
       else result=await isolatedPage(browser,server.origin,async page=>{
         if(name==='machines')return contract('pot-ui-machines-browser.js',page,{origin:server.origin});
-        if(/^(assistant-start|first-connection|settings|composer|usage)-/.test(name)||name==='linked-approvals'||name==='patch-approvals')return focused(page,name,server.origin);
+        if(/^(assistant-start|settings|composer|usage)-/.test(name)||name==='linked-approvals'||name==='patch-approvals')return focused(page,name,server.origin);
         if(name==='controller')return contract('pot-ui-conversation-controller-browser.js',page,{origin:server.origin});
         if(fixtures[name]){const result=await fixture(page,server.origin,name,fixtures[name]);if(name==='cached-loading.html')return {...result,firstCacheReturn:await page.evaluate(()=>window.cachedFirstReturnEvidence),cacheReturn:await page.evaluate(()=>window.cachedScopeReturnEvidence)};return name==='chat-cache-ui.html'?{...result,readiness:await page.evaluate(()=>window.cacheViewportEvidence)}:result;}
         if(name==='scroll-components')return fixture(page,server.origin,'chat-scroll.html?contract=window','DONE scrolling checks');
@@ -132,7 +134,7 @@ async function shellRetention(page){
 }
 
 async function focused(page,name,origin){
-  const phone=name.endsWith('-phone')||name==='usage-trend'||name==='linked-approvals'||name==='first-connection-codex';
+  const phone=name.endsWith('-phone')||name==='usage-trend'||name==='linked-approvals';
   const locale=phone?'zh-CN':'en';
   await page.setViewportSize({width:phone?390:1200,height:844});
   const result=async key=>{
@@ -140,9 +142,6 @@ async function focused(page,name,origin){
     const state=await page.evaluate(key=>window[key],key);
     if(!state.passed)throw Error(JSON.stringify(state));return state;
   };
-  if(name.startsWith('first-connection-')){
-    return contract('pot-ui-first-connection-browser.js',page,{origin,state:{kind:name.slice('first-connection-'.length),width:phone?390:1200,locale}});
-  }
   if(name.startsWith('assistant-start-')){
     await page.goto(origin+'/scripts/tests/fixtures/assistant-start.html?locale='+locale+'&theme=light');
     return result('assistantStartResults');

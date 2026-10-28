@@ -10,6 +10,9 @@ async page => {
  assert(await cloud.locator('.topology-issue-badge').count()===1,'Allowance warning is attached to its node');
  assert(await codex.locator('.topology-issue-badge').count()===0,'Ordinary running/queued work does not warn');
  assert((await codex.innerText()).includes('dev-box.local'),'A reported hostname identifies the remote node');
+ await page.locator('.topology-node').filter({hasText:'Retired peer'}).click();
+ assert(await page.locator('.topology-inspector .topology-link-actions').count()===0,'Retired history exposes no connection commands');
+ assert(await page.locator('.topology-inspector .topology-assistant').count()===0,'Retired history grants no assistant capability');
  await cloud.click();
  assert((await page.locator('.topology-issue-notice').innerText()).includes('token allowance'),'Selecting the problem node explains the cause');
  await codex.click();

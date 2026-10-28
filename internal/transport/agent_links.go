@@ -49,15 +49,12 @@ func (a *Application) agentLinkCall(ctx context.Context, method, path string, r 
 		result, err := a.Control.AgentCapabilities(ctx, u.Query().Get("assistant_id"))
 		return result, err, true
 	}
-	if path != "/api/v1/agent-links" && path != "/api/v1/agent-links/invitation" {
+	if path != "/api/v1/agent-links" {
 		return nil, nil, false
 	}
-	if method == "GET" && path == "/api/v1/agent-links" {
+	if method == "GET" {
 		result, err := a.Control.AgentLinks(ctx)
 		return result, err, true
 	}
-	if method != "POST" {
-		return nil, protocol.APIError{Code: "method_not_allowed"}, true
-	}
-	return nil, protocol.APIError{Code: "agent_link_reconnect_required"}, true
+	return nil, protocol.APIError{Code: "method_not_allowed"}, true
 }

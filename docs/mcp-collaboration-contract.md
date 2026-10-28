@@ -83,7 +83,7 @@ Before a mutation, the gateway resolves a saved exact retry, then checks current
 authorization, original caller ownership, target capability and admission. Input
 and cancel require an atomic expected-run check against the owned Task. The
 `Task` passed to `Guidance` must already have been loaded under that caller's
-ownership; shape validation is not an ownership lookup. The legacy Backend's
+ownership; shape validation is not an ownership lookup. The receiver Backend's
 run-less Input/Cancel methods require the gateway/Host to enforce this fence in
 the same serialized admission path. A separate read followed by an unfenced
 mutation is insufficient.
@@ -201,7 +201,7 @@ as admission validation. Encoder schemas must likewise reject additional fields.
 | Submit / message text, result error | Existing 65,536-byte bound |
 | Task input text | Existing Host 24,000-byte bound |
 | Terminal result text | Existing Agent Link 1 MiB bound |
-| Entire extension payload | Existing `peer.MaxPayload`, 24 MiB, including artifacts/evidence |
+| Entire extension payload | `agentlink.MCPMaxPayloadBytes`, 24 MiB, including artifacts/evidence |
 | Native thread/session ID | 4,096 bytes |
 | Capability operations | Existing Directory limit of 64, unique and supported |
 | Event sequence | Positive JavaScript-safe integer |

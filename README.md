@@ -111,10 +111,11 @@ Windows is currently unsupported.
 ### Desktop
 
 Open Pot, choose **Add assistant** and connect an API model provider, another
-Pot, or Codex. Try: “Research this project and suggest three improvements.”
+Pot, Codex, or Antigravity. Try: “Research this project and suggest three improvements.”
 
-For Agent Link, copy connection information from one side into **Add Agent** on
-the other. See [Agent Link](docs/agent-links.md) or [Codex setup](integrations/codex/README.md).
+For Agent Link, configure the published MCP URL and complete browser
+authorization. Native receivers are installed and started separately. See
+[Agent Link](docs/agent-links.md) or [Codex setup](integrations/codex/README.md).
 
 ### Linux server / Web UI
 
@@ -149,7 +150,7 @@ See [deployment](docs/deployment.md) for that setup, TLS and services.
 
 ## Connect other assistants
 
-Agent Link supports Pot-to-Pot connections as well as Codex. To connect another
+Agent Link uses MCP for Pot-to-Pot, Codex and Antigravity connections. To connect another
 Pot, follow the [Agent Link guide](docs/agent-links.md). External assistant
 support is listed below.
 
@@ -162,8 +163,8 @@ Read https://github.com/jjyr/pot/blob/main/docs/connect-with-agent.md and help m
 ```
 
 The [assistant connection guide](docs/connect-with-agent.md) covers prerequisites,
-local plugin installation and pairing in Pot's **Add Agent**. For manual setup,
-see the [complete Codex guide](integrations/codex/README.md#install-and-connect).
+independent MCP configuration, browser authorization and optional native receiver
+setup. See the [complete Codex guide](integrations/codex/README.md).
 
 ### Claude
 
@@ -175,7 +176,12 @@ Coming soon.
 
 ### Antigravity
 
-Coming soon.
+Configure an independent Pot MCP connection for ordinary tools, or install the
+separate receiver support package for assistant messages and Tasks. It uses the
+same MCP receiver and Agent contracts as Codex, with Antigravity stream-json as
+the native execution driver. Headless human approvals are not advertised. See
+the [Antigravity guide](integrations/antigravity/README.md) for setup and capability
+boundaries.
 
 ## More ways to work
 

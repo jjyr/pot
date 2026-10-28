@@ -19,14 +19,14 @@ def digest(data):
 
 
 def install(home, binary=None, agy="agy", build=False, activate=True, receiver=False):
+    if receiver:
+        # Support is separately installed and checked by the native driver.
+        return install_receiver(home, binary, agy, build, activate)
     destination = home / ".config/pot-antigravity/plugin"
     for path in [destination]:
         if any(p.is_symlink() for p in [path, *path.parents]):
             raise ValueError("Refusing symlink at installation destination")
     desired = {str(p.relative_to(SOURCE)): p.read_bytes() for p in SOURCE.rglob("*") if p.is_file()}
-    if receiver:
-        # Support is separately installed and checked by the native driver.
-        return install_receiver(home, binary, agy, build, activate)
     receipt = destination / ".pot-install.json"
     if receipt.is_symlink():
         raise ValueError("Refusing symlink install receipt")
@@ -81,7 +81,7 @@ def install_receiver(home, binary, agy, build, activate):
     config = json.loads(desired["mcp_config.json"])
     config["mcpServers"]["pot_receiver"].update(
         command=str(executable),
-        args=["execution-tools", "--root", str(home / ".config/pot-antigravity/agent")],
+        args=["execution-tools"],
     )
     desired["mcp_config.json"] = (json.dumps(config, indent=2) + "\n").encode()
     desired["hooks.json"] = desired["hooks.json"].replace(

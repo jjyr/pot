@@ -6,12 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"slices"
 	"testing"
 
+	assistantprofile "github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/transport"
 	"github.com/jjyr/pot/internal/webui"
+	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/assistantavatar"
 )
 
@@ -36,7 +37,7 @@ func TestCodexNewAssistantUsesUnusedKitchenIdentity(t *testing.T) {
 	}
 }
 
-func TestCodexMCPAvatarImportIsBoundToAssistantWorkspaceAndSurvivesRestart(t *testing.T) {
+func TestCodexProfileAvatarSurvivesRestartAndReset(t *testing.T) {
 	h, root := testHost(t)
 	ctx := context.Background()
 	a, _ := h.backend.resolve(ctx, "codex")
@@ -44,28 +45,28 @@ func TestCodexMCPAvatarImportIsBoundToAssistantWorkspaceAndSurvivesRestart(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = os.WriteFile(filepath.Join(a.Workspace, "avatar.png"), image, 0600); err != nil {
+	avatar, err := assistantprofile.NormalizeAvatar(image)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err = os.Symlink(filepath.Join(root, "tasks.sqlite"), filepath.Join(a.Workspace, "escape")); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{"../tasks.sqlite", "escape", "/etc/passwd"} {
-		if _, err = h.tool(ctx, hostToolInput{Operation: "profile", FromAssistantID: "codex", AvatarPath: path}); err == nil {
-			t.Fatal("out of workspace image allowed", path)
-		}
-	}
-	if _, err = h.tool(ctx, hostToolInput{Operation: "profile", FromAssistantID: "codex", AssistantID: "another", Name: func() *string { v := "wrong"; return &v }()}); err == nil {
-		t.Fatal("MCP could edit another assistant")
-	}
-	if _, err = h.tool(ctx, hostToolInput{Operation: "profile", FromAssistantID: "codex", AvatarPath: "avatar.png"}); err != nil {
+	if _, err = h.backend.Profile(ctx, agentlink.ProfileRequest{AssistantID: "codex", Action: "update", Revision: a.Revision, Avatar: &avatar}); err != nil {
 		t.Fatal(err)
 	}
 	custom, _ := h.backend.resolve(ctx, "codex")
 	if custom.Avatar == a.Avatar || custom.Name != a.Name {
 		t.Fatal("avatar import failed or renamed assistant")
 	}
-	if _, err = h.tool(ctx, hostToolInput{Operation: "profile", FromAssistantID: "codex", ResetAvatar: true}); err != nil {
+	h.close()
+	h, err = openAgentHost(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := h.backend.Profile(ctx, agentlink.ProfileRequest{AssistantID: "codex", Action: "get"})
+	if err != nil || restored.Avatar != custom.Avatar || restored.Revision != custom.Revision {
+		t.Fatal("custom profile lost after restart", err)
+	}
+	avatar = ""
+	if _, err = h.backend.Profile(ctx, agentlink.ProfileRequest{AssistantID: "codex", Action: "update", Revision: custom.Revision, Avatar: &avatar}); err != nil {
 		t.Fatal(err)
 	}
 	h.close()

@@ -4,7 +4,7 @@ export const groups = {
   nav: ['directory', 'switching', 'chat-initial-layout.html', 'work-record-navigation.html'],
   history: ['task-history', 'task-history-edges'],
   domain: ['domain-repositories.html','query-resource-commits','task-status'],
-  management: ['assistant-start-phone','first-connection-codex','first-connection-antigravity','settings-phone','machines'],
+  management: ['assistant-start-phone','mcp-onboarding','settings-phone','machines'],
   composer: ['composer-phone','composer-enter','reference-cancel','attachment-picker','composer-continuation','composer-continuation-drafts','assistant-drafts'],
   connection: ['chat-stream-recovery','chat-directory-activity'],
   approvals: ['linked-approvals','patch-approvals'],

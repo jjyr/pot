@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import shlex
 from pathlib import Path
 import tempfile
 import unittest
@@ -37,7 +38,7 @@ class InstallTests(unittest.TestCase):
             root = Path(temporary).resolve()
             binary = root / "binary"
             binary.write_bytes(b"fixture")
-            home = root / "home with space"
+            home = root / "owner's home with space"
             support = installer.install(home, binary, build=False, activate=False, receiver=True)
             helper = installer.install(home, activate=False)
             self.assertNotEqual(support, helper)
@@ -45,15 +46,65 @@ class InstallTests(unittest.TestCase):
             self.assertEqual(manifest["name"], "pot-receiver")
             hooks = json.loads((support / "hooks.json").read_text())
             command = hooks["pot-execution-scope"]["PreToolUse"][0]["hooks"][0]["command"]
-            self.assertIn("pot-antigravity-agent", command)
+            self.assertEqual(
+                shlex.split(command), [str(support / "bin/pot-antigravity-agent"), "policy"]
+            )
             self.assertNotIn("__POT_POLICY", command)
             config = json.loads((support / "mcp_config.json").read_text())
-            self.assertEqual(config["mcpServers"]["pot_receiver"]["args"][0], "execution-tools")
+            self.assertEqual(config["mcpServers"]["pot_receiver"]["args"], ["execution-tools"])
             self.assertEqual((support / "bin/pot-antigravity-agent").read_bytes(), b"fixture")
             installer.install(home, binary, build=False, activate=False, receiver=True)
             (support / "hooks.json").write_text("owner edit")
             with self.assertRaisesRegex(ValueError, "local change"):
                 installer.install(home, binary, build=False, activate=False, receiver=True)
+
+    def test_receiver_support_not_affected_by_helper_symlink(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            binary = root / "binary"
+            binary.write_bytes(b"fixture")
+            home = root / "home"
+            helper = home / ".config/pot-antigravity/plugin"
+            helper.parent.mkdir(parents=True)
+            helper.symlink_to(root, target_is_directory=True)
+            support = installer.install(home, binary, activate=False, receiver=True)
+            self.assertTrue((support / "plugin.json").is_file())
+            self.assertTrue(helper.is_symlink())
+
+    def test_native_activation_sequence_and_validation_failure(self):
+        from unittest import mock
+        import os
+        import subprocess
+
+        before = dict(os.environ)
+        for receiver in (False, True):
+            with self.subTest(receiver=receiver), tempfile.TemporaryDirectory() as temporary:
+                home = Path(temporary).resolve()
+                binary = home / "binary"
+                binary.write_bytes(b"fixture")
+                with mock.patch.object(installer.subprocess, "run") as run:
+                    destination = installer.install(home, binary, receiver=receiver)
+                validate = ["agy", "plugin", "validate", str(destination), "--strict", "--json"]
+                self.assertEqual(
+                    run.call_args_list,
+                    [
+                        mock.call(validate, check=True),
+                        mock.call(["agy", "plugin", "install", str(destination)], check=True),
+                        mock.call(
+                            ["agy", "plugin", "enable", "pot-receiver" if receiver else "pot"],
+                            check=True,
+                        ),
+                    ],
+                )
+                with mock.patch.object(
+                    installer.subprocess,
+                    "run",
+                    side_effect=subprocess.CalledProcessError(1, validate),
+                ) as run:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        installer.install(home, binary, receiver=receiver)
+                run.assert_called_once_with(validate, check=True)
+        self.assertEqual(dict(os.environ), before)
 
     def test_helper_does_not_spawn_or_modify_environment(self):
         from unittest import mock

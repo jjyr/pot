@@ -32,7 +32,11 @@ func TestMain(m *testing.M) {
 				os.Exit(2)
 			}
 		}
-		if err := Main(os.Args[1:], os.Stdin, os.Stdout); err != nil {
+		adapter := Codex()
+		if os.Getenv("POT_AGENTHOST_CLI_ADAPTER") == "antigravity" {
+			adapter = Antigravity()
+		}
+		if err := MainRuntime(adapter, os.Args[1:], os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}

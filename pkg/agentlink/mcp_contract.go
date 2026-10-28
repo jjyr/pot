@@ -6,7 +6,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/jjyr/pot/pkg/core"
-	"github.com/jjyr/pot/pkg/peer"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
@@ -17,9 +16,9 @@ const (
 	MCPMaxTextBytes   = protocol.MaxMailText
 	MCPMaxInputBytes  = 24000
 	MCPMaxResultBytes = 1024 * 1024
-	// MCPMaxPayloadBytes retains the existing peer payload ceiling. HTTP handlers
-	// must bound the body before decoding, including for registration and events.
-	MCPMaxPayloadBytes = peer.MaxPayload
+	// MCPMaxPayloadBytes bounds receiver extension payloads. HTTP handlers must
+	// bound the body before decoding, including for registration and events.
+	MCPMaxPayloadBytes = 24 * 1024 * 1024
 )
 
 // MCPExecutionBinding is trusted execution metadata, never tool arguments.

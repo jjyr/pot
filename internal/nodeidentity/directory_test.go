@@ -13,7 +13,7 @@ func TestStableAutonomousIdentityAndLocalLabels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity, key := d.TransportIdentity()
+	identity, savedKey := d.Identity(), d.state.Key
 	if err = d.SetLabels(context.Background(), "another", []string{"remote"}); err == nil {
 		t.Fatal("changed foreign node labels")
 	}
@@ -28,8 +28,8 @@ func TestStableAutonomousIdentityAndLocalLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	next, nextKey := d.TransportIdentity()
-	if identity != next || !reflect.DeepEqual(key, nextKey) {
+	next := d.Identity()
+	if identity != next || savedKey != d.state.Key {
 		t.Fatal("signing identity changed")
 	}
 	if !reflect.DeepEqual(d.LocalLabels(), []string{"local", "desktop"}) {

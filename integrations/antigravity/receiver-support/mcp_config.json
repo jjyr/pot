@@ -2,7 +2,7 @@
   "mcpServers": {
     "pot_receiver": {
       "command": "__POT_AGENT_EXECUTABLE__",
-      "args": ["execution-tools", "--root", "__POT_AGENT_ROOT__"]
+      "args": ["execution-tools"]
     }
   }
 }

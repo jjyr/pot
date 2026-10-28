@@ -28,31 +28,15 @@ process supervision, credentials and execution policy. It also owns the canonica
 Node SDK assets used by Runtime adapters and plugin servers. See [MCP](mcp.md)
 for API boundaries, host extensions and asset rebuilding.
 
-## Native peer transport
+## MCP collaboration contracts
 
-`pkg/peer` provides TLS 1.3 TCP sessions with mutual Ed25519 key proof,
-public-key pinning, service admission and bidirectional RPC. Yamux multiplexes
-calls with CBOR metadata, opaque JSON body bytes and optional Zstd compression.
-Hosts inject keys and handlers; the package has no product dependencies.
-Use `Server` with a caller-created listener and `Dial` with a trusted expected
-identity. Business permissions and durable recovery remain in the service;
-uncertain calls are never automatically replayed. See [Peer protocol](peer-protocol.md).
-
-Agent Link owners stop its `Run` loop and close incoming listeners before calling
-`agentlink.Service.Close`, then release their database and secret-store handles.
-Close fences session attachment and connectivity-state callbacks with the service
-lock, so a late session closure cannot write SQLite after host shutdown. It does
-not cancel backend tasks or replay business operations. Each connection owns a
-request forwarder with 32 business calls in flight and 64 waiting positions.
-The forwarder shares one multiplexed session and one bounded dial among callers;
-different connections progress independently. Queued cancellation prevents sending,
-while a sent call retains the transport's possibly uncertain result. Disconnect,
-inbound attachment and dial completion are serialized by the forwarder; generation
-checks discard late dials. Close joins owned dial/call workers and admitted RPC
-handlers before returning. Session.Done alone does not join handlers.
-Foreground synchronization and periodic metadata sampling share per-connection
-admission, so a background sample cannot invalidate an unfinished initial directory
-read. Waiting foreground callers honor cancellation; mailbox exchange remains independent.
+`pkg/agentlink` defines shared operation, capability, identity, Task/run and
+receiver-journal contracts. `pkg/mcp` supplies protocol sessions;
+`internal/mcpreceiver` owns authenticated outbound connection, registration,
+claim and acknowledgment. Receivers persist business journals and enforce
+execution ownership. The gateway and native adapters use the same contracts.
+See [MCP collaboration](mcp-collaboration-contract.md) and
+[receiver operation](mcp-receiver-host.md).
 
 ## Third-party integrations
 
@@ -60,13 +44,18 @@ read. Waiting foreground callers honor cancellation; mailbox exchange remains in
 `Adapter`, `AccountStore` and `SecretStore` ports. `SQLAccounts` accepts a
 caller-owned database. `CredentialResolver` provides scoped reads for execution
 callers. `pkg/integrations/github` implements GitHub browser device authorization.
-Codex and Antigravity are autonomous Agent Link adapters sharing `internal/agenthost`,
-with executables `cmd/pot-codex-agent` and `cmd/pot-antigravity-agent`. They expose persistent virtual assistants
-for messages and an independent task executor through `pkg/agentlink.Backend`.
-Direct user chat is an optional `ChatBackend` capability implemented by Pot and Antigravity
-adapters. Codex is not an
-OAuth account or a separate Bridge service. See the
-[integration guide](../integrations/codex/README.md) and [Integrations](credentials.md) for API and lifecycle contracts.
+Codex and Antigravity share `internal/agenthost` and the MCP receiver, with
+executables `cmd/pot-codex-agent` and `cmd/pot-antigravity-agent`. Native execution
+uses Codex App Server or Antigravity stream-json; receiver models, login,
+workspaces and permissions remain local. Both expose configured assistants for
+messages and an independent task executor. Native headless human review is a
+Codex capability; neither native adapter advertises direct user chat.
+
+Ordinary clients configure an independent remote MCP server. The optional helper
+contains setup instructions; native receiver operation is separately installed,
+authorized and started. See [Codex](../integrations/codex/README.md),
+[Antigravity](../integrations/antigravity/README.md) and
+[credentials](credentials.md) for their distinct API and lifecycle boundaries.
 
 ## Embed an Agent loop
 
@@ -187,8 +176,8 @@ streams; the caller owns the listener, transport and token distribution. An empt
 token denies all requests. The facade does not publish the shared browser UI.
 The facade exposes only its authenticated operator handler. Browser publication
 mounts the distinct MCP/OAuth interface through the private Control socket.
-`PeerListen` and the dedicated Agent Link TCP host have been removed. The
-standalone `pkg/peer` API remains independent of product connection admission.
+Collaboration uses the MCP/OAuth interface; there is no separate peer transport
+library or dedicated Agent Link TCP host.
 
 Provider credentials use the system key store by default. Applications can
 provide a `runtime.KeySource` with a persistent 32-byte key. Preserve that key

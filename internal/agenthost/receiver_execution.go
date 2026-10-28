@@ -11,6 +11,16 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
+type executionContextInput struct {
+	JobID           string `json:"job_id,omitempty"`
+	RunID           string `json:"run_id,omitempty"`
+	FromAssistantID string `json:"from_assistant_id,omitempty"`
+}
+
+type nopWriteCloser struct{ io.Writer }
+
+func (n nopWriteCloser) Close() error { return nil }
+
 // executionTools connects only to an already operated receiver Host. The model
 // can ask for its verified context, but cannot supply an actor, run or credential.
 // Assistant callbacks cross the authenticated receiver gateway; direct Task
@@ -38,9 +48,9 @@ func executionMCPServer(client hostClient, jobID, runID, assistantID string) *mc
 		if err := agentlink.DecodeMCPContract(raw, &input); err != nil {
 			return toolResult(nil, "invalid_payload"), nil, nil
 		}
-		request := hostToolInput{Operation: "execution_context", JobID: jobID, RunID: runID, FromAssistantID: assistantID}
+		request := executionContextInput{JobID: jobID, RunID: runID, FromAssistantID: assistantID}
 		var binding agentlink.MCPExecutionBinding
-		if err := client.call(ctx, "/api/v1/agent-host/tool", request, &binding); err != nil {
+		if err := client.call(ctx, "/api/v1/agent-host/execution-context", request, &binding); err != nil {
 			return toolResult(nil, "execution_fenced"), nil, nil
 		}
 		return toolResult(binding, ""), nil, nil
@@ -49,7 +59,7 @@ func executionMCPServer(client hostClient, jobID, runID, assistantID string) *mc
 	return server
 }
 
-func (h *agentHost) executionContext(ctx context.Context, in hostToolInput) (agentlink.MCPExecutionBinding, error) {
+func (h *agentHost) executionContext(ctx context.Context, in executionContextInput) (agentlink.MCPExecutionBinding, error) {
 	var binding agentlink.MCPExecutionBinding
 	if in.JobID == "" || in.RunID == "" {
 		return binding, agentlink.ErrUnauthorized

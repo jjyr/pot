@@ -17,9 +17,9 @@ points; `internal/` contains product implementation. All packages share one root
 | `pkg/storage` | SQLite transactions, messages, events and context persistence |
 | `pkg/instance`, `pkg/modeldirectory` | Private data-root identity/locking and provider model metadata |
 | `internal/assistant` | Identities, rules, conversation Threads, chat driver and durable mailboxes |
-| `pkg/peer` | Shared TLS 1.3 TCP sessions, mutual identity proof, Yamux streams, CBOR/Zstd framing and service admission; no business authorization |
 | `pkg/agentlink` | Product operation port, per-assistant capability contracts, node-bound collaboration and durable request recovery |
-| `internal/linkhost` | Agent Link adapters plus one host-owned peer service registry/listener |
+| `internal/mcpreceiver` | Authenticated outbound MCP connection, registration, claims and acknowledgments against receiver-owned journals |
+| `internal/agenthost` | Shared native receiver and supervised Codex App Server / Antigravity stream-json execution with receiver-owned models, workspaces and permissions |
 | `internal/gateway`, `internal/secrets` | Node-owned provider HTTP routes and encrypted credential references |
 | `pkg/integrations`, `pkg/integrations/github` | Independent service login, single-account connections and credential caching through injected account/Secrets stores; GitHub device authorization adapter |
 | `internal/usage` | Durable reservations, allowances, usage settlement, tools and compaction accounting |

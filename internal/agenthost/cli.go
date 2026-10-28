@@ -8,7 +8,10 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
+
+	"github.com/jjyr/pot/pkg/agentlink"
 )
 
 // Main exposes local host management and owner-selected execution scopes.
@@ -21,7 +24,7 @@ func MainRuntime(adapter Runtime, args []string, in io.Reader, out io.Writer) er
 		return agyPolicy(in, out)
 	}
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(out, "usage: pot-"+adapter.Kind+"-agent host --root PRIVATE_DIRECTORY; assistant --root PRIVATE_DIRECTORY --id ID --workspace DIRECTORY [--name NAME] [--model MODEL] [--effort LEVEL] [--mode read-only|workspace-write] [--default]; executor --root PRIVATE_DIRECTORY --workspace DIRECTORY [--mode read-only|workspace-write]")
+		fmt.Fprintln(out, "usage: pot-"+adapter.Kind+"-agent assistant --root PRIVATE_DIRECTORY --id ID --workspace DIRECTORY [--name NAME] [--model MODEL] [--effort LEVEL] [--mode read-only|workspace-write] [--default]; executor --root PRIVATE_DIRECTORY --workspace DIRECTORY [--mode read-only|workspace-write]")
 		fmt.Fprintln(out, "receiver-connect --root PRIVATE_DIRECTORY --url POT_MCP_URL [--connection ID]; receiver-serve|receiver-disconnect --root PRIVATE_DIRECTORY --connection ID; local Host commands accept --listen LOOPBACK_IP:PORT")
 		return nil
 	}
@@ -41,9 +44,10 @@ func MainRuntime(adapter Runtime, args []string, in io.Reader, out io.Writer) er
 	if flags.Parse(args[1:]) != nil || len(flags.Args()) != 0 {
 		return errors.New("invalid_flags")
 	}
-	if adapter.Kind == "antigravity" && args[0] == "host" && os.Getenv("POT_AGENT_JOB_ID") != "" && os.Getenv("POT_AGENT_HOST_ROOT") != "" {
-		*root = os.Getenv("POT_AGENT_HOST_ROOT")
-		*listen = os.Getenv("POT_AGENT_HOST_LISTEN")
+	if args[0] == "execution-tools" {
+		if err := bindExecutionToolsScope(flags, root, listen); err != nil {
+			return err
+		}
 	}
 	if !hostListenValid(*listen) {
 		return errors.New("invalid_host_listen")
@@ -71,8 +75,6 @@ func MainRuntime(adapter Runtime, args []string, in io.Reader, out io.Writer) er
 		return client.call(context.Background(), "/api/v1/agent-host/executor", map[string]any{"workspace": *workspace, "mode": *mode, "model": *model, "effort": *effort}, &result)
 	case "agent-serve":
 		return agentServe(*root, adapter)
-	case "host":
-		return hostMCP(in, out, *root, adapter)
 	case "assistant":
 		client, err := ensureAgentHost(*root, adapter)
 		if err != nil {
@@ -95,4 +97,24 @@ func hostListenValid(address string) bool {
 	ip := net.ParseIP(host)
 	number, portErr := strconv.Atoi(port)
 	return err == nil && ip != nil && ip.IsLoopback() && portErr == nil && number > 0 && number <= 65535
+}
+
+// Installed support uses no fixed host defaults: only its supervised execution
+// supplies the scope. Explicit CLI flags may confirm, never replace, that scope.
+func bindExecutionToolsScope(flags *flag.FlagSet, root, listen *string) error {
+	hostRoot, hostListen := os.Getenv("POT_AGENT_HOST_ROOT"), os.Getenv("POT_AGENT_HOST_LISTEN")
+	if os.Getenv("POT_AGENT_JOB_ID") == "" || os.Getenv("POT_AGENT_RUN_ID") == "" || !filepath.IsAbs(hostRoot) || !hostListenValid(hostListen) {
+		return agentlink.ErrUnauthorized
+	}
+	mismatch := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "root" && *root != hostRoot || f.Name == "listen" && *listen != hostListen {
+			mismatch = true
+		}
+	})
+	if mismatch {
+		return agentlink.ErrUnauthorized
+	}
+	*root, *listen = hostRoot, hostListen
+	return nil
 }

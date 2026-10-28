@@ -27,7 +27,7 @@ func TestAntigravityExecutionSupportMustBeEnabledWithHookAndContextServer(t *tes
 		if err := os.WriteFile(path, []byte("#!/bin/sh\ncat <<'METADATA'\n"+tc.metadata+"\nMETADATA\n"), 0700); err != nil {
 			t.Fatal(err)
 		}
-		err := verifyAgyPlugin(context.Background(), path)
+		err := verifyAgyPlugin(context.Background(), path, Session{Workspace: t.TempDir()})
 		if (err == nil) != tc.valid {
 			t.Fatalf("support admitted=%v want=%v: %v", err == nil, tc.valid, err)
 		}

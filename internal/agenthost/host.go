@@ -26,7 +26,7 @@ import (
 	webassets "github.com/jjyr/pot/web"
 )
 
-const hostVersion = "12"
+const hostVersion = "13"
 const hostListen = "127.0.0.1:8792"
 
 type agentHost struct {
@@ -235,12 +235,12 @@ func (h *agentHost) handler() http.Handler {
 			h.executionHTTP(w, r)
 			return
 		}
-		if r.URL.Path == "/api/v1/agent-host/tool" && r.Method == "POST" {
-			var input hostToolInput
+		if r.URL.Path == "/api/v1/agent-host/execution-context" && r.Method == "POST" {
+			var input executionContextInput
 			if !body(w, r, &input) {
 				return
 			}
-			v, err := h.tool(r.Context(), input)
+			v, err := h.executionContext(r.Context(), input)
 			if err != nil {
 				fail(w, 400, err.Error())
 				return
