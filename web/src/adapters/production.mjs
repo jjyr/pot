@@ -329,10 +329,10 @@ export async function createProductionClient({desktop = false, base = '', resour
   };
   displayReader=createResourceReader(client,request,{base,desktop,...(resourceCopies?{copies:resourceCopies}:{})});
   client.resourceCopies=displayReader.copies;
-  client.onResourceRetire=(scope,listener)=>{const key=resourceScope(displayReader.identity(scope));return displayReader.copies.subscribe(event=>{if(event.kind==='clear'||event.kind==='compact'||event.kind==='retire'&&event.scope===key)listener();});};
+  client.onResourceRetire=(scope,listener)=>{const key=resourceScope(displayReader.identity(scope));return displayReader.copies.subscribe(event=>{if(event.kind==='clear'||event.kind==='retire'&&event.scope===key)listener();});};
   client.retireResourceCopies=scope=>displayReader.retire(displayReader.identity(scope));
   client.acquireResource=createDisplayResources(displayReader.read,()=>context,(resource,path,scope,operation='content',token='')=>desktop?`/pot-resource-content?${new URLSearchParams({id:resource.id,path,assistant_id:scope.owner,space_id:scope.space,render:operation==='render'?'1':'0',token})}`:`${base}${scopedPath(`/api/v1/resources/${encodeURIComponent(resource.id)}/${operation}?${new URLSearchParams({path,token})}`,scope)}`,{copies:displayReader.copies,identity:displayReader.identity,current:displayReader.current});
-  displayReader.copies.subscribe(event=>{if(event.kind==='clear'||event.kind==='compact'||event.kind==='retire'){for(const [key,pending] of attachmentURLs){if(event.kind==='clear'||event.kind==='compact'||JSON.parse(key)[0]===event.scope){attachmentURLs.delete(key);pending.then(url=>URL.revokeObjectURL(url)).catch(()=>{});}}}});
+  displayReader.copies.subscribe(event=>{if(event.kind==='clear'||event.kind==='retire'){for(const [key,pending] of attachmentURLs){if(event.kind==='clear'||JSON.parse(key)[0]===event.scope){attachmentURLs.delete(key);pending.then(url=>URL.revokeObjectURL(url)).catch(()=>{});}}}});
   client.resources=createResourceReads(client,{storage:resourceStorage});
   client.read=(path,options)=>client.resources.read(path,options);
   return client;

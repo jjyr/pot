@@ -3,7 +3,7 @@ import {copyKey,digestBlob,resourceScope} from './resource-bytes.mjs';
 // belong to the last connected reader; persistence never owns browser URLs.
 export function createDisplayResources(request,getScope,contentURL,persistence={}){
   const entries=new Map(),{copies,identity=scope=>scope,current=()=>true}=persistence;
-  copies?.subscribe(event=>{if(event.kind==='clear'||event.kind==='compact'||event.kind==='retire')for(const entry of entries.values())if(event.kind==='clear'||event.kind==='compact'||entry.scope===event.scope){entry.abort.abort();for(const url of entry.urls.values())url.then(value=>URL.revokeObjectURL(value)).catch(()=>{});entry.retire?.();}});
+  copies?.subscribe(event=>{if(event.kind==='clear'||event.kind==='retire')for(const entry of entries.values())if(event.kind==='clear'||entry.scope===event.scope){entry.abort.abort();for(const url of entry.urls.values())url.then(value=>URL.revokeObjectURL(value)).catch(()=>{});entry.retire?.();}});
   return function acquire(resource,options={}){
     const scope={...getScope(),...options},source=identity(scope),revision=JSON.stringify([resource.id,resource.entry,resource.files]),key=copyKey(source,'resource',revision),files=new Map(resource.files.map(file=>[file.path,file]));
     let entry=entries.get(key);

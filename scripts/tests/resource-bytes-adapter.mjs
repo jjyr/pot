@@ -15,6 +15,7 @@ offline=true;const before=requests,restored=acquire(resource);assert.equal(await
 restored.release();await Promise.resolve();
 await reader.retire(reader.identity(client.scope()));await assert.rejects(acquire(resource).read(file.path),/source changed|retired/);
 offline=false;await reader.bindings('message',{sourceText:'source'});const recovered=acquire(resource);assert.equal(await(await recovered.read(file.path)).text(),await blob.text());recovered.release();
+const stable=acquire(resource);await stable.read(file.path);const stableURL=await stable.url(file.path);copies.compact();offline=true;assert.equal(await(await stable.read(file.path)).text(),await blob.text());assert.equal(await stable.url(file.path),stableURL);stable.release();offline=false;
 await reader.retire(reader.identity(client.scope()));copies.compact();await reader.bindings('message',{sourceText:'source'});const compacted=acquire(resource);assert.equal(await(await compacted.read(file.path)).text(),await blob.text());compacted.release();
 // A request started before revoke cannot publish after a later explicit live recovery.
 const raceCopies=memory(),race=createResourceReader(client,request,{copies:raceCopies});gate=deferred();entered=deferred();const late=race.bindings('message',{sourceText:'source'});await entered.promise;await race.retire(race.identity(client.scope()));gate.resolve();gate=null;await assert.rejects(late);
