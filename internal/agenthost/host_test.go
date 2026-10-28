@@ -103,7 +103,7 @@ func TestAgentHostConcurrentEnsureAndForeignPort(t *testing.T) {
 	original := hostDaemonCommand
 	defer func() { hostDaemonCommand = original }()
 	var started atomic.Int32
-	hostDaemonCommand = func(binary, root string) *exec.Cmd {
+	hostDaemonCommand = func(binary, root, listen string) *exec.Cmd {
 		started.Add(1)
 		cmd := exec.Command(binary, "-test.run=TestAgentHostDaemonProcess")
 		cmd.Env = append(os.Environ(), "POT_HOST_TEST_DAEMON="+root)

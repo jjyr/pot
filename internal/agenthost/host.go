@@ -332,7 +332,9 @@ type hostClient struct {
 	client  *http.Client
 }
 
-var hostDaemonCommand = func(binary, root string) *exec.Cmd { return exec.Command(binary, "agent-serve", "--root", root) }
+var hostDaemonCommand = func(binary, root, listen string) *exec.Cmd {
+	return exec.Command(binary, "agent-serve", "--root", root, "--listen", listen)
+}
 
 func (c hostClient) call(ctx context.Context, path string, input any, output any) error {
 	method := "GET"
@@ -425,7 +427,7 @@ func ensureAgentHost(root string, runtimes ...Runtime) (hostClient, error) {
 		return c, err
 	}
 	defer log.Close()
-	cmd := hostDaemonCommand(binary, root)
+	cmd := hostDaemonCommand(binary, root, adapter.Listen)
 	cmd.Stdin = nil
 	cmd.Stdout = log
 	cmd.Stderr = log

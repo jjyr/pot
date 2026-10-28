@@ -6,7 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
+	"strconv"
 )
 
 // Main exposes local host management and owner-selected execution scopes.
@@ -20,7 +22,7 @@ func MainRuntime(adapter Runtime, args []string, in io.Reader, out io.Writer) er
 	}
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		fmt.Fprintln(out, "usage: pot-"+adapter.Kind+"-agent host --root PRIVATE_DIRECTORY; assistant --root PRIVATE_DIRECTORY --id ID --workspace DIRECTORY [--name NAME] [--model MODEL] [--effort LEVEL] [--mode read-only|workspace-write] [--default]; executor --root PRIVATE_DIRECTORY --workspace DIRECTORY [--mode read-only|workspace-write]")
-		fmt.Fprintln(out, "receiver-connect --root PRIVATE_DIRECTORY --url POT_MCP_URL [--connection ID]; receiver-serve|receiver-disconnect --root PRIVATE_DIRECTORY --connection ID")
+		fmt.Fprintln(out, "receiver-connect --root PRIVATE_DIRECTORY --url POT_MCP_URL [--connection ID]; receiver-serve|receiver-disconnect --root PRIVATE_DIRECTORY --connection ID; local Host commands accept --listen LOOPBACK_IP:PORT")
 		return nil
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
@@ -28,6 +30,7 @@ func MainRuntime(adapter Runtime, args []string, in io.Reader, out io.Writer) er
 	potURL := flags.String("url", "", "Pot MCP resource URL")
 	connection := flags.String("connection", "", "receiver connection ID")
 	root := flags.String("root", "", "private native agent host directory")
+	listen := flags.String("listen", adapter.Listen, "local Host loopback IP and port")
 	id := flags.String("id", "", "virtual assistant ID")
 	name := flags.String("name", "", "assistant display name")
 	workspace := flags.String("workspace", "", "owner-selected absolute workspace")
@@ -40,7 +43,12 @@ func MainRuntime(adapter Runtime, args []string, in io.Reader, out io.Writer) er
 	}
 	if adapter.Kind == "antigravity" && args[0] == "host" && os.Getenv("POT_AGENT_JOB_ID") != "" && os.Getenv("POT_AGENT_HOST_ROOT") != "" {
 		*root = os.Getenv("POT_AGENT_HOST_ROOT")
+		*listen = os.Getenv("POT_AGENT_HOST_LISTEN")
 	}
+	if !hostListenValid(*listen) {
+		return errors.New("invalid_host_listen")
+	}
+	adapter.Listen = *listen
 	if *root == "" {
 		return errors.New("host_root_required")
 	}
@@ -80,4 +88,11 @@ func MainRuntime(adapter Runtime, args []string, in io.Reader, out io.Writer) er
 	default:
 		return errors.New("unknown_command")
 	}
+}
+
+func hostListenValid(address string) bool {
+	host, port, err := net.SplitHostPort(address)
+	ip := net.ParseIP(host)
+	number, portErr := strconv.Atoi(port)
+	return err == nil && ip != nil && ip.IsLoopback() && portErr == nil && number > 0 && number <= 65535
 }

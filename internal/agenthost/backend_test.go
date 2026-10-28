@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +25,18 @@ var fakeAgyBinary string
 func TestMain(m *testing.M) {
 	if processscope.HandleWorker() {
 		return
+	}
+	if os.Getenv("POT_AGENTHOST_CLI_FIXTURE") == "1" {
+		if len(os.Args) > 1 && os.Args[1] == "agent-serve" {
+			if err := os.WriteFile(os.Getenv("POT_AGENTHOST_CLI_PID"), []byte(fmt.Sprint(os.Getpid())), 0600); err != nil {
+				os.Exit(2)
+			}
+		}
+		if err := Main(os.Args[1:], os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		os.Exit(0)
 	}
 	dir, err := os.MkdirTemp("", "pot-codex-agent-fixture-")
 	if err != nil {

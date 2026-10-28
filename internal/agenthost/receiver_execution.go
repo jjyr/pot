@@ -17,7 +17,7 @@ import (
 // workers retain their context-only model surface and no delegation authority.
 func executionTools(in io.Reader, out io.Writer, root string, adapter Runtime) error {
 	jobID, runID := os.Getenv("POT_AGENT_JOB_ID"), os.Getenv("POT_AGENT_RUN_ID")
-	if jobID == "" || runID == "" || os.Getenv("POT_AGENT_HOST_ROOT") != root {
+	if jobID == "" || runID == "" || os.Getenv("POT_AGENT_HOST_ROOT") != root || os.Getenv("POT_AGENT_HOST_LISTEN") != adapter.Listen {
 		return agentlink.ErrUnauthorized
 	}
 	client, err := existingAgentHostClient(root, adapter)

@@ -43,6 +43,7 @@ func nativeEnvironment(parent []string, s Session) []string {
 		"POT_AGENT_RUN_ID="+s.RunID,
 		"POT_AGENT_MODE="+s.Mode,
 		"POT_AGENT_HOST_ROOT="+s.HostRoot,
+		"POT_AGENT_HOST_LISTEN="+s.HostListen,
 	)
 }
 
@@ -54,7 +55,7 @@ func codexExecutionConfig(s Session) (map[string]any, error) {
 	if s.RunID == "" {
 		return nil, nil
 	}
-	if s.JobID == "" || !filepath.IsAbs(s.HostRoot) {
+	if s.JobID == "" || !filepath.IsAbs(s.HostRoot) || !hostListenValid(s.HostListen) {
 		return nil, errors.New("codex_invalid_execution_binding")
 	}
 	executable, err := os.Executable()
@@ -69,7 +70,7 @@ func codexExecutionConfig(s Session) (map[string]any, error) {
 	return map[string]any{
 		"mcp_servers.pot_receiver": map[string]any{
 			"command":       executable,
-			"args":          []string{"execution-tools", "--root", s.HostRoot},
+			"args":          []string{"execution-tools", "--root", s.HostRoot, "--listen", s.HostListen},
 			"env":           env,
 			"enabled":       true,
 			"required":      true,

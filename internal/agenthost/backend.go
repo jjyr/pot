@@ -543,6 +543,7 @@ func (b *backend) executeSession(ctx context.Context, selected job, session Sess
 	}
 	session.Adapter = b.runtime().Kind
 	session.HostRoot = b.root
+	session.HostListen = b.runtime().Listen
 	session.RunID = selected.Task.RunID
 	result := runNativeTurn(turnCtx, session, text, turnEvents{
 		Thread: bind,

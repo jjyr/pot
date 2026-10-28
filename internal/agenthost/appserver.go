@@ -37,6 +37,7 @@ type Session struct {
 	Mode                             string
 	ThreadID                         string
 	Worker                           []string
+	HostListen                       string
 }
 
 type TurnResult struct {

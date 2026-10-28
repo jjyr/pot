@@ -23,10 +23,23 @@ Use a private absolute root for its native runtime. The same root cannot be
 operated by another Host or receiver process. Codex and Antigravity use separate
 roots and keep their own native login, model, workspace and permission settings.
 
+Local Host commands accept `--listen LOOPBACK_IP:PORT`. Codex defaults to
+`127.0.0.1:8792` and Antigravity to `127.0.0.1:8795`. Use an explicit unused port
+for an isolated receiver alongside an existing Host, and pass the same value to
+connect, serve, disconnect and local management commands for that private root.
+Only a loopback IP literal and a nonzero port are accepted; wildcard interfaces,
+hostnames and automatic port selection are rejected. The selected address is
+carried to spawned daemons and supervised native tools; their root credentials
+and active Task/run checks still apply. It is not saved as a new connection or
+permission setting.
+
 ```sh
 pot-codex-agent receiver-connect --root /absolute/private/codex --url https://pot.example/mcp
 pot-codex-agent receiver-serve --root /absolute/private/codex --connection CONNECTION_ID
 ```
+
+For example, add `--listen 127.0.0.1:17756` to both commands for an isolated
+Codex receiver; use it again on renewal, disconnect and management commands.
 
 Replace `pot-codex-agent` with `pot-antigravity-agent` for Antigravity. The URL is
 the deployer's actual Pot MCP resource. Deployers manage HTTP/HTTPS, certificates
