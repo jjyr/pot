@@ -7,6 +7,9 @@ chat, using available tools to verify current information. Tool use, multiple
 lookups, reasoning steps and diagrams alone do not require a Task. Main delegates
 explicit background requests, prolonged execution, extensive investigation,
 substantial file/report creation and code changes to Tasks.
+Route background work by goal, sending additions or fixes to matching Tasks and
+creating new Tasks for goals that do not overlap; see
+[Task routing](task-coordination.md#coherent-objectives-and-routing).
 
 Main arranges all requested background work, then ends its turn without polling,
 waiting or a routine confirmation. Task cards provide acceptance feedback. Creation

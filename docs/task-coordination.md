@@ -9,6 +9,21 @@ Task-result and plugin-notification handling retain the
 assistant's configured tools and current machine permissions. A batch with
 eligible failed work additionally exposes the retry tool described below.
 
+## Coherent objectives and routing
+
+Each Task owns one goal. Send additions or fixes to an existing Task when they
+advance that same goal, avoiding duplicate Tasks. For work requiring delegation,
+create a new Task when its goal does not overlap an existing Task's goal. Overlap
+means the requested outcome, not merely a shared repository, page or files.
+Explicit user merge or split instructions take precedence; route mixed goals
+separately. Keep lightweight work in chat.
+
+Use existing Task context and `list_tasks` when needed to find a matching goal.
+Use the original brief from conversation context when available; inspect available
+Task status or results if needed to resolve the match, without polling. For work
+advancing the same goal, use `send_message` to continue the same Task, even if
+archived; context and workspace are retained.
+
 ## Agent Link interface
 
 Chat UI, task UI and model task tools use the Agent Link task interface for both
