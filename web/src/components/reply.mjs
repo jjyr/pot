@@ -29,7 +29,15 @@ export function createReplyBubble(host) {
         const normalized=reference.href.replace(/:[1-9][0-9]*$/,'');
         if(reference.block&&shown.has(normalized))reference={...reference,block:false};if(reference.block)shown.add(normalized);
         return createMessageFile(reference,message.id,{messageFiles,retryMessageFile,acquireResource,downloadResource,previewClaims,sourceText:message.text,pending:!complete});
-      }:undefined});text=version;}
+      }:undefined});
+        // Appended prose can retain an earlier file block. Its pending binding
+        // still belongs to the current text revision, including at commit.
+        for(const file of content.querySelectorAll('pot-message-file')){
+          const properties=file.preparationUpdates||{reference:file.reference,message:file.message,options:file.options};
+          const updated={...properties,options:{...properties.options,sourceText:message.text,pending:!complete}};
+          if(file.preparationSurrogate)file.preparationUpdates=updated;else file.updatePreparedProperties(updated);
+        }
+        text=version;}
       const nextResource=JSON.stringify(message.presentation||null);
       if(resourceKey!==nextResource){resourceNode?.remove();resourceNode=null;resourceKey=nextResource;if(message.presentation){resourceNode=createResourceView(message.presentation,{acquireResource,downloadResource});moveConversationNode(content,resourceNode);}}
       content.hidden=!message.text&&!message.presentation;

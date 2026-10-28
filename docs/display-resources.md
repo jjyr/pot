@@ -76,7 +76,10 @@ supply replacement paths or manufacture a source binding.
 
 The conversation UI can show a pending reference and query its binding metadata
 while a reply is streaming. This never initiates a source read or authorizes an
-unbound path. A ready binding can prepare its saved preview before the reply
+unbound path. Pending references retained while prose is appended follow the
+committed text revision and reject older metadata completions, without renewing
+their preparation deadline or replacing an existing saved preview.
+A ready binding can prepare its saved preview before the reply
 ends; missing bindings retain the bounded preparation frame while metadata is
 pending. Completing the reply retires stale metadata-read completions and applies
 the terminal binding state inside that same frame.

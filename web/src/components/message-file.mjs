@@ -38,7 +38,7 @@ function register(){
       }catch(error){if(current()){this.dataset.state='error';this.state=error.status?'unavailable':'source_offline';this.showStatus();this.retryButton();}}
     }
     showStatus(){if(!this.status){this.status=document.createElement('span');this.status.className='file-reference-status';this.status.setAttribute('role','status');this.append(this.status);}this.refresh();}
-    updatePreparedProperties(properties){const pending=this.options.pending;Object.assign(this,properties);if(pending&&!this.options.pending&&this.started&&!this.preview){clearTimeout(this.timer);this.load();}}
+    updatePreparedProperties(properties){const pending=this.options.pending,sourceText=this.options.sourceText;Object.assign(this,properties);if((pending&&!this.options.pending||sourceText!==this.options.sourceText)&&this.started&&!this.preview){clearTimeout(this.timer);this.emptyReads=0;this.load();}}
     open(){
       if(!this.row?.resource)return;this.dialog?.close();this.releaseDialogScroll?.();
       const dialog=this.dialog=document.createElement('dialog');dialog.className='file-reference-dialog';dialog.setAttribute('aria-label',this.reference.label||this.row.resource.name);
