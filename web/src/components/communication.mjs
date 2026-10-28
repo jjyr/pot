@@ -1,4 +1,4 @@
-import {preparedDOM,preparedAsset,preparedText} from './prepared-render.mjs';
+import {currentPreparedRender,preparedDOM,preparedAsset,preparedText} from './prepared-render.mjs';
 import {moveConversationNode} from './conversation-dom.mjs';
 import {translate} from '../locales/messages.mjs';
 import {communicationKey} from '../state/communication.mjs';
@@ -52,7 +52,9 @@ export function createCommunication({locale,resolveIdentity,downloadFile,acquire
     summary.hidden=!model||expanded;body.hidden=!model;if(!model)return;
     const profiles=model.messages.map(mail=>[resolveIdentity(mail.from),resolveIdentity(mail.to)]),destination=taskTarget(model);
     const signature=JSON.stringify([model.kind,model.messages.map(mail=>[mail.from,mail.to,...[mail.from,mail.to].map(address=>address?.kind==='task'?taskIdentities.short(address):'')]),model.count,destination,locale(),profiles]),profileRefs=profiles.flat();
-    if(summarySignature!==signature){
+    // A retained candidate joins a new preparation context with an empty slot map.
+    // Register its measured DOM again even when its own signature is unchanged.
+    if(summarySignature!==signature||currentPreparedRender()?.context.phase==='prepare'){
       summarySignature=signature;summaryProfiles=profileRefs;preparedDOM(summary,'communication-summary',signature,target=>{const flows=[];
       const multiple=model.sources.length>1,toKeys=new Set(model.messages.map(mail=>communicationKey(mail.to)));
       const mail=model.messages[0]||{};
@@ -68,7 +70,7 @@ export function createCommunication({locale,resolveIdentity,downloadFile,acquire
       if(!entry){entry=preparedAsset('communication-entry:'+index,JSON.stringify([mail,locale()]),()=>{const box=n('section','communication-entry'),relation=n('div','communication-identity'),content=n('div','message-body communication-text'),fallback=n('p','communication-fallback');box.append(relation,content,fallback);return {box,relation,content,fallback};});entries.set(index,entry);moveConversationNode(body,entry.box);}
       entry.box.hidden=false;entry.relation.hidden=compact&&model.messages.length===1&&![mail.from,mail.to].some(address=>address?.kind==='task');
       const relationSignature=JSON.stringify([mail.from,mail.to,...[mail.from,mail.to].map(address=>address?.kind==='task'?taskIdentities.short(address):''),locale(),profiles[index]]);
-      if(entry.relationSignature!==relationSignature){
+      if(entry.relationSignature!==relationSignature||currentPreparedRender()?.context.phase==='prepare'){
         entry.relationSignature=relationSignature;[entry.fromProfile,entry.toProfile]=profiles[index];
         preparedDOM(entry.relation,'communication-relation:'+index,relationSignature,target=>{
         const context=n('span','communication-recipient',t('messageAddressedTo').replace('{name}',displayName(mail.to,entry.toProfile)));
