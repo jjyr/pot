@@ -33,7 +33,7 @@ func (m *Mailbox) ResumeDelivery(ctx context.Context, owner, batch string) error
 // Notifications reads both trusted notification sources in inbox receipt order.
 // Correspondence uses its sender batch but shares the same owning conversation.
 func (m *Mailbox) Notifications(ctx context.Context, owner string) ([]protocol.Envelope, error) {
-	events, err := m.envelopes(ctx, `SELECT envelope FROM agent_messages WHERE recipient=? AND direction='in' AND state='queued' AND json_extract(envelope,'$.kind') IN ('task_result','plugin_event') ORDER BY sequence LIMIT ?`, owner, inbox.MaxBatchMessages)
+	events, err := m.envelopes(ctx, `SELECT envelope FROM agent_messages WHERE recipient=? AND direction='in' AND state='queued' AND json_extract(envelope,'$.to.node_id')=? AND json_extract(envelope,'$.to.kind')='assistant' AND json_extract(envelope,'$.kind') IN ('task_result','plugin_event') ORDER BY sequence LIMIT ?`, owner, m.nodeID, inbox.MaxBatchMessages)
 	if err != nil {
 		return nil, err
 	}

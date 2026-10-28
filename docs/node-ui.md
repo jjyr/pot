@@ -23,8 +23,8 @@ Unavailable inventory shows a localized missing-information label, never an ID.
 Connection lists and assistant source labels show the peer name and available
 host information; they never fall back to a node ID.
 Execution machines show their hostname and one interface IP. Linked nodes show
-the reported hostname together with the saved TCP endpoint's host and port;
-this endpoint is a connection address, not a discovered remote interface inventory.
+the reported hostname together with the configured MCP URL;
+this URL is a connection address, not a remote interface inventory.
 An incoming-only link may have no saved endpoint. Missing host information stays
 empty. Internal node IDs and a technical-details disclosure are not shown.
 
@@ -95,13 +95,11 @@ brand. Offline and unsupported nodes retain their names, status explanations and
 connection-management actions. Only online nodes advertising node-level
 `assistant.management` open a creation form. The local API provider is selected
 inside that form. **＋ Connect a new Agent** opens a type picker for Codex,
-Antigravity or another Pot. Each native Agent has installation and invitation
-instructions; invitation verification rejects a different Agent type and supports
-retry without leaving the guide. Cancel returns through the type picker to the
-runtime list. Once pairing is accepted, wait for its result before navigating.
-Successful connection preselects the new node in the creation form. Only an
-explicit successful creation opens the returned assistant; the advertised default
-assistant is not opened automatically. Connecting from Link returns to Link.
+Antigravity or another Pot. Pot setup accepts the other Pot's MCP URL and opens
+existing browser login/consent. Native setup links the explicit updated receiver
+commands; it never asks for a TCP invitation or starts a local receiver through a
+plugin. Connected nodes appear in the runtime list. Only explicit creation opens
+the returned real assistant. Connecting never selects an advertised default.
 
 The shared form consumes a versioned, typed receiver catalog and only renders
 known supported fields. Models, reasoning effort and workspace scopes belong to

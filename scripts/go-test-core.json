@@ -25,7 +25,9 @@
   "selected": {
     "./internal/control": [
       "TestLocalControlAgentApprovalCommandPersistenceAndRestart",
-      "TestAcceptedTaskCancellationPersistsThroughDisconnectAndRestart",
+      "TestPotMCPCancellationPersistsThroughDisconnectAndRestart",
+      "TestPotMCPReceiverTaskLifecycleOneReachableEndpoint",
+      "TestPotMCPControlReopenPreservesAcceptedHistoryAndIdentity",
       "TestModelReservationSettlementAndDuplicateFence",
       "TestPermanentCommandIsExactAndEditable",
       "TestDefaultSandboxAndExplicitMachineTrust",
@@ -61,8 +63,10 @@
       "TestCommittedApprovalStreamAndOwnerRevocation"
     ],
     "./internal/agenthost": [
-      "TestCodexTaskAndPeerApprovalFromPot",
-      "TestAutomaticReviewDoesNotPublishApprovalHistory"
+      "TestReceiverRealHTTPNativeAssistantReverseAndHumanApproval",
+      "TestReceiverApprovalDecisionIsBoundAndNeverReplayed",
+      "TestMCPAutomaticReviewDoesNotPublishApprovalHistory",
+      "TestAutomaticReviewNotificationsStayInsideCodex"
     ]
   }
 }

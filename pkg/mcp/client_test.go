@@ -5,13 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/jjyr/pot/internal/testutil"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -111,35 +108,5 @@ func TestSDKNegotiationMetadataErrorsAndCancellation(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("connection did not close")
-	}
-}
-
-func TestSDKStreamableHTTPKeepsTransportSessionAndErrorCode(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
-	defer cancel()
-	server := NewServer(&Implementation{Name: "http-fixture", Version: "1"}, nil)
-	var calls atomic.Int32
-	AddTool(server, &Tool{Name: "echo", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *CallToolRequest, json.RawMessage) (*CallToolResult, any, error) {
-		calls.Add(1)
-		return &CallToolResult{IsError: true, Content: []Content{&TextContent{Text: "expected tool error"}}}, nil, nil
-	})
-	handler := sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, nil)
-	api := httptest.NewServer(handler)
-	defer api.Close()
-	session, err := Connect(ctx, &StreamableClientTransport{Endpoint: api.URL, HTTPClient: api.Client(), DisableStandaloneSSE: true, MaxRetries: -1}, Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer session.Close()
-	tools, err := session.ListTools(ctx)
-	if err != nil || len(tools) != 1 {
-		t.Fatal(tools, err)
-	}
-	result, err := session.CallTool(ctx, "echo", json.RawMessage(`{}`))
-	if err != nil || !result.IsError {
-		t.Fatal(result, err)
-	}
-	if calls.Load() != 1 {
-		t.Fatal("automatic retry", calls.Load())
 	}
 }

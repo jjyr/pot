@@ -10,6 +10,22 @@ import (
 
 func (a *Application) agentLinkCall(ctx context.Context, method, path string, r Request) (any, error, bool) {
 	u, _ := url.ParseRequestURI(r.Path)
+	if path == "/api/v1/agent-links/mcp" {
+		if method == "GET" {
+			value, err := a.Control.PotMCPConnectionView(ctx)
+			return value, err, true
+		}
+		if method != "POST" {
+			return nil, protocol.APIError{Code: "method_not_allowed"}, true
+		}
+		var input control.PotMCPConnectionCommand
+		if err := decode(r.Body, &input); err != nil {
+			return nil, err, true
+		}
+		value, err := a.Control.ManagePotMCPConnection(ctx, input)
+		return value, err, true
+	}
+
 	if path == "/api/v1/agent-links/assistants" && method == "POST" {
 		var input struct {
 			ConnectionID string            `json:"connection_id"`
@@ -26,7 +42,7 @@ func (a *Application) agentLinkCall(ctx context.Context, method, path string, r 
 		if err := decode(r.Body, &input); err != nil {
 			return nil, err, true
 		}
-		value, err := a.Control.ManageLinkedAssistant(ctx, input.ConnectionID, agentlink.AssistantManagementRequest{Action: input.Action, RequestID: input.RequestID, ID: input.ID, Name: input.Name, Model: input.Model, Effort: input.Effort, Workspace: input.Workspace, Revision: input.Revision})
+		value, err := a.Control.ManageHumanLinkedAssistant(ctx, input.ConnectionID, agentlink.AssistantManagementRequest{Action: input.Action, RequestID: input.RequestID, ID: input.ID, Name: input.Name, Model: input.Model, Effort: input.Effort, Workspace: input.Workspace, Revision: input.Revision})
 		return value, err, true
 	}
 	if path == "/api/v1/agent-links/capabilities" && method == "GET" {
@@ -43,13 +59,5 @@ func (a *Application) agentLinkCall(ctx context.Context, method, path string, r 
 	if method != "POST" {
 		return nil, protocol.APIError{Code: "method_not_allowed"}, true
 	}
-	var command control.AgentLinkCommand
-	if err := decode(r.Body, &command); err != nil {
-		return nil, err, true
-	}
-	if path == "/api/v1/agent-links/invitation" {
-		command.Action = "invite"
-	}
-	result, err := a.Control.ManageAgentLink(ctx, command)
-	return result, err, true
+	return nil, protocol.APIError{Code: "agent_link_reconnect_required"}, true
 }

@@ -91,6 +91,7 @@ const resources={
   '/api/v1/integrations':['integrations'],
   '/api/v1/runtime':['runtime','machines'],
   '/api/v1/agent-links':['agent-links'],
+  '/api/v1/agent-links/mcp':['agent-links'],
   '/api/v1/about':['runtime'],
   '/api/v1/completions':['machines','skills','assistants','agent-links','settings','permissions'],
 };
@@ -268,6 +269,13 @@ export function displayProjection(path,value){
     mcp:(value?.mcp||[]).map(item=>({...pick(item,['id','name','revision','enabled','transport','command','args','cwd','url','has_credentials','tools','disabled_tools','status','client_id','scope']),...(typeof item.auth==='string'?{auth:item.auth}:{})})),
     diagnostics:value?.diagnostics||[],
   });
+  if(base==='/api/v1/agent-links/mcp')return (Array.isArray(value)?value:[]).map(item=>({
+    ...pick(item,['id','remote_node_id','state','status','inbound']),
+    // Endpoint query strings, userinfo and diagnostics can contain credentials.
+    url:(()=>{try{const url=new URL(item.url);return /^https?:$/.test(url.protocol)?url.origin+url.pathname:'';}catch{return '';}})(),
+    directory:{name:typeof item.directory?.name==='string'?item.directory.name:''},
+    last_error:item.last_error==='authorization_expired'?'authorization_expired':item.last_error?'unavailable':'',
+  }));
   if(base.startsWith('/api/v1/agent-links')||/^\/api\/v1\/(agent|instructions|extensions|spaces|usage)(?:\/|$)/.test(base))return redact(value);
   return value;
 }

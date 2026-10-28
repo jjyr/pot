@@ -73,7 +73,7 @@ func (e Envelope) Validate() error {
 	if e.Kind != "message" && e.Kind != "task_result" && e.Kind != "plugin_event" && (e.To.Kind != "task" || !mailID(e.Owner) || !core.Identifier(e.RequestID) || e.Result != nil) {
 		return fmt.Errorf("invalid Task inbox message")
 	}
-	if e.Kind == "task_result" && (e.To.Kind != "assistant" || e.From.Kind != "runtime" || e.Result == nil || !core.Identifier(e.Result.TaskID) || !validUUID(e.Result.RunID)) {
+	if e.Kind == "task_result" && (e.To.Kind != "assistant" || e.From.Kind != "runtime" || e.Result == nil || !core.Identifier(e.Result.TaskID) || !core.Identifier(e.Result.RunID)) {
 		return fmt.Errorf("invalid Runtime task event")
 	}
 	if e.Kind == "plugin_event" {
@@ -109,7 +109,11 @@ func (e Envelope) Validate() error {
 	if e.Kind == "plugin_event" {
 		validText = e.Text == ""
 	}
-	if !mailID(e.ID) || !e.From.Valid() || !e.To.Valid() || !validUUID(e.ConversationID) || e.ReplyTo != nil && !mailID(*e.ReplyTo) || !validText {
+	validConversation := validUUID(e.ConversationID)
+	if e.Kind == "task_result" && e.Result != nil && e.ConversationID == e.Result.RunID && core.Identifier(e.ConversationID) {
+		validConversation = true
+	}
+	if !mailID(e.ID) || !e.From.Valid() || !e.To.Valid() || !validConversation || e.ReplyTo != nil && !mailID(*e.ReplyTo) || !validText {
 		return fmt.Errorf("invalid assistant mail envelope")
 	}
 	return nil

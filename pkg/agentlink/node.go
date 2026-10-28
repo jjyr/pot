@@ -89,7 +89,3 @@ type Backend interface {
 	Status(context.Context, protocol.AgentRef, string) (Task, error)
 	Cancel(context.Context, protocol.AgentRef, string) (Task, error)
 }
-
-func (s *Service) localIdentity(ctx context.Context) (Identity, error) {
-	return s.options.Identity(ctx, "")
-}

@@ -32,7 +32,9 @@ const sameMailGroup = `b.direction='in' AND json_extract(b.envelope,'$.kind')='m
 
 // Confirmed failure is terminal history, not a lease over future correspondence.
 // Uncertain executions still require the owning conversation's recovery gate.
-const blockedMailGroup = ` AND NOT EXISTS(SELECT 1 FROM agent_messages b WHERE ` + sameMailGroup + ` AND
+const activeMail = ` AND (m.id NOT IN (SELECT id FROM retired_agent_link_work WHERE kind='message') OR json_extract(m.envelope,'$.from.node_id')=json_extract(m.envelope,'$.to.node_id'))`
+
+const blockedMailGroup = activeMail + ` AND NOT EXISTS(SELECT 1 FROM agent_messages b WHERE ` + sameMailGroup + ` AND (b.id NOT IN (SELECT id FROM retired_agent_link_work WHERE kind='message') OR json_extract(b.envelope,'$.from.node_id')=json_extract(b.envelope,'$.to.node_id')) AND
  (b.state IN ('processing','interrupted') OR b.state='waiting' AND
  COALESCE((SELECT batch FROM agent_delivery_items WHERE message=b.id),b.id)!=COALESCE((SELECT batch FROM agent_delivery_items WHERE message=m.id),m.id)))`
 
@@ -52,7 +54,7 @@ func (m *Mailbox) ClaimMailBatch(ctx context.Context, seed protocol.Envelope) (M
 		if !sameEnvelope(stored, seed) {
 			return errors.New("mail batch seed changed")
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT envelope FROM agent_messages WHERE direction='in' AND state='queued' AND recipient=? AND json_extract(envelope,'$.kind')='message' AND json_extract(envelope,'$.from.node_id')=? AND json_extract(envelope,'$.from.kind')=? AND json_extract(envelope,'$.from.agent_id')=? ORDER BY sequence LIMIT ?`, seed.To.AgentID, seed.From.NodeID, seed.From.Kind, seed.From.AgentID, inbox.MaxBatchMessages)
+		rows, err := tx.QueryContext(ctx, `SELECT envelope FROM agent_messages m WHERE direction='in' AND state='queued' AND recipient=? AND json_extract(envelope,'$.kind')='message' AND json_extract(envelope,'$.from.node_id')=? AND json_extract(envelope,'$.from.kind')=? AND json_extract(envelope,'$.from.agent_id')=?`+activeMail+` ORDER BY sequence LIMIT ?`, seed.To.AgentID, seed.From.NodeID, seed.From.Kind, seed.From.AgentID, inbox.MaxBatchMessages)
 		if err != nil {
 			return err
 		}

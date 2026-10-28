@@ -68,15 +68,13 @@ Initialize a private root and run the node:
 
 ```sh
 pot init -root "$HOME/.pot-node"
-pot serve -root "$HOME/.pot-node" -peer-listen 100.64.0.10:19444
+pot serve -root "$HOME/.pot-node" -ui 127.0.0.1:17703
 ```
 
-`-peer-listen` binds authenticated Agent Link TCP. Use a private LAN, VPN or
-Tailscale endpoint. TLS 1.3 encrypts traffic and proves possession of both
-Ed25519 identity keys, using automatically generated self-signed certificates
-and public-key pins. No CA or certificate-file configuration is needed. The
-listener grants no remote owner, membership, model proxy or raw execution access.
-Both ends must support peer protocol v4 (TLS/Yamux/CBOR/Zstd); there is no downgrade.
+The dedicated `-peer-listen` option is removed. Publish `/mcp` using the existing
+browser listener (`pot serve -ui` or `pot web-ui-server`). The configured public
+origin must match the URL used by clients. HTTP/HTTPS, certificates and
+reachability remain deployer-managed.
 
 The private local socket serves CLI operator requests:
 
@@ -213,20 +211,26 @@ installing an archive installs a user service.
 
 ## Agent Link access
 
-The topology page manages Agent Links. Each node starts a loopback TCP peer
-listener and shows its actual bind address. Access setup verifies a reachable
-`tcp://host:port` on a public, private or system Tailscale interface. Existing TCP
-forwarding can be reused; getting an invitation never changes Tailscale Serve
-configuration. Opening the page does not change network settings. Setup verifies
-the node's signing identity before saving an endpoint. See [Peer protocol](peer-protocol.md).
+The browser publication mounts exactly `/mcp`, OAuth registration/authorize/consent/
+token/revoke/connections and their discovery URLs. It forwards them through the
+existing private authenticated Unix Control socket; it publishes no owner API
+listener. External MCP bearer and SDK session metadata stay within MCPAccess.
+Consent and revocation reuse the existing browser login and original session.
+The public `Origin` and `Host` must match deployment configuration; non-browser
+clients may omit `Origin`. Reverse proxies must preserve the configured public
+Host and must not invent an owner session.
 
-Copy connection information from one node and paste the complete segment into
-Add Agent on the other. It carries a short-lived, single-use invitation, so treat
-it as a credential. The connection opens the peer's advertised assistant directory
-and supported collaboration operations; it grants no node administration access.
-Use the existing assistant chat and task delegation interactions. Disconnect
-pauses the link; delete removes the saved connection while retaining history.
-Neither action silently stops accepted work. See [Agent Links](agent-links.md).
+An ordinary client enters `https://pot.example/mcp`, logs in and confirms once.
+A native receiver uses its documented explicit receiver-connect/receiver-serve
+commands against that URL. A second Pot uses **Connect with browser** in connection
+settings and needs no listener for reverse work. The optional setup plugin is
+separate from a receiver and from Codex's independent MCP configuration.
+
+Update both ends and explicitly reconnect. Old invitations and connections are
+unsupported; no TCP listener starts, no old connection resumes and no fallback
+occurs. Existing saved history remains readable; unfinished legacy remote work
+keeps its last confirmed state. See [Agent Links](agent-links.md) and
+[Pot MCP connections](pot-mcp-connections.md).
 
 ## Installation names
 

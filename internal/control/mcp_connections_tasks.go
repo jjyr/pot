@@ -1,0 +1,284 @@
+package control
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/jjyr/pot/internal/mcpreceiver"
+	"github.com/jjyr/pot/internal/tasks"
+	"github.com/jjyr/pot/pkg/agentlink"
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
+)
+
+func (s *Service) isPotMCP(ctx context.Context, id string) bool {
+	var found int
+	if s.integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM mcp_receiver_connections WHERE id=? AND node_id=?", id, s.options.RuntimeID).Scan(&found) == nil && found == 1 {
+		return true
+	}
+	_, e := s.inboundPotMCPConnection(ctx, id)
+	return e == nil
+}
+
+// potMCPRoute includes saved offline targets so their operations fail explicitly
+// through MCP, without falling back to an old pairing for the same node.
+func (s *Service) potMCPRoute(ctx context.Context, target protocol.AgentRef) (PotMCPConnection, bool, error) {
+	connections, e := s.PotMCPConnections(ctx)
+	if e != nil {
+		return PotMCPConnection{}, false, e
+	}
+	incoming, e := s.inboundPotMCPConnections(ctx)
+	if e != nil {
+		return PotMCPConnection{}, false, e
+	}
+	connections = append(connections, incoming...)
+	var selected PotMCPConnection
+	found := false
+	for _, c := range connections {
+		if c.Directory == nil {
+			continue
+		}
+		for _, endpoint := range c.Directory.Targets {
+			if endpoint.Address != target {
+				continue
+			}
+			if found {
+				return selected, true, agentlink.ErrConflict
+			}
+			selected = c
+			found = true
+		}
+	}
+	return selected, found, nil
+}
+func (s *Service) potMCPCall(ctx context.Context, id, tool string, input, output any) error {
+	c, e := s.PotMCPConnection(ctx, id)
+	if e != nil {
+		return e
+	}
+	if c.State != "active" {
+		return agentlink.ErrDisconnected
+	}
+	s.potMCP.mu.Lock()
+	live := s.potMCP.live[id]
+	var client = (*mcpreceiver.Client)(nil)
+	if live != nil && live.online {
+		client = live.client
+	}
+	s.potMCP.mu.Unlock()
+	if client == nil {
+		return agentlink.ErrUnavailable
+	}
+	return client.Call(ctx, tool, input, output)
+}
+func (s *Service) createPotMCPTask(ctx context.Context, c PotMCPConnection, owner string, from protocol.AgentRef, request protocol.CreateTask) (protocol.TaskInfo, error) {
+	if from != agentlink.AssistantTarget(s.options.RuntimeID, owner) && from != (protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: owner}) {
+		return protocol.TaskInfo{}, agentlink.ErrUnauthorized
+	}
+	if request.Target == nil || c.Directory == nil || !c.Directory.Capabilities(*request.Target).Supports(agentlink.TaskSubmit) {
+		return protocol.TaskInfo{}, agentlink.ErrUnsupported
+	}
+	if request.Workspace != (protocol.TaskWorkspace{}) {
+		return protocol.TaskInfo{}, agentlink.ErrUnsupported
+	}
+	if c.Inbound {
+		a, caller, e := s.localPotMCPBusinessCaller(ctx, c, from)
+		if e != nil {
+			return protocol.TaskInfo{}, e
+		}
+		accepted, e := a.options.Queue.Submit(ctx, caller, agentlink.MCPSubmitInput{RequestID: request.RequestID, Target: *request.Target, Text: request.Text})
+		if e != nil {
+			return protocol.TaskInfo{}, e
+		}
+		record, e := s.Tasks.Get(ctx, owner, accepted.Task.ID)
+		if e != nil {
+			return protocol.TaskInfo{}, e
+		}
+		if record == nil {
+			return protocol.TaskInfo{}, agentlink.ErrNotFound
+		}
+		return record.Info, nil
+	}
+	id, _ := core.HashJSON([]string{"agent-link-task", owner, request.RequestID})
+	now := time.Now().UnixMilli()
+	origin := &protocol.AgentLinkOrigin{LinkID: c.ID, NodeID: request.Target.NodeID, AssistantID: request.Target.AgentID, Kind: "pot", Name: c.Directory.Name}
+	r := agentlink.TaskRequest{Target: *request.Target, RequestID: request.RequestID, From: from, Text: request.Text}
+	record := tasks.Record{AssistantID: owner, Request: request, Info: protocol.TaskInfo{ID: id, AssistantID: owner, Title: strings.SplitN(request.Text, "\n", 2)[0], Phase: protocol.TaskQueued, RemoteWaiting: true, CreatedAtMS: now, UpdatedAtMS: now, AgentLink: origin, ExecutorIcon: "pot"}, Execution: &tasks.Execution{Request: r}}
+	if e := s.Tasks.AcceptExecution(ctx, record); e != nil {
+		return protocol.TaskInfo{}, e
+	}
+	s.wakeTasks()
+	s.Changes.Notify("tasks")
+	return record.Info, nil
+}
+func (s *Service) potMCPTaskSubmit(ctx context.Context, id string, r agentlink.TaskRequest) (agentlink.Task, error) {
+	var accepted MCPTaskAcceptance
+	if r.From.NodeID != s.options.RuntimeID || r.From.Kind != "assistant" && r.From.Kind != "user" {
+		return agentlink.Task{}, agentlink.ErrUnauthorized
+	}
+	if r.From.Kind == "user" {
+		var persisted bool
+		if e := s.Tasks.DB().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM tasks WHERE json_extract(body,'$.info.agent_link.link_id')=? AND json_extract(body,'$.execution.request')=?)", id, mcpJSON(r)).Scan(&persisted); e != nil {
+			return agentlink.Task{}, e
+		}
+		if !persisted {
+			return agentlink.Task{}, agentlink.ErrUnauthorized
+		}
+		e := s.potMCPCall(ctx, id, "pot_receiver_user_task_submit", agentlink.MCPHumanTaskSubmit{User: r.From, Input: agentlink.MCPSubmitInput{RequestID: r.RequestID, Target: r.Target, Text: r.Text}}, &accepted)
+		return accepted.Task, e
+	}
+	e := s.potMCPCall(ctx, id, "pot_receiver_node_submit", agentlink.MCPNodeSubmit{Actor: r.From, Input: agentlink.MCPSubmitInput{RequestID: r.RequestID, Target: r.Target, Text: r.Text}}, &accepted)
+	return accepted.Task, e
+}
+func (s *Service) potMCPTaskRead(ctx context.Context, id string, r agentlink.TaskRequest, task string) (agentlink.Task, error) {
+	var remote agentlink.Task
+	if c, e := s.PotMCPConnection(ctx, id); e == nil && c.Inbound {
+		a, caller, e := s.localPotMCPBusinessCaller(ctx, c, r.From)
+		if e != nil {
+			return remote, e
+		}
+		dispatch, e := localMCPDispatchTask(ctx, a.options.Queue, caller, r, task)
+		if e != nil {
+			return remote, e
+		}
+		remote, e = a.options.Queue.Task(ctx, caller, dispatch)
+		return localMCPExecutionReceipt(ctx, a.options.Queue, remote, e)
+	}
+	if r.From.Kind == "user" {
+		e := s.potMCPCall(ctx, id, "pot_task_read", map[string]string{"task_id": task}, &remote)
+		return remote, e
+	}
+	e := s.potMCPCall(ctx, id, "pot_receiver_node_task_get", agentlink.MCPNodeRead{Actor: r.From, TaskID: task}, &remote)
+	return remote, e
+}
+func (s *Service) potMCPTaskCancel(ctx context.Context, id string, r agentlink.TaskRequest, task, run string) (agentlink.Task, error) {
+	if task == "" || run == "" {
+		return agentlink.Task{}, agentlink.ErrUnavailable
+	}
+	if c, e := s.PotMCPConnection(ctx, id); e == nil && c.Inbound {
+		a, caller, e := s.localPotMCPBusinessCaller(ctx, c, r.From)
+		if e != nil {
+			return agentlink.Task{}, e
+		}
+		dispatch, e := localMCPDispatchTask(ctx, a.options.Queue, caller, r, task)
+		if e != nil {
+			return agentlink.Task{}, e
+		}
+		request, _ := core.HashJSON([]string{"pot-mcp-cancel", id, dispatch, run})
+		accepted, e := a.options.Queue.Control(ctx, caller, nil, &agentlink.MCPCancelInput{RequestID: request, TaskID: dispatch, RunID: run})
+		return localMCPExecutionReceipt(ctx, a.options.Queue, accepted.Task, e)
+	}
+	request, _ := core.HashJSON([]string{"pot-mcp-cancel", id, task, run})
+	var accepted MCPTaskAcceptance
+	if r.From.Kind == "user" {
+		e := s.potMCPCall(ctx, id, "pot_task_cancel", agentlink.MCPCancelInput{RequestID: request, TaskID: task, RunID: run}, &accepted)
+		return accepted.Task, e
+	}
+	e := s.potMCPCall(ctx, id, "pot_receiver_node_task_cancel", agentlink.MCPNodeCancel{Actor: r.From, Input: agentlink.MCPCancelInput{RequestID: request, TaskID: task, RunID: run}}, &accepted)
+	return accepted.Task, e
+}
+func (s *Service) potMCPTaskInput(ctx context.Context, d *tasks.Record, input protocol.TaskInput) (MCPTaskAcceptance, error) {
+	var accepted MCPTaskAcceptance
+	if c, e := s.PotMCPConnection(ctx, d.Info.AgentLink.LinkID); e == nil && c.Inbound {
+		a, caller, e := s.localPotMCPBusinessCaller(ctx, c, d.Execution.Request.From)
+		if e != nil {
+			return accepted, e
+		}
+		dispatch, e := localMCPDispatchTask(ctx, a.options.Queue, caller, d.Execution.Request, d.Execution.Receipt.ID)
+		if e != nil {
+			return accepted, e
+		}
+		continuation := agentlink.MCPTaskInput{RequestID: input.RequestID, TaskID: dispatch, RunID: d.Execution.Receipt.RunID, Text: input.Text}
+		// send_message has no explicit run parameter. An accepted request keeps
+		// its original run even after admission advances the live catalogue.
+		// Control still compares the complete digest, including text and Task;
+		// explicit MCP inputs continue to use their supplied run unchanged.
+		var raw string
+		e = a.options.Queue.DB.QueryRowContext(ctx, "SELECT receipt FROM mcp_service_mutations WHERE connection_id=? AND actor=? AND operation=? AND request_id=?", caller.ConnectionID(), mcpJSON(caller.Actor()), agentlink.TaskInput, input.RequestID).Scan(&raw)
+		if e == nil {
+			var previous MCPTaskAcceptance
+			if mcpRead(raw, &previous) != nil || previous.Receipt.Validate() != nil || previous.Receipt.RequestID != input.RequestID || previous.Task.RunID == "" {
+				return accepted, agentlink.MCPError{Code: agentlink.MCPUnknown}
+			}
+			continuation.RunID = previous.Task.RunID
+		} else if !errors.Is(e, sql.ErrNoRows) {
+			return accepted, e
+		}
+		accepted, e = a.options.Queue.Control(ctx, caller, &continuation, nil)
+		accepted.Task, e = localMCPExecutionReceipt(ctx, a.options.Queue, accepted.Task, e)
+		return accepted, e
+	}
+	if d.Execution.Request.From.Kind == "user" {
+		e := s.potMCPCall(ctx, d.Info.AgentLink.LinkID, "pot_task_input", agentlink.MCPTaskInput{TaskID: d.Execution.Receipt.ID, RunID: d.Execution.Receipt.RunID, RequestID: input.RequestID, Text: input.Text}, &accepted)
+		return accepted, e
+	}
+	e := s.potMCPCall(ctx, d.Info.AgentLink.LinkID, "pot_receiver_node_task_input", agentlink.MCPNodeInput{Actor: d.Execution.Request.From, Input: agentlink.MCPTaskInput{TaskID: d.Execution.Receipt.ID, RunID: d.Execution.Receipt.RunID, RequestID: input.RequestID, Text: input.Text}}, &accepted)
+	return accepted, e
+}
+
+// The origin catalogue retains the real execution Task in its receipt. Queue
+// operations address the dispatch Task instead; resolve that association under
+// the immutable caller and original submission, never by an unowned Task ID.
+func localMCPDispatchTask(ctx context.Context, q *MCPAccessQueue, caller agentlink.MCPCaller, request agentlink.TaskRequest, task string) (string, error) {
+	var dispatch, raw string
+	if e := q.DB.QueryRowContext(ctx, "SELECT id,execution FROM mcp_service_tasks WHERE connection_id=? AND actor=? AND request_id=?", caller.ConnectionID(), mcpJSON(caller.Actor()), request.RequestID).Scan(&dispatch, &raw); e != nil {
+		return "", mcpMissing(e)
+	}
+	if task == dispatch {
+		return dispatch, nil
+	}
+	var binding agentlink.MCPRunBinding
+	if raw == "" || mcpRead(raw, &binding) != nil || binding.Validate() != nil || binding.Task.AgentID != task {
+		return "", agentlink.ErrUnauthorized
+	}
+	return dispatch, nil
+}
+
+func localMCPExecutionReceipt(ctx context.Context, q *MCPAccessQueue, task agentlink.Task, err error) (agentlink.Task, error) {
+	if err != nil {
+		return task, err
+	}
+	var raw string
+	if e := q.DB.QueryRowContext(ctx, "SELECT execution FROM mcp_service_tasks WHERE id=?", task.ID).Scan(&raw); e != nil {
+		return task, e
+	}
+	if raw != "" {
+		var binding agentlink.MCPRunBinding
+		if mcpRead(raw, &binding) != nil || binding.Validate() != nil {
+			return task, agentlink.ErrFenced
+		}
+		task.ID = binding.Task.AgentID
+	}
+	return task, nil
+}
+func projectPotMCPTaskReceipt(record *tasks.Record, remote agentlink.Task) {
+	projectTaskReceipt(record, remote)
+	// The backend's actual run is not a UI-generated replacement identity.
+	record.Info.RunID = remote.RunID
+}
+
+// localPotMCPExecution obtains actor/run from the owning Control's trusted call
+// binding and persisted active record. Model parameters cannot provide them.
+func (s *Service) localPotMCPExecution(ctx context.Context, owner string, actor protocol.AgentRef) (agentlink.MCPNodeExecutionAdmission, error) {
+	var result agentlink.MCPNodeExecutionAdmission
+	if actor.NodeID != s.options.RuntimeID || actor.Kind != "task" {
+		return result, agentlink.ErrUnauthorized
+	}
+	bound, ok := ctx.Value(taskMessageRunKey{}).(taskMessageRun)
+	if !ok {
+		return result, agentlink.ErrUnauthorized
+	}
+	record, e := s.Tasks.Get(ctx, owner, actor.AgentID)
+	if e != nil {
+		return result, e
+	}
+	if record == nil || record.Execution != nil || record.NodeID != s.options.RuntimeID || record.RunID != bound.ID || record.Generation != bound.Generation || record.Info.Phase.Scope() != "active" || record.StopMode != "" {
+		return result, agentlink.ErrFenced
+	}
+	id, _ := core.HashJSON([]string{actor.NodeID, actor.AgentID, record.RunID})
+	result = agentlink.MCPNodeExecutionAdmission{ExecutionID: id, Binding: agentlink.MCPExecutionBinding{Actor: actor, Task: actor, RunID: record.RunID}, PreviousRunID: record.PreviousRunID}
+	return result, nil
+}

@@ -237,16 +237,14 @@ or `mise exec -- go run ./cmd/pot-app -preview` for a native fixture. Neither us
 product data or model calls. Browser fixtures do not establish real authentication
 or remote transport behavior.
 
-For linked profile editing and deletion through the authenticated browser gateway
-and a real isolated Agent Link peer, start
-`POT_CODEX_PROFILE_FIXTURE_URL_FILE=/tmp/pot-profile-url mise exec -- go test
-./internal/agenthost -run '^TestCodexProfileBrowserFixture$' -count=1 -v
--timeout=20m`. Open the origin written to that file with the cached Playwright CLI,
-then run `scripts/tests/pot-ui-codex-profile-browser.js` or
-`scripts/tests/pot-ui-linked-assistant-delete-browser.js` using `run-code --filename`.
-The latter retires the disposable remote assistant; restart the fixture before
-repeating it. The fixture login grants only its temporary browser session; product
-routes still pass through the real browser allowlist. Stop with `POST /fixture/stop`.
+For linked native profile, deletion and scoped assistant management over MCP, run
+`mise exec -- go test ./internal/agenthost -run
+'TestMCPNative|TestMCPHumanNative' -count=1`. These checks use disposable Control
+and native stores, real OAuth/MCP HTTP, and the existing native backend. They do
+not invoke an installed Codex or Antigravity CLI. The former TCP browser fixture
+is retired; browser scripts that require it cannot qualify the MCP path. See
+[MCP receiver Host](mcp-receiver-host.md) for explicit receiver setup and its
+native execution qualification boundary.
 
 For update discovery and Settings' version refresh icon, run
 `POT_UPDATES_FIXTURE_URL_FILE=/tmp/pot-updates-url mise exec -- go test
@@ -762,35 +760,9 @@ atlases. `mise run icons` generates these assets; App packaging includes `Pot.ic
 
 Paid tests require an explicit `POT_LIVE=1` in the calling process.
 
-`TestConfiguredModelAgentLinksLive` qualifies two independent Controls with the
-machine's configured model and production prompts. Set `POT_CONFIGURED_LIVE_ROOT`
-and its existing `POT_SECRET_KEY_FILE`; configuration is read only and credentials
-stay on that machine. Both Controls use disposable roots and expose only
-`list_assistants` and `send_message` to the model. The test checks read-only
-preview, symmetric pinned pairing, full node-address matching with equal display
-names, model-generated messages and replies in both directions, processing and
-provenance, and identity-preserving reconnection after restart. It caps the whole
-run at 24 real requests, 2048 output tokens per request and five minutes. Run:
-
-```sh
-POT_LIVE=1 POT_CONFIGURED_LIVE_ROOT=/absolute/control/root \
-  mise exec -- go test -v ./internal/control \
-  -run '^TestConfiguredModelAgentLinksLive$' -count=1 -timeout=6m
-```
-
-`TestConfiguredModelAgentProfileLive` uses `POT_CONFIGURED_LIVE_ROOT` and the
-machine's existing key-file selector to read its configured model credentials
-locally. It runs the production Agent, executor and profile tool in disposable
-Controls. The direct case draws a cow/horse PNG and saves the name and avatar in
-user chat. The background case delegates a monkey/keyboard PNG to a Task, then
-imports that Task artifact and updates the profile during result handling. It
-verifies the persisted avatar against the actual Task image and the successful
-notification tool receipt. Each case caps provider calls at 24 and output at 4096
-tokens per call.
-`POT_LIVE_OUTPUT` optionally saves the normalized PNG and non-secret evidence
-outside the repository. Production conversations, profiles and services are not
-modified. Run with `POT_LIVE=1 mise exec -- go test ./internal/control -run
-'^TestConfiguredModelAgentProfileLive$' -count=1 -v -timeout=6m`.
+MCP collaboration tests use isolated roots and synthetic browser login. Run live
+external-client checks only with explicit authorization and a supported installed
+client; fixtures do not establish native CLI or deployed login acceptance.
 
 For quiet task dispatch and model-directed automatic recovery, run
 `TestConfiguredModelTaskRecoveryLive` with `POT_LIVE=1`,
@@ -928,24 +900,10 @@ directory for the observation; request headers and credentials are never recorde
 
 The Add assistant and settings fixtures run in the `management` source group:
 `mise exec -- node scripts/tests/ui-regressions.mjs --group management`.
-A phone assistant/settings scenario and one scenario per Codex/Antigravity
-connection preserve creation, draft restoration, invitation verification,
-type mismatch, pairing retry, cancellation and connection reuse. Fixtures use
-synthetic node directories and no model credentials. They avoid repeating each
-workflow across the full locale/theme/width product.
-
-For real HTTP authentication and signed Agent Link pairing, start
-`POT_FIRST_CONNECTION_FIXTURE_URL_FILE=/tmp/pot-first-connection-urls mise exec --
-go test ./internal/agenthost -run '^TestFirstConnectionBrowserFixture$' -count=1 -v
--timeout=30m`. The URL file contains independent zero-connection Controls for each
-Agent and create/manage/observe intent. Open a URL with
-`/scripts/tests/fixtures/first-connection-live.html?locale=en` (or `zh-CN`). The
-fixture supplies a temporary browser login and disposable clipboard invitation;
-product authentication, pairing and management remain real. Native CLIs return
-mock metadata, no worker starts, and installation commands are only displayed.
-`scripts/tests/pot-ui-first-connection-live-browser.js` checks create/manage
-intents using an injected `STATE` with `origin`, `kind` and `intent`. POST
-`/fixture/stop` to any fixture URL when finished. All databases are temporary.
+The current connection UI uses MCP browser authorization and explicit native
+receiver setup. Legacy invitation and pairing fixtures are retired. For the
+public HTTP boundary, exercise the actual access Manager and private Unix Control
+socket; constructor-only fixtures do not verify publication.
 
 Run composer selection, native mention editing and desktop/mobile Enter/IME with
 `mise exec -- node scripts/tests/ui-regressions.mjs --group composer`.
@@ -955,20 +913,19 @@ lookups. Native keyboard/clipboard/undo checks share that scenario; the separate
 Enter contract owns its desktop and touch contexts. These are Chromium checks,
 not physical keyboard or iPhone Safari qualification.
 
-The Codex integration tests use a real Agent Link transport and a supervised
+The Codex integration tests use the MCP receiver transport and a supervised
 App Server protocol fixture. Run the task/approval and automatic-review boundary
 coverage without model credentials:
 
 ```sh
 mise exec -- go test -race ./internal/agenthost \
-  -run 'Test(CodexTaskAndPeerApprovalFromPot|AutomaticReviewDoesNotPublishApprovalHistory|DirectTasksOwnIndependentPersistentSessions)'
+  -run 'Test(ReceiverRealHTTPNativeAssistantReverseAndHumanApproval|MCPNativeHumanProfileDeleteAndTombstone|MCPHumanNativeManagementKeepsReceiverOwnedScopes|AutomaticReviewDoesNotPublishApprovalHistory|DirectTasksOwnIndependentPersistentSessions)'
 ```
 
 The fixture exercises caller-owned manual decisions, independent task sessions,
 same-task continuation and normal outcome delivery. Direct user chat is a Pot
 adapter capability; Codex task and message adapters do not implement it.
-`TestConfiguredModelAgentLinksLive` separately covers user-only Pot-to-Pot replies
-using the machine's configured model, under its existing request/output caps.
+
 
 ## Frontend regression selection
 
@@ -1010,7 +967,7 @@ override instruction. No runner downloads a tool or browser.
 | `history` | Visible top automatically reads 80 rows/one cursor, prepend anchor, short-window filling, Retry, single flight, same-cursor termination, new output while reading and Latest/run/dispose late-result isolation. |
 | `domain` | Fast Node contracts plus real-IDB repository fixture: progressive sources, retired queries, captured owner/run, mutation idempotency, commit-before-notify, evicted backfill and run fencing. |
 | `storage` | 2048/8192-record reads: incremental 1 row/0 scan, history 80 rows/1 cursor; namespace, reset/cursor/boot/version fences, abort/storage failure, cross-owner isolation, UI commit-before-display and cached-loading races. |
-| `management`, `composer`, `approvals`, `usage` | Representative configurations retain live locale, creation/pairing, native mentions/IME, exact one-time decisions, all data states, calendar/range/owner scopes and held stale requests. `management --case machines` also checks policy CAS plus actual Task/tool/approval host labels and schedule machine selection → locale → captured-scope save. Full repeated theme/width matrices are omitted. |
+| `management`, `composer`, `approvals`, `usage` | Representative configurations retain live locale, creation/connection, native mentions/IME, exact one-time decisions, all data states, calendar/range/owner scopes and held stale requests. `management --case machines` also checks policy CAS plus actual Task/tool/approval host labels and schedule machine selection → locale → captured-scope save. Full repeated theme/width matrices are omitted. |
 
 `mise run test:ui-regressions` runs all source groups once. List or narrow them:
 

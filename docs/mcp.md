@@ -48,6 +48,30 @@ another supported client's initial proposal. The protocol package reuses SDK
 server types and registration through `NewServer` and `AddTool`; business handlers
 remain with their owning component.
 
+`NewStreamableHTTPHandler(func(*http.Request) *Server, *StreamableHTTPOptions)`
+exposes that same server as a standard `http.Handler`. `StreamableHTTPHandler`
+and `StreamableHTTPOptions` are SDK aliases; the constructor forwards options
+without introducing transport defaults or a separate protocol loop. For example,
+an embedding service can construct its handler as follows:
+
+```go
+server := mcp.NewServer(&mcp.Implementation{Name: "example", Version: "1"}, nil)
+// Register the service's tools on server before accepting requests.
+handler := mcp.NewStreamableHTTPHandler(
+    func(*http.Request) *mcp.Server { return server },
+    &mcp.StreamableHTTPOptions{SessionTimeout: 5 * time.Minute},
+)
+```
+
+The embedding service owns routing, authentication, caller binding, HTTP policy,
+listeners and shutdown. Constructing a handler starts no listener and grants no
+business authority. Session timeout, stateful/stateless mode and JSON/SSE response
+policy remain explicit SDK options. The SDK handler has no public `Close` method;
+after stopping HTTP admission, the service can close each remaining session from
+`server.Sessions()`. A client's `Session.Close` sends the SDK's session-deletion
+request for stateful HTTP sessions. Transport cancellation concerns the in-flight
+MCP call; durable business work needs its own cancellation semantics.
+
 The SDK's exported `Connection` interface permits a small stdio decorator for
 explicitly registered incoming extension methods. This is needed because the
 Go SDK does not expose client-side custom receiving-method registration. The
@@ -110,3 +134,28 @@ package. GitHub subscription CRUD, default initialization, filtering and shared
 scan aggregation remain in the GitHub plugin. The host's inbox/checkpoint
 transaction remains unchanged. See [plugins](plugins.md#github-notifications) and
 [independent MCP connections](extensions.md#independent-mcp-servers).
+
+`TokenInfo`, `TokenVerifier`, `RequireBearerTokenOptions`, `RequireBearerToken`
+and `TokenInfoFromContext` expose the SDK bearer middleware through the same
+protocol facade. Business hosts supply credential verification, consent,
+revocation, audience and logical identity. They do not import the SDK auth package
+directly or place product authorization logic in this package.
+
+## Product HTTP publication
+
+`pot serve -ui` and `pot web-ui-server` mount the public resource at `/mcp` with
+OAuth discovery, dynamic public-client registration, browser authorization, S256
+PKCE exchange and revocation. The existing access/browser process forwards only
+fixed MCP/OAuth paths and methods over the private authenticated Control socket.
+It strips caller-supplied internal headers, attests only its verified human
+browser session for consent/revocation and never returns its IPC credential.
+MCPAccess still verifies the external bearer and connection on every request and
+tool entry. Standard MCP status/challenge, session/version headers, streaming and
+request cancellation survive the bridge.
+
+Each configured browser origin has its own resource audience and SDK sessions;
+publications share the existing Control queues and identities. An external
+bearer or cookie from another browser publication does not establish a local
+owner session. Non-browser MCP clients may omit Origin; explicit Origin and
+Host must match the deployer's configured public origin. No certificate or
+network automation is provided.

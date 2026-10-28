@@ -9,7 +9,7 @@ import (
 )
 
 func (b potLinkBackend) Observe(ctx context.Context, peerNode string) (agentlink.Observation, error) {
-	d, err := b.Directory(ctx)
+	definitions, err := b.s.Registry.Definitions(ctx)
 	value := agentlink.Observation{NodeID: b.s.options.RuntimeID, Assistants: []agentlink.Activity{}}
 	if err != nil {
 		return value, err
@@ -20,8 +20,8 @@ func (b potLinkBackend) Observe(ctx context.Context, peerNode string) (agentlink
 		return value, err
 	}
 	byID := map[string]*agentlink.Activity{}
-	for _, assistant := range d.Assistants() {
-		id := assistant.Address.AgentID
+	for _, assistant := range definitions {
+		id := assistant.ID
 		activity := agentlink.Activity{AssistantID: id, ChatState: "unknown"}
 		b.s.mu.Lock()
 		conversation := b.s.conversations[id]

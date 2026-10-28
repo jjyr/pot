@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/protocol"
 
 	"github.com/jjyr/pot/pkg/core"
@@ -69,6 +70,9 @@ func (s *Service) ApprovalView(ctx context.Context, assistantID string) map[stri
 	}
 	pending := []any{}
 	for _, approval := range s.Permissions.Pending(assistantID) {
+		if approval.Request.Task != "" && s.potMCPRemoteTask(ctx, approval.Request.Task) {
+			continue
+		}
 		item := pendingApproval{Approval: approval}
 		if approval.Request.Task != "" {
 			if task, err := s.Tasks.Get(ctx, assistantID, approval.Request.Task); err == nil && task != nil {
@@ -116,6 +120,11 @@ func (s *Service) ManageApproval(ctx context.Context, assistantID string, body [
 		}
 		err = s.Permissions.Configure(input.MachineID, *input.MachinePolicy)
 	default:
+		for _, approval := range s.Permissions.Pending(assistantID) {
+			if approval.ID == input.ID && approval.Request.Task != "" && s.potMCPRemoteTask(ctx, approval.Request.Task) {
+				return nil, agentlink.ErrUnauthorized
+			}
+		}
 		err = s.Permissions.Decide(assistantID, input.ID, input.Action)
 	}
 	return map[string]bool{"accepted": err == nil}, err

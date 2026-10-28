@@ -20,8 +20,14 @@ func (b *backend) awaitReview(ctx context.Context, j job, method string, params 
 	if len(params) > maxBody {
 		return "", agentlink.ErrInvalid
 	}
-	if j.Message != nil || j.Request.Target.Kind != "node" || j.Request.From.Kind != "assistant" {
+	if j.Message != nil || j.Request.Target.Kind != "node" || (j.Request.From.Kind != "assistant" && j.Request.From.Kind != "user") {
 		return "", agentlink.ErrUnauthorized
+	}
+	if j.Request.From.Kind == "user" {
+		var mapped bool
+		if b.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM mcp_receiver_journal WHERE execution_task=? AND execution_run=?)", j.Task.ID, j.Task.RunID).Scan(&mapped) != nil || !mapped {
+			return "", agentlink.ErrUnauthorized
+		}
 	}
 	p := &pendingReview{value: agentlink.ExecutionApproval{ID: identifier(), JobID: j.Task.ID, Method: method, Params: append(json.RawMessage(nil), params...)}, job: j, done: make(chan string, 1), ctx: ctx}
 	b.mu.Lock()
@@ -43,7 +49,7 @@ func (b *backend) awaitReview(ctx context.Context, j job, method string, params 
 		b.mu.Unlock()
 		if !remaining {
 			_ = b.update(context.Background(), j.Task.ID, func(current *job) error {
-				if current.Task.State == "waiting_approval" {
+				if current.Task.RunID == j.Task.RunID && current.Task.State == "waiting_approval" {
 					current.Task.State = "running"
 				}
 				return nil
@@ -51,6 +57,9 @@ func (b *backend) awaitReview(ctx context.Context, j job, method string, params 
 		}
 	}()
 	if err := b.update(ctx, j.Task.ID, func(current *job) error {
+		if current.Task.RunID != j.Task.RunID {
+			return agentlink.ErrFenced
+		}
 		if current.Task.State == "cancelling" {
 			return context.Canceled
 		}
@@ -58,9 +67,6 @@ func (b *backend) awaitReview(ctx context.Context, j job, method string, params 
 		return nil
 	}); err != nil {
 		return "", err
-	}
-	if b.approvalCommitted != nil {
-		_ = b.approvalCommitted(ctx, agentlink.ApprovalEvent{To: j.Request.From, ID: p.value.ID, JobID: j.Task.ID, RequestID: j.Request.RequestID})
 	}
 	select {
 	case action := <-p.done:
@@ -88,7 +94,7 @@ func (b *backend) Review(ctx context.Context, r agentlink.ReviewRequest) (agentl
 			return result, agentlink.ErrNotFound
 		}
 		current, err := b.read(ctx, r.Caller, p.job.Task.ID)
-		if err != nil || current.Task.State != "waiting_approval" {
+		if err != nil || current.Task.RunID != p.job.Task.RunID || current.Task.State != "waiting_approval" {
 			return result, agentlink.ErrConflict
 		}
 		// Mark consumed while retaining other concurrent requests for this job.

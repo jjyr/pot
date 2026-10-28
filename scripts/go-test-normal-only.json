@@ -4,8 +4,6 @@
       "package": "./internal/control",
       "reason": "Saved configuration and metadata contracts; lifecycle and CAS races are covered by the retained routing/provider/task suites.",
       "tests": [
-        "TestAssistantCompletionsReadPinnedPeerProfilesAndExcludeRevokedNodes",
-        "TestAssistantCompletionsRetireDefinitionsWithoutUsingHistoricalContacts",
         "TestAssistantSelectionDoesNotMutateProviderOrOtherAssistant",
         "TestBundledGitHubPluginContract",
         "TestCompletionsUseOwnerResourcesAndBoundMetadataWithoutExecution",
@@ -61,9 +59,7 @@
         "TestUserSkillCreateEditConflictAndRecoverableRemove",
         "TestLocalImportRejectsLinksAndPreservesUpdateIdentity",
         "TestFailedMCPTestKeepsEditableConfigurationRevision",
-        "TestMissingAssistantCannotPublishIdentity",
-        "TestAgentLinkControlPreviewDoesNotClaimInvitation",
-        "TestAgentLinkControlPreviewExpiredInvitation"
+        "TestMissingAssistantCannotPublishIdentity"
       ]
     },
     {

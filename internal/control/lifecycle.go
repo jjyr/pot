@@ -10,7 +10,6 @@ import (
 	"github.com/jjyr/pot/internal/hooks"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/core"
-	"github.com/jjyr/pot/pkg/protocol"
 	"time"
 )
 
@@ -47,33 +46,34 @@ func (s *Service) LifecycleAuthority(ctx context.Context) hooks.Authority {
 			}
 		}
 	}
-	if s.agentLinks != nil && s.agentLinks.service != nil {
-		links, err := s.agentLinks.service.List(ctx)
-		if err == nil {
-			for _, c := range links {
-				if c.State == "revoked" || c.State == "disconnected" || c.Directory == nil {
-					continue
-				}
-				sourceVersion, _ := core.HashJSON([]any{s.options.BootID, c.ID, c.Directory})
-				if c.Directory.Capabilities(agentlink.NodeTarget(c.PeerHost.NodeID)).Supports(agentlink.Approvals) {
-					add("source:"+c.ID, c.Peer.Name, sourceVersion)
-				}
-				for _, a := range c.Directory.Assistants() {
-					d := c.Directory.Capabilities(a.Address)
-					if !d.Supports(agentlink.ChatRead) {
-						continue
-					}
-					version, _ := core.HashJSON([]any{s.options.BootID, c.ID, a.Address, d})
-					kinds := []string{"reply_completed"}
-					if d.Supports(agentlink.TaskSubmit) {
-						kinds = append(kinds, "task_completed", "task_interrupted", "task_failed", "task_cancelled")
-					}
-					if d.Supports(agentlink.Approvals) {
-						kinds = append(kinds, "approval_requested", "approval_resolved", "approval_expired")
-					}
-					add("agent-link:"+c.ID+":"+a.Address.AgentID, a.Name, version, kinds...)
-				}
+	connections, e := s.PotMCPConnections(ctx)
+	if e == nil {
+		incoming, e := s.inboundPotMCPConnections(ctx)
+		if e == nil {
+			connections = append(connections, incoming...)
+		}
+	}
+	for _, c := range connections {
+		if c.State != "active" || c.Directory == nil {
+			continue
+		}
+		version, _ := core.HashJSON([]any{s.options.BootID, c.ID, c.Directory})
+		if c.Directory.Capabilities(agentlink.NodeTarget(c.RemoteNodeID)).Supports(agentlink.Approvals) {
+			add("source:"+c.ID, c.Directory.Name, version)
+		}
+		for _, endpoint := range c.Directory.Assistants() {
+			d := endpoint.Capabilities
+			if !d.Supports(agentlink.ChatRead) {
+				continue
 			}
+			kinds := []string{"reply_completed"}
+			if d.Supports(agentlink.TaskSubmit) {
+				kinds = append(kinds, "task_completed", "task_interrupted", "task_failed", "task_cancelled")
+			}
+			if d.Supports(agentlink.Approvals) {
+				kinds = append(kinds, "approval_requested", "approval_resolved", "approval_expired")
+			}
+			add("agent-link:"+c.ID+":"+endpoint.Address.AgentID, endpoint.Name, version, kinds...)
 		}
 	}
 	s.lifecycleAuthority.owners = next
@@ -138,28 +138,4 @@ func (s *Service) StreamLifecycle(ctx context.Context, send func(string, any) er
 			}
 		}
 	}
-}
-
-// The receiving business boundary binds the authenticated peer event to this
-// caller's already committed delegation, even before its receipt arrives.
-func (s *Service) receiveApprovalEvent(ctx context.Context, link string, e agentlink.ApprovalEvent) error {
-	c, err := s.agentLinks.service.Get(ctx, link)
-	if err != nil {
-		return err
-	}
-	if c.State == "revoked" || c.State == "disconnected" || c.Directory == nil || !c.Directory.Capabilities(agentlink.NodeTarget(c.PeerHost.NodeID)).Supports(agentlink.Approvals) {
-		return agentlink.ErrUnauthorized
-	}
-	var task, title string
-	err = s.Tasks.DB().QueryRowContext(ctx, `SELECT id,json_extract(body,'$.info.title') FROM tasks WHERE assistant_id=? AND json_extract(body,'$.info.agent_link.link_id')=? AND json_extract(body,'$.execution.request.request_id')=?`, e.To.AgentID, link, e.RequestID).Scan(&task, &title)
-	if err != nil {
-		return agentlink.ErrUnauthorized
-	}
-	id := linkedApprovalID(linkedReview{LinkID: link}, e.ID)
-	authority := s.LifecycleAuthority(ctx)
-	if authority.Sources[link] == "" {
-		return agentlink.ErrUnauthorized
-	}
-	s.Lifecycle.Publish(protocol.LifecycleEvent{ID: id, Kind: "approval_requested", Owner: e.To.AgentID, Task: task, Name: title, Source: link, SourceBoot: authority.Sources[link]})
-	return nil
 }

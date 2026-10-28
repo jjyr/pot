@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -23,6 +24,17 @@ func (s *Service) Execution(ctx context.Context, owner, id string) (*Record, err
 }
 
 func (s *Service) AcceptExecution(ctx context.Context, record Record) error {
+	err := storage.Transaction(ctx, s.db, func(tx *sql.Tx) error { return s.AcceptExecutionTx(ctx, tx, record) })
+	if err == nil {
+		s.Notify()
+	}
+	return err
+}
+
+// AcceptExecutionTx admits a caller-owned execution in the caller's Tasks
+// transaction, allowing transport receipts and the catalogue to commit together.
+// The caller publishes Notify only after the transaction commits.
+func (s *Service) AcceptExecutionTx(ctx context.Context, tx *sql.Tx, record Record) error {
 	if record.Execution == nil || record.Info.AgentLink == nil || !core.Identifier(record.AssistantID) || !core.Identifier(record.Info.ID) {
 		return fmt.Errorf("invalid Task execution binding")
 	}
@@ -31,99 +43,127 @@ func (s *Service) AcceptExecution(ctx context.Context, record Record) error {
 	record.Generation = 1
 	record.Origin = protocol.TaskOrigin{Kind: "manual"}
 	record.RunID = record.Info.RunID
-	err := storage.Transaction(ctx, s.db, func(tx *sql.Tx) error {
-		var exists bool
-		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM task_writes WHERE assistant_id=? AND request_id=?)", record.AssistantID, record.Request.RequestID).Scan(&exists); err != nil {
-			return err
-		}
-		if exists {
-			return agentlink.ErrConflict
-		}
-		var count int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE assistant_id=?", record.AssistantID).Scan(&count); err != nil {
-			return err
-		}
-		if count >= s.options.MaxTasks {
-			return fmt.Errorf("task total limit reached")
-		}
-		hash, err := core.HashJSON([]any{record.Request, record.Origin})
-		if err != nil {
-			return err
-		}
-		if err := write(ctx, tx, &record); err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO task_writes(assistant_id,request_id,digest,task_id) VALUES(?,?,?,?)", record.AssistantID, record.Request.RequestID, hash, record.Info.ID)
+	var exists bool
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM task_writes WHERE assistant_id=? AND request_id=?)", record.AssistantID, record.Request.RequestID).Scan(&exists); err != nil {
 		return err
-	})
-	if err == nil {
-		s.Notify()
 	}
+	if exists {
+		return agentlink.ErrConflict
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE assistant_id=?", record.AssistantID).Scan(&count); err != nil {
+		return err
+	}
+	if count >= s.options.MaxTasks {
+		return fmt.Errorf("task total limit reached")
+	}
+	hash, err := core.HashJSON([]any{record.Request, record.Origin})
+	if err != nil {
+		return err
+	}
+	if err := write(ctx, tx, &record); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, "INSERT INTO task_writes(assistant_id,request_id,digest,task_id) VALUES(?,?,?,?)", record.AssistantID, record.Request.RequestID, hash, record.Info.ID)
 	return err
 }
 
 // UpdateExecution serializes polling with guidance and dispositions. The original
 // run reference is a compare-and-swap fence against stale backend responses.
 func (s *Service) UpdateExecution(ctx context.Context, record Record, expectedRun string) (bool, error) {
-	changed := false
+	var changed bool
 	err := storage.Transaction(ctx, s.db, func(tx *sql.Tx) error {
-		current, err := read(ctx, tx, record.AssistantID, record.Info.ID)
-		if err != nil {
-			return err
-		}
-		if current == nil || current.Execution == nil || current.Execution.Receipt.RunID != expectedRun {
-			return nil
-		}
-		// A delayed poll cannot reopen an already-ended execution. Continuation
-		// must supply a new run identity through the original backend.
-		if current.Info.Phase.Scope() == "attention" && record.Info.Phase.Scope() == "active" && record.Execution.Receipt.RunID == expectedRun {
-			return nil
-		}
-		record.Info.Archived = current.Info.Archived
-		record.Info.ArchiveReason = current.Info.ArchiveReason
-		record.Execution.StopRequested = current.Execution.StopRequested
-		record.Execution.Notified = current.Execution.Notified
-		if expectedRun != "" && record.Execution.Receipt.RunID != expectedRun {
-			record.Execution.Notified = false
-			record.Execution.StopRequested = false
-			record.Info.Archived = false
-			record.Info.ArchiveReason = ""
-			record.Outcome = nil
-			record.Result = nil
-		}
-		record.RunID = record.Info.RunID
-		record.Execution.ObservedAtMS = time.Now().UnixMilli()
-		record.Error = record.Execution.Receipt.Error
-		if record.Info.Phase.Scope() != "active" {
-			kind := "success"
-			if record.Info.Phase == protocol.TaskFailed {
-				kind = "failed"
-			}
-			if record.Info.Phase == protocol.TaskCancelled || record.Info.Phase == protocol.TaskInterrupted {
-				kind = "cancelled"
-			}
-			record.Result = &Terminal{Text: record.Execution.Receipt.Result, Outcome: core.Outcome{Kind: kind, Error: record.Error}}
-			record.Outcome = &protocol.TaskResultEvent{TaskID: record.Info.ID, RunID: record.RunID, Title: record.Info.Title, Phase: record.Info.Phase, Text: record.Execution.Receipt.Result, Error: record.Error, Origin: record.Origin}
-		}
-		if err := write(ctx, tx, &record); err != nil {
-			return err
-		}
-		changed = true
-		return nil
+		var err error
+		changed, err = s.UpdateExecutionTx(ctx, tx, record, expectedRun)
+		return err
 	})
 	if err == nil && changed {
 		s.Notify()
 	}
 	return changed, err
 }
-func (s *Service) StopExecution(ctx context.Context, owner, id string) error {
-	return s.change(ctx, owner, id, func(_ *sql.Tx, r *Record) error {
-		if r.Execution == nil {
-			return fmt.Errorf("Task has no Agent Link execution")
+
+// UpdateExecutionTx applies the existing expected-run fence and outcome indexes
+// in the same Tasks transaction as a transport event receipt.
+func (s *Service) UpdateExecutionTx(ctx context.Context, tx *sql.Tx, record Record, expectedRun string) (bool, error) {
+	current, err := read(ctx, tx, record.AssistantID, record.Info.ID)
+	if err != nil {
+		return false, err
+	}
+	if current == nil || current.Execution == nil || current.Execution.Receipt.RunID != expectedRun {
+		return false, nil
+	}
+	// A delayed poll cannot reopen an already-ended execution. Continuation
+	// must supply a new run identity through the original backend.
+	if current.Info.Phase.Scope() == "attention" && record.Info.Phase.Scope() == "active" && record.Execution.Receipt.RunID == expectedRun {
+		return false, nil
+	}
+	record.Info.Archived = current.Info.Archived
+	record.Info.ArchiveReason = current.Info.ArchiveReason
+	record.Execution.StopRequested = current.Execution.StopRequested
+	record.Execution.Notified = current.Execution.Notified
+	if expectedRun != "" && record.Execution.Receipt.RunID != expectedRun {
+		previous, err := json.Marshal(current)
+		if err != nil {
+			return false, err
 		}
-		r.Execution.StopRequested = true
+		if _, err = tx.ExecContext(ctx, "INSERT INTO task_run_history(assistant_id,task_id,run_id,body) VALUES(?,?,?,?) ON CONFLICT(assistant_id,task_id,run_id) DO NOTHING", current.AssistantID, current.Info.ID, current.RunID, string(previous)); err != nil {
+			return false, err
+		}
+		record.Execution.Notified = false
+		record.Execution.StopRequested = false
+		record.Info.Archived = false
+		record.Info.ArchiveReason = ""
+		record.Outcome = nil
+		record.Result = nil
+	}
+	record.RunID = record.Info.RunID
+	record.Execution.ObservedAtMS = time.Now().UnixMilli()
+	record.Error = record.Execution.Receipt.Error
+	if record.Info.Phase.Scope() != "active" {
+		kind := "success"
+		if record.Info.Phase == protocol.TaskFailed {
+			kind = "failed"
+		}
+		if record.Info.Phase == protocol.TaskCancelled || record.Info.Phase == protocol.TaskInterrupted {
+			kind = "cancelled"
+		}
+		record.Result = &Terminal{Text: record.Execution.Receipt.Result, Outcome: core.Outcome{Kind: kind, Error: record.Error}}
+		evidence, artifacts, artifactsError := []string(nil), []string(nil), ""
+		if record.Outcome != nil && record.Outcome.TaskID == record.Info.ID && record.Outcome.RunID == record.RunID && record.Outcome.Phase == record.Info.Phase {
+			evidence = record.Outcome.Evidence
+			artifacts = record.Outcome.Artifacts
+			artifactsError = record.Outcome.ArtifactsError
+		}
+		record.Outcome = &protocol.TaskResultEvent{TaskID: record.Info.ID, RunID: record.RunID, Title: record.Info.Title, Phase: record.Info.Phase, Text: record.Execution.Receipt.Result, Error: record.Error, Origin: record.Origin, Evidence: evidence, Artifacts: artifacts, ArtifactsError: artifactsError}
+	}
+	if err := write(ctx, tx, &record); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+func (s *Service) StopExecution(ctx context.Context, owner, id string) error {
+	err := storage.Transaction(ctx, s.db, func(tx *sql.Tx) error { return s.StopExecutionTx(ctx, tx, owner, id) })
+	if err == nil {
+		s.Notify()
+	}
+	return err
+}
+
+// StopExecutionTx records cancellation intent without fabricating a terminal run.
+func (s *Service) StopExecutionTx(ctx context.Context, tx *sql.Tx, owner, id string) error {
+	record, err := read(ctx, tx, owner, id)
+	if err != nil {
+		return err
+	}
+	if record == nil || record.Execution == nil {
+		return fmt.Errorf("Task has no Agent Link execution")
+	}
+	if record.Execution.StopRequested {
 		return nil
-	})
+	}
+	record.Execution.StopRequested = true
+	return write(ctx, tx, record)
 }
 func (s *Service) NotifyExecution(ctx context.Context, owner, id, run string) error {
 	return s.change(ctx, owner, id, func(_ *sql.Tx, r *Record) error {
@@ -132,6 +172,20 @@ func (s *Service) NotifyExecution(ctx context.Context, owner, id, run string) er
 		}
 		return nil
 	})
+}
+
+// NotifyExecutionTx records completion delivery in the caller's terminal-result
+// transaction. It never changes execution or consumes pending Task guidance.
+func (s *Service) NotifyExecutionTx(ctx context.Context, tx *sql.Tx, owner, id, run string) error {
+	r, err := read(ctx, tx, owner, id)
+	if err != nil {
+		return err
+	}
+	if r == nil || r.Execution == nil || r.Execution.Receipt.RunID != run {
+		return agentlink.ErrFenced
+	}
+	r.Execution.Notified = true
+	return write(ctx, tx, r)
 }
 
 // FindRequest resolves accepted intent before consulting mutable destinations.
@@ -163,4 +217,23 @@ func (s *Service) AwaitExecution(ctx context.Context, owner, id, run string) err
 		}
 		return nil
 	})
+}
+
+// RejectExecutionTx records receiver admission rejection in the existing
+// catalogue. There is no admitted run and no terminal execution event to invent.
+func (s *Service) RejectExecutionTx(ctx context.Context, tx *sql.Tx, owner, id, code string) error {
+	record, err := read(ctx, tx, owner, id)
+	if err != nil {
+		return err
+	}
+	if record == nil || record.Execution == nil || record.RunID != "" || record.Execution.Receipt.RunID != "" {
+		return agentlink.ErrFenced
+	}
+	record.Info.Phase = protocol.TaskFailed
+	record.Info.UpdatedAtMS = time.Now().UnixMilli()
+	record.Info.FinishedAtMS = record.Info.UpdatedAtMS
+	record.Error = code
+	record.Execution.Receipt.State = string(protocol.TaskFailed)
+	record.Execution.Receipt.Error = code
+	return write(ctx, tx, record)
 }

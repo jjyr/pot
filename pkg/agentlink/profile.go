@@ -27,26 +27,3 @@ type ProfileRequest struct {
 type ProfileBackend interface {
 	Profile(context.Context, ProfileRequest) (Profile, error)
 }
-
-func (s *Service) Profile(ctx context.Context, id string, input ProfileRequest) (Profile, error) {
-	if !s.enterRPC() {
-		return Profile{}, ErrUnavailable
-	}
-	defer s.rpcWG.Done()
-	if input.From.Kind != "user" || !input.From.Valid() || input.From.NodeID != s.options.HostIdentity.NodeID {
-		return Profile{}, ErrUnauthorized
-	}
-	c, err := s.Get(ctx, id)
-	if err != nil {
-		return Profile{}, err
-	}
-	var profile Profile
-	err = s.callConnection(ctx, c, "assistant.profile", input, &profile)
-	if err == nil && profile.ID != input.AssistantID {
-		err = ErrConflict
-	}
-	if err == nil {
-		_, err = s.Directory(ctx, id)
-	}
-	return profile, err
-}

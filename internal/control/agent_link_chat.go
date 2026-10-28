@@ -19,7 +19,21 @@ func linkChatID(link, assistant string) string {
 	id, _ := core.HashJSON([]string{"agent-link-chat", link, assistant})
 	return id
 }
-func (s *Service) linkChatTarget(ctx context.Context, link, assistant string) (agentlink.Connection, agentlink.Identity, error) {
+func (s *Service) linkChatTarget(ctx context.Context, link, assistant string) (agentlink.HistoricalConnection, agentlink.Identity, error) {
+	if s.isPotMCP(ctx, link) {
+		c, e := s.PotMCPConnection(ctx, link)
+		if e != nil {
+			return agentlink.HistoricalConnection{}, agentlink.Identity{}, e
+		}
+		if c.Directory != nil {
+			for _, endpoint := range c.Directory.Assistants() {
+				if endpoint.Address.AgentID == assistant {
+					return agentlink.HistoricalConnection{ID: c.ID, State: c.State, Directory: c.Directory}, endpoint.Identity, nil
+				}
+			}
+		}
+		return agentlink.HistoricalConnection{}, agentlink.Identity{}, agentlink.ErrNotFound
+	}
 	c, e := s.agentLinks.service.Get(ctx, link)
 	if e != nil {
 		return c, agentlink.Identity{}, e
@@ -40,6 +54,9 @@ func (s *Service) linkChatTarget(ctx context.Context, link, assistant string) (a
 func (s *Service) SendLinkChat(ctx context.Context, link, assistant, request, text string) (protocol.SendMessageAccepted, error) {
 	if !core.Identifier(request) || strings.TrimSpace(text) == "" || len(text) > protocol.MaxMailText {
 		return protocol.SendMessageAccepted{}, agentlink.ErrInvalid
+	}
+	if s.isPotMCP(ctx, link) {
+		return s.sendPotMCPChat(ctx, link, assistant, request, text)
 	}
 	c, to, e := s.linkChatTarget(ctx, link, assistant)
 	if e != nil {
@@ -108,7 +125,7 @@ func (s *Service) captureLinkChat(ctx context.Context, message protocol.Envelope
 	if e != nil {
 		return e
 	}
-	if message.From.NodeID != c.PeerHost.NodeID || message.From.AgentID != assistant {
+	if message.From.NodeID != c.Peer.Address.NodeID || message.From.AgentID != assistant {
 		return agentlink.ErrConflict
 	}
 	inserted := false
@@ -231,7 +248,7 @@ func (s *Service) isLinkChatReply(ctx context.Context, m protocol.Envelope) (boo
 	if e != nil {
 		return false, e
 	}
-	if m.From.NodeID != c.PeerHost.NodeID || m.From.Kind != "assistant" || m.From.AgentID != assistant || m.To != (protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: senderKind, AgentID: sender}) {
+	if m.From.NodeID != c.Peer.Address.NodeID || m.From.Kind != "assistant" || m.From.AgentID != assistant || m.To != (protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: senderKind, AgentID: sender}) {
 		return false, agentlink.ErrConflict
 	}
 	return true, nil

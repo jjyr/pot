@@ -15,6 +15,7 @@ import (
 )
 
 type Tool = sdk.Tool
+type ToolAnnotations = sdk.ToolAnnotations
 type CallToolResult = sdk.CallToolResult
 type TextContent = sdk.TextContent
 type Server = sdk.Server

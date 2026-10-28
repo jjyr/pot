@@ -155,6 +155,10 @@ run = "node scripts/tests/pot-ui-settings-independent-browser.mjs"
 description = "Verify local display before transport, stable cache upgrades and editor authority"
 run = ["node scripts/tests/directory-local-first.mjs", "node scripts/tests/directory-local-first-browser.mjs", "node scripts/tests/stable-projections-browser.mjs", "node scripts/tests/settings-local-first-browser.mjs"]
 
+[tasks."test:mcp-ui"]
+description = "Verify MCP connection local display, current authority, OAuth forms and cache upgrades in a real browser"
+run = ["node scripts/tests/mcp-connections-browser.mjs", "node scripts/tests/mcp-cache-migration-browser.mjs", "node scripts/tests/mcp-onboarding-browser.mjs"]
+
 [tasks."test:hooks"]
 description = "Verify hook timing and failure propagation"
 run = "python scripts/tests/hook-timing.py"

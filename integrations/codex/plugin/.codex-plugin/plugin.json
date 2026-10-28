@@ -1,8 +1,7 @@
 {
   "name": "pot",
-  "version": "0.10.3",
-  "description": "Connect Pot and Codex for independent task execution and assistant-to-assistant messages.",
-  "mcpServers": "./.mcp.json",
+  "version": "0.11.0",
+  "description": "Optional setup guidance for an independent Pot MCP connection.",
   "homepage": "https://github.com/jjyr/pot",
   "interface": {
     "composerIcon": "./assets/pot.png",

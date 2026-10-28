@@ -179,7 +179,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Cache-Control", "no-store")
-	if !s.sameOrigin(r) {
+	if s.mcpBridge(w, r) {
+		return
+	}
+	// OAuth returns by top-level cross-site navigation. Only this static page
+	// may load that way; it consumes PKCE state through the authenticated,
+	// same-origin API after loading. Fetches and every API keep the origin fence.
+	callbackNavigation := r.Method == http.MethodGet && (r.URL.Path == "/mcp-pot-callback.html" || r.URL.Path == "/mcp-connect.html") && r.Host == s.origin.Host && r.Header.Get("Origin") == "" && r.Header.Get("Sec-Fetch-Mode") == "navigate" && r.Header.Get("Sec-Fetch-Dest") == "document"
+	if !s.sameOrigin(r) && !callbackNavigation {
 		failure(w, 403, "browser origin rejected")
 		return
 	}
@@ -343,13 +350,13 @@ func Allowed(method, path string) bool {
 	if strings.ContainsAny(path, "\\%") || strings.Contains(path, "//") || strings.Contains(path, "/../") {
 		return false
 	}
-	if path == "/api/v1/agent-links" {
+	if path == "/api/v1/agent-links" || path == "/api/v1/agent-links/mcp" {
 		return method == "GET" || method == "POST"
 	}
 	if path == "/api/v1/agent-links/capabilities" {
 		return method == "GET"
 	}
-	if path == "/api/v1/agent-links/invitation" || path == "/api/v1/agent-links/assistants" {
+	if path == "/api/v1/agent-links/assistants" {
 		return method == "POST"
 	}
 	if path == "/api/v1/extensions" {

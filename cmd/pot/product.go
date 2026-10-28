@@ -31,7 +31,6 @@ func productCommand(ctx context.Context, args []string, out io.Writer) (result e
 	workspace := flags.String("workspace", "", "Host Agent workspace")
 	ui := flags.String("ui", "", "explicit loopback browser address, for example 127.0.0.1:17703")
 	method := flags.String("method", "GET", "API method")
-	peerListen := flags.String("peer-listen", "", "authenticated Agent Link TCP listener")
 	resources := flags.String("resources", "", "installed product resource directory")
 	body := flags.String("body", "", "API JSON request body, or - for stdin")
 	if err := flags.Parse(args[1:]); err != nil {
@@ -71,7 +70,7 @@ func productCommand(ctx context.Context, args []string, out io.Writer) (result e
 		if flags.NArg() != 0 {
 			return errors.New("unexpected positional arguments")
 		}
-		runtime, err := product.Open(ctx, product.Options{Root: *root, ResourceDirectory: *resources, Control: control.Options{Workspace: *workspace, PeerListen: *peerListen}})
+		runtime, err := product.Open(ctx, product.Options{Root: *root, ResourceDirectory: *resources, Control: control.Options{Workspace: *workspace}})
 		if err != nil {
 			return err
 		}
@@ -93,9 +92,6 @@ func productCommand(ctx context.Context, args []string, out io.Writer) (result e
 			defer cancel()
 			_ = socket.Close(shutdown)
 		}()
-		if *peerListen != "" {
-			fmt.Fprintf(out, "Agent Link listener: %s\n", runtime.Control.PeerListenAddress())
-		}
 		fmt.Fprintf(out, "Runtime %s ready (%s)\n", app.RuntimeID, runtime.Root.Path)
 		if *ui != "" {
 			listener, err := net.Listen("tcp", *ui)

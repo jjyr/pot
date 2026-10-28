@@ -2,7 +2,6 @@ package agenthost
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
@@ -20,42 +19,27 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jjyr/pot/internal/linkhost"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/pkg/agentlink"
-	"github.com/jjyr/pot/pkg/peer"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 	webassets "github.com/jjyr/pot/web"
 )
 
-const hostVersion = "11"
+const hostVersion = "12"
 const hostListen = "127.0.0.1:8792"
-const hostPeerListen = "127.0.0.1:8793"
 
 type agentHost struct {
-	adapter                  Runtime
-	db, tasks                *sql.DB
-	secrets                  *secrets.Store
-	links                    *agentlink.Service
-	mailbox                  *hostMailbox
-	backend                  *backend
-	identity                 agentlink.Identity
-	peerIdentity             peer.Identity
-	peerKey                  ed25519.PrivateKey
-	peerRegistry             *linkhost.Registry
-	token, endpoint          string
-	accessMu                 sync.Mutex
-	loopbackPeer, directPeer *linkhost.PeerListener
-	networkError             string
-	peerCtx                  context.Context
-	additionalPeers          map[string]*linkhost.PeerListener
-	discoveryMu              sync.Mutex
-	discoveryAt              time.Time
-	discovered               []hostAddress
-	discover                 func(context.Context) []hostAddress
-	browserMu                sync.Mutex
-	browserTokens            map[string]time.Time
+	receiverEpoch string
+	adapter       Runtime
+	db, tasks     *sql.DB
+	secrets       *secrets.Store
+	links         *agentlink.History
+	mailbox       *hostMailbox
+	backend       *backend
+	identity      agentlink.Identity
+	token         string
+	accessMu      sync.Mutex
 }
 
 func openAgentHost(root string, runtimes ...Runtime) (*agentHost, error) {
@@ -74,7 +58,7 @@ func openAgentHost(root string, runtimes ...Runtime) (*agentHost, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := &agentHost{adapter: adapter, db: db, peerCtx: context.Background()}
+	h := &agentHost{receiverEpoch: identifier(), adapter: adapter, db: db}
 	ok := false
 	defer func() {
 		if !ok {
@@ -86,7 +70,7 @@ func openAgentHost(root string, runtimes ...Runtime) (*agentHost, error) {
 		return nil, err
 	}
 	var id, ref, savedAdapter string
-	err = db.QueryRow("SELECT node_id,owner_secret_ref,endpoint,adapter FROM agent_adapter_host WHERE singleton=1").Scan(&id, &ref, &h.endpoint, &savedAdapter)
+	err = db.QueryRow("SELECT node_id,owner_secret_ref,adapter FROM agent_adapter_host WHERE singleton=1").Scan(&id, &ref, &savedAdapter)
 	if errors.Is(err, sql.ErrNoRows) {
 		id = adapter.Kind + "-" + identifier()
 		savedAdapter = adapter.Kind
@@ -95,7 +79,7 @@ func openAgentHost(root string, runtimes ...Runtime) (*agentHost, error) {
 		if err = h.secrets.Put(context.Background(), ref, []byte(token)); err != nil {
 			return nil, err
 		}
-		_, err = db.Exec("INSERT INTO agent_adapter_host(singleton,node_id,owner_secret_ref,endpoint,adapter) VALUES(1,?,?, '',?)", id, ref, savedAdapter)
+		_, err = db.Exec("INSERT INTO agent_adapter_host(singleton,node_id,owner_secret_ref,adapter) VALUES(1,?,?,?)", id, ref, savedAdapter)
 	}
 	if err != nil {
 		return nil, err
@@ -110,9 +94,6 @@ func openAgentHost(root string, runtimes ...Runtime) (*agentHost, error) {
 	h.token = string(token)
 	clear(token)
 	h.identity = agentlink.Identity{Address: protocol.AgentRef{NodeID: id, Kind: "assistant", AgentID: adapter.Kind}, Name: adapter.Name, Adapter: adapter.Kind}
-	if err = h.loadPeerIdentity(context.Background()); err != nil {
-		return nil, err
-	}
 	h.tasks, err = storage.OpenDatabase(filepath.Join(root, "tasks.sqlite"), storage.TasksDatabase)
 	if err != nil {
 		return nil, err
@@ -122,43 +103,11 @@ func openAgentHost(root string, runtimes ...Runtime) (*agentHost, error) {
 		return nil, err
 	}
 	h.mailbox = &hostMailbox{db: h.tasks, local: h.identity.Address, backend: h.backend}
-	h.links, err = agentlink.New(agentlink.Options{DB: db, Secrets: h.secrets, Mailbox: h.mailbox, Backend: h.backend, HostIdentity: h.peerIdentity, HostKey: h.peerKey, Identity: func(_ context.Context, assistant string) (agentlink.Identity, error) {
-		if assistant == "" {
-			return agentlink.Identity{Address: protocol.AgentRef{NodeID: id, Kind: "node", AgentID: id}, Name: adapter.Name, Adapter: adapter.Kind}, nil
-		}
-		a, err := h.backend.resolve(context.Background(), assistant)
-		if err != nil {
-			return agentlink.Identity{}, err
-		}
-		return h.backend.identity(a), nil
-	}})
-	if err != nil {
-		return nil, err
-	}
-	h.backend.approvalCommitted = h.links.PublishApproval
-	h.peerRegistry = linkhost.NewRegistry(h.peerIdentity, h.peerKey)
-	if err = h.peerRegistry.Register(agentlink.ServiceName, h.links.Authorize, h.links.Attach); err != nil {
-		return nil, err
-	}
+	h.links = &agentlink.History{DB: db}
 	ok = true
 	return h, nil
 }
 func (h *agentHost) close() {
-	h.accessMu.Lock()
-	if h.loopbackPeer != nil {
-		h.loopbackPeer.Close()
-	}
-	if h.directPeer != nil {
-		h.directPeer.Close()
-	}
-	for _, listener := range h.additionalPeers {
-		listener.Close()
-	}
-	h.accessMu.Unlock()
-	if h.links != nil {
-		h.links.Close()
-	}
-	clear(h.peerKey)
 	if h.tasks != nil {
 		h.tasks.Close()
 	}
@@ -188,7 +137,7 @@ func (h *agentHost) handler() http.Handler {
 			assets.ServeHTTP(w, r)
 			return
 		}
-		if !hostOwner(r, h.token, h.runtime()) && !h.browserOwner(r) {
+		if !hostOwner(r, h.token, h.runtime()) {
 			fail(w, 401, "authentication_required")
 			return
 		}
@@ -196,8 +145,45 @@ func (h *agentHost) handler() http.Handler {
 			fail(w, 403, "cross_origin_denied")
 			return
 		}
-		if r.URL.Path == "/api/v1/agent-host/browser" && r.Method == "POST" {
-			writeJSON(w, 200, h.browserPage())
+		if r.URL.Path == "/api/v1/agent-host/receiver/authorization" && r.Method == "GET" {
+			result, err := h.receiverAuthorization(r.Context(), r.URL.Query().Get("connection_id"))
+			if handleError(w, err) {
+				return
+			}
+			writeJSON(w, 200, result)
+			return
+		}
+		if r.URL.Path == "/api/v1/agent-host/receiver/grant" && r.Method == "POST" {
+			var grant receiverGrant
+			if !body(w, r, &grant) {
+				return
+			}
+			if handleError(w, h.saveReceiverGrant(r.Context(), grant)) {
+				return
+			}
+			writeJSON(w, 200, map[string]bool{"saved": true})
+			return
+		}
+		if r.URL.Path == "/api/v1/agent-host/receiver/disconnect" && r.Method == "POST" {
+			var input struct {
+				ConnectionID string `json:"connection_id"`
+			}
+			if !body(w, r, &input) {
+				return
+			}
+			result, err := h.db.ExecContext(r.Context(), "UPDATE mcp_receiver_connections SET state='disconnected',revision=revision+1 WHERE id=?", input.ConnectionID)
+			if handleError(w, err) {
+				return
+			}
+			n, err := result.RowsAffected()
+			if handleError(w, err) {
+				return
+			}
+			if n != 1 {
+				fail(w, 404, "not_found")
+				return
+			}
+			writeJSON(w, 200, map[string]bool{"disconnected": true})
 			return
 		}
 		if r.URL.Path == "/api/v1/agent-host/health" {
@@ -245,6 +231,10 @@ func (h *agentHost) handler() http.Handler {
 			writeJSON(w, 200, map[string]bool{"accepted": true})
 			return
 		}
+		if r.URL.Path == "/api/v1/agent-host/execution" && r.Method == "POST" {
+			h.executionHTTP(w, r)
+			return
+		}
 		if r.URL.Path == "/api/v1/agent-host/tool" && r.Method == "POST" {
 			var input hostToolInput
 			if !body(w, r, &input) {
@@ -262,148 +252,23 @@ func (h *agentHost) handler() http.Handler {
 	})
 }
 func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
-	var endpoint string
-	if err := h.db.QueryRow("SELECT endpoint FROM agent_adapter_host WHERE singleton=1").Scan(&endpoint); handleError(w, err) {
+	if r.URL.Path != "/api/v1/agent-links" || r.Method != "GET" {
+		http.NotFound(w, r)
 		return
 	}
-	if r.URL.Path == "/api/v1/agent-links" && r.Method == "GET" {
-		items, err := h.links.List(r.Context())
-		if handleError(w, err) {
-			return
-		}
-		status := "needs_access"
-		h.accessMu.Lock()
-		networkError := h.networkError
-		h.accessMu.Unlock()
-		if endpoint != "" {
-			status = "ready"
-		}
-		if networkError != "" {
-			status = "needs_access"
-		}
-		view := []map[string]any{}
-		for _, c := range items {
-			if c.State == "revoked" {
-				continue
-			}
-			state := c.State
-			if state == "ready" {
-				state = "connected"
-			}
-			directory := c.Directory
-			if directory == nil {
-				directory = &agentlink.Directory{Targets: []agentlink.Endpoint{}}
-			}
-			view = append(view, map[string]any{"id": c.ID, "assistants": directory.Assistants(), "default_assistant_id": directory.DefaultAssistant(), "peer": map[string]any{"id": c.Peer.Address.AgentID, "node_id": c.Peer.Address.NodeID, "address": c.Endpoint, "kind": c.Peer.Adapter, "name": c.Peer.Name}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
-		}
-		directory, err := h.backend.Directory(r.Context())
-		if handleError(w, err) {
-			return
-		}
-		writeJSON(w, 200, map[string]any{"items": view, "directory": directory, "self_assistants": directory.Assistants(), "addresses": h.addresses(r.Context()), "self": map[string]any{"id": h.runtime().Kind, "node_id": h.identity.Address.NodeID, "kind": h.runtime().Kind, "name": h.runtime().Name, "address": endpoint, "endpoint": endpoint, "status": status, "reason_code": networkError}, "network": map[string]any{"listen": h.runtime().PeerListen, "endpoint": endpoint, "mode": "address", "status": status, "reason_code": networkError}, "identity": h.identity, "peer_identity": h.peerIdentity})
+	connections, err := h.links.List(r.Context())
+	if handleError(w, err) {
 		return
 	}
-	if r.Method != "POST" {
-		fail(w, 404, "not_found")
+	directory, err := h.backend.Directory(r.Context())
+	if handleError(w, err) {
 		return
 	}
-	if r.URL.Path == "/api/v1/agent-links/invitation" {
-		var input struct {
-			Endpoint string `json:"endpoint"`
-		}
-		if !body(w, r, &input) {
-			return
-		}
-		var err error
-		endpoint, err = h.selectAddress(r.Context(), input.Endpoint)
-		if err != nil {
-			fail(w, 400, err.Error())
-			return
-		}
-		inv, err := h.links.Invite(r.Context(), endpoint)
-		if err != nil {
-			fail(w, 400, err.Error())
-			return
-		}
-		writeJSON(w, 200, map[string]any{"address": inv.Address, "expires_at_ms": inv.ExpiresAt.UnixMilli()})
-		return
+	items := []any{}
+	for _, c := range connections {
+		items = append(items, map[string]any{"id": c.ID, "peer": c.Peer, "status": "unsupported", "last_known_state": c.State, "directory": c.Directory})
 	}
-	if r.URL.Path != "/api/v1/agent-links" {
-		fail(w, 404, "not_found")
-		return
-	}
-	var in struct {
-		Action      string `json:"action"`
-		AssistantID string `json:"assistant_id"`
-		Address     string `json:"address"`
-		ID          string `json:"id"`
-		Endpoint    string `json:"endpoint"`
-		Mode        string `json:"mode"`
-		Listen      string `json:"listen"`
-		RequestID   string `json:"request_id"`
-		Revision    int64  `json:"revision"`
-	}
-	if !body(w, r, &in) {
-		return
-	}
-	var v any = map[string]bool{"ok": true}
-	var err error
-	switch in.Action {
-	case "preview":
-		var preview agentlink.Preview
-		preview, err = h.links.Preview(r.Context(), in.Address)
-		if err == nil {
-			v = map[string]any{"peer": map[string]any{"id": preview.Identity.Address.AgentID, "node_id": preview.Identity.Address.NodeID, "kind": preview.Identity.Adapter, "name": preview.Identity.Name}, "endpoint": preview.Endpoint, "fingerprint": preview.Fingerprint, "expires_at_ms": preview.ExpiresAt.UnixMilli()}
-		}
-	case "connect":
-		v, err = h.links.Connect(r.Context(), in.Address)
-	case "reconnect":
-		err = h.links.Reconnect(r.Context(), in.ID)
-	case "delete":
-		err = h.links.Delete(r.Context(), in.ID)
-	case "disconnect":
-		var c agentlink.Connection
-		c, err = h.links.Get(r.Context(), in.ID)
-		if err == nil {
-			if in.Revision != c.CreatedAt.UnixMilli() {
-				err = agentlink.ErrConflict
-			} else {
-				err = h.links.Disconnect(r.Context(), in.ID)
-			}
-		}
-	case "configure":
-		if in.Mode != "" && in.Mode != "address" {
-			err = agentlink.ErrInvalid
-			break
-		}
-		if in.Listen != "" && in.Listen != h.runtime().PeerListen {
-			err = errors.New("agent_link_listener_restart_required")
-			break
-		}
-		err = h.configureEndpoint(r.Context(), in.Endpoint)
-	default:
-		err = agentlink.ErrInvalid
-	}
-	if err != nil {
-		fail(w, 400, err.Error())
-		return
-	}
-	writeJSON(w, 200, v)
-}
-
-func (h *agentHost) probeEndpoint(ctx context.Context, endpoint string) error {
-	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
-	defer cancel()
-	if _, err := peer.ValidateEndpoint(ctx, endpoint); err != nil {
-		return agentlink.ErrInvalid
-	}
-	if err := linkhost.Probe(ctx, endpoint, h.peerIdentity, h.peerKey, h.peerIdentity); err != nil {
-		if errors.Is(err, peer.ErrUnauthorized) {
-			return agentlink.ErrConflict
-		}
-		return agentlink.ErrUnavailable
-	}
-	return nil
+	writeJSON(w, 200, map[string]any{"items": items, "directory": directory, "self_assistants": directory.Assistants(), "identity": h.identity})
 }
 
 func agentServe(root string, runtimes ...Runtime) error {
@@ -432,13 +297,6 @@ func agentServe(root string, runtimes ...Runtime) error {
 	defer listener.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err = h.startPeerNetwork(ctx); err != nil {
-		return err
-	}
-	plugins := linkhost.New()
-	if err = plugins.RegisterAgent(linkhost.Messages{Name: adapter.Kind, Service: h.links}); err != nil {
-		return err
-	}
 	if err = h.backend.recover(ctx); err != nil {
 		return err
 	}
@@ -448,7 +306,7 @@ func agentServe(root string, runtimes ...Runtime) error {
 		workers.Add(2)
 		go func() { defer workers.Done(); h.backend.run(ctx) }()
 		go func() { defer workers.Done(); h.backend.runMessages(ctx) }()
-		plugins.Run(ctx)
+
 		workers.Wait()
 		close(done)
 	}()
@@ -474,7 +332,9 @@ type hostClient struct {
 	client  *http.Client
 }
 
-var hostDaemonCommand = func(binary, root string) *exec.Cmd { return exec.Command(binary, "agent-serve", "--root", root) }
+var hostDaemonCommand = func(binary, root, listen string) *exec.Cmd {
+	return exec.Command(binary, "agent-serve", "--root", root, "--listen", listen)
+}
 
 func (c hostClient) call(ctx context.Context, path string, input any, output any) error {
 	method := "GET"
@@ -567,7 +427,7 @@ func ensureAgentHost(root string, runtimes ...Runtime) (hostClient, error) {
 		return c, err
 	}
 	defer log.Close()
-	cmd := hostDaemonCommand(binary, root)
+	cmd := hostDaemonCommand(binary, root, adapter.Listen)
 	cmd.Stdin = nil
 	cmd.Stdout = log
 	cmd.Stderr = log

@@ -31,13 +31,14 @@ const (
 // when a persisted thread cannot be resumed.
 type Session struct {
 	Adapter, Model, Effort, HostRoot string
-	JobID                            string
+	JobID, RunID                     string
 	AssistantID                      string
 	Binary                           string
 	Workspace                        string
 	Mode                             string
 	ThreadID                         string
 	Worker                           []string
+	HostListen                       string
 }
 
 type TurnResult struct {
@@ -241,7 +242,7 @@ func (a *appTurn) approval(m rpcMessage) {
 				}
 			}
 			if !accept {
-				a.finish("failed", "codex_approval_requires_local_review")
+				a.finish("failed", codexLocalReviewDiagnostic(m.Method, "accept_unavailable"))
 				a.interrupt()
 				return
 			}
@@ -253,7 +254,7 @@ func (a *appTurn) approval(m rpcMessage) {
 			proposed := a.fileChanges[id]
 			a.mu.Unlock()
 			if len(proposed) == 0 {
-				a.finish("failed", "codex_approval_requires_local_review")
+				a.finish("failed", codexLocalReviewDiagnostic(m.Method, "file_changes_unavailable"))
 				a.interrupt()
 				return
 			}
@@ -288,7 +289,7 @@ func (a *appTurn) approval(m rpcMessage) {
 				a.denied = true
 				a.approvalError = "codex_approval_denied"
 				if err != nil {
-					a.approvalError = "codex_approval_requires_local_review"
+					a.approvalError = codexLocalReviewDiagnostic(m.Method, "review_rejected")
 				}
 			}
 			a.mu.Unlock()
@@ -300,7 +301,10 @@ func (a *appTurn) approval(m rpcMessage) {
 	}
 	a.mu.Lock()
 	a.denied = true
-	a.approvalError = "codex_approval_requires_local_review"
+	a.approvalError = codexLocalReviewDiagnostic(m.Method, "unsupported_interaction")
+	if m.Method == "mcpServer/elicitation/request" {
+		a.approvalError += codexElicitationShape(m.Params, a.result.ThreadID, a.result.TurnID)
+	}
 	a.mu.Unlock()
 	switch m.Method {
 	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
@@ -312,6 +316,67 @@ func (a *appTurn) approval(m rpcMessage) {
 		a.interrupt()
 	}
 }
+
+// Keep diagnostic protocol IDs, never interactive parameters or arbitrary
+// server-provided method strings. This records which native gate rejected the
+// turn without exposing elicitation text, command arguments or credentials.
+func codexLocalReviewDiagnostic(method, reason string) string {
+	switch method {
+	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval",
+		"mcpServer/elicitation/request", "item/tool/requestUserInput",
+		"item/permissions/requestApproval", "item/tool/call", "account/chatgptAuthTokens/refresh":
+	default:
+		method = "unrecognized"
+	}
+	return "codex_approval_requires_local_review: " + method + ": " + reason
+}
+
+// Keep only known enum values and field presence/association. Neither a native
+// approval nor a server elicitation can be inferred from this method alone.
+func codexElicitationShape(raw json.RawMessage, thread, turn string) string {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return "; shape=invalid"
+	}
+	mode := func(value json.RawMessage) string {
+		if len(value) == 0 {
+			return "absent"
+		}
+		var name string
+		if json.Unmarshal(value, &name) != nil {
+			return "invalid"
+		}
+		switch name {
+		case "form", "openai/form", "openaiForm", "url":
+			return name
+		}
+		return "unrecognized"
+	}
+	association := func(key, expected string) string {
+		value, ok := fields[key]
+		if !ok {
+			return "absent"
+		}
+		if string(value) == "null" {
+			return "null"
+		}
+		var name string
+		if json.Unmarshal(value, &name) != nil {
+			return "invalid"
+		}
+		if expected == "" {
+			return "unbound"
+		}
+		if name == expected {
+			return "match"
+		}
+		return "mismatch"
+	}
+	var request map[string]json.RawMessage
+	_ = json.Unmarshal(fields["request"], &request)
+	return fmt.Sprintf("; mode=%s; request_mode=%s; thread=%s; turn=%s; schema_present=%t; request_present=%t; item_present=%t", mode(fields["mode"]), mode(request["mode"]), association("threadId", thread), association("turnId", turn), len(fields["requestedSchema"]) != 0, len(fields["request"]) != 0, len(fields["itemId"]) != 0)
+}
+
 func (a *appTurn) notification(m rpcMessage) {
 	if a.isDone() {
 		return
@@ -460,11 +525,16 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 		result.Error = "codex_absolute_workspace_required"
 		return
 	}
+	executionConfig, err := codexExecutionConfig(s)
+	if err != nil {
+		result.Error = err.Error()
+		return
+	}
 	binary := s.Binary
 	if binary == "" {
 		binary = "codex"
 	}
-	binary, err := exec.LookPath(binary)
+	binary, err = exec.LookPath(binary)
 	if err != nil {
 		result.Error = "codex_unavailable"
 		return
@@ -480,7 +550,7 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 	defer cancel()
 	cmd := exec.CommandContext(processCtx, binary, "app-server", "--listen", "stdio://")
 	cmd.Dir = s.Workspace
-	cmd.Env = append(os.Environ(), "POT_AGENT_ASSISTANT_ID="+s.AssistantID, "POT_AGENT_JOB_ID="+s.JobID)
+	cmd.Env = nativeEnvironment(os.Environ(), s)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stderr = io.Discard
 	input, err := cmd.StdinPipe()
@@ -568,6 +638,9 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 	// Preserve the receiving Codex configuration, including its automatic
 	// reviewer. Only server requests for a human decision enter Agent Link.
 	params := map[string]any{"cwd": s.Workspace, "sandbox": s.Mode}
+	if executionConfig != nil {
+		params["config"] = executionConfig
+	}
 	if s.Model != "" {
 		params["model"] = s.Model
 	}

@@ -7,8 +7,10 @@ import (
 	"strings"
 )
 
-// A global plugin hook is inert in ordinary Antigravity conversations. The host
+// The independent receiver support hook is inert in ordinary Antigravity conversations. The host
 // binds the execution identity and scope through the supervised child's env.
+// Antigravity's "allow" delegates to its next hook/default policy; it does not
+// auto-approve a tool or replace the receiver owner's native permission rules.
 func agyPolicy(in io.Reader, out io.Writer) error {
 	var payload struct {
 		ToolCall struct {
@@ -31,8 +33,8 @@ func agyPolicy(in io.Reader, out io.Writer) error {
 			if tool == "" {
 				tool, _ = payload.ToolCall.Args["tool_name"].(string)
 			}
-			if (server == "pot" || server == "pot_pot") && (tool == "pot_connections" || tool == "pot_assistants" || tool == "pot_send" || tool == "pot_message_receipt") {
-				decision = "auto_approve"
+			if server == "pot_receiver" && isExecutionTool(tool) && (os.Getenv("POT_AGENT_ASSISTANT_ID") != "" || tool == "pot_execution_context") && os.Getenv("POT_AGENT_RUN_ID") != "" {
+				decision = "allow"
 			} else if os.Getenv("POT_AGENT_MODE") == "read-only" {
 				decision = "deny"
 				reason = "pot_read_only_scope"
@@ -48,4 +50,13 @@ func agyPolicy(in io.Reader, out io.Writer) error {
 		// policy still owns all non-read-only execution and explicit deny rules.
 	}
 	return json.NewEncoder(out).Encode(map[string]string{"decision": decision, "reason": strings.TrimSpace(reason)})
+}
+
+func isExecutionTool(name string) bool {
+	for _, tool := range executionToolNames {
+		if name == tool {
+			return true
+		}
+	}
+	return false
 }

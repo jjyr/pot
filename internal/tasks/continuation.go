@@ -48,31 +48,7 @@ func (s *Service) continuePending(ctx context.Context, owner, task string) error
 		if err != nil {
 			return err
 		}
-		raw, err := json.Marshal(r)
-		if err != nil {
-			return err
-		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO task_run_history(assistant_id,task_id,run_id,body)VALUES(?,?,?,?)", owner, task, r.RunID, string(raw)); err != nil {
-			return err
-		}
-		r.PreviousRunID = r.RunID
-		r.RunID = ID()
-		r.Info.RunID = r.RunID
-		r.RunText, r.RunInputID = text, id
-		r.Info.Phase = protocol.TaskQueued
-		r.Info.Archived, r.Info.Paused, r.Info.RemoteWaiting = false, false, false
-		r.Info.ArchiveReason = ""
-		r.Info.StartedAtMS = 0
-		r.Info.FinishedAtMS = 0
-		r.StopMode, r.Error = "", ""
-		r.Finalizing = false
-		r.Launch, r.Result, r.Outcome = nil, nil, nil
-		r.Origin = protocol.TaskOrigin{Kind: "manual"}
-		if r.Info.Pending > 0 {
-			r.Info.Pending--
-		}
-		_, err = tx.ExecContext(ctx, "UPDATE task_inputs SET state='consumed' WHERE assistant_id=? AND task_id=? AND request_id=?", owner, task, id)
-		return err
+		return s.beginContinuationTx(ctx, tx, r, id, text)
 	})
 }
 
@@ -111,4 +87,33 @@ func (s *Service) SetDispositions(ctx context.Context, owner string, decisions [
 	}
 	s.Notify()
 	return result, nil
+}
+
+// beginContinuationTx is shared by local guidance and authenticated receiver control.
+func (s *Service) beginContinuationTx(ctx context.Context, tx *sql.Tx, r *Record, id, text string) error {
+	raw, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO task_run_history(assistant_id,task_id,run_id,body)VALUES(?,?,?,?)", r.AssistantID, r.Info.ID, r.RunID, string(raw)); err != nil {
+		return err
+	}
+	r.PreviousRunID = r.RunID
+	r.RunID = ID()
+	r.Info.RunID = r.RunID
+	r.RunText, r.RunInputID = text, id
+	r.Info.Phase = protocol.TaskQueued
+	r.Info.Archived, r.Info.Paused, r.Info.RemoteWaiting = false, false, false
+	r.Info.ArchiveReason = ""
+	r.Info.StartedAtMS = 0
+	r.Info.FinishedAtMS = 0
+	r.StopMode, r.Error = "", ""
+	r.Finalizing = false
+	r.Launch, r.Result, r.Outcome = nil, nil, nil
+	r.Origin = protocol.TaskOrigin{Kind: "manual"}
+	if r.Info.Pending > 0 {
+		r.Info.Pending--
+	}
+	_, err = tx.ExecContext(ctx, "UPDATE task_inputs SET state='consumed' WHERE assistant_id=? AND task_id=? AND request_id=?", r.AssistantID, r.Info.ID, id)
+	return err
 }

@@ -18,11 +18,15 @@ reports the denial. See [Agent execution](task-coordination.md#agent-execution).
 The [architecture overview](architecture.md) shows the shared local/peer operation
 port and its execution adapters.
 
+Pot MCP connection setup and receiver operation are described in
+[Pot MCP connections](pot-mcp-connections.md). The product mounts MCP through the browser publication and its private Control
+socket. Dedicated TCP pairing/listener entry points have been removed.
+
 ## Nodes and assistants
 
-A stable Ed25519 `peer.Identity` authenticates `{node_id, public_key}`. Assistant
-addresses are `{node_id, kind: assistant, agent_id}`. Node IDs, connection IDs,
-assistant IDs and execution IDs are distinct. Names and origin icons are display
+OAuth + PKCE binds a logical caller or explicitly consented receiver node.
+Assistant addresses are `{node_id, kind: assistant, agent_id}`. Node, connection,
+assistant, Task and execution-run identities remain distinct. Names are display
 metadata. One machine can host several autonomous nodes.
 
 `Directory.targets` binds each receiver's identity directly to its capability
@@ -85,7 +89,7 @@ Chat capabilities distinguish send, receipt, history, subscription, attachments,
 references and individual turn controls. Task capabilities distinguish submit,
 read, list, cancel, input, events, files, archive and advanced owner controls.
 The existing local configuration, usage and approval interfaces remain owner
-capabilities; a peer invitation does not authorize remote operator management.
+capabilities; a connection alone does not authorize remote operator management.
 A `task.submit` request may carry a serializable `configuration` only through
 the owner adapter's `task.configure` capability. Peer transport rejects that
 field before calling the receiver, even if its contents claim a local identity.
@@ -109,161 +113,30 @@ The current scheduler is retained behind the owning assistant's
 peer operator API. Its internal occurrence transactions and local execution
 remain receiver implementation details.
 
-## Copy and paste admission
+## Connect and recover
 
-The Link page (连接 in Chinese) and Codex connection page share address discovery
-and copy actions. Addresses stay in a scrollable popup opened by **Copy connection
-address**, leaving the default page for the graph and other actions. Escape, an
-outside click or the close button dismisses the popup. Opening either page reads
-local interfaces and existing Tailscale forwarding without enabling access.
-Addresses are ordered by Tailscale
-name, Tailscale IP, public IP, private IP and loopback, followed by other saved
-addresses. **Get connection address** enables only the selected endpoint, verifies
-this node’s identity and displays the complete single-use invitation in a selected,
-read-only field. Manual copying is available immediately; the clipboard button is
-an optional shortcut. Closing the popup clears the invitation, and invitations
-are never put in snapshots or browser storage. Tailscale names and IPs use direct
-listeners without requiring Serve configuration or administrator permissions.
-Existing raw TCP forwarding can be reused, but copying never changes Tailscale
-configuration. All selected endpoints remain enabled independently
-and are restored on restart; an unavailable interface does not block startup.
+An ordinary MCP client configures the published Pot URL, completes the existing
+browser login and confirms its connection once. It needs no local Host or plugin.
+Receivers additionally register their own real endpoints and claim addressed
+Work/Control over that outbound connection. See [MCP collaboration](mcp-collaboration-contract.md)
+for receipts, causation, run admission, cancellation and human-review fencing.
 
-System Tailscale is optional and managed outside Pot. Pot only reads its addresses
-and existing forwarding; it has no login, Serve configuration or disconnect
-operation for the system client. Explicit endpoint configuration accepts only
-`address` mode and verifies the same signed TCP identity.
+Update Pot and relevant plugins/adapters on both ends and explicitly reconnect.
+Old TCP invitations are not parsed or imported. There is no listener, old pairing
+restoration, forwarding fallback or simultaneous legacy release mode.
 
-Paste the invitation in the existing Add Agent editor; live verification is
-followed by connection, then Link selects the new node. No assistant binding
-wizard is required. Link keeps its graph, regions, edges and responsive inspector.
-The inspector shows provided assistants, opens their existing chat UI, and offers
-disconnect, reconnect and confirmed deletion.
+Control migration 0008 stores a minimal unsupported history row and last known
+state, then drops pairing/listener/invitation configuration. It does not copy
+grants into OAuth. Tasks, reports, receipts, messages and saved local artifact
+content retain their original identities. Old remote work is excluded from
+reconciliation and stays at its last confirmed unfinished state; it is never
+automatically completed, failed, cancelled or submitted again. History reads use
+the saved database records, without scanning old sessions or source files.
 
-Invitations identify the node, independently of its available assistants. A node
-with an empty directory can both publish and consume invitations.
-
-Invitation version 5 carries the pinned node key, reachable TCP endpoint,
-public display anchor and a single-use capability in its URL fragment. Never
-log this capability, expose it through model tools or send it in chat. Preview
-proves the server key before revealing the capability and cannot claim it or
-exchange business data. The pair intent persists before confirmation, so
-lost responses retry the original request. Both directions use one authenticated
-session; only the dialing side needs an endpoint.
-
-Endpoints permit public unicast IPv4/IPv6, loopback, private LAN and Tailscale
-addresses, including DNS resolving entirely to usable unicast addresses. Unspecified,
-multicast and link-local addresses are rejected. Dialing validates the actual numeric
-address again. There is no public HTTP, proxy or protocol downgrade fallback.
-TLS 1.3 encrypts frames and invitation capabilities, with mutual Ed25519 key
-proof and the invitation or saved public-key pin. Self-signed certificates are
-generated automatically. Calls use independent Yamux streams with CBOR metadata
-and optionally Zstd-compressed bodies; see [Peer protocol](peer-protocol.md). Peer listeners
-expose only identity verification and Agent Link, without membership or
-distributed execution services.
-
-## Business contract and recovery
-
-Each connection forwards up to 32 business requests concurrently over one
-multiplexed session and holds up to 64 additional requests in FIFO dispatch order.
-A full queue returns `agent_link_capacity_exceeded` before sending. Queued callers
-can cancel without sending; sent calls retain the transport's response or uncertain
-outcome and are never automatically replayed by the forwarder. Different
-connections have independent queues and shared dials. A caller's cancellation does
-not cancel another caller's dial. Dials and dispatched calls have a 15-second bound.
-The receiver admits 32 business handlers and one independent mailbox exchange;
-slots remain held until handlers return, even if callers stop waiting. These limits
-count RPC handlers, not running Tasks. Authenticated business and exchange calls
-have no fixed per-minute rate limit. Invitation preview retains its separate
-single slot and 180-admissions/minute budget. The peer transport's 64 pending-call
-and memory limits remain in force.
-
-`Backend` provides `Directory`, `Observe`, `Submit`, `Status` and `Cancel`. The same receiver
-implementation owns in-process calls and authenticated remote calls. The receiver
-enforces per-assistant operation support and caller ownership; unsupported
-operations return a specific error. Capability checks for new submissions must
-not prevent exact retries from returning an already accepted receipt. Optional
-`ChatBackend`, `TaskInputBackend` and `ReviewBackend` interfaces supply only the
-operations that an adapter implements. Codex implements task input and human
-review; direct user chat is provided by Pot adapters.
-Remote operations are scoped to the authenticated node and original caller
-address, including its assistant, task or user kind. Returned task IDs, request
-identity and assistant node are checked.
-
-`observe` returns a live, payload-free node summary: hostname, per-assistant task
-counts (running, queued, waiting for approval or allowance), chat activity and
-uncertain-cleanup fences. Counts cover all local executions on the receiving
-node, regardless of their caller. Caller-side records of linked Tasks and
-historical remote launches are excluded; an unavailable original execution is
-not reported as an allowance wait. No prompts, task text, workspace paths, tool
-arguments, model settings or credentials are exported. Outbox counts and the
-oldest known acceptance timestamp are scoped to the authenticated caller's node;
-the request cannot select another peer. Delivery receipts still mean durable
-acceptance, never completed processing.
-
-The existing recovery pass samples observations over the authenticated session.
-The sender validates node identity, assistant membership, unique IDs, bounded
-counts and states, then caches the sample in memory with its local receipt time.
-The sample is separate from the persisted directory and is lost on restart.
-Sampling failure retains the last sample with an error; disconnect retains it as
-cached data. Status changes invalidate the UI, and unchanged samples publish at
-most every 15 seconds. Link additionally refreshes every 10 seconds while
-visible so local activity, queue timestamps and freshness remain current.
-After 30 seconds, a disconnected owner or a sampling failure, current totals
-exclude that node and assistant activity is unknown. Cached values remain labeled
-in the inspector. Connection health and execution state stay independent.
-
-The message table records local insertion time outside immutable envelopes. Exact retries retain that timestamp. Historical
-messages retain zero (unknown); if an outbox contains such a message, its oldest
-timestamp remains unknown. Aggregates cover the entire node route rather than a
-bounded delivery page.
-
-The receiver durably deduplicates the complete task request before executing.
-The sender stores a Task and original execution reference in its shared Task
-catalogue. The receiver owns the actual execution. Local and peer submissions
-share the same task operations; caller-side receipt caching does not run a worker.
-A lost submission response retries the same request ID; it cannot create another
-execution. A disconnected or uncertain request remains unresolved. Definitive
-admission failures surface in the original task list and notification route.
-Cancellation intent is persisted before any attempt to send it. Before acceptance
-is observed it waits for the original reference; afterward it always targets that
-reference. Disconnect and restart retain the intent for retry. Cancellation never
-fabricates completion or proves that execution stopped.
-
-Direct user chats with another Pot use a persisted user session address per
-connection and target assistant, rather than the local default assistant. User requests address an
-assistant; assistant replies to user addresses require the original request,
-conversation and full sender/recipient binding. They enter the durable user
-projection without autonomous local processing. Session addresses survive default
-changes, local assistant deletion and restart. Peer text retains its existing
-receiver-owned execution policy; a user session address grants no remote owner
-API access. Proactive messages still address a real assistant explicitly. A
-Codex sender discovers the current directory and supplies assistant_id; omission
-or a removed target fails without selecting another recipient. Task delegation
-uses the explicit executor or ordinary Pot routing contract.
-
-The existing mailbox owns messages and immutable delivery receipts. Pending
-selection filters both node IDs before applying the page bound, preserving
-accepted senders even after assistant removal. Reconnection resends originals;
-conflicting message IDs or receipts are rejected. Receipt means durable inbox
-acceptance, not model processing or task completion. Direct user chat replies
-are atomically admitted as already consumed by the user conversation, so they
-cannot simultaneously trigger the local assistant's autonomous mail consumer.
-The existing unread tracking and notification paths display their replies.
-
-Assistant-originated remote task outcomes enter the existing durable background
-notification inbox for the original directing assistant. User-originated tasks
-instead retain a persisted user session for their source conversation and target.
-They need no local assistant: results enter that conversation and its task outcome
-projection without waking any local model. Restart and retries retain the original
-caller, request, task reference and result ID. A different user session or caller
-kind cannot inspect or cancel that accepted task. Retained conversation and task
-reads still work after deleting a link, without permitting new execution.
-Results retain receiver provenance. Source icons in assistant lists, chat titles and task rows identify Codex or another Pot.
-Task details expose local archive state and controls advertised by the receiving
-adapter. Codex supports terminal-run continuation; live steering and remote file
-access are unavailable. Neither current adapter
-advertises cross-node artifact access. Directory entries and exported capabilities
-must be implemented before additional controls are exposed.
+The current remote contract has no file-byte transfer. The previous Agent Link
+service also exposed no TaskFiles/file-read operation; local file snapshots and
+saved message-file content remain available under their original source checks.
+A remote result path is metadata, not a delivered file.
 
 ## Chat execution projection
 
@@ -287,24 +160,11 @@ upgrades. This chat execution projection applies to receivers that implement
 
 ## Lifecycle and upgrades
 
-Disconnect pauses communication and retains endpoint, keys, directory, history
-and task references. Reconnect reuses that connection. Delete revokes the saved
-connection and removes its active directory projection; a minimal authenticated
-tombstone fences a stale peer. Messages, tasks, results and receipts remain.
-Neither action silently cancels receiver-owned execution.
-
-Each revocation propagation attempt retires its transport session, including
-failed or canceled attempts. The remote may close the connection before its
-reply arrives. A later pending attempt opens a fresh authenticated session and
-can observe the remote tombstone. Failed attempts retain the durable pending
-revocation; closing the session does not retry business requests.
-
-Persisted schemas and upgrade procedures are documented in
-[database migrations](database-migrations.md). Upgrade connected Pot and Codex
-adapters together. Admission requiring a new invitation stays fenced until the
-user reconnects; upgrades never replay unfinished execution. See the
-[Codex adapter](../integrations/codex/README.md) for installation, local execution
-scope and conservative restart behavior.
+Disconnect pauses communication without cancelling work or removing history.
+Revocation invalidates the OAuth connection; reauthorization cannot revive a
+revoked grant. SDK sessions carry no owner authority. Renew expired access with
+the same client only after browser login and consent. Deployers manage
+reachability, HTTP/HTTPS and certificates.
 
 ## User-managed native assistants
 
@@ -367,3 +227,12 @@ not undo creation, and ordinary periodic synchronization updates all clients.
 Errors distinguish unsupported, unauthorized, unreachable, unavailable model or
 workspace, revision conflict, busy, capacity and invalid requests. The UI translates
 these identifiers and retains raw diagnostics in a disclosure.
+
+Native profile/delete and the existing assistant-management catalogue use a
+receiver-only human-operation channel. Only the original authenticated human UI
+can enqueue it; ordinary MCP callers, models and execution tools cannot. Existing
+profile/delete DTOs and native revision, idle, cleanup, scope and management
+receipt checks remain authoritative. Receivers journal before execution; a lost
+finished response can be reconciled, while uncertain effects are never replayed.
+Server-side tombstones stop old registrations from reviving deleted assistants.
+The connection does not grant raw workspace, credential or owner configuration.

@@ -48,7 +48,7 @@ func (s *Service) createTaskFrom(ctx context.Context, owner string, from protoco
 	r := agentlink.TaskRequest{Target: target, RequestID: request.RequestID, From: from, Text: request.Text, Workspace: request.Workspace.ProjectDir}
 	if target == self && from.Kind == "assistant" {
 		r.Configuration = &request
-		accepted, err := s.agentLinks.service.Submit(ctx, "", r)
+		accepted, err := (potLinkBackend{s}).Submit(ctx, r)
 		if err != nil {
 			return protocol.TaskInfo{}, err
 		}
@@ -64,15 +64,23 @@ func (s *Service) createTaskFrom(ctx context.Context, owner string, from protoco
 	if request.Profile != nil || request.Model != nil || request.Skills != nil || request.Workspace.Mode() == "worktree" || request.Requirements != (protocol.TaskRequirements{}) || target.Kind == "node" && request.Workspace.ProjectDir != "" {
 		return protocol.TaskInfo{}, agentlink.ErrUnsupported
 	}
+	if connection, found, e := s.potMCPRoute(ctx, target); e != nil {
+		return protocol.TaskInfo{}, e
+	} else if found {
+		return s.createPotMCPTask(ctx, connection, owner, from, request)
+	}
 	link, err := s.agentLinkRoute(ctx, target)
 	if err != nil {
 		return protocol.TaskInfo{}, err
 	}
-	directory, err := s.agentLinks.service.Directory(ctx, link)
+	directory, err := (potLinkBackend{s}).Directory(ctx)
 	if err != nil {
 		return protocol.TaskInfo{}, err
 	}
 	if !directory.Capabilities(target).Supports(agentlink.TaskSubmit) {
+		return protocol.TaskInfo{}, agentlink.ErrUnsupported
+	}
+	if link != "" {
 		return protocol.TaskInfo{}, agentlink.ErrUnsupported
 	}
 	identity := agentlink.Identity{Address: agentlink.NodeTarget(s.options.RuntimeID), Adapter: "local", Name: "Pot"}
@@ -128,12 +136,27 @@ func (s *Service) guideTaskExecution(ctx context.Context, owner, id string, inpu
 	if !s.taskExecutionCapabilities(ctx, d).Supports(agentlink.TaskInput) || d.Execution.Receipt.ID == "" {
 		return nil, agentlink.ErrUnsupported
 	}
-	remote, err := s.agentLinks.service.Input(ctx, taskLinkID(d.Info.AgentLink.LinkID), agentlink.TaskGuidance{From: d.Execution.Request.From, ID: d.Execution.Receipt.ID, RequestID: input.RequestID, Text: input.Text})
+	var accepted MCPTaskAcceptance
+	if s.isPotMCP(ctx, d.Info.AgentLink.LinkID) {
+		accepted, err = s.potMCPTaskInput(ctx, d, input)
+	} else {
+		return nil, agentlink.ErrUnsupported
+	}
 	if err != nil {
-		return nil, err
+		return nil, mcpFailure(err)
+	}
+	remote := accepted.Task
+	if accepted.Receipt.Duplicate {
+		// This is the saved acceptance, not the current execution snapshot.
+		// Never project its old run over an admitted continuation.
+		return remote, nil
 	}
 	linkRun := d.Execution.Receipt.RunID
-	projectTaskReceipt(d, remote)
+	if s.isPotMCP(ctx, d.Info.AgentLink.LinkID) {
+		projectPotMCPTaskReceipt(d, remote)
+	} else {
+		projectTaskReceipt(d, remote)
+	}
 	_, err = s.Tasks.UpdateExecution(ctx, *d, linkRun)
 	if err == nil {
 		s.wakeTasks()
@@ -153,6 +176,9 @@ func (s *Service) StopTask(ctx context.Context, owner, id, mode string) error {
 	if mode != "cancel" {
 		return agentlink.ErrUnsupported
 	}
+	if d.Info.AgentLink != nil && d.Info.AgentLink.LinkID != "local" && !s.isPotMCP(ctx, d.Info.AgentLink.LinkID) {
+		return agentlink.ErrUnsupported
+	}
 	if e = s.Tasks.StopExecution(ctx, owner, id); e != nil {
 		return e
 	}
@@ -160,7 +186,11 @@ func (s *Service) StopTask(ctx context.Context, owner, id, mode string) error {
 	if d.Execution.Receipt.ID == "" {
 		return nil
 	}
-	_, e = s.agentLinks.service.Cancel(ctx, taskLinkID(d.Info.AgentLink.LinkID), d.Execution.Request.From, d.Execution.Receipt.ID)
+	if s.isPotMCP(ctx, d.Info.AgentLink.LinkID) {
+		_, e = s.potMCPTaskCancel(ctx, d.Info.AgentLink.LinkID, d.Execution.Request, d.Execution.Receipt.ID, d.Execution.Receipt.RunID)
+		return e
+	}
+	_, e = (potLinkBackend{s}).Cancel(ctx, d.Execution.Request.From, d.Execution.Receipt.ID)
 	return e
 }
 func (s *Service) syncTaskExecutions(ctx context.Context) {
@@ -200,7 +230,16 @@ func (s *Service) syncTaskExecutions(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		if it.link != "local" && !s.isPotMCP(ctx, it.link) {
+			continue
+		}
 		d := it.d
+		// Receiver service projections are not this Control's directing actor.
+		// Their original node reads the owned result through the saved mapping.
+		// A matching assistant ID on this node grants no notification ownership.
+		if d.Execution.Request.From.NodeID != s.options.RuntimeID {
+			continue
+		}
 		expectedRun := d.Execution.Receipt.RunID
 		if terminalLinkTask(d.Execution.Receipt.State) && it.notified != 0 {
 			continue
@@ -210,9 +249,17 @@ func (s *Service) syncTaskExecutions(ctx context.Context) {
 			remote = d.Execution.Receipt
 			e = nil
 		} else if d.Execution.Receipt.ID == "" {
-			remote, e = s.agentLinks.service.Submit(ctx, taskLinkID(it.link), d.Execution.Request)
+			if s.isPotMCP(ctx, it.link) {
+				remote, e = s.potMCPTaskSubmit(ctx, it.link, d.Execution.Request)
+			} else {
+				remote, e = (potLinkBackend{s}).Submit(ctx, d.Execution.Request)
+			}
 		} else {
-			remote, e = s.agentLinks.service.Status(ctx, taskLinkID(it.link), d.Execution.Request.From, d.Execution.Receipt.ID)
+			if s.isPotMCP(ctx, it.link) {
+				remote, e = s.potMCPTaskRead(ctx, it.link, d.Execution.Request, d.Execution.Receipt.ID)
+			} else {
+				remote, e = (potLinkBackend{s}).Status(ctx, d.Execution.Request.From, d.Execution.Receipt.ID)
+			}
 		}
 		if e != nil {
 			definitive := errors.Is(e, agentlink.ErrInvalid) || errors.Is(e, agentlink.ErrUnsupported) || errors.Is(e, agentlink.ErrUnauthorized) || errors.Is(e, agentlink.ErrConflict) || errors.Is(e, agentlink.ErrNotFound) || errors.Is(e, agentlink.ErrFenced)
@@ -223,14 +270,24 @@ func (s *Service) syncTaskExecutions(ctx context.Context) {
 			remote = agentlink.Task{RequestID: d.Execution.Request.RequestID, State: "failed", Error: e.Error(), UpdatedAt: time.Now().UTC()}
 		}
 		if it.stop != 0 && !terminalLinkTask(remote.State) {
-			if cancelled, err := s.agentLinks.service.Cancel(ctx, taskLinkID(it.link), d.Execution.Request.From, remote.ID); err == nil {
+			cancelled, err := agentlink.Task{}, error(nil)
+			if s.isPotMCP(ctx, it.link) {
+				cancelled, err = s.potMCPTaskCancel(ctx, it.link, d.Execution.Request, remote.ID, remote.RunID)
+			} else {
+				cancelled, err = (potLinkBackend{s}).Cancel(ctx, d.Execution.Request.From, remote.ID)
+			}
+			if err == nil {
 				remote = cancelled
 			}
 		}
 		if d.Execution.Receipt.ID != "" && (d.Execution.Receipt.ID != remote.ID || d.Execution.Receipt.RequestID != remote.RequestID || d.Execution.Receipt.Receiver.Address != remote.Receiver.Address) {
 			continue
 		}
-		projectTaskReceipt(d, remote)
+		if s.isPotMCP(ctx, it.link) {
+			projectPotMCPTaskReceipt(d, remote)
+		} else {
+			projectTaskReceipt(d, remote)
+		}
 		changed, err := s.Tasks.UpdateExecution(ctx, *d, expectedRun)
 		if err != nil || !changed {
 			continue
@@ -246,42 +303,50 @@ func (s *Service) syncTaskExecutions(ctx context.Context) {
 	}
 }
 func (s *Service) taskExecutionNotification(ctx context.Context, id, owner string, d *tasks.Record) error {
+	if d.Execution.Request.From.NodeID != s.options.RuntimeID {
+		return agentlink.ErrUnauthorized
+	}
 	if d.Execution.Request.From.Kind == "user" {
 		return s.userTaskExecutionNotification(ctx, id, owner, d)
 	}
-	// Receiver-owned task outcomes enter the same durable notification inbox as
-	// local outcomes. IDs and routing are fixed at submission, even if defaults change.
-	run := d.Info.RunID
-	if run == "" {
-		run = linkRunID(id)
-	}
-	eventID := id
-	if d.Execution.Request.Target.Kind == "node" {
-		eventID, _ = core.HashJSON([]string{id, run})
-	}
-	result := protocol.TaskResultEvent{TaskID: id, RunID: run, Title: d.Info.Title, Phase: d.Info.Phase, Text: d.Execution.Receipt.Result, Error: d.Execution.Receipt.Error, Origin: protocol.TaskOrigin{Kind: "manual"}}
-	envelope := protocol.Envelope{ID: eventID, Kind: "task_result", From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "runtime", AgentID: "agent-link"}, To: d.Execution.Request.From, ConversationID: run, Text: d.Execution.Receipt.Result, Result: &result}
-	if envelope.Text == "" {
-		envelope.Text = d.Info.Title
-	}
 	err := storage.Transaction(ctx, s.Tasks.DB(), func(tx *sql.Tx) error {
-		var exists bool
-		if e := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_messages WHERE id=?)", eventID).Scan(&exists); e != nil {
-			return e
-		}
-		if exists {
-			return nil
-		}
-		if e := inbox.EnqueueTx(ctx, tx, envelope, "in", "queued"); e != nil {
-			return e
-		}
-		return nil
+		return taskExecutionNotificationTx(ctx, tx, s.options.RuntimeID, d)
 	})
 	if err == nil {
 		s.Changes.Notify("task-outcomes")
 	}
 	return err
 }
+
+// Terminal mailbox runs may advance before the background notification scan.
+// Commit their completion envelope alongside the terminal Task projection.
+func taskExecutionNotificationTx(ctx context.Context, tx *sql.Tx, node string, d *tasks.Record) error {
+	if d.Execution.Request.From.NodeID != node || d.Execution.Request.From.Kind != "assistant" {
+		return agentlink.ErrUnauthorized
+	}
+	run := d.Info.RunID
+	if run == "" {
+		run = linkRunID(d.Info.ID)
+	}
+	eventID, _ := core.HashJSON([]string{d.Info.ID, run})
+	result := protocol.TaskResultEvent{TaskID: d.Info.ID, RunID: run, Title: d.Info.Title, Phase: d.Info.Phase, Text: d.Execution.Receipt.Result, Error: d.Execution.Receipt.Error, Origin: protocol.TaskOrigin{Kind: "manual"}}
+	if d.Outcome != nil && d.Outcome.TaskID == d.Info.ID && d.Outcome.RunID == run {
+		result = *d.Outcome
+	}
+	envelope := protocol.Envelope{ID: eventID, Kind: "task_result", From: protocol.AgentRef{NodeID: node, Kind: "runtime", AgentID: "agent-link"}, To: d.Execution.Request.From, ConversationID: run, Text: d.Execution.Receipt.Result, Result: &result}
+	if envelope.Text == "" {
+		envelope.Text = d.Info.Title
+	}
+	var exists bool
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_messages WHERE id=?)", eventID).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	return inbox.EnqueueTx(ctx, tx, envelope, "in", "queued")
+}
+
 func (s *Service) TaskPage(ctx context.Context, owner string, q protocol.TaskQuery) (protocol.TaskPage, error) {
 	// The operator filter uses the directory key. Linked tasks are stored under
 	// their durable user-chat session, not the remote assistant ID or UI key.
@@ -370,11 +435,13 @@ func (s *Service) taskExecutionCapabilities(ctx context.Context, record *tasks.R
 	var directory *agentlink.Directory
 	link := taskLinkID(record.Info.AgentLink.LinkID)
 	if link == "" {
-		if d, err := s.agentLinks.service.Directory(ctx, ""); err == nil {
+		if d, err := (potLinkBackend{s}).Directory(ctx); err == nil {
 			directory = &d
 		}
-	} else if c, err := s.agentLinks.service.Get(ctx, link); err == nil && c.State != "revoked" {
-		directory = c.Directory
+	} else if s.isPotMCP(ctx, link) {
+		if c, e := s.PotMCPConnection(ctx, link); e == nil && c.State != "revoked" {
+			directory = c.Directory
+		}
 	}
 	if directory == nil {
 		return result

@@ -265,3 +265,30 @@ projection and cache accounting is rebuilt. Command receipts retain their
 original keys. Boot provenance remains available to live read and write fences;
 restored display values do not restore operation authority. The upgrade leaves
 transcripts, startup identity, drafts, outbox records and original Blobs intact.
+
+`ui-cache/0010_mcp_connections.mjs` adds the MCP connection display domain with
+a strict metadata projection. It discards earlier projections and command
+receipts for that endpoint, including their boot-scoped and stable cache keys.
+OAuth authorization URLs, query credentials, state, codes and tokens remain
+transient. Cached connection status never authorizes a mutation; each command
+confirms the current connection and scope through a live read.
+
+## MCP cutover
+
+`control/0009_mcp_cutover` converts saved old connections to version-1 minimal
+unsupported history records, including their last known state. It drops obsolete
+invitation, handshake, TCP endpoint and native pairing-key configuration. It
+neither imports an OAuth grant nor changes Task phases, reports, receipts or
+saved artifact content. Old encrypted pairing secrets are no longer read or
+converted by startup.
+
+`tasks/0010_mcp_native_user` adds the human-operation request/result journal and
+native profile/delete tombstones. It reuses the existing native backend checks.
+Startup and receiver epoch changes fence unfinished requests as unknown; neither
+reconnection nor a journal entry authorizes re-execution.
+
+`tasks/0012_mcp_input_mailbox` adds a separate input-disposition receipt and
+captures the phase at original mailbox admission. It updates saved claim replies
+and receiver journal controls together. Previously admitted inputs are marked
+consumed without executing them again; pending inputs remain pending. Original
+mutation receipts, Task/run identities and retired work tombstones are retained.

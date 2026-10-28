@@ -1,21 +1,15 @@
 package agenthost
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/jjyr/pot/pkg/agentlink"
-	"github.com/jjyr/pot/pkg/peer"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 )
@@ -288,84 +282,6 @@ func TestManagementContractAcrossRuntimes(t *testing.T) {
 	}
 }
 
-func TestBrowserManagementKeepsCommittedIdentityWhenDirectoryFails(t *testing.T) {
-	var fail atomic.Bool
-	h, app, owner := profileApplication(t, func(server *peer.Server) {
-		authorize := server.Authorize
-		server.Authorize = func(ctx context.Context, remote peer.Identity, service string, auth json.RawMessage) (peer.Handler, error) {
-			handler, e := authorize(ctx, remote, service, auth)
-			return func(ctx context.Context, r peer.Request) (json.RawMessage, error) {
-				if r.Method == "directory" && fail.Load() {
-					return nil, agentlink.ErrUnavailable
-				}
-				out, e := handler(ctx, r)
-				if r.Method == "assistant.management" && strings.Contains(string(r.Params), `"action":"create"`) && e == nil {
-					fail.Store(true)
-				}
-				return out, e
-			}, e
-		}
-	})
-	h.backend.binary = fakeBinary
-	handler, cookie := profileBrowserHandler(t, app)
-	link := strings.Split(owner, ":")[1]
-	body := map[string]any{"connection_id": link, "action": "create", "request_id": "browser-create", "id": "review", "name": "Review", "model": "model-one", "effort": "high", "workspace": scopeID(filepath.Join(h.backend.root, "workspace"), "read-only"), "from": map[string]string{"node_id": "forged", "kind": "assistant", "agent_id": "model"}}
-	call := func() *httptest.ResponseRecorder {
-		r := httptest.NewRequest(http.MethodPost, "http://localhost/api/v1/agent-links/assistants", strings.NewReader(encoded(body)))
-		r.AddCookie(cookie)
-		r.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, r)
-		return w
-	}
-	first := call()
-	if first.Code != 200 {
-		t.Fatal(first.Code, first.Body.String())
-	}
-	var value agentlink.AssistantManagementResult
-	if json.Unmarshal(first.Body.Bytes(), &value) != nil || value.Assistant == nil || value.Assistant.Address != agentlink.AssistantTarget(h.backend.nodeID, "review") || value.Assistant.Effort != "high" {
-		t.Fatal(first.Body.String())
-	}
-	second := call()
-	if second.Code != 200 || second.Body.String() != first.Body.String() {
-		t.Fatal("retry changed committed result", second.Code, second.Body.String())
-	}
-	var count int
-	h.backend.db.QueryRow("SELECT COUNT(*) FROM agent_adapter_assistants WHERE id='review'").Scan(&count)
-	if count != 1 {
-		t.Fatal(count)
-	}
-	var callerNode, callerKind, callerAgent string
-	if e := h.backend.db.QueryRow("SELECT json_extract(payload,'$.from.node_id'),json_extract(payload,'$.from.kind'),json_extract(payload,'$.from.agent_id') FROM agent_adapter_management WHERE request_id='browser-create'").Scan(&callerNode, &callerKind, &callerAgent); e != nil || callerNode != app.RuntimeID || callerKind != "user" || callerAgent != "operator" {
-		t.Fatal("untrusted From survived authentication binding", callerNode, callerKind, callerAgent, e)
-	}
-	// Verify optional-field presence through the actual HTTP and Agent Link path.
-	delete(body, "workspace")
-	delete(body, "effort")
-	delete(body, "model")
-	body["action"] = "update"
-	body["request_id"] = "rename-with-omitted-effort"
-	body["revision"] = value.Assistant.Revision
-	body["name"] = "Updated"
-	h.backend.binary = "/missing-metadata-for-presentation-edit"
-	renamed := call()
-	var renamedValue agentlink.AssistantManagementResult
-	if renamed.Code != 200 || json.Unmarshal(renamed.Body.Bytes(), &renamedValue) != nil || renamedValue.Assistant == nil || renamedValue.Assistant.Effort != "high" {
-		t.Fatal("HTTP omission cleared receiver effort", renamed.Code, renamed.Body.String())
-	}
-	h.backend.binary = fakeBinary
-	body["request_id"] = "explicit-default-effort"
-	body["revision"] = renamedValue.Assistant.Revision
-	body["effort"] = ""
-	delete(body, "name")
-	cleared := call()
-	var clearedValue agentlink.AssistantManagementResult
-	if cleared.Code != 200 || json.Unmarshal(cleared.Body.Bytes(), &clearedValue) != nil || clearedValue.Assistant == nil || clearedValue.Assistant.Effort != "" {
-		t.Fatal("HTTP explicit default was lost", cleared.Code, cleared.Body.String())
-	}
-
-}
-
 func TestManagedCodexSessionAppliesItsOwnModelAndEffort(t *testing.T) {
 	workspace := t.TempDir()
 	worker, e := os.Executable()
@@ -383,56 +299,6 @@ func TestManagedCodexSessionAppliesItsOwnModelAndEffort(t *testing.T) {
 	var settings map[string]string
 	if json.Unmarshal(raw, &settings) != nil || settings["model"] != "model-one" || settings["effort"] != "high" {
 		t.Fatal(string(raw))
-	}
-}
-
-func TestBrowserManagementRecoversLostMutationResponseWithOriginalRequest(t *testing.T) {
-	var dropped atomic.Bool
-	h, app, owner := profileApplication(t, func(server *peer.Server) {
-		authorize := server.Authorize
-		server.Authorize = func(ctx context.Context, remote peer.Identity, service string, auth json.RawMessage) (peer.Handler, error) {
-			handler, e := authorize(ctx, remote, service, auth)
-			return func(ctx context.Context, r peer.Request) (json.RawMessage, error) {
-				result, e := handler(ctx, r)
-				if e == nil && r.Method == "assistant.management" && strings.Contains(string(r.Params), `"action":"create"`) && !dropped.Swap(true) {
-					return nil, agentlink.ErrUnavailable
-				}
-				return result, e
-			}, e
-		}
-	})
-	h.backend.binary = fakeBinary
-	handler, cookie := profileBrowserHandler(t, app)
-	link := strings.Split(owner, ":")[1]
-	body := map[string]any{"connection_id": link, "action": "create", "request_id": "lost-response", "id": "independent", "name": "Review", "model": "model-one", "workspace": scopeID(filepath.Join(h.backend.root, "workspace"), "read-only")}
-	call := func() *httptest.ResponseRecorder {
-		request := httptest.NewRequest(http.MethodPost, "http://localhost/api/v1/agent-links/assistants", strings.NewReader(encoded(body)))
-		request.AddCookie(cookie)
-		request.Header.Set("Content-Type", "application/json")
-		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, request)
-		return response
-	}
-	first := call()
-	if first.Code == 200 || !dropped.Load() {
-		t.Fatal("lost response was not injected", first.Code)
-	}
-	// The model source can disappear after the durable mutation. The retry still
-	// resolves its receipt before discovery and does not create another identity.
-	h.backend.binary = "/missing-metadata-after-commit"
-	retry := call()
-	var result agentlink.AssistantManagementResult
-	if retry.Code != 200 || json.Unmarshal(retry.Body.Bytes(), &result) != nil || result.Assistant == nil || result.Assistant.Address != agentlink.AssistantTarget(h.backend.nodeID, "independent") {
-		t.Fatal(retry.Code, retry.Body.String())
-	}
-	body["name"] = "Changed payload"
-	conflict := call()
-	if conflict.Code == 200 || !strings.Contains(conflict.Body.String(), agentlink.ErrConflict.Error()) {
-		t.Fatal(conflict.Code, conflict.Body.String())
-	}
-	var count int
-	if e := h.backend.db.QueryRow("SELECT COUNT(*) FROM agent_adapter_assistants WHERE id='independent'").Scan(&count); e != nil || count != 1 {
-		t.Fatal(count, e)
 	}
 }
 

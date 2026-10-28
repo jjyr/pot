@@ -40,22 +40,48 @@ func (s *Service) agentTarget(ctx context.Context, owner string) (context.Contex
 		return ctx, agentlink.AssistantTarget(s.options.RuntimeID, owner), nil
 	}
 	parts := strings.SplitN(strings.TrimPrefix(owner, "agent-link:"), ":", 2)
+	if s.isPotMCP(ctx, parts[0]) {
+		c, e := s.PotMCPConnection(ctx, parts[0])
+		if e != nil {
+			return ctx, protocol.AgentRef{}, e
+		}
+		target := agentlink.AssistantTarget(c.RemoteNodeID, parts[1])
+		if c.Directory == nil || c.Directory.Capabilities(target).Version != 1 {
+			return ctx, protocol.AgentRef{}, agentlink.ErrNotFound
+		}
+		return context.WithValue(ctx, agentRouteKey{}, c.ID), target, nil
+	}
 	c, err := s.agentLinks.service.Get(ctx, parts[0])
 	if err != nil {
 		return ctx, protocol.AgentRef{}, err
 	}
-	return context.WithValue(ctx, agentRouteKey{}, c.ID), agentlink.AssistantTarget(c.PeerHost.NodeID, parts[1]), nil
+	return context.WithValue(ctx, agentRouteKey{}, c.ID), agentlink.AssistantTarget(c.Peer.Address.NodeID, parts[1]), nil
 }
 func (s *Service) agentLinkRoute(ctx context.Context, target protocol.AgentRef) (string, error) {
 	if !agentlink.ValidTarget(target) {
 		return "", agentlink.ErrInvalid
 	}
 	if pinned, ok := ctx.Value(agentRouteKey{}).(string); ok {
+		if s.isPotMCP(ctx, pinned) {
+			c, e := s.PotMCPConnection(ctx, pinned)
+			if e != nil {
+				return "", e
+			}
+			if c.Directory == nil {
+				return "", agentlink.ErrUnavailable
+			}
+			for _, endpoint := range c.Directory.Targets {
+				if endpoint.Address == target {
+					return c.ID, nil
+				}
+			}
+			return "", agentlink.ErrConflict
+		}
 		c, err := s.agentLinks.service.Get(ctx, pinned)
 		if err != nil {
 			return "", err
 		}
-		if c.PeerHost.NodeID != target.NodeID {
+		if c.Peer.Address.NodeID != target.NodeID {
 			return "", agentlink.ErrConflict
 		}
 		return c.ID, nil
@@ -63,13 +89,18 @@ func (s *Service) agentLinkRoute(ctx context.Context, target protocol.AgentRef) 
 	if target.NodeID == s.options.RuntimeID {
 		return "", nil
 	}
+	if c, found, e := s.potMCPRoute(ctx, target); e != nil {
+		return "", e
+	} else if found {
+		return c.ID, nil
+	}
 	connections, err := s.agentLinks.service.List(ctx)
 	if err != nil {
 		return "", err
 	}
 	var route string
 	for _, c := range connections {
-		if c.State != "revoked" && c.PeerHost.NodeID == target.NodeID {
+		if c.State != "revoked" && c.Peer.Address.NodeID == target.NodeID {
 			if route != "" {
 				return "", agentlink.ErrConflict
 			}
@@ -188,30 +219,29 @@ func (p agentPort) Describe(ctx context.Context, target protocol.AgentRef) (agen
 		}
 		return agentlink.Description{Version: 1, Scope: "owner", Operations: agentlink.OwnerOperations()}, nil
 	}
+	if p.s.isPotMCP(ctx, link) {
+		c, e := p.s.PotMCPConnection(ctx, link)
+		if e != nil {
+			return agentlink.Description{}, e
+		}
+		if c.Directory == nil {
+			return agentlink.Description{}, agentlink.ErrUnavailable
+		}
+		d := c.Directory.Capabilities(target)
+		if d.Supports(agentlink.ChatRead) {
+			d.Operations = append(d.Operations, agentlink.ChatSubscribe)
+		}
+		if d.Supports(agentlink.TaskRead) {
+			d.Operations = append(d.Operations, agentlink.TaskList, agentlink.TaskArchive, agentlink.TaskOutcomes)
+		}
+		return d, nil
+	}
 	c, err := p.s.agentLinks.service.Get(ctx, link)
 	if err != nil {
 		return agentlink.Description{}, err
 	}
-	d := agentlink.Description{}
-	if c.State != "revoked" && c.Directory != nil {
-		d = c.Directory.Capabilities(target)
-	}
-	var retained bool
-	if err = p.s.integrationDB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_link_chat_sessions WHERE link_id=? AND assistant_id=?)", link, target.AgentID).Scan(&retained); err != nil {
-		return d, err
-	}
-	if d.Version != 1 && retained {
-		return agentlink.Description{Version: 1, Scope: "caller", Operations: []agentlink.Operation{agentlink.ChatRead, agentlink.ChatReceipt, agentlink.ChatSubscribe, agentlink.TaskRead, agentlink.TaskList, agentlink.TaskArchive, agentlink.TaskOutcomes}}, nil
-	}
-	if d.Version != 1 {
-		return d, agentlink.ErrNotFound
-	}
-	// Lists, archive and outcome reads project only this user's accepted tasks;
-	// they do not grant access to another user's remote task catalogue.
-	if d.Supports(agentlink.TaskSubmit) {
-		d.Operations = append(append([]agentlink.Operation{}, d.Operations...), agentlink.TaskList, agentlink.TaskArchive, agentlink.TaskOutcomes)
-	}
-	return d, nil
+	_ = c
+	return agentlink.Description{Version: 1, Scope: "caller", Operations: []agentlink.Operation{agentlink.ChatRead, agentlink.ChatReceipt, agentlink.ChatSubscribe, agentlink.TaskRead, agentlink.TaskList, agentlink.TaskArchive, agentlink.TaskOutcomes}}, nil
 }
 
 func (p agentPort) Call(ctx context.Context, target protocol.AgentRef, operation agentlink.Operation, call agentlink.Call) (any, error) {
@@ -403,7 +433,7 @@ func (p agentPort) linkedCall(ctx context.Context, target protocol.AgentRef, lin
 		if err := protocol.DecodeStrict(call.Body, &input); err != nil {
 			return nil, err
 		}
-		return s.agentLinks.service.DeleteAssistant(ctx, link, agentlink.DeleteAssistantRequest{From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: linkChatID(link, target.AgentID)}, AssistantID: target.AgentID, Revision: input.Revision})
+		return s.nativeUserCall(ctx, link, target, nil, &agentlink.DeleteAssistantRequest{AssistantID: target.AgentID, Revision: input.Revision}, nil)
 	}
 	if op == agentlink.AssistantProfile {
 		var input struct {
@@ -418,7 +448,7 @@ func (p agentPort) linkedCall(ctx context.Context, target protocol.AgentRef, lin
 		if action == "write" {
 			action = "update"
 		}
-		return s.agentLinks.service.Profile(ctx, link, agentlink.ProfileRequest{From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: linkChatID(link, target.AgentID)}, AssistantID: target.AgentID, Action: action, Name: input.Name, Avatar: input.Avatar, Revision: input.Revision})
+		return s.nativeUserCall(ctx, link, target, &agentlink.ProfileRequest{AssistantID: target.AgentID, Action: action, Name: input.Name, Avatar: input.Avatar, Revision: input.Revision}, nil, nil)
 	}
 	owner := linkChatID(link, target.AgentID)
 	if op == agentlink.TaskSubmit {

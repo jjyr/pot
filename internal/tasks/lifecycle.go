@@ -220,6 +220,17 @@ func (s *Service) markWaiting(ctx context.Context, assistant, id string, cause e
 	})
 }
 func (s *Service) Stop(ctx context.Context, assistant, id, mode string) error {
+	return s.stop(ctx, assistant, id, mode, "")
+}
+
+// StopExpectedRun fences a collaboration cancellation against the actual run.
+func (s *Service) StopExpectedRun(ctx context.Context, assistant, id, expectedRun string) error {
+	if !core.Identifier(expectedRun) {
+		return agentlink.ErrInvalid
+	}
+	return s.stop(ctx, assistant, id, "cancel", expectedRun)
+}
+func (s *Service) stop(ctx context.Context, assistant, id, mode, expectedRun string) error {
 	if mode != "interrupt" && mode != "cancel" {
 		return fmt.Errorf("invalid stop mode")
 	}
@@ -230,6 +241,9 @@ func (s *Service) Stop(ctx context.Context, assistant, id, mode string) error {
 		}
 		if record == nil {
 			return fmt.Errorf("task missing")
+		}
+		if expectedRun != "" && record.RunID != expectedRun {
+			return agentlink.ErrFenced
 		}
 		if record.Execution != nil {
 			return agentlink.ErrUnsupported
@@ -253,6 +267,9 @@ func (s *Service) Stop(ctx context.Context, assistant, id, mode string) error {
 	send := false
 	var launch *Launch
 	err := s.change(ctx, assistant, id, func(tx *sql.Tx, r *Record) error {
+		if expectedRun != "" && r.RunID != expectedRun {
+			return agentlink.ErrFenced
+		}
 		if r.Info.Phase.Scope() != "active" {
 			state := "retained"
 			if mode == "cancel" {

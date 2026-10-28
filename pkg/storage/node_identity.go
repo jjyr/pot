@@ -161,11 +161,6 @@ func (n *nodeJSON) migrate(mode string) {
 				v.changed = true
 			}
 		}
-	case "credential":
-		if pair := n.get("pair"); pair != nil {
-			pair.get("local").identity()
-			pair.get("peer").identity()
-		}
 	case "directory":
 		n.rename("control_id", "node_id")
 		n.get("assistants").each(func(v *nodeJSON) { v.get("address").ref() })

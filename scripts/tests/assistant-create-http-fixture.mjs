@@ -39,6 +39,7 @@ export async function assistantCreateHTTPFixture(sourceOrigin){
     }
     if(path==='/api/v1/providers'){await wait('providers');return json(res,{default_provider_id:'fixture',profiles:emptyProviders?[]:[{id:'fixture',revision:1,name:'Fixture API',model:'fixture-model'}],connections:[],directory:[],provider_types:[{id:'fixture-type',name:'Fixture API',available:true}]});}
     if(path==='/api/v1/agent-links'){await wait('links');log('response',{path});return json(res,{items:links});}
+    if(path==='/api/v1/agent-links/mcp')return body?json(res,{code:'synthetic_authorization_unavailable'},503):json(res,[]);
     if(path.startsWith('/api/')){
       const value=path==='/api/v1/runtime'?{runtime_id:space.control_id,boot_id:'creation-boot'}:path==='/api/v1/spaces'?{active_space_id:'local',items:[space]}:path==='/api/v1/assistants'?assistants:path==='/api/v1/snapshot'?frame(owner):path==='/api/v1/permissions'?{pending:[],policy:{machines:{}}}:{items:[],pending:[],policy:{},total:0};
       log('response',{path});return json(res,value);

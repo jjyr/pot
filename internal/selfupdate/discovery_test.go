@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -147,7 +148,7 @@ func TestManualCheckIsNetworkSingleflightAndWorksWithoutInstallation(t *testing.
 func TestSignedFingerprintChangeRequiresKnownForwardLineage(t *testing.T) {
 	r := eligibleRelease(t, "0.2.0")
 	r.StorageFormat = StorageFormat + "-" + strings.Repeat("cd", 32)
-	r.Schemas["tasks"] = append(r.Schemas["tasks"], "0005_forward_tasks_"+strings.Repeat("ab", 32))
+	r.Schemas["tasks"] = append(r.Schemas["tasks"], fmt.Sprintf("%04d_forward_tasks_", len(r.Schemas["tasks"])+1)+strings.Repeat("ab", 32))
 	feed, key := signed(t, *r)
 	verified, err := Verify(feed, key)
 	if err != nil || eligibility(verified) != "" {

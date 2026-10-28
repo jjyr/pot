@@ -9,7 +9,6 @@ import (
 	"github.com/jjyr/pot/internal/attachments"
 	"github.com/jjyr/pot/internal/gateway"
 	"github.com/jjyr/pot/internal/hooks"
-	"github.com/jjyr/pot/internal/linkhost"
 	"github.com/jjyr/pot/internal/nodeidentity"
 	"github.com/jjyr/pot/internal/resources"
 	"github.com/jjyr/pot/internal/schedule"
@@ -30,6 +29,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -44,17 +44,19 @@ type Options struct {
 	CleanupTarget func(context.Context, string, bool) error
 
 	WorkspaceHome       string // Optional destination home override for embedded/test hosts.
-	PeerListen          string // Explicit TCP peer bind address; owner HTTP remains separate.
 	Embedded            bool
 	SandboxDirectory    string
 	Node                string
 	IntegrationAdapters []integrations.Adapter
 }
 type Service struct {
+	potMCP              potMCPConnections
+	mcpAccess           atomic.Pointer[MCPAccess]
+	mcpMountMu          sync.Mutex
+	mcpPublications     map[string]*MCPAccess
 	linkMu              sync.Mutex
 	chatRecoveryMu      sync.Mutex
 	agentLinks          *agentLinkHost
-	linkPlugins         *linkhost.Host
 	pluginWG            sync.WaitGroup
 	fileWG              sync.WaitGroup
 	mcpOAuth            map[string]mcpOAuthSession
@@ -118,7 +120,7 @@ func Open(options Options) (*Service, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(options.Context)
-	s := &Service{options: options, ctx: ctx, cancel: cancel, conversations: map[string]*assistant.Conversation{}, hosts: map[string]*executor.Engine{}, linkPlugins: linkhost.New()}
+	s := &Service{options: options, ctx: ctx, cancel: cancel, conversations: map[string]*assistant.Conversation{}, hosts: map[string]*executor.Engine{}}
 	s.Terminals = terminal.New()
 	success := false
 	defer func() {
@@ -196,6 +198,9 @@ func Open(options Options) (*Service, error) {
 	s.watchAssistantFiles()
 	s.fileWG.Add(1)
 	go s.messageFileLoop()
+	if err = s.resumePotMCP(s.ctx); err != nil {
+		return nil, err
+	}
 	success = true
 	return s, nil
 }
@@ -464,11 +469,10 @@ func (s *Service) Close() error {
 		engines = append(engines, e)
 	}
 	s.mu.Unlock()
+	s.potMCP.wg.Wait()
 	linkErr := s.closeAgentLinks()
 	s.pluginWG.Wait()
-	if s.agentLinks != nil {
-		s.agentLinks.service.Close()
-	}
+	s.closeMCPPublications()
 	s.fileWG.Wait()
 	var result error = linkErr
 	if s.Terminals != nil {

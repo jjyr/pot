@@ -131,6 +131,41 @@ func TestAppServerReadFailureIsDistinctFromProcessExit(t *testing.T) {
 	}
 }
 
+func TestUnsupportedNativeInteractionKeepsOnlyProtocolDiagnostic(t *testing.T) {
+	for _, method := range []string{"mcpServer/elicitation/request", "item/permissions/requestApproval", "item/tool/requestUserInput", "untrusted-secret-method"} {
+		t.Run(method, func(t *testing.T) {
+			var output bytes.Buffer
+			a := &appTurn{input: nopWriteCloser{&output}, ctx: context.Background(), done: make(chan struct{}), result: TurnResult{ThreadID: "thread", TurnID: "turn"}, events: turnEvents{Review: func(context.Context, string, json.RawMessage) (string, error) {
+				t.Fatal("unsupported native interaction reached human command/file review")
+				return "", nil
+			}}}
+			a.approval(rpcMessage{ID: json.RawMessage(`"request"`), Method: method, Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","message":"private-interactive-text","token":"private-token"}`)})
+			a.notification(rpcMessage{Method: "turn/completed", Params: json.RawMessage(`{"threadId":"thread","turn":{"id":"turn","status":"completed"}}`)})
+			wantMethod := method
+			if method == "untrusted-secret-method" {
+				wantMethod = "unrecognized"
+			}
+			want := "codex_approval_requires_local_review: " + wantMethod + ": unsupported_interaction"
+			if method == "mcpServer/elicitation/request" {
+				want += "; mode=absent; request_mode=absent; thread=match; turn=match; schema_present=false; request_present=false; item_present=false"
+			}
+			if a.result.Status != "failed" || a.result.Error != want {
+				t.Fatal(a.result)
+			}
+			if strings.Contains(output.String(), "private-") || strings.Contains(a.result.Error, "private-") || strings.Contains(a.result.Error, "untrusted-secret") {
+				t.Fatal("interactive content leaked into diagnostics or response")
+			}
+			if method == "mcpServer/elicitation/request" {
+				if !strings.Contains(output.String(), `"action":"cancel"`) || strings.Contains(output.String(), "turn/interrupt") {
+					t.Fatal("elicitation cancellation changed", output.String())
+				}
+			} else if !strings.Contains(output.String(), `"code":-32601`) || !strings.Contains(output.String(), "turn/interrupt") {
+				t.Fatal("unsupported interaction rejection changed", output.String())
+			}
+		})
+	}
+}
+
 func TestAppServerKeepsOnlyAnswerAndStopsAtTurnCompletion(t *testing.T) {
 	a := &appTurn{done: make(chan struct{}), readerDone: make(chan struct{}), pending: map[int]chan rpcMessage{}, result: TurnResult{ThreadID: "thread", TurnID: "turn"}}
 	var stream strings.Builder
@@ -154,5 +189,25 @@ func TestAppServerKeepsOnlyAnswerAndStopsAtTurnCompletion(t *testing.T) {
 	a.read(strings.NewReader(stream.String()))
 	if a.result.Status != "completed" || a.result.Text != "answer\n" {
 		t.Fatalf("turn result included intermediate or later output: %+v", a.result)
+	}
+}
+
+func TestCodexElicitationShapeNeverRetainsInteractiveContent(t *testing.T) {
+	for _, mode := range []string{"form", "openai/form", "openaiForm", "url", "private-unknown-mode"} {
+		raw := json.RawMessage(`{"mode":"` + mode + `","request":{"mode":"form","url":"https://private-url.invalid"},"threadId":"private-other-thread","turnId":null,"message":"private-text","requestedSchema":{"private-key":"private-value"},"itemId":"private-item"}`)
+		got := codexElicitationShape(raw, "thread", "turn")
+		if strings.Contains(got, "private") || !strings.Contains(got, "thread=mismatch; turn=null; schema_present=true; request_present=true; item_present=true") {
+			t.Fatal(got)
+		}
+		want := mode
+		if strings.HasPrefix(mode, "private") {
+			want = "unrecognized"
+		}
+		if !strings.Contains(got, "mode="+want+"; request_mode=form;") {
+			t.Fatal(got)
+		}
+	}
+	if got := codexElicitationShape(json.RawMessage(`null`), "", ""); got != "; shape=invalid" {
+		t.Fatal(got)
 	}
 }
