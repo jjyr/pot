@@ -128,7 +128,11 @@ the bounded login-session status checks.
 
 The desktop local UI adapter consumes the same backend subscriptions and emits
 `pot:changed` through Wails. Responses and changes retain their local scope;
-Agent Link peer operations use their explicit connection identity.
+Agent Link peer operations use their explicit connection identity. A suspended
+desktop startup generation ignores changes from its retired listeners.
+The manager preserves the `/changes` SSE ID's Runtime boot in the native
+`pot:changed.boot_id` envelope, independently of domain version markers. A reset
+or changed boot revalidates desktop startup even when no Chat is selected.
 
 ## Browser stream recovery
 
@@ -242,7 +246,33 @@ the stream write deadline. No token queue grows behind a slow consumer.
 
 The browser uses EventSource and closes the old source when switching owners.
 Desktop forwards the same frames through `pot:snapshot`; its local UI adapter
-reconnects with bounded backoff. Every new connection begins with a reset. The
+reconnects with bounded backoff. The WebView allocates an opaque subscription
+token before calling `Service.Subscribe(token, space, owner, locale)`. The host
+rejects duplicate live tokens and caps active subscriptions at 128. The production
+`localui.NativeSubscriptions` bridge owns the registry and recovery loop; the
+Wails service delegates to it and broadcasts its emitted payloads.
+
+```text
+main WebView (token A) --+                        +--> pot:snapshot/subscription
+                        +--> Wails Service --> localui bridge --> Manager --> Control
+tray WebView (token B) --+                        +--> token + connection generation
+```
+
+Both `pot:snapshot` and `pot:subscription` carry `token`, `generation`,
+`space_id` and `owner`. Each connection attempt increments generation and emits
+`connecting` before its first frame. A WebView accepts only its token, scope,
+current startup generation and current connection attempt. A binding receipt
+does not mean connected; the first accepted reset must precede connected status.
+The Chat domain still confirms its session only after the snapshot commits to
+IndexedDB. Unsubscribe retires listeners immediately, including while the native
+binding promise is pending. Shutdown cancels and joins the bridge's streams.
+
+For a retained desktop client, transport loss or a changed frame boot revokes
+the startup generation before an old pending commit can confirm a session.
+Startup revalidation confirms native runtime/boot before the UI creates one
+replacement watch. Retained waiters defer resumption until that synchronous
+replacement can cancel them. The connected callback does not request another
+UI reattachment. Every new connection begins with a reset. The
 client rejects old cursors and duplicate deltas and renews the subscription on a
 base-cursor gap or boot change. Read versions prevent a concurrent older page
 from overwriting newer token text. A bounded recent-update map also covers

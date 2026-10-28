@@ -21,6 +21,24 @@ export function decodeDesktopResponse(raw) {
       &&typeof value.error.code==='string'&&typeof value.error.message==='string')throw new APIError(value.status,value.error);
   return value;
 }
+// Startup identity reads deliberately bypass the retained client's request gate.
+// They only confirm the local Control; they never replay a business operation.
+export async function readDesktopStartup({signal}={}) {
+  const api=await import('/wails/runtime.js');
+  const invoke=(method,...args)=>api.Call.ByName(`github.com/jjyr/pot/internal/desktop.Service.${method}`,...args);
+  const read=async(method,...args)=>{
+    signal?.throwIfAborted();
+    const pending=invoke(method,...args);
+    let abort;
+    try{return await (signal?Promise.race([pending,new Promise((_,reject)=>{abort=()=>{pending.cancel?.();reject(signal.reason);};signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();})]):pending);}
+    finally{if(abort)signal.removeEventListener('abort',abort);}
+  };
+  const runtime=decodeDesktopResponse(await read('Call','GET','/api/v1/runtime',''));
+  if(!(runtime?.runtime_id||runtime?.id)||!runtime.boot_id)throw Error('Runtime identity is unavailable');
+  const readBaselines=await read('AssistantReads');
+  signal?.throwIfAborted();
+  return {runtime,readBaselines};
+}
 export function scopedPath(path, {owner = '', space = '',configuration=false,control_id,configurationBoot,expectedControl} = {}) {
   const [base, query = ''] = path.split('?');
   const params = new URLSearchParams(query);
@@ -142,6 +160,7 @@ export async function createProductionClient({desktop = false, base = '', resour
       try {
         const raw = await pending;
         if (signal?.aborted) throw signal.reason;
+        if(method==='GET'&&generation!==client?.connectionGeneration)throw new DOMException('Connection retired','AbortError');
         let value;try{value=decodeDesktopResponse(raw);}catch(error){throw localized(error);}configurationResult();if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);return value;
       } finally { signal?.removeEventListener('abort', abort); }
     }
@@ -157,7 +176,7 @@ export async function createProductionClient({desktop = false, base = '', resour
   }
   const runtime = startupIdentity?{runtime_id:startupIdentity.runtime_id,boot_id:startupIdentity.boot_id}:await request('/api/v1/runtime', {owner: '', space: ''});
   if (!runtime || !(runtime.runtime_id || runtime.id)) throw Error('Runtime identity is unavailable');
-  const readBaselines=desktop?await invoke('AssistantReads'):[];
+  const readBaselines=desktop&&!startupIdentity?await invoke('AssistantReads'):[];
   const attachmentURLs=new Map(),attachmentLeases=new Map();
   const attachmentKey=(attachment,options)=>{const scope={...context,...options};return JSON.stringify([scope.expectedControl||'',scope.space,scope.owner,attachment.id]);};
   const onlineWaiters=new Set();
@@ -190,7 +209,15 @@ export async function createProductionClient({desktop = false, base = '', resour
       client.onlineReady=false;client.connectionGeneration++;client.directoryGeneration=-1;client.directorySpaces.clear();confirmedSessions.clear();
       connectionAbort.abort();connectionAbort=new AbortController();client.resources.resetConnection();
     },
-    confirmStartup(value){if((value.runtime_id||value.id)!==runtime.runtime_id)throw Error('Startup identity changed');Object.assign(runtime,value);client.onlineReady=true;for(const handler of [...onlineWaiters])handler();onlineWaiters.clear();}, transport:request,request:resourceRequest,readBaselines,
+    confirmStartup(value){
+      if((value.runtime_id||value.id)!==runtime.runtime_id){client.suspendStartup();throw Error('Startup identity changed');}
+      if(client.onlineReady&&runtime.boot_id&&value.boot_id!==runtime.boot_id)client.suspendStartup();
+      Object.assign(runtime,value);client.onlineReady=true;
+      const resume=()=>{if(!client.onlineReady)return;for(const handler of [...onlineWaiters]){if(onlineWaiters.delete(handler))handler();}};
+      // The mounted desktop UI synchronously replaces its scoped watches on
+      // confirmation. Let it cancel retained waiters before starting a stream.
+      if(desktop)queueMicrotask(resume);else resume();
+    }, transport:request,request:resourceRequest,readBaselines,
     messageFiles(message,options={}){return request(`/api/v1/message-files/${encodeURIComponent(message)}?${new URLSearchParams({task_id:options.task||''})}`,options);},
     retryMessageFile(message,ref,options={}){return request(`/api/v1/message-files/${encodeURIComponent(message)}/${encodeURIComponent(ref)}?${new URLSearchParams({task_id:options.task||''})}`,{...options,method:'POST'});},
     acquireResource:createDisplayResources(request,()=>context,(resource,path,scope,operation='content',token='')=>desktop?`/pot-resource-content?${new URLSearchParams({id:resource.id,path,assistant_id:scope.owner,space_id:scope.space,render:operation==='render'?'1':'0',token})}`:`${base}${scopedPath(`/api/v1/resources/${encodeURIComponent(resource.id)}/${operation}?${new URLSearchParams({path,token})}`,scope)}`),
@@ -279,27 +306,48 @@ export async function createProductionClient({desktop = false, base = '', resour
     subscribe(onSnapshot, onStatus = () => {}, options = {}) {
       const scope = {...context,...options};
       if(!client.onlineReady){let active=true,stop;onStatus('connecting');const cancel=whenOnline(()=>{if(active)stop=client.subscribe(onSnapshot,onStatus,scope);});return ()=>{active=false;cancel();stop?.();};}
-      let active = true, token;
+      let active = true;
+      const connectionGeneration=client.connectionGeneration;
+      const current=()=>active&&client.onlineReady&&connectionGeneration===client.connectionGeneration;
       const deliver = value => {
-        if (!active||!client.onlineReady) return;
+        if (!current()) return;
         let snapshot;
         try { snapshot = normalizeSnapshot(value, runtime, scope.owner, scope.space); }
         catch (reason) { onStatus('offline', reason); return; }
         onSnapshot(snapshot);
       };
       if (desktop) {
+        // Allocate before Subscribe: the native goroutine can emit its initial
+        // reset before the binding promise resolves, even in a second WebView.
+        const token=crypto.randomUUID();let source=0,hasFrame=false;
+        const matches=value=>current()&&value.token===token&&value.space_id===scope.space&&value.owner===scope.owner&&Number.isSafeInteger(value.generation)&&value.generation>0;
+        const revalidate=()=>{client.suspendStartup();client.revalidateStartup?.();};
+        const failure=reason=>localized(Object.assign(reason,{uiKey:reason.uiKey||'connection.streamUnavailable'}));
+        onStatus('connecting');
         const stop = runtimeAPI.Events.On('pot:snapshot', event => {
           const value = event.data;
-          if (value.space_id === scope.space && value.owner === scope.owner) deliver(value.snapshot);
+          if(!matches(value)||value.generation!==source)return;
+          if(client.startup&&value.snapshot?.view?.state?.boot_id!==runtime.boot_id){revalidate();return;}
+          let snapshot;try{snapshot=normalizeSnapshot(value.snapshot,runtime,scope.owner,scope.space);if(!validSnapshot(snapshot)||!hasFrame&&snapshot.kind!=='reset')throw Error('Invalid initial conversation frame');}
+          catch(reason){onStatus('offline',failure(reason));if(client.startup)revalidate();return;}
+          hasFrame=true;deliver(value.snapshot);
         });
         const stopStatus=runtimeAPI.Events.On('pot:subscription',event=>{
           const value=event.data;
-          if(active&&value.space_id===scope.space&&value.owner===scope.owner)onStatus(value.status,value.error?new Error(value.error):undefined);
+          if(!matches(value)||value.generation<source)return;
+          if(value.status==='connecting'){
+            if(value.generation===source)return;
+            source=value.generation;hasFrame=false;
+            // A reconnect may belong to a new Control boot. Verify it before
+            // accepting any frame; startup confirmation owns the new attachment.
+            if(source>1&&client.startup){revalidate();return;}
+          }else if(value.generation!==source||value.status==='connected'&&!hasFrame)return;
+          if(value.status==='offline')confirmedSessions.delete(sessionKey(scope));
+          onStatus(value.status,value.error?failure(new Error(value.error)):undefined);
+          if(value.status==='offline'&&client.startup)revalidate();
         });
-        invoke('Subscribe', scope.space, scope.owner, client.uiLocale?.()||'en').then(value => {
-          token = value; if (!active) invoke('Unsubscribe', value).catch(() => {}); else onStatus('connected');
-        }).catch(reason => { if (active) onStatus('offline', reason); });
-        return () => { active = false; stop(); stopStatus(); if (token) invoke('Unsubscribe', token).catch(() => {}); };
+        invoke('Subscribe',token,scope.space,scope.owner,client.uiLocale?.()||'en').then(()=>{if(!active)invoke('Unsubscribe',token).catch(()=>{});}).catch(reason=>{if(current()){onStatus('offline',failure(reason));if(client.startup)revalidate();}});
+        return () => { active = false; stop(); stopStatus(); confirmedSessions.delete(sessionKey(scope));invoke('Unsubscribe', token).catch(() => {}); };
       }
       return createEventStream({url:`${base}${scopedPath('/api/v1/events?'+new URLSearchParams({locale:client.uiLocale?.()||'en'}),scope)}`,
         events:{conversation:(event,initial)=>{
@@ -313,9 +361,12 @@ export async function createProductionClient({desktop = false, base = '', resour
       const scope = {...context,space};
       if(!client.onlineReady){let active=true,stop;const cancel=whenOnline(()=>{if(active)stop=client.changes(onChange,{space});});return ()=>{active=false;cancel();stop?.();};}
       const versions=createTopicVersions();
+      const generation=client.connectionGeneration;
       const notify=(topics,sourceSpace,boot)=>{const changed=versions(topics,sourceSpace,boot);if(changed.length)onChange(changed,{space:sourceSpace,boot});};
       if (desktop) return runtimeAPI.Events.On('pot:changed', event => {
+        if(!client.onlineReady||generation!==client.connectionGeneration)return;
         if(scope.space&&event.data.space_id!==scope.space)return;
+        if(client.startup&&(event.data.reset||event.data.boot_id&&event.data.boot_id!==runtime.boot_id)){client.suspendStartup();client.revalidateStartup?.();return;}
         if(event.data.reset){onChange([],{space:event.data.space_id,reset:true});return;}
         notify(event.data.topics,event.data.space_id,event.data.boot_id||'');
       });
