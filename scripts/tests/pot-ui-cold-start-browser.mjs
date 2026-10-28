@@ -87,7 +87,7 @@ else{
  // Draft hydration precedes the hidden layout/position commits. Check the
  // readable viewport itself while the network gate is still held or offline.
  const waitCachedChat=(page,anchor)=>page.waitForFunction(anchor=>{
-  const history=document.querySelector('.history');
+  const history=document.querySelector('.history:not([data-preparation-surface])');
   if(!history||history.getAttribute('aria-busy')==='true'||getComputedStyle(history).visibility!=='visible')return false;
   const box=history.getBoundingClientRect();if(!box.width||!box.height)return false;
   const visible=[...history.querySelectorAll('article.message')].filter(row=>{const rect=row.getBoundingClientRect();return rect.bottom>box.top&&rect.top<box.bottom;});
@@ -105,7 +105,7 @@ else{
   if(viewport.width<500)await page.getByRole('button',{name:'Back to Assistants',exact:true}).click();
   await page.getByText('Synthetic Alpha',{exact:true}).first().click();await waitChat(page);assert.equal(await editor(page).inputValue(),'Persistent synthetic draft');
   // A trusted wheel establishes a non-bottom reading anchor.
-  await page.locator('.history').hover();await page.mouse.wheel(0,-2200);await page.waitForTimeout(800);
+  await page.locator('.history:not([data-preparation-surface])').hover();await page.mouse.wheel(0,-2200);await page.waitForTimeout(800);
   await page.evaluate(async()=>{await navigator.serviceWorker.ready});
   const prepared=await record(page,'prepared-'+viewport.width);assert(prepared.storage.startup[0]?.owner==='alpha');
   const reading=state=>state.storage.views.find(view=>view.key.includes('alpha')&&view.surface===state.storage.startup[0]?.surface)?.position;
@@ -115,7 +115,7 @@ else{
    await config({hold:block});await page.reload({waitUntil:'domcontentloaded'});
    await editor(page).waitFor();await page.waitForFunction(()=>document.querySelector('textarea.composer-input')?.value==='Persistent synthetic draft');
    await waitCachedChat(page,anchorPosition);
-   assert((await page.locator('.history').innerText()).includes('ALPHA cached message'));
+   assert((await page.locator('.history:not([data-preparation-surface])').innerText()).includes('ALPHA cached message'));
    const state=await record(page,'held-'+block+'-'+viewport.width);assert.equal(reading(state)?.position?.anchor?.id,anchor);assert(state.controller);assert.equal(state.caches.find(cache=>cache.name==='pot-ui-shell-'+original.version)?.assets.length,original.assets.length);assert(!state.text.includes('Could not start'));assert.equal(await page.getByRole('button',{name:'Allow notifications',exact:true}).count(),0);assert(!state.text.split('\n').includes('Connected'),'cached directory must not claim a live connection');if(viewport.width>500)assert(await page.getByRole('button',{name:'Tasks',exact:true}).isDisabled());
    assert(await page.locator('.send-button').isDisabled());
    await editor(page).fill('Typed while '+block+' pending');await page.waitForTimeout(500);
@@ -126,7 +126,7 @@ else{
   }
   await context.setOffline(true);await page.close();page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',error=>errors.push(error.message));await page.goto(origin+'/?locale=en',{waitUntil:'domcontentloaded'});await editor(page).waitFor();await page.waitForFunction(()=>document.querySelector('textarea.composer-input')?.value==='Persistent synthetic draft');
   await waitCachedChat(page,anchorPosition);
-  assert((await page.locator('.history').innerText()).includes('ALPHA cached message'));assert(await page.locator('.send-button').isDisabled());
+  assert((await page.locator('.history:not([data-preparation-surface])').innerText()).includes('ALPHA cached message'));assert(await page.locator('.send-button').isDisabled());
   await editor(page).fill('Offline new draft');await page.waitForTimeout(500);assert.equal(reading(await record(page,'offline-'+viewport.width))?.position?.anchor?.id,anchor);await page.screenshot({path:resolve(output,'offline-'+viewport.width+'.png')});
   if(viewport.width<500)await page.getByRole('button',{name:'Back to Assistants',exact:true}).click();await page.getByText('Synthetic Beta',{exact:true}).first().click();await page.getByText('BETA cached message 90.',{exact:false}).first().waitFor();
   assert(await page.locator('.send-button').isDisabled());assert.equal(await page.locator('.send-button').getAttribute('aria-label'),'Send');
@@ -175,6 +175,9 @@ else{
  const missingContext=await browser.newContext(),missing=await missingContext.newPage();missing.setDefaultTimeout(12000);await missing.goto(origin);await waitChat(missing);await editor(missing).fill('Missing directory draft');await missing.waitForTimeout(500);await missing.evaluate(async()=>{await navigator.serviceWorker.ready;await new Promise(resolve=>{const op=indexedDB.open('pot-chat-cache');op.onsuccess=()=>{const db=op.result,tx=db.transaction('projections','readwrite');tx.objectStore('projections').clear();tx.oncomplete=()=>{db.close();resolve()}}})});await missingContext.setOffline(true);await missing.reload({waitUntil:'domcontentloaded'});await missing.getByText('Showing saved conversations.',{exact:false}).first().waitFor();await missing.waitForTimeout(200);assert(await missing.locator('.send-button').isDisabled());await record(missing,'missing-directory-offline');await missingContext.setOffline(false);await editor(missing).waitFor();await missing.waitForFunction(()=>document.querySelector('textarea.composer-input')?.value==='Missing directory draft');await record(missing,'missing-directory-recovered');await missingContext.close();
  assert.equal(calls.filter(call=>call.method==='POST'&&/messages|turn|assistants/.test(call.path)).length,0,'cache restoration must not submit commands');
  await writeFile(resolve(output,'results.json'),JSON.stringify({passed:true,results,errors,calls,versions:{one:original.version,two:updated.version}},null,2));assert.deepEqual(errors,[]);console.log('PASS local-first cold start desktop/mobile, held auth/runtime, offline reopen/edit/switch, reconnect, no replay, atomic SW update, Control isolation and first-use/access failures');
- }catch(error){await writeFile(resolve(output,'failure.json'),JSON.stringify({error:error.stack,results,errors,calls},null,2));console.error(error);process.exitCode=1;}
+ }catch(error){
+  const pages=await Promise.all(browser.contexts().flatMap(context=>context.pages()).map(async page=>({url:page.url(),dom:await page.evaluate(()=>({text:document.body.innerText,errors:window.potErrors?.logs(),online:navigator.onLine,editor:document.querySelector('textarea.composer-input')?.value,root:document.querySelector('#app')?.className,history:[...document.querySelectorAll('.history:not([data-preparation-surface])')].map(h=>({hidden:h.hidden,busy:h.getAttribute('aria-busy'),visibility:getComputedStyle(h).visibility,top:h.scrollTop,extent:h.scrollHeight,rows:[...h.querySelectorAll('article.message')].map(row=>row.dataset.messageId)}))})).catch(reason=>({error:reason.message}))})));
+  await writeFile(resolve(output,'failure.json'),JSON.stringify({error:error.stack,pages,results,errors,calls},null,2));console.error(error);process.exitCode=1;
+ }
  finally{await browser.close();closeStreams();server.closeAllConnections();await new Promise(done=>server.close(done));}
 }

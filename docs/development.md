@@ -265,6 +265,16 @@ isolated production HTTP/SSE, IndexedDB and Service Worker fixtures. Its reconne
 checks hold directory or session responses, revoke capabilities and release
 retired connection/Control responses; no command is submitted.
 
+`node scripts/tests/pot-ui-cache-entry-browser.mjs` independently checks cached
+Chat entry and local browsing while production bootstrap, SSE and history HTTP
+responses are held. It seeds and verifies real committed IndexedDB identities,
+uses desktop and phone viewports, and exercises offline reopening, assistant
+switches, cached references and a pending page transaction. Use
+`POT_PLAYWRIGHT_MODULE` and `POT_CHROMIUM_EXECUTABLE` for an existing installation;
+`POT_CACHE_ENTRY_OUTPUT` selects the evidence directory and
+`POT_CACHE_ENTRY_SOURCE` selects the source tree under test. The fixture owns and
+closes its synthetic loopback server and temporary browser profile.
+
 For chat stream lifecycle checks, `node scripts/tests/ui-regressions.mjs --group
 connection` runs the production browser adapter and shared UI with real
 EventSource, IndexedDB and a controlling Service Worker against synthetic HTTP
@@ -355,6 +365,20 @@ the data window, reconnects and the five-second preview slot fallback. Set
 selects an extracted source tree. Pass `--baseline` directly to
 `node scripts/tests/chat-scroll-http-browser.mjs` to record the known send and
 draft-layout regressions in that tree while retaining the other assertions.
+
+`mise run test:ui-prepared-layout` exercises connected off-flow rendering with
+the same existing Playwright/Chromium prerequisites. It covers the native and
+fallback scroll-end branches, recursive readiness, stable component deadlines,
+load admission, same-node resource transfer, streaming HTTP/SSE output, mixed
+image/PDF/HTML/Markdown previews through real history pagination, cached initial
+layout and virtual remount, native group aliases across pagination/cold IndexedDB/remount, and a trusted mobile
+touch gesture during an incomplete Mermaid fence's completion. The fixtures
+use synthetic loopback data and reject product writes. They do not qualify
+physical iOS/Safari behavior. `POT_PREPARED_OUTPUT`, `POT_HISTORY_RESOURCES_OUTPUT`, `POT_ALIAS_OUTPUT` and
+`POT_TOUCH_OUTPUT` select untracked evidence directories. The touch runner accepts
+`--baseline` with `POT_TOUCH_SOURCE` pointing to an extracted source tree; that
+mode requires the temporary-source/shrink failure rather than reporting it as a
+passing fix.
 
 `mise run test:ui-chat-activity` uses the same isolated browser prerequisites to
 check lifecycle activity through reconnects, empty model/tool rounds, long

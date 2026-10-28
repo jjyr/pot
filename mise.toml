@@ -137,6 +137,10 @@ run = ["node scripts/tests/pot-ui-task-pages.mjs", "node scripts/tests/task-iden
 description = "Verify one-click assistant creation, retries and Space ownership"
 run = "node scripts/tests/pot-ui-assistant-creation.mjs"
 
+[tasks."test:ui-prepared-layout"]
+description = "Verify prepared conversation output, native aliases and touch geometry with isolated browser fixtures"
+run = ["node scripts/tests/prepared-group-intent-browser.mjs", "node scripts/tests/prepared-communication-context-browser.mjs", "node scripts/tests/prepared-controller-browser.mjs", "node scripts/tests/prepared-resources-browser.mjs", "node scripts/tests/prepared-chat-browser.mjs", "node scripts/tests/prepared-history-resources-browser.mjs", "node scripts/tests/prepared-group-alias-browser.mjs", "node scripts/tests/prepared-touch-browser.mjs"]
+
 [tasks."test:hooks"]
 description = "Verify hook timing and failure propagation"
 run = "python scripts/tests/hook-timing.py"

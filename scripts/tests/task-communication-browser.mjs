@@ -54,9 +54,9 @@ try{
  await page.goto(`${origin}/scripts/tests/fixtures/work-records.html?locale=en`);await page.waitForFunction(()=>window.workRecordsFixture);await page.evaluate(()=>window.workRecordsFixture.prepare());
  await page.locator('.work-record-summary').click();await page.locator('[data-call-id="m2"]>summary').click();await page.locator('[data-call-id="m2"] .tool-raw>summary').click();
  await page.evaluate(()=>window.workRecordsFixture.update(rows=>{for(let i=0;i<120;i++)rows.push({id:'filler-'+i,role:'assistant',text:'History '+i+' — '.repeat(100),status:'complete',sequence:String(1000+i),version:1});}));
- await page.evaluate(()=>{document.activeElement.blur();const h=document.querySelector('.history');h.dispatchEvent(new WheelEvent('wheel',{deltaY:100000,bubbles:true}));h.scrollTop=h.scrollHeight;h.dispatchEvent(new Event('scroll'));});
- await page.waitForFunction(()=>!document.querySelector('.work-records'));assert(await page.locator('.history article.message').count()<80);
- await page.evaluate(()=>{const h=document.querySelector('.history');h.dispatchEvent(new WheelEvent('wheel',{deltaY:-100000,bubbles:true}));h.scrollTop=0;h.dispatchEvent(new Event('scroll'));});
+ await page.evaluate(()=>{document.activeElement.blur();const h=document.querySelector('.history:not([data-preparation-surface])');h.dispatchEvent(new WheelEvent('wheel',{deltaY:100000,bubbles:true}));h.scrollTop=h.scrollHeight;h.dispatchEvent(new Event('scroll'));});
+ await page.waitForFunction(()=>!document.querySelector('.work-records'));assert(await page.locator('.history:not([data-preparation-surface]) article.message').count()<80);
+ await page.evaluate(()=>{const h=document.querySelector('.history:not([data-preparation-surface])');h.dispatchEvent(new WheelEvent('wheel',{deltaY:-100000,bubbles:true}));h.scrollTop=0;h.dispatchEvent(new Event('scroll'));});
  await page.waitForSelector('[data-call-id="m2"] .tool-raw[open]');assert.equal(await page.locator('.work-records').evaluate(e=>e.open),true);
  console.log('PASS actual Chat virtualizer recycling restores group, message and raw expansion');
  const task=await page.evaluate(async()=>{

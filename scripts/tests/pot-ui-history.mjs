@@ -70,3 +70,4 @@ console.log('UTF-8 bounds: CJK/emoji windows, active dependencies, oversized-row
 const mutable=message(1,'initial');delete mutable.version;
 mergeUIFrame(null,frame(1,'reset',[mutable]));mutable.text='中'.repeat(6*1024*1024);
 assert.throws(()=>mergeUIFrame(null,frame(2,'reset',[mutable])),/chat_cache_capacity/,'Mutated raw Task backfill rows must not reuse an earlier smaller byte weight');
+await import('./pot-ui-history-intents.mjs');

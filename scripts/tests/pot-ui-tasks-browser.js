@@ -39,13 +39,13 @@ async page => {
  const settle=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
  const scrollHistory=async delta=>{
   await settle();
-  const history=page.locator('.task-history'),before=await history.evaluate(node=>node.scrollTop);
+  const history=page.locator('.task-history:not([data-preparation-surface])'),before=await history.evaluate(node=>node.scrollTop);
   await history.hover();await page.mouse.wheel(0,delta);
-  await page.waitForFunction(before=>{const h=document.querySelector('.task-history');return h.scrollTop!==before||h.scrollTop===0;},before);
+  await page.waitForFunction(before=>{const h=document.querySelector('.task-history:not([data-preparation-surface])');return h.scrollTop!==before||h.scrollTop===0;},before);
   await page.locator('.task-composer-area .latest-button').waitFor({state:'visible'});
-  await page.waitForFunction(()=>{const history=document.querySelector('.task-history'),top=history.getBoundingClientRect().top;return [...history.querySelectorAll('article.message')].some(node=>{const box=node.getBoundingClientRect();return box.height&&box.bottom>top&&box.top<top+history.clientHeight;});});await settle();
+  await page.waitForFunction(()=>{const history=document.querySelector('.task-history:not([data-preparation-surface])'),top=history.getBoundingClientRect().top;return [...history.querySelectorAll('article.message')].some(node=>{const box=node.getBoundingClientRect();return box.height&&box.bottom>top&&box.top<top+history.clientHeight;});});await settle();
  };
- const readingPosition=()=>page.locator('.task-history').evaluate(history=>{
+ const readingPosition=()=>page.locator('.task-history:not([data-preparation-surface])').evaluate(history=>{
   const top=history.getBoundingClientRect().top,bottom=top+history.clientHeight;
   const rows=[...history.querySelectorAll('article.message')].filter(node=>{const box=node.getBoundingClientRect();return box.height&&box.bottom>top&&box.top<bottom;});
   const row=rows.findLast(node=>node.getBoundingClientRect().top<=top+4)||rows[0];
@@ -53,7 +53,7 @@ async page => {
  });
  const assertReading=async(position,message)=>{
   assert(position,'A visible message anchors historical reading');await settle();
-  const offset=await page.locator('.task-history').evaluate((history,id)=>{const row=[...history.querySelectorAll('article.message')].find(node=>node.dataset.messageId===id);return row?row.getBoundingClientRect().top-history.getBoundingClientRect().top:null;},position.id);
+  const offset=await page.locator('.task-history:not([data-preparation-surface])').evaluate((history,id)=>{const row=[...history.querySelectorAll('article.message')].find(node=>node.dataset.messageId===id);return row?row.getBoundingClientRect().top-history.getBoundingClientRect().top:null;},position.id);
   assert(offset!==null&&Math.abs(offset-position.offset)<2,message+': '+JSON.stringify({position,offset}));
  };
  try{
@@ -115,7 +115,7 @@ async page => {
   for(const [height,top]of [[420,80],[420,110],[852,0]]){
     await page.evaluate(({height,top})=>{Object.defineProperties(window.visualViewport,{height:{configurable:true,value:height},offsetTop:{configurable:true,value:top}});window.visualViewport.dispatchEvent(new Event('resize'));window.visualViewport.dispatchEvent(new Event('scroll'));},{height,top});
     const bounds=await composer.boundingBox(),sendBounds=await page.locator('.task-composer-area .send-button').boundingBox();
-    assert(await page.locator('.task-history').evaluate(node=>node.clientHeight>0),'Keyboard leaves a visible Task transcript');
+    assert(await page.locator('.task-history:not([data-preparation-surface])').evaluate(node=>node.clientHeight>0),'Keyboard leaves a visible Task transcript');
     assert(sendBounds.y+sendBounds.height<=top+height,'Task send control stays above the keyboard');
     assert(bounds.y>top+44&&bounds.y+bounds.height<=top+height,'Task composer stays above the keyboard after a tap');
     assert(await composer.evaluate(node=>document.activeElement===node&&node.selectionStart===30&&node.selectionEnd===40),'Task keyboard transitions retain native focus and selection: '+JSON.stringify(await composer.evaluate(node=>({focused:document.activeElement===node,active:document.activeElement?.tagName,selection:[node.selectionStart,node.selectionEnd]}))));

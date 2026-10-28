@@ -5,7 +5,7 @@ async page=>{
   await page.goto(`${origin}/scripts/tests/fixtures/chat-scroll.html?conversation=alpha&locale=zh-CN&theme=dark`);
   await page.waitForSelector('.history article.message');
   await page.evaluate(()=>{
-    const history=document.querySelector('.history'),native=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
+    const history=document.querySelector('.history:not([data-preparation-surface])'),native=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
     const trace=window.chatComposerTrace={active:true,mode:'latest',frames:0,errors:[],writes:[],inputs:0,samples:[]};
     trace.geometry=()=>{
       const viewport=history.getBoundingClientRect(),rows=[...history.querySelectorAll('article.message')];
@@ -61,7 +61,7 @@ async page=>{
     // outside the instrumented production writers. Textarea edits stay trusted.
     await page.evaluate(()=>{
       window.chatComposerTrace.mode='transition';
-      const history=document.querySelector('.history');history.dispatchEvent(new WheelEvent('wheel',{deltaY:-1500,bubbles:true}));
+      const history=document.querySelector('.history:not([data-preparation-surface])');history.dispatchEvent(new WheelEvent('wheel',{deltaY:-1500,bubbles:true}));
       Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop').set.call(history,history.scrollTop-1500);history.dispatchEvent(new Event('scroll'));
     });
     await page.waitForTimeout(300);await settle();

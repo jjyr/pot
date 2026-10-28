@@ -57,7 +57,7 @@ try{
  for(const os of ['iPhone','Android']){
   for(const order of ['dom-first','measure-first']){
    const f=fixture(os),v=f.virtualizer;let actualTop=1000,requested=0;
-   const row={dataset:{scrollAnchor:'message:m',messageId:'m',sequence:'11'},getBoundingClientRect:()=>({top:actualTop-f.history.scrollTop-v._holdOffset,bottom:actualTop-f.history.scrollTop-v._holdOffset+200,height:200})};
+   const row={closest:()=>null,dataset:{scrollAnchor:'message:m',messageId:'m',sequence:'11'},getBoundingClientRect:()=>({top:actualTop-f.history.scrollTop-v._holdOffset,bottom:actualTop-f.history.scrollTop-v._holdOffset+200,height:200})};
    f.history.querySelectorAll=()=>[row];
    const notifications=[];
    const c=createConversationController({scroller:f.history,virtualizer:v,requestLayout:()=>requested++,scrolled:delta=>notifications.push({delta,published:c.api.snapshot().position?.anchor?.offset,actual:row.getBoundingClientRect().top})});f.attach(c);
@@ -79,6 +79,7 @@ try{
     const beforeInput=row.getBoundingClientRect().top;actualTop+=25;
     const event=new Event(kind);Object.assign(event,kind==='wheel'?{deltaY:-36,deltaX:0}:{key:'ArrowUp'});
     f.history.closest=()=>null;f.history.dispatchEvent(event);
+    assert.equal(c.api.snapshot().mode,'reading','A pending render cannot expose an older Latest intent to context/cache consumers');
     if(kind==='keydown')c.idle(); // The preceding wheel's idle can arrive first.
     f.scroll(f.history.scrollTop-36);
     v.resizeItem(3,v.getMeasurements()[3].size+25);commit();

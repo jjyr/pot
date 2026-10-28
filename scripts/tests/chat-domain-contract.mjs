@@ -27,11 +27,18 @@ export async function chatDomainContract(report=()=>{}){
     latest=frame(11);try{await one.refresh();}finally{IDBObjectStore.prototype.put=put;}
     check(injected&&errors.at(-1)?.storage&&seen.length===1&&(await one.query()).snapshot.cursor==='10','Chat transaction abort publishes only a storage error and retains committed output');
     await one.refresh();await wait(()=>seen.at(-1)?.cursor==='11');check((await one.query()).snapshot.cursor==='11','Chat explicit refresh retries the failed commit');
+    check(await one.history({before:'10'},{cachedOnly:true})===null&&historyCalls===0,'A local cache miss does not begin historical network IO');
     hold=deferred();historyPage={boot_id:'boot',conversation_id:'chat',cursor:'11',messages:[message(9)],history:{before:'9',after:'9'}};
     const first=one.history({before:'11'}).then(()=>false,error=>error.name==='AbortError'),second=two.history({before:'11'});
-    await wait(()=>historyCalls===1);await one.close();hold.resolve();const result=await second;
+    await wait(()=>historyCalls===1);
+    const local=await two.history({around:'m11'},{around:true,cachedOnly:true});
+    check(local.messages.some(value=>value.id==='m11')&&historyCalls===1,'Committed local history remains readable while another page waits on the network');
+    await one.close();hold.resolve();const result=await second;
     check(await first&&result.messages.some(value=>value.id==='m9')&&historyCalls===1,'Two surfaces share historical IO; closing one cannot cancel another or publish its late result');
     hold=null;const calls=historyCalls;await two.history({around:'m9'},{around:true});check(historyCalls===calls,'Chat history and reset restoration share committed indexed coverage');
+    await two.history({around:'m11'},{around:true,cachedOnly:true});
+    const superseded=await two.history({around:'m9'},{around:true,cachedOnly:true,currentPosition:()=>false});
+    check(superseded.messages.some(value=>value.id==='m11')&&superseded.messages.some(value=>value.id==='m9'),'An obsolete around request commits data without replacing the current local window');
     hold=deferred();historyPage={...historyPage,messages:[message(8)],history:{before:'8',after:'8'}};
     const late=two.history({before:'9'}).then(()=>false,error=>error.name==='AbortError');await wait(()=>historyCalls===calls+1);
     const staleReceive=streams.find(stream=>stream.captured.owner==='a').receive;await domain.remove(scope);hold.resolve();check(await late,'Deleting a conversation fences a late historical response');

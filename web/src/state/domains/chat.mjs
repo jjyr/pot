@@ -24,17 +24,22 @@ export function createChatDomain(client){
     const session={
       hasHistory:typeof client.history==='function',
       async query(){current();let saved=cache?await stored(cache.read(key,surface)):null;if(cache&&!saved?.view&&initialSurface)saved=await stored(cache.read(key,initialSurface));current();if(saved)snapshot=saved.snapshot;return saved;},
-      async history(query,{around=false,signal,valid=()=>true}={}){
+      async history(query,{around=false,cachedOnly=false,signal,valid=()=>true,currentPosition=()=>true}={}){
         const version=generation;
         const check=()=>{current();if(signal?.aborted)throw signal.reason;if(version!==generation||!valid())throw new DOMException('Chat history retired','AbortError');};
         check();if(!snapshot||!session.hasHistory)return null;
         let page=cache?await stored(cache.readPage(key,query)):null;check();
         if(!page){
+          if(cachedOnly)return null;
           const requestKey=JSON.stringify([key,query]);let flight=historyReads.get(requestKey);
           if(!flight){flight=client.history(query,scope).finally(()=>historyReads.delete(requestKey));historyReads.set(requestKey,flight);}
           page=await flight;
         }check();
-        const value=cache?await commit(()=>cache.writePage(key,page,{...commitContext(),around})):mergeHistoryPage(snapshot,page,context().anchor,{around});
+        // Reader input can supersede an around request without retiring its
+        // scoped data. Commit that page against the current window/anchor, but
+        // never replace the window for an obsolete positioning intention.
+        const replace=around&&currentPosition();
+        const value=cache?await commit(()=>cache.writePage(key,page,{context:commitContext,around,currentPosition,validate:check})):mergeHistoryPage(snapshot,page,context().anchor,{around:replace});
         check();if(value)snapshot=value;return value;
       },
       saveView(value){

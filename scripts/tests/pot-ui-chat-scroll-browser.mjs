@@ -38,7 +38,7 @@ const client={chatCacheName:'pot-scroll-'+crypto.randomUUID(),production:true,ru
   },
 };
 if(new URLSearchParams(location.search).get('contract')!=='window')mountApp(root,client);
-const history=()=>root.querySelector('.history');
+const history=()=>root.querySelector('.history:not([data-preparation-surface])');
 function scroll(top){const h=history();h.scrollTop=top;h.dispatchEvent(new Event('scroll'));}
 const check=(value,label)=>{results.textContent+=`${value?'PASS':'FAIL'} ${label}\n`;};
 async function run(){
@@ -97,38 +97,39 @@ async function virtualizerChecks(){
     if(!record){const row=document.createElement('article');row.className='message';row.append(document.createElement('button'));record={row};}
     record.row.style.height=`${item.height}px`;record.row.dataset.messageId=item.id;return record;
   },dispose:record=>record.row.remove()});
+  const settled=async()=>{for(let attempt=0;attempt<90;attempt++){await frame();if(windowed.prepared&&!renderFrame){await frame();if(windowed.prepared&&!renderFrame)return;}}throw Error('Prepared virtual range did not settle');};
   const visible=()=>[...host.querySelectorAll('article')].find(row=>{const box=row.getBoundingClientRect(),top=scroller.getBoundingClientRect().top;return box.bottom>top&&box.top<top+scroller.clientHeight;});
   const offset=row=>row.getBoundingClientRect().top-scroller.getBoundingClientRect().top;
-  const move=async top=>{scroller.dispatchEvent(new KeyboardEvent('keydown',{key:'PageUp',bubbles:true}));scroller.scrollTop=top;scroller.dispatchEvent(new Event('scroll'));await settle();};
+  const move=async top=>{scroller.dispatchEvent(new KeyboardEvent('keydown',{key:'PageUp',bubbles:true}));scroller.scrollTop=top;scroller.dispatchEvent(new Event('scroll'));await settled();};
   try{
-    windowed.scrollToLatest();windowed.setMessages(rows);await settle();
+    windowed.scrollToLatest();windowed.setMessages(rows);await settled();
     check(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop<2,'TanStack opens a dynamic-height list at its end');
     await move(scroller.scrollHeight*.45);const saved=visible(),savedOffset=offset(saved);
     rows=[...Array.from({length:30},(_,index)=>({id:`prepend-${index}`,viewKey:`prepend-${index}`,role:'user',height:110+index%3*20})),...rows];
-    windowed.setMessages(rows);await settle();
+    windowed.setMessages(rows);await settled();
     check(saved.isConnected&&Math.abs(offset(saved)-savedOffset)<2,`historical prepend preserves the keyed visible message (${savedOffset} → ${offset(saved)})`);
     const focused=visible();focused.querySelector('button').focus({preventScroll:true});await move(scroller.scrollTop+5000);
     check(focused.isConnected&&focused.contains(document.activeElement),'focused message remains mounted outside the virtual range');
-    rows=[{id:'focused-prepend',viewKey:'focused-prepend',role:'user',height:150},...rows];windowed.setMessages(rows);await settle();
+    rows=[{id:'focused-prepend',viewKey:'focused-prepend',role:'user',height:150},...rows];windowed.setMessages(rows);await settled();
     check(focused.isConnected&&focused.contains(document.activeElement),'prepending history retains focus by message key after indexes shift');
-    document.activeElement.blur();windowed.scrollToLatest();windowed.setMessages(rows);await settle();
-    rows=rows.map((row,index)=>index===rows.length-1?{...row,height:row.height+300}:row);windowed.setMessages(rows);await settle();
+    document.activeElement.blur();windowed.scrollToLatest();windowed.setMessages(rows);await settled();
+    rows=rows.map((row,index)=>index===rows.length-1?{...row,height:row.height+300}:row);windowed.setMessages(rows);await settled();
     check(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop<2,'streaming row growth keeps an end-pinned viewport at the end');
     await move(scroller.scrollTop-1000);const reading=visible(),readingOffset=offset(reading);
-    rows=[...rows,{id:'appended',viewKey:'appended',role:'user',height:180}];windowed.setMessages(rows);await settle();
+    rows=[...rows,{id:'appended',viewKey:'appended',role:'user',height:180}];windowed.setMessages(rows);await settled();
     check(reading.isConnected&&Math.abs(offset(reading)-readingOffset)<2,'appended output does not pull a historical reader to the end');
     const targetID=rows.at(-1).id;
-    windowed.setMessages(rows);windowed.locate({id:targetID});await settle();
-    rows=[...rows].reverse();windowed.setMessages(rows);await settle();
+    windowed.setMessages(rows);windowed.locate({id:targetID});await settled();
+    rows=[...rows].reverse();windowed.setMessages(rows);await settled();
     check(!!host.querySelector(`[data-message-id="${targetID}"]`),'reordering rows preserves the retained navigation target');
-    rows=rows.slice(0,24);windowed.setMessages(rows);await settle();
+    rows=rows.slice(0,24);windowed.setMessages(rows);await settled();
     check(!!host.querySelector(`[data-message-id="${targetID}"]`),'trimming history resolves a retained navigation target by message identity');
-    windowed.scrollToLatest();windowed.setMessages(rows);await settle();
-    rows=rows.slice(-2);windowed.setMessages(rows);await settle();
+    windowed.scrollToLatest();windowed.setMessages(rows);await settled();
+    rows=rows.slice(-2);windowed.setMessages(rows);await settled();
     check(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop<2,'an end target follows the current list after it shrinks');
-    windowed.setMessages(rows);windowed.locate({id:targetID});await settle();
-    rows=[];windowed.setMessages(rows);await settle();
-    rows=[{id:'replacement',viewKey:'replacement',role:'user',height:180}];windowed.setMessages(rows);await settle();
+    windowed.setMessages(rows);windowed.locate({id:targetID});await settled();
+    rows=[];windowed.setMessages(rows);await settled();
+    rows=[{id:'replacement',viewKey:'replacement',role:'user',height:180}];windowed.setMessages(rows);await settled();
     check(!!host.querySelector('[data-message-id="replacement"]'),'a removed target cannot break an empty or replacement window');
   }finally{cancelAnimationFrame(renderFrame);windowed.close();scroller.remove();}
 }

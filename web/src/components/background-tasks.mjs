@@ -15,13 +15,14 @@ const activePhases=new Set(['queued','running','waiting','waiting_approval']);
 // detail navigation and refreshes. It is never part of the transcript.
 export function createBackgroundTasks({locale,onOpen,onToggle}) {
   const element=node('section','background-tasks'),states=new Map();
-  const id=`background-tasks-${crypto.randomUUID()}`;
+  const baseID=`background-tasks-${crypto.randomUUID()}`;let presentation=0;
   let current=null,signature='';
-  function update(scope,tasks,needsApproval) {
+  function update(scope,tasks,needsApproval,target=element,now=Date.now()) {
     let state=states.get(scope);
-    if(!tasks.length){const changed=current===scope&&signature!=='';states.delete(scope);element.remove();current=null;signature='';return changed;}
+    target.hidden=!tasks.length;
+    if(!tasks.length){const changed=current===scope&&signature!=='';target.replaceChildren();if(target===element){states.delete(scope);current=null;signature='';}return changed;}
     if(!state){state={expanded:false,order:[],observed:new Map()};states.set(scope,state);}
-    const now=Date.now(),byID=new Map(tasks.map(task=>{
+    const byID=new Map(tasks.map(task=>{
       const key=taskKey(task),previous=state.observed.get(key);
       // Display memory never grants capabilities or changes the source record.
       // Retained data cannot roll a confirmed phase back during revalidation.
@@ -41,13 +42,13 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
     for(const key of state.observed.keys())if(!byID.has(key))state.observed.delete(key);
     taskIdentities.register(tasks);
     const nextSignature=JSON.stringify([scope,locale(),state.expanded,[...byID.values()].map(task=>[taskKey(task),task.address,taskIdentities.short(task),task.title,task.phase,task.stale,task.clockEnd,task.started_at_ms,task.finished_at_ms,task.agent_link,task.waiting])]);
-    if(current===scope&&signature===nextSignature)return false;
-    signature=nextSignature;
+    if(target===element&&current===scope&&signature===nextSignature)return false;
     state.order=state.order.filter(key=>byID.has(key));
     for(const key of byID.keys())if(!state.order.includes(key))state.order.push(key);
     // Keep existing order within each approval group; clock/status refreshes and
     // backend updated-at ordering must not shuffle the reader's task rows.
     const ordered=state.order.map(key=>byID.get(key)).sort((a,b)=>Number(b.waiting)-Number(a.waiting));
+    const id=baseID+'-'+ ++presentation;
     const t=key=>translate(locale(),key),projection=node('section','background-tasks');
     projection.setAttribute('aria-labelledby',`${id}-heading`);
     const heading=node('h2','background-tasks-heading',t('tasks.backgroundCount').replace('{count}',tasks.length.toLocaleString(locale())));
@@ -83,8 +84,12 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
       toggle.onclick=()=>{state.expanded=!state.expanded;onToggle({expanded:state.expanded});};projection.append(toggle);
     }
     // A different conversation must not inherit another owner's keyed DOM.
-    if(current!==scope)element.replaceChildren();current=scope;
-    reconcile(element,projection);return true;
+    if(target===element){if(current!==scope)element.replaceChildren();current=scope;signature=nextSignature;}
+    reconcile(target,projection);return true;
   }
-  return {element,update,close(){}};
+  return {element,update,region(scope,tasks,needsApproval){
+    tasks=structuredClone(tasks);const now=Date.now();
+    const decisions=new Map(tasks.map(task=>[task.id,needsApproval(task.id,task.phase)]));
+    return {key:'background-tasks',host:element,revision:JSON.stringify([scope,locale(),states.get(scope)?.expanded||false,tasks,tasks.map(task=>taskElapsed(task.started_at_ms,taskClockEnd(task,now),locale(),true)),[...decisions]]),render:target=>update(scope,tasks,id=>decisions.get(id),target,now)};
+  },close(){}};
 }

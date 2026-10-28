@@ -33,6 +33,11 @@ version baseline. Usage-only updates do not reload the assistant directory. Perm
 refresh catalogue `pending_approvals` counts for every assistant independently of
 reply identity and unread baselines. They also refresh the selected owner's
 transient Chat approval region; duplicate request IDs do not repeat its notice.
+Approval regions carry an in-memory generation. A pending message preparation
+refreshes and measures an invalidated region before committing it, while retaining
+its body candidates. Stale, removed and cleared approvals disable their old live
+actions immediately; an older region cannot republish enabled actions after its
+generation has retired. Decision handlers also revalidate current approval context.
 Mutations publish after persistence; no-op reads do not produce invalidations.
 Task journal `text_delta` and `tool_output` commits publish `runner` only. They
 advance the same durable transcript cursor without invalidating the assistant
@@ -303,6 +308,23 @@ main/tray windows and browser tabs have independent positions. Returning to Chat
 reads its target window from disk while the subscription refreshes it. A reset
 while reading an older message reloads that message's window. References resolve
 by ID, without traversing intervening pages.
+Local browsing and historical network reads advance independently. A cached
+window completes its normal hidden preparation, measurement and positioning
+before reveal, without waiting for access verification, directory confirmation,
+an initial stream frame or a missing history page. A missing saved anchor can
+backfill asynchronously while an available measured local anchor remains readable.
+The history notice belongs to that gap; it does not hide or disable the current
+transcript. Cached pages and local references remain available during another
+page's network request or durable write. Unknown history creates no estimated
+canvas space. Returned pages commit under the captured session and conversation
+before entering the same preparation pipeline. A superseded around request may
+fill the cache, but cannot replace the reader's current window or restore an old
+position after input. Cached output never confirms command or session authority.
+Successive reader intentions for the same missing target consume the shared
+historical network read independently; an older ticket cannot suppress a later
+explicit navigation to that target.
+An incomplete committed cache window reports a storage failure instead of
+presenting an empty conversation.
 All Chat entry paths share a scoped positioning intent: restore the saved reading
 position, locate an explicit message, or follow Latest. Page returns, assistant
 switches and browser history prepare the composer, mount the destination window,
@@ -313,8 +335,10 @@ an unrelated assistant's cleanup failure does not complete the selected draft's
 preparation.
 Hidden rows do not overwrite measured heights. The destination remains visually
 hidden through mounting, measurement and position restoration; only the prepared
-viewport is exposed. Persisted height hints are qualified by width, locale, theme
-and font revision; content changes remeasure mounted rows. Explicit message/Latest actions supersede prior positioning, and
+viewport is exposed. Persisted height hints do not authorize offsets in a new layout. The complete
+loaded collection must have measurements for its current width, fonts, locale
+and render props before the list publishes its canvas; content changes replace
+the affected measurements through preparation. Explicit message/Latest actions supersede prior positioning, and
 navigation or deliberate upward reading retires an in-flight locate so its late
 response cannot replace the current history window or move the reader.
 An explicit message destination stays anchored through delayed preview loading;
@@ -356,12 +380,29 @@ an explicit Latest command does.
 
 The same reconciliation handles prepend, trimming, reorder, width reflow,
 external header/composer layout and asynchronous image or disclosure sizes.
-Newly mounted or updated rows have synchronous initial measurements, including
-during native scrolling; later ResizeObserver batches update the same geometry.
+New, changed and remounted rows first render in a connected, visually hidden
+surface with the actual ancestor CSS and available client width. The surface
+preserves the scroller's CSS inheritance, including relative line heights. Each
+component recursively reaches readiness or receives its five-second component
+frame before its parent is measured. Preparation uses batches of at most 96
+rows and admits at most 32 concurrent resource loads. It covers the entire
+loaded collection, while preserving the existing backend page boundaries.
+Only a complete measured index is installed into the engine. The prepared real
+nodes then move into the live tree in the same geometry transaction. Row and
+region containers retain natural flow; only bounded component frames isolate
+late resource content. Live activity, elapsed-time text and disclosure changes
+use this same preparation entry point. Width and font changes retain the old
+committed layout until the replacement measurements are ready. Live observer
+callbacks cannot insert unprepared sizes into the index.
 A delayed or repeated measurement of an already accounted height yields zero
 remaining displacement. Independent height changes can receive independent
-corrections. Reading state is published after the resulting geometry settles,
-rather than by a separate cursor's layout-finally callback.
+corrections. The controller records requested and actual native landings. When
+the native scroller cannot represent a fractional CSS-pixel destination, it
+retains that residual in the intended anchor offsets and suppresses repeated
+identical commands. Publication may adopt a newly visible native anchor without
+erasing the residual. Actual readback also synchronizes the engine's offset.
+Reading state is published after the resulting geometry settles, rather than
+by a separate cursor's layout-finally callback.
 
 TanStack retains native touch ownership and executes deferred corrections through
 contact, dragging and the momentum tail. The controller accounts for a held
@@ -378,10 +419,22 @@ with twelve overscan items on each side. Native scroll notifications commit the
 range synchronously. Held touch corrections may require a negative leading
 spacer margin. Each DOM replacement temporarily reserves the host extent until
 all rows and spacers are in place, preventing native clamping against an
-intermediate shorter list. Initial measurement and subsequent bounded range
-commits avoid scanning or rendering the whole transcript. Item margins are
-included in sizes; width changes invalidate mounted measurements, and each
-cached owner retains bounded height hints.
+intermediate shorter list. A layout generation measures the complete loaded
+collection in bounded batches, retaining numeric measurements while disposing
+offscreen candidate DOM and leases. Only the current virtual range, pinned
+reading nodes and bounded preparation cohorts retain DOM. Item margins are
+included in every measured size. Recent valid measurements may be reused across
+page windows in the same layout generation; unknown or invalid values never
+become canvas offsets.
+
+If a native jump outruns materialization, the list can temporarily hold its last
+readable real nodes while the measured destination is prepared. These nodes
+keep their original message IDs and sequences. The explicitly marked hold is
+excluded from reading-position capture, resolution and persistence, never
+represents the new range, and is removed atomically with the ready destination.
+Its rectangles remain actual DOM rectangles; no projected rectangle is used as
+a readable witness or measurement. The hold does not write scrollTop or replace
+the controller's latest input and navigation intent.
 
 Expanded tools have range-only child virtualizers sharing the chat scroller;
 only the root controller owns reading intent and scroll compensation. Child
@@ -430,8 +483,10 @@ immediately, including small movements within the bottom proximity threshold.
 Following resumes at the bottom or through Latest. Older and newer history start
 prefetching within two viewports of the relevant edge (at least 360 px), extending
 up to four viewports with observed scroll speed and request latency. Upward gestures also trigger it
-when the loaded content cannot scroll. Page reads remain serialized and preserve
-the visible message anchor. When the complete conversation fits in the viewport,
+when the loaded content cannot scroll. Local page probes remain independent;
+matching network reads share one request. Committed pages preserve the visible
+message anchor unless the current explicit navigation replaces the window. When
+the complete conversation fits in the viewport,
 upward gestures leave it still, without history reads or a Latest action; new
 messages continue following. Only confirmation matching the captured request and
 owner clears a submitted attempt. A user message's `request_id` confirms an ordinary send; steer messages

@@ -18,7 +18,7 @@ try{
    const ids=new WeakMap();let next=0;
    const id=node=>{if(!node)return null;if(!ids.has(node))ids.set(node,++next);return ids.get(node);};
    window.activitySample=()=>{
-    const h=document.querySelector('.history'),box=h?.getBoundingClientRect(),rows=[...h?.querySelectorAll('article.message')||[]];
+    const h=document.querySelector('.history:not([data-preparation-surface])'),box=h?.getBoundingClientRect(),rows=[...h?.querySelectorAll('article.message')||[]];
     const row=h?.querySelector('[data-window-key="activity:active-request"]')||h?.querySelector('[data-window-key="reply:active-request"]'),status=row?.querySelector('.reply-status'),line=status?.firstElementChild,r=row?.getBoundingClientRect();
     const first=rows.find(n=>n.getBoundingClientRect().bottom>box?.top&&n.getBoundingClientRect().top<box?.bottom);
     return {phase:activityPhase,at:Date.now(),visible:!!h&&getComputedStyle(h).visibility==='visible'&&!document.querySelector('#app.show-directory'),following:document.querySelector('.latest-button')?.hidden,scrollTop:h?.scrollTop,extent:h?.scrollHeight,first:first?.dataset.windowKey,firstTop:first?.getBoundingClientRect().top,row:id(row),bubble:id(row?.querySelector('.reply-bubble')),status:id(status),line:id(line),height:r?.height,statusHeight:status?.getBoundingClientRect().height,hidden:status?.hidden,icons:[...status?.querySelector('.reply-activity-icon')?.children||[]].filter(node=>getComputedStyle(node).display!=='none').length,text:status?.textContent,inView:!!r&&r.top>=box.top&&r.bottom<=box.bottom,rows:rows.map(n=>({key:n.dataset.windowKey,id:n.dataset.messageId,node:id(n),height:n.getBoundingClientRect().height,text:n.querySelector('.reply-content')?.textContent,activity:n.classList.contains('is-activity')}))};
@@ -43,10 +43,10 @@ try{
   const marks=[];
   try{
    await page.goto(fixture.origin+'/?locale=en&theme=light&assistant_id=alpha');
-   await page.waitForFunction(()=>document.querySelector('.connection-status.is-connected')&&document.querySelector('.waiting-dots')&&getComputedStyle(document.querySelector('.history')).visibility==='visible');
+   await page.waitForFunction(()=>document.querySelector('.connection-status.is-connected')&&document.querySelector('.waiting-dots')&&getComputedStyle(document.querySelector('.history:not([data-preparation-surface])')).visibility==='visible');
    const dismiss=page.getByRole('button',{name:'Not now',exact:true});if(await dismiss.count())await dismiss.click();
    await committed(1);await frames();
-   if(intent==='reading'){const box=await page.locator('.history').boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.wheel(0,-120);await page.waitForFunction(()=>document.querySelector('.latest-button')?.hidden===false);await frames();}
+   if(intent==='reading'){const box=await page.locator('.history:not([data-preparation-surface])').boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.wheel(0,-120);await page.waitForFunction(()=>document.querySelector('.latest-button')?.hidden===false);await frames();}
    await page.evaluate(()=>window.activityRecording=true);await phase('thinking');const initial=await frames();marks.push(initial);
    await phase('reconnecting');await control({holdEvents:'alpha',close:'events'});
    await page.waitForFunction(()=>document.querySelector('.connection-status')?.textContent.toLowerCase().includes('reconnect'));

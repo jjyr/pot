@@ -77,7 +77,7 @@ window.taskCommunication={errors,messages,send,receive,taskA,taskB,taskC,client,
     await frame();
     if(scenario!=='collapsed')for(const item of document.querySelectorAll('.communication-tool'))if(!item.open)item.querySelector('summary').click();
     await frame();await document.fonts.ready;
-    const history=document.querySelector('.history');history.dispatchEvent(new WheelEvent('wheel',{deltaY:-10000,bubbles:true}));history.scrollTop=0;history.dispatchEvent(new Event('scroll'));await frame();
+    const history=document.querySelector('.history:not([data-preparation-surface])');history.dispatchEvent(new WheelEvent('wheel',{deltaY:-10000,bubbles:true}));history.scrollTop=0;history.dispatchEvent(new Event('scroll'));await frame();
     if(errors.length)throw Error(errors.join('; '));this.ready=true;
   }
 };

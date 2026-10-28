@@ -1,5 +1,5 @@
 // Input ownership only. Reading intent and geometry live in the list controller.
-export function bindConversationInput(history,{engage,endPointer,endMotion}) {
+export function bindConversationInput(history,{engage,endPointer,endMotion,endTouch=()=>{}}) {
   const listeners=[],view=history.ownerDocument.defaultView;
   let touchY=null;
   const listen=(target,name,run)=>{target.addEventListener(name,run,{passive:true});listeners.push([target,name,run]);};
@@ -21,8 +21,8 @@ export function bindConversationInput(history,{engage,endPointer,endMotion}) {
   listen(history,'scrollend',()=>endMotion());
   listen(history,'touchstart',event=>{touchY=event.touches.length===1?event.touches[0].clientY:null;if(touchY!==null)input(event,'touchstart');});
   listen(history,'touchmove',event=>{const next=event.touches.length===1?event.touches[0].clientY:null;if(next!==null&&touchY!==null&&next!==touchY)input(event,'touchmove',next>touchY);touchY=next;});
-  const endTouch=()=>{touchY=null;};
-  listen(history,'touchend',endTouch);listen(history,'touchcancel',endTouch);
+  const releaseTouch=()=>{touchY=null;endTouch();};
+  listen(history,'touchend',releaseTouch);listen(history,'touchcancel',releaseTouch);
   listen(history,'keydown',event=>{
     if(event.altKey||event.target.closest('input,textarea,select,[contenteditable]'))return;
     if((event.ctrlKey||event.metaKey)&&!['ArrowUp','ArrowDown','Home','End'].includes(event.key))return;

@@ -1,3 +1,5 @@
+import {moveConversationNode} from './conversation-dom.mjs';
+import {currentPreparedRender,preparedAsset,consumePreparationSurrogates} from './prepared-render.mjs';
 import {domainsFor} from '../state/domains/index.mjs';
 import {machinePresentation} from '../state/machine-identity.mjs';
 import {storedPreference} from '../state/preferences.mjs';
@@ -13,7 +15,7 @@ import {createAssistantDrafts} from '../state/assistant-drafts.mjs';
 import {bindMessageSelection,renderMessageReferences,referenceProblem} from './message-references.mjs';
 import {createSystemNotifications} from '../adapters/notifications.mjs';
 import {createToolCall} from './tool-call.mjs';
-import {messageIdentities} from '../state/message-identities.mjs';
+import {messageIdentities,resolveMessageRenderIdentity,messageRenderIssuer} from '../state/message-identities.mjs';
 import {toolForest} from '../state/tool-calls.mjs';
 import {projectScriptRuns} from '../state/script-runs.mjs';
 import {avatar} from './avatar.mjs';
@@ -24,7 +26,7 @@ import {messages,translate} from '../locales/messages.mjs';
 import {acceptSnapshot, beginSend, beginSubscription, createConversationState, draft, draftReferences, setDraftReferences, ownerKey, setDraft, validSnapshot} from '../state/conversation.mjs';
 import {bindComposer} from './composer.mjs';
 import {createAttachmentComposer,renderMessageAttachments,failedMessageInput} from './attachments.mjs';
-import {renderMarkdown} from './markdown.mjs';
+import {updateMarkdown} from './markdown.mjs';
 import {createPages} from './pages.mjs';
 import {createReplies,replyKey} from '../state/replies.mjs';
 import {bindCompletions} from './completions.mjs';
@@ -95,10 +97,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let assistants = [], spaces = [], selectedAssistant = null, pendingSelection = null;
   let unsubscribe = () => {}, stopChanges = () => {};
   let directoryEpoch = 0, directorySignature = '';
-  let activeView=null,viewWrite=Promise.resolve(),viewTimer,chatSession=null,selectionGeneration=0;
+  let activeView=null,viewWrite=Promise.resolve(),viewTimer,chatSession=null,selectionGeneration=0,chatHydration=0;
   let chatPreparing=false,initialIntent=null;
   let chatShown=false,pendingTaskToggle=null;
-  let chatPosition=null,chatNavigation=0;
+  let chatPosition=null,chatNavigation=0,chatRestore=null;
   let awaitingSnapshot=false;
   const t = key => translate(locale,key);
   root.replaceChildren();
@@ -118,10 +120,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   history.setAttribute('role', 'log');
   history.setAttribute('aria-label', t('chat'));
   const messageColumn = el('div', 'message-column');
-  const taskClock=bindTaskClock(messageColumn,{locale:()=>locale,active:()=>!disposed&&route==='chat'&&!root.classList.contains('show-directory')});
+  const taskClock=bindTaskClock(messageColumn,{locale:()=>locale,active:()=>!disposed&&route==='chat'&&!root.classList.contains('show-directory'),prepare:()=>requestMessageRender(false)});
   const historyStatus=el('button','history-page-status text-button');historyStatus.type='button';
   const windowHost=el('div','message-window');
-  messageColumn.append(historyStatus,windowHost,chatApprovals);
+  const emptyChat=el('p','empty-chat');emptyChat.hidden=true;
+  messageColumn.append(historyStatus,windowHost,chatApprovals,emptyChat);
   history.append(messageColumn);
   const latest = button('down', t('latest'), 'latest-button');
   latest.hidden = true;
@@ -148,10 +151,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   root.append(rail, titlebar, directory, workspace, menu, preferences, assistantProfile);
   chatApprovals.dataset.scrollAnchor='chat-approvals';
   const messageNodes=new Map(),toolMemory=new Map(),windowHeights=new Map();
+  const renderIdentities=()=>currentPreparedRender()?.context.renderContext?.identities;
+  const resolveRenderIdentity=address=>renderIdentities()?resolveMessageRenderIdentity(renderIdentities(),address):messageIdentities(client).resolve(address);
+  const renderTasks=scope=>currentPreparedRender()?.context.renderContext?.tasks||projectedTasks(scope);
   const messageWindow=createWorkRecordWindow({
     blocked:message=>!!pages?.approvalFor(message.tool),
     scroller:history,host:windowHost,render:(...args)=>renderMessage(...args),dispose:entry=>disposeMessage(entry),heights:windowHeights,
-    locale:()=>locale,actor:()=>messageIdentities(client).actor(client.scope?.()),resolveIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,scope:()=>JSON.stringify(client.scope?.()),
+    locale:()=>locale,actor:()=>renderIdentities()?.actor||messageIdentities(client).actor(client.scope?.()),resolveIdentity:resolveRenderIdentity,memory:toolMemory,scope:()=>JSON.stringify(messageRenderIssuer(client,client.scope?.())),
     active:()=>chatShown&&!disposed,
     requestRender:()=>renderMessages(true),
     interact:()=>cancelChatPosition(),
@@ -241,34 +247,60 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const draftStatus=el('div','draft-storage-status');draftStatus.hidden=true;draftStatus.setAttribute('role','status');composerArea.append(draftStatus);
   let draftStatusSignature='';
   let referenceDraftSignature='',referenceNotice='';
-  let historyLoading=false,historyFailure='',historyGeneration=0,historyFlight=null,historyRecovery=null,historyAbort=new AbortController();
+  let historyLoading=false,historyFailure='',historyGeneration=0,historyRequests=new Map(),historyDemand=null,historyAbort=new AbortController();
   let historyScrollTime=0,historySpeed=0,historyLatency=200;
   const historyPrefetch=()=>Math.max(360,Math.min(history.clientHeight*4,history.clientHeight*2+historySpeed*historyLatency));
   function readHistory(query,options={}){
     if(options.positionTicket&&!currentChatPosition(options.positionTicket))return Promise.resolve(false);
-    const receivedEpoch=epoch;
-    if(historyLoading&&(historyRecovery||historyFlight))return (historyRecovery||historyFlight).then(()=>receivedEpoch===epoch?readHistory(query,options):false);
-    historyFlight=readHistoryNow(query,options);return historyFlight;
+    if(!chatSession?.hasHistory||!state.snapshot)return Promise.resolve(false);
+    // Coalesce work only for the same reader intention. A later click on the
+    // same missing target must not inherit the first click's retired ticket;
+    // the domain independently shares the underlying historical HTTP request.
+    const ticket=options.positionTicket;
+    const requests=historyRequests,key=JSON.stringify([query,!!options.around,ticket?[ticket.epoch,ticket.generation]:null]);
+    if(requests.has(key))return requests.get(key).promise;
+    const request={remote:false};requests.set(key,request);
+    request.promise=readHistoryNow(query,options,request).finally(()=>{
+      requests.delete(key);
+      if(requests===historyRequests){historyLoading=!!historyDemand||[...requests.values()].some(value=>value.remote);renderMessages();}
+    });return request.promise;
   }
-  async function readHistoryNow(query,{around=false,positionTicket}={}) {
-    if(!chatSession?.hasHistory||!state.snapshot||historyLoading)return false;
-    const receivedEpoch=epoch,generation=++historyGeneration;
-    historyLoading=true;historyFailure='';renderMessages();
+  function resumeHistory(){
+    const demand=historyDemand;if(!demand||client.onlineReady===false)return;
+    historyDemand=null;historyLoading=[...historyRequests.values()].some(value=>value.remote);renderMessages();
+    if(demand.epoch===epoch&&demand.generation===historyGeneration)readHistory(demand.query,demand.options);
+  }
+  async function readHistoryNow(query,{around=false,positionTicket,restoreIntent,recovery}={},request) {
+    const session=chatSession,receivedEpoch=epoch,generation=historyGeneration;
+    const current=()=>!disposed&&receivedEpoch===epoch&&generation===historyGeneration&&session===chatSession;
+    const currentPosition=()=>!positionTicket||currentChatPosition(positionTicket);
+    const options={around,signal:historyAbort.signal,valid:current,currentPosition};
+    historyFailure='';
     try {
       const started=performance.now();
-      const merged=await chatSession.history(query,{around,signal:historyAbort.signal,valid:()=>!disposed&&receivedEpoch===epoch&&generation===historyGeneration&&(!positionTicket||currentChatPosition(positionTicket))});
-      if(disposed||receivedEpoch!==epoch||generation!==historyGeneration||positionTicket&&!currentChatPosition(positionTicket))return false;
+      // Every request probes committed local coverage independently. A slow
+      // network page must never put another cached page behind its flight.
+      let merged=await session.history(query,{...options,cachedOnly:true});
+      if(!current())return false;
+      if(!merged){
+        if(!currentPosition())return false;
+        if(client.onlineReady===false){historyDemand={query,options:{around,positionTicket,restoreIntent,recovery},epoch:receivedEpoch,generation};historyLoading=true;renderMessages();return false;}
+        request.remote=true;historyLoading=true;renderMessages();
+        merged=await session.history(query,options);
+      }
+      if(!current()||!currentPosition())return false;
       historyLatency=historyLatency*.5+(performance.now()-started)*.5;
       if(!merged)return false;
-      state.snapshot=merged;renderMessagesNow();scheduleViewSave();
+      if(restoreIntent){chatRestore=null;positionChat(restoreIntent);}
+      if(recovery)await applySnapshot(merged,receivedEpoch,recovery.receivedMessages,{live:recovery.live});
+      else {state.snapshot=merged;renderMessagesNow();scheduleViewSave();}
       return true;
-    }catch(reason){if(!disposed&&receivedEpoch===epoch&&generation===historyGeneration&&(!positionTicket||currentChatPosition(positionTicket))){historyFailure=reason?.status===404?'history.missing':'history.failed';if(reason.storage)cacheFailure(reason);}return false;}
-    finally{if(!disposed&&receivedEpoch===epoch&&generation===historyGeneration){historyLoading=false;renderMessages();}}
+    }catch(reason){if(current()&&currentPosition()&&reason.name!=='AbortError'){historyFailure=reason?.status===404?'history.missing':'history.failed';if(reason.storage)cacheFailure(reason);}return false;}
   }
   async function jumpToMessage(id,{expand=false}={}){
     const ticket=positionChat({kind:'message',id,expand});
     let message=state.snapshot?.messages.find(message=>message.id===id&&!message.context_only);
-    if(!message){prepareChat();if(!await readHistory({around:id},{around:true,positionTicket:ticket})){if(currentChatPosition(ticket))chatPosition=null;return;}message=state.snapshot?.messages.find(message=>message.id===id);}
+    if(!message){if(!await readHistory({around:id},{around:true,positionTicket:ticket})){if(currentChatPosition(ticket))chatPosition=null;return;}message=state.snapshot?.messages.find(message=>message.id===id);}
     if(!currentChatPosition(ticket))return;
     if(!message){chatPosition=null;historyFailure='history.missing';renderMessages();return;}
     state.uiAnchor=message.sequence;
@@ -551,7 +583,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     clearTimeout(viewTimer);
     if(!state.snapshot||chatPreparing)return viewWrite;
     while(toolMemory.size>1280)toolMemory.delete(toolMemory.keys().next().value);
-    activeView={position:messageWindow.snapshot(),layout:layoutKey(),heights:[...windowHeights],tools:[...toolMemory]};
+    const position=chatRestore&&currentChatPosition(chatRestore.ticket)?chatRestore.intent.position:messageWindow.snapshot();
+    activeView={position,layout:layoutKey(),heights:messageWindow.prepared?[...windowHeights]:[],tools:[...toolMemory]};
     const savedScope=client.scope?.();
     if(chatSession)viewWrite=chatSession.saveView(activeView).then(()=>client.rememberStartup?.(savedScope,viewSurface)).catch(reason=>{if(!disposed){error=t('chatCache.positionFailed');console.error('Chat view storage:',reason);updateControls();}});
     return viewWrite;
@@ -565,7 +598,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   // cached history arrives. Include that geometry in the hidden first layout.
   const draftLayoutReady=()=>{const status=assistantDrafts?.status(editorOwner);return !assistantDrafts||assistantDrafts.ready(editorOwner)||!!status?.error&&!status.cleanup;};
   const initialLayout=createInitialChatLayout({history,
-    ready:()=>!disposed&&chatPreparing&&!!state.snapshot&&!historyLoading&&chatShown&&draftLayoutReady(),
+    ready:()=>!disposed&&chatPreparing&&!!state.snapshot&&chatShown&&draftLayoutReady()&&messageWindow.prepared,
     layout:()=>{editor.resize();renderMessagesNow(true);},
     position:()=>{if(initialIntent)applyChatPosition(initialIntent);},
     fontFallback:()=>root.classList.add('chat-font-fallback'),
@@ -578,7 +611,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     root.classList.remove('chat-font-fallback');
   }
   function revealChat(){
-    if(chatPreparing&&!initialLayout.pending&&state.snapshot&&!historyLoading&&chatShown&&draftLayoutReady())initialLayout.start();
+    if(chatPreparing&&!initialLayout.pending&&state.snapshot&&chatShown&&draftLayoutReady())initialLayout.start();
   }
   const closeAssistantProfile = () => assistantProfile.hidePopover();
   window.addEventListener('resize', closeAssistantProfile);
@@ -753,7 +786,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function nearBottom() { return history.scrollHeight - history.clientHeight - history.scrollTop < 80; }
   let renderFrame=0,fullRender=false,chatProjection;
   function currentChatPosition(ticket){return !disposed&&ticket.generation===chatNavigation&&ticket.epoch===epoch;}
-  function cancelChatPosition(){chatNavigation++;chatPosition=null;initialIntent=null;}
+  function cancelChatPosition(){chatNavigation++;chatPosition=null;initialIntent=null;chatRestore=null;}
   function applyChatPosition(intent){
     if(intent.kind==='restore')messageWindow.restore(intent.position);
     else if(intent.kind==='latest')messageWindow.scrollToLatest();
@@ -768,17 +801,17 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function pauseFollowing(){cancelChatPosition();messageWindow.pause();}
   function loadEarlierNearTop(){
-    if(!historyLoading&&!historyFailure&&history.scrollTop<historyPrefetch()&&state.snapshot?.history?.has_more){
+    if(!historyFailure&&history.scrollTop<historyPrefetch()&&state.snapshot?.history?.has_more){
       pauseFollowing();readHistory({before:state.snapshot.history.before});
     }
   }
   function loadNewerNearBottom(){
-    if(!historyLoading&&!historyFailure&&history.scrollHeight-history.clientHeight-history.scrollTop<historyPrefetch()&&state.snapshot?.history?.has_newer){
+    if(!historyFailure&&history.scrollHeight-history.clientHeight-history.scrollTop<historyPrefetch()&&state.snapshot?.history?.has_newer){
       pauseFollowing();readHistory({after:state.snapshot.history.after});
     }
   }
-  latest.onclick = async()=>{const ticket=positionChat({kind:'latest'});if(state.snapshot?.history?.has_newer){prepareChat();await readHistory({},{around:true,positionTicket:ticket});}if(!currentChatPosition(ticket))return;state.uiAnchor=null;renderMessagesNow();};
-  historyStatus.onclick=()=>{pauseFollowing();if(historyFailure==='history.missing'){historyFailure='';renderMessages();}else if(!historyLoading&&state.snapshot?.history?.has_more)readHistory({before:state.snapshot.history.before});};
+  latest.onclick = async()=>{const ticket=positionChat({kind:'latest'});if(state.snapshot?.history?.has_newer)await readHistory({},{around:true,positionTicket:ticket});if(!currentChatPosition(ticket))return;state.uiAnchor=null;renderMessagesNow();};
+  historyStatus.onclick=()=>{pauseFollowing();if(historyFailure==='history.missing'){historyFailure='';renderMessages();}else if(state.snapshot?.history?.has_more)readHistory({before:state.snapshot.history.before});};
   let backgroundProjection={key:'',items:[]};
   const projectedTasks=scope=>backgroundProjection.key===JSON.stringify([scope.space,scope.owner])?backgroundProjection.items.map(task=>({...task,_stale:!!task._stale||client.onlineReady===false||!can('task.list')})):[];
   const openChatTask=(task,scope=client.scope())=>{route='tasks';pages.openTask({...task,_space_id:task._space_id||scope.space,assistant_id:task.assistant_id||scope.owner},{returnTo:{route:'chat',scope:{...scope}}});renderShell();};
@@ -796,7 +829,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       backgroundTasks={close:stop,run:()=>domains.tasks.active(scope).refresh()};
     }return backgroundTasks.run();
   }
-  const disposeMessage=record=>{record.attachmentNode?.dispose?.();record.row.remove();messageNodes.delete(record.row.dataset.windowKey);};
+  const disposeMessage=record=>{record.attachmentNode?.dispose?.();record.row.remove();const key=record.row.dataset.windowKey;if(messageNodes.get(key)===record)messageNodes.delete(key);};
   const requestMessageRender=resize=>{
     renderMessages(true);
   };
@@ -810,14 +843,16 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     downloadFile:client.downloadFile?async({task,path})=>{try{await client.downloadFile(task,path,scope);}catch(reason){error=reason.message;updateControls();}}:undefined,
   });
   const renderMessage=(message,existing)=>{
-    const snapshot=renderingSnapshot,sending=renderingSending,forest=renderingForest;
+    const context=currentPreparedRender()?.context.renderContext||{snapshot:renderingSnapshot,sending:renderingSending,forest:renderingForest,scope:client.scope?.(),assistant:selectedAssistant,t,offline:connection==='offline'||disconnected,canRetrySend:connection==='connected'&&!pendingSend()&&draft(state)===renderingSending?.request.text};
+    const {snapshot,sending,forest}=context;
     let record = existing;
     if (!record) {
       const row = el('article', `message role-${message.role}`);
       const bubble = el('div', 'message-body');
       row.append(bubble);
       record = {row, bubble};
-      messageNodes.set(message.viewKey, record);
+      record.commit=()=>{messageNodes.set(message.viewKey,record);record.childrenWindow?.commitPrepared();return record;};
+      if(currentPreparedRender()?.context.phase!=='prepare')record.commit();
     }
     const {row, bubble} = record;
     row.classList.toggle('is-activity',!!message.activity);
@@ -827,50 +862,49 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
  if(!record.compact){record.compact=createCompaction({locale:()=>locale});bubble.append(record.compact.element);}
  record.compact.update(message);
  }else if(message.role==='tool'&&message.tool){
-      const scope=client.scope?.()||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
-      if(!record.tool){record.tool=createToolCall({messageActor:()=>messageIdentities(client).actor(scope),resolveTask:id=>projectedTasks(scope).find(task=>task.id===id),onOpenTask:task=>openChatTask(task,scope),resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key,locale:()=>locale,machineLabel:id=>machinePresentation(client).label(id,scope,locale),onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>messageWindow.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
-      record.tool.update(message,{offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
+      const scope=context.scope||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
+      if(!record.tool){record.tool=createToolCall({messageActor:()=>renderIdentities()?.actor||messageIdentities(client).actor(scope),resolveTask:id=>renderTasks(scope).find(task=>task.id===id),onOpenTask:task=>openChatTask(task,scope),resolveMessageIdentity:resolveRenderIdentity,memory:toolMemory,key,locale:()=>locale,machineLabel:id=>currentPreparedRender()?.context.renderContext?.machineLabels?.[id]??machinePresentation(client).label(id,scope,locale),onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>messageWindow.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
+      record.tool.update(message,{expanded:messageWindow.revealing&&messageWindow.visibilityPath.has(message.id)||messageWindow.destination?.expand&&messageWindow.destination.id===message.id,offline:context.offline,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
     }else if(message.role==='assistant'){
       record.reply ||= createReplyBubble(bubble);
-      const scope=client.scope?.();
+      const scope=context.scope;
       record.reply.update(message,{t,...markdownFiles(scope),
         onSettings:async()=>{if(!await pages?.leave())return;route='settings';await pages.showProviders();renderShell();},
-        onRetrySend:submit,canRetrySend:connection==='connected'&&!pendingSend()&&draft(state)===sending?.request.text});
+        onRetrySend:submit,canRetrySend:context.canRetrySend});
       record.text=message.text;record.role=message.role;
     }else if (record.text !== message.text || record.role !== message.role) {
-      bubble.replaceChildren();
-      if (message.role === 'tool') bubble.append(el('pre','',message.text));
-      else if (message.role === 'system') bubble.textContent = message.text;
-      else {const scope=client.scope?.(),prose=el('div','message-prose');prose.append(renderMarkdown(message.text,{...markdownFiles(scope)}));bubble.append(prose);}
+      if(message.role==='user'){
+        if(!record.prose){record.prose=preparedAsset('user-prose-host','user',()=>el('div','message-prose'));bubble.prepend(record.prose);}
+        updateMarkdown(record.prose,message.text,{...markdownFiles(context.scope),renderSlot:'user-prose'});
+      }else bubble.replaceChildren(preparedAsset('plain-body',JSON.stringify([message.role,message.text]),()=>message.role==='tool'?el('pre','',message.text):document.createTextNode(message.text)));
       record.text = message.text; record.role = message.role;
       row.className = `message role-${message.role}`;
     }
     if(message.role==='assistant'&&!message.activity){
-      const name=selectedAssistant?.name||'Pot',image=selectedAssistant?.avatar;
+      const name=context.assistant?.name||'Pot',image=context.assistant?.avatar;
       if(!record.speaker||record.speakerName!==name||record.speakerImage!==image){
         record.speaker?.remove();record.speakerName=name;record.speakerImage=image;
-        record.speaker=el('div','message-speaker');
-        record.speaker.append(assistantAvatar(selectedAssistant,25),el('span','',name));
-        row.prepend(record.speaker);
+        record.speaker=preparedAsset('speaker',JSON.stringify([name,image]),()=>{const speaker=el('div','message-speaker');speaker.append(assistantAvatar(context.assistant,25),el('span','',name));return speaker;});
+        moveConversationNode(row,record.speaker,row.firstChild);
       }
     }else if(record.speaker){record.speaker.remove();record.speaker=null;}
     const source=message.role==='assistant'?bubble.querySelector('.reply-content'):message.role==='user'?bubble.querySelector('.message-prose'):null;
     if(source&&message.text&&!message.id.startsWith('pending:'))source.dataset.referenceSource=message.id;
-    const referenceSignature=JSON.stringify([message.references||[],locale]);
+    const referenceSignature=JSON.stringify([message.references||[],locale,(message.references||[]).map(ref=>{const source=snapshot?.messages?.find(row=>row.id===ref.message_id);return [source?.role,ref.quote?null:source?.text];})]);
     if(message.role==='user'&&(record.referenceSignature!==referenceSignature||record.referenceNode&&!record.referenceNode.isConnected)){
       record.referenceNode?.remove();record.referenceSignature=referenceSignature;
-      if(message.references?.length){record.referenceNode=renderMessageReferences(message.references,{messages:snapshot?.messages||[],locale:()=>locale,onJump:jumpToMessage});bubble.prepend(record.referenceNode);}
+      if(message.references?.length){record.referenceNode=preparedAsset('references',referenceSignature,()=>renderMessageReferences(message.references,{messages:snapshot?.messages||[],locale:()=>locale,onJump:jumpToMessage}));moveConversationNode(bubble,record.referenceNode,bubble.firstChild);}
     }
-    const attachmentSignature=JSON.stringify([message.attachments||[],state.snapshot?.agent?.attachments]);
+    const attachmentSignature=JSON.stringify([message.attachments||[],snapshot?.agent?.attachments]);
     if(message.role==='user'&&(record.attachmentSignature!==attachmentSignature||!record.attachmentNode?.isConnected)){
-      record.attachmentNode?.dispose?.();record.attachmentNode?.remove();record.attachmentSignature=attachmentSignature;
-      if(message.attachments?.length){record.attachmentNode=renderMessageAttachments(message.attachments,{client,caps:state.snapshot?.agent?.attachments,scope:{...client.scope()},locale:()=>locale,onError:reason=>{error=reason.message;updateControls();}});bubble.append(record.attachmentNode);}
+      const prepared=message.attachments?.length?preparedAsset('attachments',attachmentSignature,()=>renderMessageAttachments(message.attachments,{client,caps:snapshot?.agent?.attachments,scope:{...context.scope},locale:()=>locale,onError:reason=>{error=reason.message;updateControls();}})):null;
+      if(prepared&&currentPreparedRender()?.context.phase==='commit')consumePreparationSurrogates(prepared);
+      record.attachmentNode?.dispose?.();record.attachmentNode?.remove();record.attachmentSignature=attachmentSignature;record.attachmentNode=prepared;
+      if(prepared)moveConversationNode(bubble,prepared);
     }
     if ((message.role === 'assistant'||message.role==='user') && message.text && !record.copy) {
-      const copy = button('copy',t('copy'),'copy-message');
-      copy.type = 'button';
-      copyFeedback(copy,{text:()=>record.text,locale:()=>locale,translate,onError:reason=>{error=reason.message;updateControls();}});
-      row.append(copy); record.copy = copy;
+      const copy=preparedAsset('copy-control','message-copy',()=>{const control=button('copy',t('copy'),'copy-message');control.type='button';copyFeedback(control,{text:()=>control.copyRecord.text,locale:()=>locale,translate,onError:reason=>{error=reason.message;updateControls();}});return control;});
+      copy.copyRecord=record;moveConversationNode(row,copy);record.copy=copy;
     }
     if (record.copy) {const label=t(record.copy.dataset.copied?'copied':'copy');record.copy.title=label;record.copy.setAttribute('aria-label',label);}
     if (message.role==='tool'&&!message.tool&&message.status === 'streaming' && !record.dot) {
@@ -891,7 +925,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const viewportObserver=new ResizeObserver(()=>requestMessageRender(true));viewportObserver.observe(history);
   function renderMessages(viewportOnly=false){fullRender ||= !viewportOnly;if(disposed||renderFrame)return;renderFrame=requestAnimationFrame(()=>{renderFrame=0;const viewportOnly=!fullRender;fullRender=false;renderMessagesNow(viewportOnly);});}
   function renderMessagesNow(viewportOnly=false) {
-    if(!chatShown)return;
+    // A missing/offline directory can replace the conversation with its own
+    // recovery view. Its retired row/region hosts are no longer a layout target.
+    // Selecting a confirmed assistant reconnects the normal column together.
+    if(!chatShown||windowHost.parentElement!==messageColumn)return;
     const navigation=chatPosition?.epoch===epoch?chatPosition:null;
     const anchor=messageWindow.anchor;
     const snapshot=state.snapshot;
@@ -906,32 +943,32 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     const {messages:visibleMessages,forest,roots,parents}=chatProjection;
     renderingSnapshot=snapshot;renderingSending=sending;renderingForest=forest;
-    historyStatus.hidden=!chatSession?.hasHistory||!snapshot;
-    historyStatus.disabled=historyLoading||!historyFailure&&!snapshot?.history?.has_more;
-    historyStatus.textContent=t(historyLoading?'history.loading':historyFailure|| (snapshot?.history?.has_more?'history.earlier':'history.start'));
+    const historyChrome={hidden:!chatSession?.hasHistory||!snapshot,disabled:!historyFailure&&!snapshot?.history?.has_more,label:t(historyLoading?'history.loading':historyFailure|| (snapshot?.history?.has_more?'history.earlier':'history.start'))};
     const tasks=client.production?projectedTasks(client.scope()):[];
-    if(client.production&&!viewportOnly)backgroundTaskView.update(JSON.stringify(client.scope()),tasks,(id,phase)=>pages.taskNeedsApproval(id,phase));
-    // The task region stays outside recycled message rows and shares the chat scroller.
-    if(client.production&&tasks.length){
+    // Regions outside recycled rows join the same prepared geometry transaction.
+    if(client.production){
       if(backgroundTaskView.element.parentElement!==messageColumn)messageColumn.insertBefore(backgroundTaskView.element,chatApprovals);
-    }else backgroundTaskView.element.remove();
+    }
     if(pendingTaskToggle&&!pendingTaskToggle.expanded&&messageWindow.position?.anchors[0]?.key.startsWith('task:')){
       const retained=new Set([...backgroundTaskView.element.querySelectorAll('[data-scroll-anchor]')].map(node=>node.dataset.scrollAnchor));
       if(!retained.has(messageWindow.position.anchors[0].key))messageWindow.locate({key:'background-tasks-heading',align:'nearest'});
     }
     pendingTaskToggle=null;
-    if(!viewportOnly)taskClock.refresh();
-    if (snapshot && !visibleMessages.length) {
-      if(!messageColumn.querySelector('.empty-chat'))messageColumn.append(el('p', 'empty-chat', t('first')));
-    }else if(visibleMessages.length){
-      messageColumn.querySelector('.empty-chat')?.remove();
-    }
     if(!viewportOnly)pages?.renderApprovals();
     if(!chatApprovals.hidden&&locateApprovals===JSON.stringify(client.scope?.())){
       locateApprovals='';cancelChatPosition();messageWindow.locate({key:'chat-approvals',align:'nearest'});
     }
-    messageWindow.setMessages(roots,{parents});
-    if(navigation&&snapshot&&!historyLoading&&navigation.kind!=='message')chatPosition=null;
+    const empty={hidden:!snapshot||!!visibleMessages.length,text:t('first')};
+    const toolOffline=connection==='offline'||disconnected;
+    const canRetrySend=connection==='connected'&&!pendingSend()&&draft(state)===sending?.request.text;
+    const regions=[{key:'chat-history-status',host:historyStatus,revision:JSON.stringify(historyChrome),render:target=>{target.hidden=historyChrome.hidden;target.disabled=historyChrome.disabled;target.textContent=historyChrome.label;}},
+      {key:'chat-empty',host:emptyChat,revision:JSON.stringify(empty),render:target=>{target.hidden=empty.hidden;target.textContent=empty.text;}},
+      ...(client.production?[backgroundTaskView.region(JSON.stringify(client.scope()),tasks,(id,phase)=>pages.taskNeedsApproval(id,phase)),pages.approvalRegion()]:[])];
+    const identities=messageIdentities(client).snapshot(client.scope?.());
+    const machineLabels=Object.fromEntries(roots.flatMap(message=>[message.tool?.target?.runtime_id]).filter(Boolean).map(id=>[id,machinePresentation(client).label(id,client.scope?.(),locale)]));
+    const referenceProps=roots.flatMap(message=>(message.references||[]).map(ref=>{const source=snapshot?.messages?.find(row=>row.id===ref.message_id);return [ref.message_id,source?.role,ref.quote?null:source?.text];}));
+    messageWindow.setMessages(roots,{parents,regions,afterCommit:()=>taskClock.refresh(),layoutEpoch:[layoutKey(),snapshot?.runtime_id,snapshot?.boot_id,snapshot?.owner_id,snapshot?.conversation_id,selectedAssistant?.name,selectedAssistant?.avatar,snapshot?.agent?.attachments,toolOffline,canRetrySend,identities,tasks,referenceProps,machineLabels],renderContext:{identities,tasks,machineLabels,snapshot,sending,forest,scope:{...client.scope?.()},assistant:selectedAssistant,t,offline:toolOffline,canRetrySend}});
+    if(navigation&&snapshot&&navigation.kind!=='message')chatPosition=null;
     latest.hidden=messageWindow.following;
     state.uiAnchor=messageWindow.following?null:selectedSequence()||messageWindow.anchor?.sequence||null;
     revealChat();
@@ -941,7 +978,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     state.uiAnchor=messageWindow.anchor?.sequence||null;
   }
   function pendingSend(){return state.snapshot&&state.pending.has(ownerKey(state.snapshot));}
-  function readyFromSnapshot(){connection='connected';connectionError='';disconnected=false;if(chatCacheFailed){chatCacheFailed=false;error='';}}
+  function readyFromSnapshot(){connection='connected';connectionError='';disconnected=false;if(chatCacheFailed){chatCacheFailed=false;error='';}resumeHistory();}
   async function applySnapshot(snapshot, receivedEpoch = epoch, receivedMessages=snapshot.messages,{live=true}={}) {
     if (disposed || receivedEpoch !== state.epoch) return;
     if(state.snapshot&&validSnapshot(snapshot)&&state.snapshot.boot_id!==snapshot.boot_id){
@@ -958,15 +995,18 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     const readingBeforeReset=snapshot.kind==='reset'&&!messageWindow.following?messageWindow.anchor:null;
     if(chatSession&&readingBeforeReset&&!snapshot.messages.some(message=>message.id===readingBeforeReset.id&&!message.context_only)){
-      const ticket={generation:chatNavigation,epoch},generation=++historyGeneration;
-      let finish;const recovery=new Promise(resolve=>{finish=resolve;});historyRecovery=recovery;
-      historyLoading=true;connection='connecting';updateControls();
+      const ticket={generation:chatNavigation,epoch},generation=historyGeneration;
+      connection='connecting';updateControls();
       try{
-        const restored=await chatSession.history({around:readingBeforeReset.id},{around:true,signal:historyAbort.signal,valid:()=>receivedEpoch===epoch&&generation===historyGeneration&&currentChatPosition(ticket)});
-        if(!restored||receivedEpoch!==epoch||generation!==historyGeneration||!currentChatPosition(ticket))return;
+        const restored=await chatSession.history({around:readingBeforeReset.id},{around:true,cachedOnly:true,signal:historyAbort.signal,valid:()=>receivedEpoch===epoch&&generation===historyGeneration,currentPosition:()=>currentChatPosition(ticket)});
+        if(receivedEpoch!==epoch||generation!==historyGeneration||!currentChatPosition(ticket))return;
+        if(!restored){
+          // Keep the existing prepared window while recovery fills the cache.
+          // The stream commit/retirement must not await this network request.
+          readHistory({around:readingBeforeReset.id},{around:true,positionTicket:ticket,recovery:{receivedMessages,live}});return;
+        }
         snapshot=restored;
       }catch(reason){if(receivedEpoch===epoch&&generation===historyGeneration&&currentChatPosition(ticket)){historyFailure=reason?.status===404?'history.missing':'history.failed';if(reason.storage)cacheFailure(reason);}return;}
-      finally{finish();if(historyRecovery===recovery)historyRecovery=null;if(receivedEpoch===epoch&&generation===historyGeneration){historyLoading=false;renderMessages();}}
     }
     const initialSnapshot = !state.snapshot;
     if(live&&validSnapshot(snapshot)){awaitingSnapshot=false;}
@@ -983,15 +1023,25 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(markVisibleRead())renderShell();
     renderMessages();updateControls();
     if(client.production)pages.syncApprovals();
-    if(readingBeforeReset&&!snapshot.messages.some(message=>message.id===readingBeforeReset.id&&!message.context_only)){
-      readHistory({around:readingBeforeReset.id},{around:true});
-    }
     if(initialSnapshot){if(client.production)pages.permissions();renderShell();}
     scheduleViewSave();
   }
   async function loadSnapshot(reattach = false) {
     if (disposed) return;
-    if(reattach){const retained=state.snapshot;historyGeneration++;historyLoading=false;epoch=beginSubscription(state);if(retained)acceptSnapshot(state,retained,epoch,{committed:true});disconnected=false;return attach();}
+    // Startup confirmation can arrive while the selected session queries IDB.
+    // That selection will attach with the latest connection authority after
+    // hydration. Reattaching here would retire its epoch and discard the only
+    // cached snapshot while the backend's initial frame is still unavailable.
+    if(reattach&&chatHydration===selectionGeneration)return;
+    if(reattach){
+      const retained=state.snapshot,demand=historyDemand,restore=chatRestore;
+      const resume=demand&&(!demand.options.positionTicket||currentChatPosition(demand.options.positionTicket));
+      const retainRestore=restore&&currentChatPosition(restore.ticket);
+      historyGeneration++;historyRequests=new Map();historyDemand=null;historyLoading=false;epoch=beginSubscription(state);
+      if(resume)historyDemand={...demand,epoch,generation:historyGeneration,options:{...demand.options,positionTicket:demand.options.positionTicket?{...demand.options.positionTicket,epoch}:undefined}};
+      chatRestore=retainRestore?{...restore,ticket:{...restore.ticket,epoch}}:null;
+      if(retained)acceptSnapshot(state,retained,epoch,{committed:true});disconnected=false;const attached=attach();resumeHistory();return attached;
+    }
     const receivedEpoch = epoch;
     connection = 'connecting'; error = ''; connectionError = ''; updateControls();
     try {
@@ -1036,8 +1086,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     epoch=beginSubscription(state);const receivedEpoch=epoch;editorOwner=null;activeView=null;route='chat';if(!initial||client.startup?.owner===item.id&&!restoredDirectory)directoryOpen=false;
     pendingTaskToggle=null;chatProjection=null;renderingSnapshot=null;renderingSending=null;renderingForest=null;historyScrollTime=0;historySpeed=0;historyLatency=200;messageWindow.reset();
     messageWindow.setMessages([]);windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);messageNodes.clear();windowHeights.clear();toolMemory.clear();
-    historyGeneration++;historyLoading=false;historyFailure='';state.uiAnchor=null;error='';chatCacheFailed=false;connectionError='';disconnected=false;connection='connecting';
+    historyGeneration++;historyRequests=new Map();historyDemand=null;historyLoading=false;historyFailure='';state.uiAnchor=null;error='';chatCacheFailed=false;connectionError='';disconnected=false;connection='connecting';
     renderShell();
+    chatHydration=selection;
     try{
       const cached=await chatSession.query();
       if(disposed||selection!==selectionGeneration||receivedEpoch!==epoch)return;
@@ -1045,17 +1096,23 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if(activeView?.layout===layoutKey())for(const [key,height]of activeView.heights||[])windowHeights.set(key,height);
       for(const [key,value]of activeView?.tools||[])toolMemory.set(key,value);
       restoreSavedPosition(activeView?.position);
+      const restoreIntent=initialIntent;
+      const restoreAnchor=activeView?.position?.position?.anchor;
       if(cached?.snapshot){acceptSnapshot(state,cached.snapshot,epoch,{committed:true});syncEditor();}
+      chatHydration=0;
       if(client.production&&record)saveNavigation('chat',initial);
       renderShell();attach();pages?.permissions();refreshBackgroundTasks();
-      const anchor=messageWindow.anchor;
-      if(anchor&&!state.snapshot?.messages.some(message=>message.id===anchor.id))await readHistory({around:anchor.id},{around:true});
-      else if(messageWindow.following&&state.snapshot?.history?.has_newer)await readHistory({},{around:true});
+      const anchor=messageWindow.anchor,ticket={generation:chatNavigation,epoch};
+      const missing=restoreAnchor&&!state.snapshot?.messages.some(message=>message.id===restoreAnchor.id)?restoreAnchor:anchor&&!state.snapshot?.messages.some(message=>message.id===anchor.id)?anchor:null;
+      if(missing){chatRestore={ticket,intent:restoreIntent};readHistory({around:missing.id},{around:true,positionTicket:ticket,restoreIntent});}
+      else if(messageWindow.following&&state.snapshot?.history?.has_newer)readHistory({},{around:true,positionTicket:ticket});
     }catch(reason){if(!disposed&&receivedEpoch===epoch){cacheFailure(reason);}}
+    finally{if(chatHydration===selection)chatHydration=0;}
   }
   function creationSpace(){return selectedAssistant?spaces.find(space=>space.id===selectedAssistant.space_id):spaces.find(space=>space.kind==='local')||spaces[0];}
   function clearSelectedAssistant() {
     initialLayout.cancel();
+    historyGeneration++;historyRequests=new Map();historyDemand=null;historyLoading=false;
     const space=selectedAssistant?.space_id||client.scope().space;
     attachmentUI?.forget({space,owner:selectedAssistant?.id||client.scope().owner});
     selectionGeneration++;unsubscribe();historyAbort.abort();historyAbort=new AbortController();chatSession?.close().catch(()=>{});chatSession=null;epoch=beginSubscription(state);activeView=null;selectedAssistant=null;editorOwner=null;pendingSelection=null;
@@ -1193,7 +1250,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     },{space:''});
   }
   if(client.production){attachChanges();loadDirectory();updates?.refresh(client.scope());}else attach();
-  const startupConfirmed=()=>{if(disposed)return;if(client.onlineReady!==false){attachChanges();domains.directory.refresh().catch(()=>{});if(selectedAssistant)loadSnapshot(true);}renderShell();updateControls();};
+  const startupConfirmed=()=>{if(disposed)return;if(client.onlineReady!==false){attachChanges();domains.directory.refresh().catch(()=>{});if(selectedAssistant)loadSnapshot(true);resumeHistory();}renderShell();updateControls();};
   const stopStartup=client.onStartupConfirmed?.(startupConfirmed);
   const stopResume=bindResumeRecovery(async()=>{
     if(disposed)return;

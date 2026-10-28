@@ -16,7 +16,7 @@ export async function chatDirectoryActivity(browser,{sourceOrigin,baseline=false
    const complete=Object.getOwnPropertyDescriptor(IDBTransaction.prototype,'oncomplete');
    Object.defineProperty(IDBTransaction.prototype,'oncomplete',{...complete,set(handler){complete.set.call(this,function(event){directoryTimeline.push({at:Date.now(),kind:'idb-complete',phase:directoryPhase,mode:this.mode,stores:[...this.objectStoreNames]});handler.call(this,event);});}});
    const sample=()=>{
-    const history=document.querySelector('.history');
+    const history=document.querySelector('.history:not([data-preparation-surface])');
     directoryTimeline.push({at:Date.now(),kind:'frame',phase:directoryPhase,cooking:document.querySelectorAll('.assistant-activity[data-state="cooking"]').length,disabled:document.querySelector('.send-button')?.disabled,local:document.querySelector('#app')?.classList.contains('is-local-startup'),status:document.querySelector('.connection-status')?.textContent,historyVisible:history&&getComputedStyle(history).visibility==='visible',scrollTop:history?.scrollTop});requestAnimationFrame(sample);
    };requestAnimationFrame(sample);
   });

@@ -202,6 +202,7 @@ export function renderMessageAttachments(refs,{client,scope,locale,onError,caps}
   for(const attachment of refs||[]){
     const resource={...attachment,entry:attachment.name,files:[],download:{path:attachment.name}};
     const card=createResourceView({resource,mode:'preview'},{
+      renderSlot:'attachment:'+attachment.id,
       acquireResource:()=>{const release=client.retainAttachment?.(attachment,scope);return {url:()=>client.attachmentURL(attachment,scope),release:()=>release?.()};},
       downloadResource:()=>client.downloadAttachment(attachment,scope),
       noticeKey:caps&&!attachmentAllowed(caps,attachment.mime_type)?'attachments.historyUnavailable':null,

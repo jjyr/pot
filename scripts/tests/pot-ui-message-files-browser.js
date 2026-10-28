@@ -43,7 +43,7 @@ async page=>{
       await page.goto(`${origin}/${version==='before'?'before/':''}?locale=${scenario.locale}&theme=${scenario.theme}`);await page.locator('.assistant-row').first().waitFor();if(await page.locator('.assistant-row').first().isVisible())await page.locator('.assistant-row').first().click();await page.waitForSelector('.reply-content');
       if(version==='after')await page.waitForFunction(()=>document.querySelectorAll('pot-message-file > pot-resource').length===9&&[...document.querySelectorAll('pot-resource')].every(n=>n.dataset.state==='ready'));
       const dismiss=page.getByRole('button',{name:scenario.locale==='en'?'Not now':'暂时不用',exact:true});if(await dismiss.isVisible().catch(()=>false))await dismiss.click();
-      await page.evaluate(()=>{document.querySelector('.history').scrollTop=0;});await page.waitForTimeout(150);
+      await page.evaluate(()=>{document.querySelector('.history:not([data-preparation-surface])').scrollTop=0;});await page.waitForTimeout(150);
       const snapshot=await (await page.request.get(origin+'/api/v1/snapshot')).json(),text=JSON.stringify(snapshot.view.messages.map(({message:m})=>[m.id,m.text]));if(version==='before')original=text;else assert(original===text,'Before/after use identical original messages');
       assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'No horizontal page overflow');
       await page.screenshot({path:`${directory}/${scenario.name}-${version}.png`});

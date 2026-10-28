@@ -1,6 +1,8 @@
+import {currentPreparedRender,preparedDOM,preparedAsset,preparedText} from './prepared-render.mjs';
+import {moveConversationNode} from './conversation-dom.mjs';
 import {translate} from '../locales/messages.mjs';
 import {communicationKey} from '../state/communication.mjs';
-import {renderMarkdown} from './markdown.mjs';
+import {updateMarkdown} from './markdown.mjs';
 import {avatar} from './avatar.mjs';
 import {icon} from './icons.mjs';
 import {taskIdentities} from '../state/task-identity.mjs';
@@ -17,7 +19,7 @@ export function createCommunication({locale,resolveIdentity,downloadFile,acquire
   let summarySignature='',summaryProfiles=[];
   const displayName=(address,profile,fallback='messageRecipientUnavailable')=>profile?.name||t(address?.kind==='task'?'messageTask':address?.kind==='user'?'messageUser':address?.kind==='assistant'?'messageAssistantUnavailable':fallback);
   function endpoint(address,{label,fallback='messageRecipientUnavailable'}={}){
-    const profile=resolveIdentity(address),task=address?.kind==='task'?taskIdentities.resolve(address):undefined;
+    const profile=resolveIdentity(address),task=address?.kind==='task'?profile?.task:undefined;
     const box=n(task&&onOpenTask?'button':'span','communication-endpoint'),mark=address?.kind==='task'?taskIdentityMark(address):n('span','communication-mark');
     if(address?.kind==='task'){
       mark.classList.add('communication-mark');
@@ -48,43 +50,47 @@ export function createCommunication({locale,resolveIdentity,downloadFile,acquire
   }
   function update(model,{expanded=false,preparing=false,summaryOnly=false,compact=false}={}){
     summary.hidden=!model||expanded;body.hidden=!model;if(!model)return;
-    const profiles=model.messages.map(mail=>[resolveIdentity(mail.from),resolveIdentity(mail.to)]),target=taskTarget(model);
-    const signature=JSON.stringify([model.kind,model.messages.map(mail=>[mail.from,mail.to,...[mail.from,mail.to].map(address=>address?.kind==='task'?taskIdentities.short(address):'')]),model.count,target,locale()]),profileRefs=profiles.flat();
-    if(summarySignature!==signature||profileRefs.some((profile,index)=>profile!==summaryProfiles[index])){
-      summarySignature=signature;summaryProfiles=profileRefs;const flows=[];
+    const profiles=model.messages.map(mail=>[resolveIdentity(mail.from),resolveIdentity(mail.to)]),destination=taskTarget(model);
+    const signature=JSON.stringify([model.kind,model.messages.map(mail=>[mail.from,mail.to,...[mail.from,mail.to].map(address=>address?.kind==='task'?taskIdentities.short(address):'')]),model.count,destination,locale(),profiles]),profileRefs=profiles.flat();
+    // A retained candidate joins a new preparation context with an empty slot map.
+    // Register its measured DOM again even when its own signature is unchanged.
+    if(summarySignature!==signature||currentPreparedRender()?.context.phase==='prepare'){
+      summarySignature=signature;summaryProfiles=profileRefs;preparedDOM(summary,'communication-summary',signature,target=>{const flows=[];
       const multiple=model.sources.length>1,toKeys=new Set(model.messages.map(mail=>communicationKey(mail.to)));
       const mail=model.messages[0]||{};
       if(model.messages.some(mail=>[mail.from,mail.to].some(address=>address?.kind==='task'))){
         const seen=new Set();for(const mail of model.messages){const key=JSON.stringify([mail.from,mail.to]);if(!seen.has(key)){flows.push(flow(mail));seen.add(key);}}
-      }else flows.push(flow({...mail,from:multiple?undefined:mail.from,to:toKeys.size>1?undefined:mail.to},{fromLabel:multiple?t('messageSources').replace('{count}',model.sources.length.toLocaleString(locale())):undefined,toLabel:toKeys.size>1?t('messageRecipients'):model.kind==='delegate'?target.label:undefined}));
-      project(summary,flows);
+      }else flows.push(flow({...mail,from:multiple?undefined:mail.from,to:toKeys.size>1?undefined:mail.to},{fromLabel:multiple?t('messageSources').replace('{count}',model.sources.length.toLocaleString(locale())):undefined,toLabel:toKeys.size>1?t('messageRecipients'):model.kind==='delegate'?destination.label:undefined}));
+      project(target,flows);});
     }
     if(!expanded||summaryOnly)return;
     for(const entry of entries.values())entry.box.hidden=true;
     for(const [index,mail] of model.messages.entries()){
       let entry=entries.get(index);
-      if(!entry){const box=n('section','communication-entry'),relation=n('div','communication-identity'),content=n('div','message-body communication-text'),fallback=n('p','communication-fallback');box.append(relation,content,fallback);entry={box,relation,content,fallback};entries.set(index,entry);body.append(box);}
+      if(!entry){entry=preparedAsset('communication-entry:'+index,JSON.stringify([mail,locale()]),()=>{const box=n('section','communication-entry'),relation=n('div','communication-identity'),content=n('div','message-body communication-text'),fallback=n('p','communication-fallback');box.append(relation,content,fallback);return {box,relation,content,fallback};});entries.set(index,entry);moveConversationNode(body,entry.box);}
       entry.box.hidden=false;entry.relation.hidden=compact&&model.messages.length===1&&![mail.from,mail.to].some(address=>address?.kind==='task');
-      const relationSignature=JSON.stringify([mail.from,mail.to,...[mail.from,mail.to].map(address=>address?.kind==='task'?taskIdentities.short(address):''),locale()]);
-      if(entry.relationSignature!==relationSignature||entry.fromProfile!==profiles[index][0]||entry.toProfile!==profiles[index][1]){
+      const relationSignature=JSON.stringify([mail.from,mail.to,...[mail.from,mail.to].map(address=>address?.kind==='task'?taskIdentities.short(address):''),locale(),profiles[index]]);
+      if(entry.relationSignature!==relationSignature||currentPreparedRender()?.context.phase==='prepare'){
         entry.relationSignature=relationSignature;[entry.fromProfile,entry.toProfile]=profiles[index];
+        preparedDOM(entry.relation,'communication-relation:'+index,relationSignature,target=>{
         const context=n('span','communication-recipient',t('messageAddressedTo').replace('{name}',displayName(mail.to,entry.toProfile)));
         const relation=[...([mail.from,mail.to].some(address=>address?.kind==='task')?[flow(mail)]:[endpoint(mail.from,{fallback:'messageSenderUnavailable'}),context])];
         const source=entry.fromProfile?.origin?.name;
         if(source&&mail.from?.node_id!==mail.to?.node_id)relation.push(n('span','communication-origin',t('messageFromSource').replace('{source}',source)));
-        project(entry.relation,relation);
+        project(target,relation);
+        });
       }
       const text=mail.text;
       entry.content.hidden=text===null;
-      if(entry.text!==text){entry.text=text;entry.content.replaceChildren(...(text===null?[]:[renderMarkdown(text,{downloadFile,acquireFileImage})]));}
-      entry.fallback.hidden=text!==null;entry.fallback.textContent=t(preparing?'messagePreparing':'messageUnavailable');
+      if(entry.text!==text){entry.text=text;updateMarkdown(entry.content,text||'',{downloadFile,acquireFileImage,renderSlot:'communication:'+index});}
+      entry.fallback.hidden=text!==null;preparedText(entry.fallback,'communication:fallback:'+index,t(preparing?'messagePreparing':'messageUnavailable'));
     }
-    if(!model.messages.length){let empty=entries.get('empty');if(!empty){empty={box:n('p','communication-fallback')};entries.set('empty',empty);body.append(empty.box);}empty.box.hidden=false;empty.box.textContent=t('messageUnavailable');}
+    if(!model.messages.length){let empty=entries.get('empty');if(!empty){empty=preparedAsset('communication-empty','empty',()=>({box:n('p','communication-fallback')}));entries.set('empty',empty);moveConversationNode(body,empty.box);}empty.box.hidden=false;preparedText(empty.box,'communication:empty.box',t('messageUnavailable'));}
     let taskEntry=entries.get('task');
     if(model.task&&onOpenTask){
-      if(!taskEntry){taskEntry={box:n('button','communication-task tool-action')};taskEntry.box.type='button';entries.set('task',taskEntry);body.append(taskEntry.box);}
+      if(!taskEntry){taskEntry=preparedAsset('communication-task',JSON.stringify(model.task),()=>({box:n('button','communication-task tool-action')}));taskEntry.box.type='button';entries.set('task',taskEntry);moveConversationNode(body,taskEntry.box);}
       const current=resolveTask(model.task.id);
-      taskEntry.box.hidden=false;taskEntry.box.textContent=t('viewMessageTask').replace('{title}',current?.title||model.task.title||model.task.id);
+      taskEntry.box.hidden=false;preparedText(taskEntry.box,'communication:taskEntry.box',t('viewMessageTask').replace('{title}',current?.title||model.task.title||model.task.id));
       // Only the real Task detail owns live phase, approvals and completion.
       taskEntry.box.onclick=()=>onOpenTask(current||model.task);
     }
