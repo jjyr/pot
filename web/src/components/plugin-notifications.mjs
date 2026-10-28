@@ -27,10 +27,12 @@ export function createPluginNotifications({request,scope,signal,locale,onProject
    const incoming=value.items?.find(i=>i.id===pluginID)?.settings;
    // Concurrent independent rows can finish out of order. Only the newer full
    // projection replaces current, but each exact write acknowledges its draft.
+   const older=(incoming?.revision||0)<(settings()?.revision||0),sameAccount=!incoming?.account_id||incoming.account_id===account;
+   // A complete display list can aid reconciliation even when the command
+   // receipt is missing; it never identifies or acknowledges this local draft.
+   if(incoming&&sameAccount&&!older){current=value;onProjection(value);}
    const savedID=value.operation?.subscription_id;
-   if(!incoming||!savedID||submitted.id!=='new'&&savedID!==submitted.id){draft.acceptedUnknown=true;throw Error('missing_subscription_receipt');}
-   const older=(incoming?.revision||0)<(settings()?.revision||0);
-   if(!older){current=value;onProjection(value);}
+   if(!incoming||!sameAccount||!savedID||submitted.id!=='new'&&savedID!==submitted.id){draft.acceptedUnknown=true;throw Error('missing_subscription_receipt');}
    const acknowledgedRevision=submitted.id==='new'?1:submitted.revision+1,latest=subscriptions().find(sub=>sub.id===savedID),superseded=older&&(!latest||latest.revision>acknowledgedRevision);
    if(superseded)error='stale_notification_response';draft.retry=null;
    if(draft.version===version&&!superseded){drafts.delete(submitted.id);if(submitted.id==='new')adding=false;}
