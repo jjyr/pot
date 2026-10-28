@@ -189,6 +189,13 @@ target does not erase an accepted receipt. C0 supplies no in-memory substitute
 for durable storage. Messages must include their immutable trusted causal
 metadata in their owning implementation's canonical digest.
 
+The owning Control's `send_message` Task facade has no explicit run argument.
+For a saved continuation request it derives that argument from the original
+owned mutation receipt, rather than the Task's now-current run. It still checks
+the complete canonical input, including Task and text, through the queue. A
+duplicate returns its original acceptance without projecting the old snapshot
+over a newer execution. Explicit MCP `run_id` arguments are never rewritten.
+
 `MCPError` carries machine codes; presentation layers localize user-facing text.
 `unavailable` permits the identical request only when non-admission is known.
 Response loss or uncertainty after mutation dispatch is `outcome_unknown`, whose

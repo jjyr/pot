@@ -136,14 +136,20 @@ func (s *Service) guideTaskExecution(ctx context.Context, owner, id string, inpu
 	if !s.taskExecutionCapabilities(ctx, d).Supports(agentlink.TaskInput) || d.Execution.Receipt.ID == "" {
 		return nil, agentlink.ErrUnsupported
 	}
-	var remote agentlink.Task
+	var accepted MCPTaskAcceptance
 	if s.isPotMCP(ctx, d.Info.AgentLink.LinkID) {
-		remote, err = s.potMCPTaskInput(ctx, d, input)
+		accepted, err = s.potMCPTaskInput(ctx, d, input)
 	} else {
 		return nil, agentlink.ErrUnsupported
 	}
 	if err != nil {
-		return nil, err
+		return nil, mcpFailure(err)
+	}
+	remote := accepted.Task
+	if accepted.Receipt.Duplicate {
+		// This is the saved acceptance, not the current execution snapshot.
+		// Never project its old run over an admitted continuation.
+		return remote, nil
 	}
 	linkRun := d.Execution.Receipt.RunID
 	if s.isPotMCP(ctx, d.Info.AgentLink.LinkID) {

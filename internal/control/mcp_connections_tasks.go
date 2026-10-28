@@ -2,6 +2,8 @@ package control
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"strings"
 	"time"
 
@@ -178,26 +180,43 @@ func (s *Service) potMCPTaskCancel(ctx context.Context, id string, r agentlink.T
 	e := s.potMCPCall(ctx, id, "pot_receiver_node_task_cancel", agentlink.MCPNodeCancel{Actor: r.From, Input: agentlink.MCPCancelInput{RequestID: request, TaskID: task, RunID: run}}, &accepted)
 	return accepted.Task, e
 }
-func (s *Service) potMCPTaskInput(ctx context.Context, d *tasks.Record, input protocol.TaskInput) (agentlink.Task, error) {
+func (s *Service) potMCPTaskInput(ctx context.Context, d *tasks.Record, input protocol.TaskInput) (MCPTaskAcceptance, error) {
 	var accepted MCPTaskAcceptance
 	if c, e := s.PotMCPConnection(ctx, d.Info.AgentLink.LinkID); e == nil && c.Inbound {
 		a, caller, e := s.localPotMCPBusinessCaller(ctx, c, d.Execution.Request.From)
 		if e != nil {
-			return agentlink.Task{}, e
+			return accepted, e
 		}
 		dispatch, e := localMCPDispatchTask(ctx, a.options.Queue, caller, d.Execution.Request, d.Execution.Receipt.ID)
 		if e != nil {
-			return agentlink.Task{}, e
+			return accepted, e
 		}
-		accepted, e := a.options.Queue.Control(ctx, caller, &agentlink.MCPTaskInput{RequestID: input.RequestID, TaskID: dispatch, RunID: d.Execution.Receipt.RunID, Text: input.Text}, nil)
-		return localMCPExecutionReceipt(ctx, a.options.Queue, accepted.Task, e)
+		continuation := agentlink.MCPTaskInput{RequestID: input.RequestID, TaskID: dispatch, RunID: d.Execution.Receipt.RunID, Text: input.Text}
+		// send_message has no explicit run parameter. An accepted request keeps
+		// its original run even after admission advances the live catalogue.
+		// Control still compares the complete digest, including text and Task;
+		// explicit MCP inputs continue to use their supplied run unchanged.
+		var raw string
+		e = a.options.Queue.DB.QueryRowContext(ctx, "SELECT receipt FROM mcp_service_mutations WHERE connection_id=? AND actor=? AND operation=? AND request_id=?", caller.ConnectionID(), mcpJSON(caller.Actor()), agentlink.TaskInput, input.RequestID).Scan(&raw)
+		if e == nil {
+			var previous MCPTaskAcceptance
+			if mcpRead(raw, &previous) != nil || previous.Receipt.Validate() != nil || previous.Receipt.RequestID != input.RequestID || previous.Task.RunID == "" {
+				return accepted, agentlink.MCPError{Code: agentlink.MCPUnknown}
+			}
+			continuation.RunID = previous.Task.RunID
+		} else if !errors.Is(e, sql.ErrNoRows) {
+			return accepted, e
+		}
+		accepted, e = a.options.Queue.Control(ctx, caller, &continuation, nil)
+		accepted.Task, e = localMCPExecutionReceipt(ctx, a.options.Queue, accepted.Task, e)
+		return accepted, e
 	}
 	if d.Execution.Request.From.Kind == "user" {
 		e := s.potMCPCall(ctx, d.Info.AgentLink.LinkID, "pot_task_input", agentlink.MCPTaskInput{TaskID: d.Execution.Receipt.ID, RunID: d.Execution.Receipt.RunID, RequestID: input.RequestID, Text: input.Text}, &accepted)
-		return accepted.Task, e
+		return accepted, e
 	}
 	e := s.potMCPCall(ctx, d.Info.AgentLink.LinkID, "pot_receiver_node_task_input", agentlink.MCPNodeInput{Actor: d.Execution.Request.From, Input: agentlink.MCPTaskInput{TaskID: d.Execution.Receipt.ID, RunID: d.Execution.Receipt.RunID, RequestID: input.RequestID, Text: input.Text}}, &accepted)
-	return accepted.Task, e
+	return accepted, e
 }
 
 // The origin catalogue retains the real execution Task in its receipt. Queue
