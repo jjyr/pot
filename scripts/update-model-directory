@@ -17,7 +17,6 @@ LOGOS = (
     "openrouter",
     "opencode",
     "opencode-go",
-    "groq",
     "mistral",
     "cerebras",
     "deepinfra",

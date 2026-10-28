@@ -1,0 +1,21 @@
+/* Composition geometry only: avatars, replies, resources, communication and task
+   rows use the shared product components and their production styles. */
+html,body{margin:0;min-height:100%;height:auto;overflow:visible;background:var(--canvas)}
+.website-plate{width:100%;min-height:100vh;padding:24px 28px;box-sizing:border-box;container-type:inline-size}
+.plate-head{display:flex;justify-content:space-between;align-items:center;padding-bottom:16px;border-bottom:1px solid var(--divider);margin-bottom:18px}
+.plate-head .work-participant{max-width:none}.plate-head .work-participant-name{max-width:none;font-size:15px}
+.plate-meta{color:var(--muted);font-size:12px}.plate-conversation{display:grid;gap:19px;min-width:0}.plate-conversation .message{margin:0;padding:0;min-width:0}
+.plate-conversation .reply-bubble{max-width:100%;width:100%}.plate-conversation .message-body{font-size:15px}.plate-conversation .role-user .message-body{max-width:94%}
+.plate-conversation .message-speaker{margin-bottom:7px}.plate-conversation .message-speaker .work-participant-name{max-width:150px}
+.plate-conversation .background-tasks{max-width:none;margin-top:3px}.plate-conversation .background-task-list{grid-template-columns:30px max-content minmax(0,1fr) 13px max-content 4px minmax(8ch,max-content)}
+.plate-conversation .resource-heading{padding:13px}.plate-conversation pot-resource{margin:10px 0 0}.plate-conversation .resource-markdown{font-size:14px}
+.plate-body{display:grid;grid-template-columns:1.2fr 1fr;gap:32px;align-items:start}.plate-body .task-panel{padding:18px;background:var(--surface);border:1px solid var(--divider);border-radius:6px}
+.task-panel .background-tasks{border:0;padding-top:0;margin:0}.task-panel .background-task-title{white-space:normal;line-height:1.5}
+.task-panel .background-task-list{grid-template-columns:30px max-content minmax(0,1fr) 13px max-content 4px minmax(8ch,max-content)}
+.task-panel .background-task{min-height:60px}.task-panel .background-tasks-heading{font-size:13px;margin-bottom:12px}
+.plate-question{border-top:1px solid var(--divider);margin-top:18px;padding-top:17px}.plate-question .communication-text{font-size:13px;line-height:1.8}.plate-question .communication-name{max-width:140px}.plate-question .communication-identity{margin-bottom:11px}
+.plate-assistant-layout{display:grid;grid-template-columns:210px minmax(0,1fr);gap:28px}.plate-directory{padding:14px;background:var(--assistant-pane);border-radius:5px}.plate-directory h2{font-size:13px;font-weight:500;margin:0 0 17px;color:var(--muted)}
+.assistant-entry{padding:14px 10px;margin-bottom:5px;border-radius:5px}.assistant-entry.selected{background:var(--assistant-selection)}.assistant-entry .work-participant{max-width:none}.assistant-entry .work-participant-name{max-width:none;font-size:14px}.assistant-entry small{display:block;color:var(--muted);font-size:11px;margin:5px 0 0 27px}
+.link-layout .communication-body{display:block}.link-layout .communication-entry{padding:15px 0}.link-layout .communication-summary{padding:12px 0}.link-layout .communication-name{max-width:200px}.link-layout .communication-identity{margin-bottom:10px}.link-layout .communication-text{font-size:14px}
+@media(max-width:500px){.website-plate{padding:16px}.plate-head{margin-bottom:16px}.plate-meta{font-size:10px}.plate-conversation{gap:15px}.plate-conversation .message-body{font-size:14px}.plate-conversation .background-task-list{grid-template-columns:25px max-content minmax(0,1fr) 11px max-content 3px minmax(7ch,max-content);column-gap:5px}.plate-conversation .background-task{font-size:11px;padding-inline:3px}.plate-conversation .background-task-meta{font-size:10px;column-gap:2px}.plate-conversation .background-task-elapsed{min-width:7ch}.plate-conversation .background-tasks-heading{font-size:11px}.plate-conversation .task-identity-short{font-size:10px}.plate-assistant-layout{grid-template-columns:140px 1fr;gap:16px}.plate-directory{padding:10px}.assistant-entry{padding:12px 4px}.assistant-entry .work-participant-name{font-size:12px}.plate-body{grid-template-columns:1fr}}
+.link-layout>.communication-summary{order:0;margin-left:0}

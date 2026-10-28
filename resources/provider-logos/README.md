@@ -9,8 +9,8 @@ Source: [Lobe Icons](https://github.com/lobehub/lobe-icons), revision
 `8a1b2821bb768c484fe8da20c5e1838b6bf551a9`,
 `packages/static-svg/icons/`. Google, DeepSeek, Mistral, Cerebras and DeepInfra
 use their `*-color.svg` variants; Together AI uses `together-color.svg` and
-Zhipu AI uses `zhipu-color.svg`. Groq uses `groq.svg` with its inherited fill
-set to the brand orange `#F55036` for standalone image rendering.
+Zhipu AI uses `zhipu-color.svg`. Grok (`xai`) uses `xai.svg` from the official
+Grok brand mark (`https://grok.com/images/favicon.svg`) with standalone SVG paths.
 
 The original MIT license is retained in `LICENSE` and included in the packaged
 `ModelDirectoryLicense.txt`. Provider names and marks belong to their owners.
