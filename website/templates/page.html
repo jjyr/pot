@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#f7f5ef"><meta name="description" content="Pot 将持续对话、后台任务与 Agent 协作放在一起，探索更少反复交代、更少盯守的工作方式。">
+<meta name="theme-color" content="#191918"><meta name="description" content="Pot 将持续对话、后台任务与 Agent 协作放在一起，探索更少反复交代、更少盯守的工作方式。">
 <title>Pot · 把精力留给目标和判断</title>
 <link rel="icon" href="assets/pot.png"><link rel="stylesheet" href="style.css">
 <script src="app.js" defer></script>
@@ -12,7 +12,7 @@
 <header class="site-header wrap">
 <a class="brand" href="#" data-switch-view="overview" aria-label="Pot 首页"><img src="assets/pot.png" alt=""><span>Pot<span class="brand-dot">.</span></span></a>
 <nav aria-label="主导航" class="view-nav">
-<a href="#philosophy" class="view-tab active" data-view-tab="overview" aria-current="page">设计理念</a>
+<a href="#view-overview" class="view-tab active" data-view-tab="overview" aria-current="page">项目</a>
 <a href="#view-security" class="view-tab" data-view-tab="security">安全与权限</a>
 <a href="#start" class="view-tab" data-view-tab="install">安装部署</a>
 <a href="#view-changelog" class="view-tab" data-view-tab="changelog">更新日志</a>
@@ -22,64 +22,100 @@
 <main id="main">
 
 <div id="view-overview" class="site-view active" data-view-panel="overview">
-<section class="hero wrap" aria-labelledby="hero-title">
-<div class="hero-copy"><p class="eyebrow">一个开源的个人 AI 助手项目</p>
-<h1 id="hero-title">让助手跟进工作，<br>把精力留给目标和判断。</h1>
-<p class="hero-description">Pot 将持续对话、后台任务与 Agent 协作放在一起，探索一种更少反复交代、更少盯守执行过程的工作方式。</p>
-<div class="actions"><a class="button primary" href="#assistant">看看一次工作如何推进 ↓</a><a href="#start" data-switch-view="install">安装 Pot ↗</a></div>
-<p class="hero-note">先讨论目标，工作在后台推进，结果回到同一段对话。</p></div>
-<figure class="hero-figure"><a href="assets/product-hero.png" target="_blank" rel="noopener"><picture><source media="(max-width:580px)" srcset="assets/product-work-mobile.png"><img src="assets/product-hero.png" width="720" height="560" alt="发布准备示例：对话中返回文档初稿，三个后台任务分别显示身份、状态和耗时"></picture></a><figcaption><span>一次发布准备，回到同一段对话。</span><small>真实组件合成 · 示例数据 · 点击查看高清</small></figcaption></figure>
-</section>
-<section id="philosophy" class="philosophy wrap" aria-labelledby="why-title">
-<div class="philosophy-heading"><p class="eyebrow">出发点</p><h2 id="why-title">为什么需要这样的助手</h2><dl class="attention"><div><dt>人</dt><dd>目标、判断与取舍</dd></div><div><dt>助手</dt><dd>组织、执行与跟进</dd></div></dl></div>
-<div class="philosophy-copy"><p>与 Agent 一起工作，仍然可能消耗大量精力：重复交代习惯、检查执行进度，以及决定接下来该做什么。每次干预都很小，累积起来却让人始终无法离开执行过程。</p>
-<p>Pot 尝试让持续对话的助手承接这些工作：先讨论目标，再组织任务、跟进进展，带着结果或需要判断的问题回到对话。</p>
-<p class="philosophy-emphasis">人的注意力留给方向、取舍与结果，助手逐渐承担更多日常跟进。</p>
-<a class="further" href="https://jjylab.com/posts/why-agent-coding-is-exhausting/">用 Agent 编程，但我为什么这么累？ ↗</a></div>
-</section>
-<section class="choices" aria-labelledby="choices-title">
-<div class="choices-heading wrap"><p class="eyebrow">从想法到界面</p><h2 id="choices-title">几个设计选择</h2><p>以发布准备为例：讨论范围、并行检查、返回文档，仍需判断的部分也留在对话里。</p></div>
-<article id="assistant" class="choice work-choice wrap">
-<div class="choice-heading"><p class="number">01</p><h3>先对齐目标，再交给任务执行</h3><p>对话用来讨论需求与取舍，后台任务承接耗时工作。结果和文件回到原来的对话，检查、修改与下一步都可以接着聊。</p></div>
-<figure class="product-figure work-figure"><a href="assets/product-work.png" target="_blank" rel="noopener"><picture><source media="(max-width:580px)" srcset="assets/product-work-mobile.png"><img src="assets/product-work.png" width="1120" height="620" alt="发布文档初稿与独立任务列表：运行和等待状态左对齐，耗时单独成列" loading="lazy"></picture></a><figcaption>文档初稿已经返回；安装检查继续运行，桌面检查则带回了需要补充的环境问题。</figcaption></figure>
-<dl class="work-notes"><div><dt>讨论范围</dt><dd>先确定文档、安装检查和截图各自需要做到什么程度。</dd></div><div><dt>跟进任务</dt><dd>每项工作保留自己的身份、状态与耗时，运行和等待的部分清楚可见。</dd></div><div><dt>审阅结果</dt><dd>文件回到对话后，可以继续提修改，也可以先处理仍需判断的问题。</dd></div></dl>
-</article>
-<article id="assistants" class="choice assistants-choice wrap">
-<div class="choice-copy"><p class="number">02</p><h3>让不同助手持续负责不同的事</h3>
-<p>开发、运维、资料整理可以各有一个助手。独立的对话与指令为每类工作积累相关背景，减少重新交代的负担；持续对话并不意味着永远记得或自动判断正确。</p>
-<ul class="use-cases"><li><b>开发与审查</b><span>围绕仓库规范、实现取舍和交付继续讨论。</span></li><li><b>资料整理</b><span>保留来源、分歧与待判断的问题，接着形成下一份整理。</span></li><li><b>日常运维</b><span>围绕环境、巡检与问题跟进积累相关背景。</span></li></ul></div>
-<figure class="product-figure assistants-figure"><a href="assets/product-assistants.png" target="_blank" rel="noopener"><picture><source media="(max-width:580px)" srcset="assets/product-assistants-mobile.png"><img src="assets/product-assistants.png" width="920" height="440" alt="专职助手列表与资料整理对话：来源有分歧时，助手带回待判断的问题" loading="lazy"></picture></a><figcaption>分开的对话承接不同工作，也保留各自需要继续讨论的问题。</figcaption></figure>
-</article>
-<div class="link-band"><article id="agent-link" class="choice link-choice wrap"><div class="choice-copy"><p class="number">03</p><h3>让助手拥有组织后续工作的方式</h3>
-<p>任务承接执行，计划与通知提供触发，Agent Link 连接其他 Agent。助手可以组织后续工作，并把进展与结果带回对话。</p>
-<p>Agent Link 支持连接 Pot、Codex 与 Antigravity，让不同环境中的助手通过对话与任务协作。</p>
-<div class="inline-links"><a href="https://github.com/jjyr/pot/blob/main/docs/agent-links.md">Agent Link 文档 ↗</a><a href="https://github.com/jjyr/pot/blob/main/integrations/codex/README.md">Codex ↗</a><a href="https://github.com/jjyr/pot/blob/main/integrations/antigravity/README.md">Antigravity ↗</a></div></div>
-<figure class="architecture" aria-labelledby="architecture-title" aria-describedby="architecture-description">
-<div class="architecture-head"><h4 id="architecture-title">工作如何回到对话</h4><div class="architecture-key"><span>实线：工作与反馈</span><span>虚线：触发来源</span></div></div>
-<div class="architecture-map">
-<div class="arch-user arch-node"><span class="arch-index">01 / 对话</span><strong>讨论目标</strong><p>目标、判断与取舍</p></div>
-<span class="arch-talk arch-wire" aria-hidden="true">↔</span>
-<div class="arch-assistant-group"><div class="arch-assistant arch-node"><span class="arch-index">02 / 组织</span><strong>持续对话的助手</strong><p>组织工作 · 跟进进展</p><span class="arch-context">同一段对话，继续讨论与修改</span></div><div class="arch-trigger arch-notification"><strong>个人 GitHub 通知</strong><span>按订阅条件进入对话</span></div></div>
-<span class="arch-dispatch" aria-hidden="true"><span>→</span><span>→</span></span>
-<div class="arch-execution"><div class="arch-task-unit"><div class="arch-task arch-node"><span class="arch-index">03 / 执行</span><strong>后台任务</strong><p>独立执行耗时工作</p></div><div class="arch-trigger arch-schedule"><strong>计划到期</strong><span>触发后台任务</span></div></div><div class="arch-peer arch-node"><strong>其他 Agent</strong><p>经 Agent Link 协作</p></div></div>
-<span class="arch-collect" aria-hidden="true"><span></span><span></span></span><span class="arch-return-end" aria-hidden="true"></span><span class="arch-return-wire" aria-hidden="true"></span><span class="arch-return-start" aria-hidden="true"></span><span class="arch-mobile-return" aria-hidden="true"></span>
-<p class="arch-outcomes">进展、结果、需判断的问题</p>
+<section id="agent-link" class="hero wrap" aria-labelledby="hero-title">
+<div class="hero-copy">
+<p class="eyebrow"><span class="pixel-spark" aria-hidden="true">✦</span> 一个开源的个人 AI 助手项目</p>
+<h1 id="hero-title"><span>你的助手，</span><span class="accent-text">也有自己的帮手。</span></h1>
+<p class="hero-description">Pot 是运行在你自己环境里的开源 AI 助手。持续对话、后台任务和 Agent 协作，在同一个地方组织起来。</p>
+<p class="hero-detail">先和助手讨论目标，再把耗时工作交给任务，或委派给 Codex 等已连接的 Agent。进展与结果回到对话，需要你判断时，再一起决定下一步。</p>
+<dl class="hero-facts"><div><dt>持续对话</dt><dd>不同助手，保留各自的背景与指令。</dd></div><div><dt>后台执行</dt><dd>分发任务、查看进度、继续修改。</dd></div><div><dt>跨 Agent 协作</dt><dd>连接已有的 Agent，使用各自的工作环境。</dd></div></dl>
+<div class="actions"><a class="button primary" href="#start" data-switch-view="install">开始使用 Pot <span aria-hidden="true">↗</span></a><a class="button secondary" href="https://github.com/jjyr/pot">查看源码 <span aria-hidden="true">↗</span></a></div>
+<div class="hero-meta"><a href="https://github.com/jjyr/pot/blob/main/LICENSE">MIT 许可证</a><span aria-hidden="true">/</span><a href="https://github.com/jjyr/pot/releases/tag/v0.0.4">v0.0.4</a><span aria-hidden="true">/</span><a href="#models">使用自己的模型</a></div>
 </div>
-<figcaption id="architecture-description">助手在原对话中组织后台任务，或经 Agent Link 与其他 Agent 协作；进展、结果和待判断的问题回到助手。计划到期可以触发后台任务，个人通知按订阅条件进入对话。</figcaption>
+<figure class="agent-select" aria-labelledby="roster-title" aria-describedby="roster-caption">
+<div class="stage-topline"><span lang="en">POT / CONNECTION SELECT</span><span aria-hidden="true">01 — 08</span></div>
+<div class="stage-title"><span aria-hidden="true">◆</span><span id="roster-title" lang="en">SELECT YOUR ALLY</span><span aria-hidden="true">◆</span></div>
+<div class="stage-subtitle">连接 Agent，或选择模型。</div>
+<div class="roster">
+<a class="agent-tile tile-codex" data-choice="codex" data-direction="nw" href="#choice-codex"><span class="tile-corners" aria-hidden="true"></span><span class="pixel-portrait sprite-0" aria-hidden="true"></span><span class="tile-brand"><img src="assets/codex.png" width="22" height="22" alt=""></span><span class="tile-label"><strong>Codex</strong><span class="agent-source">Agent</span></span></a>
+<a class="agent-tile tile-claude" data-choice="claude" data-direction="n" href="#choice-claude"><span class="tile-corners" aria-hidden="true"></span><span class="pixel-portrait sprite-1" aria-hidden="true"></span><span class="tile-brand"><img src="assets/claude.svg" width="22" height="22" alt=""></span><span class="tile-label"><strong>Claude</strong><span class="agent-source">模型</span></span></a>
+<a class="agent-tile tile-gemini" data-choice="gemini" data-direction="ne" href="#choice-gemini"><span class="tile-corners" aria-hidden="true"></span><span class="pixel-portrait sprite-2" aria-hidden="true"></span><span class="tile-brand"><img src="assets/google.svg" width="22" height="22" alt=""></span><span class="tile-label"><strong>Gemini</strong><span class="agent-source">模型</span></span></a>
+<a class="agent-tile tile-antigravity" data-choice="antigravity" data-direction="w" href="#choice-antigravity"><span class="tile-corners" aria-hidden="true"></span><span class="pixel-portrait sprite-3" aria-hidden="true"></span><span class="tile-brand"><img src="assets/antigravity.svg" width="22" height="22" alt=""></span><span class="tile-label"><strong>Antigravity</strong><span class="agent-source">Agent</span></span></a>
+<div class="pot-portrait" data-facing="center"><span class="pixel-portrait" aria-hidden="true"></span><strong class="portrait-label">Pot</strong></div>
+<a class="agent-tile tile-deepseek" data-choice="deepseek" data-direction="e" href="#choice-deepseek"><span class="tile-corners" aria-hidden="true"></span><span class="pixel-portrait sprite-4" aria-hidden="true"></span><span class="tile-brand"><img src="assets/deepseek.svg" width="22" height="22" alt=""></span><span class="tile-label"><strong>DeepSeek</strong><span class="agent-source">模型</span></span></a>
+<a class="agent-tile tile-qwen" data-choice="qwen" data-direction="sw" href="#choice-qwen"><span class="tile-corners" aria-hidden="true"></span><span class="pixel-portrait sprite-5" aria-hidden="true"></span><span class="tile-brand"><img src="assets/qwen.svg" width="22" height="22" alt=""></span><span class="tile-label"><strong>Qwen</strong><span class="agent-source">模型</span></span></a>
+<a class="agent-tile tile-grok" data-choice="grok" data-direction="s" href="#choice-grok"><span class="tile-corners" aria-hidden="true"></span><span class="pixel-portrait sprite-6" aria-hidden="true"></span><span class="tile-brand"><img src="assets/grok.svg" width="22" height="22" alt=""></span><span class="tile-label"><strong>Grok</strong><span class="agent-source">模型</span></span></a>
+<a class="agent-tile tile-glm" data-choice="glm" data-direction="se" href="#choice-glm"><span class="tile-corners" aria-hidden="true"></span><span class="pixel-portrait sprite-7" aria-hidden="true"></span><span class="tile-brand"><img src="assets/zhipuai.svg" width="22" height="22" alt=""></span><span class="tile-label"><strong>GLM</strong><span class="agent-source">模型</span></span></a>
+</div>
+<div class="stage-prompt"><span aria-hidden="true">✛</span> 悬停、点选，或用方向键选择</div>
+<div class="selection-info" id="selection-info">
+<article id="choice-codex" class="choice-panel" data-choice-panel="codex"><div class="choice-heading"><img src="assets/codex.png" width="28" height="28" alt=""><h3>Codex</h3><span class="choice-kind">Agent</span></div><p>在独立的代码工作区中执行任务，并将结果交回 Pot。</p><a class="choice-guide" href="https://github.com/jjyr/pot/blob/main/integrations/codex/README.md">连接这个 Agent ↗</a></article>
+<article id="choice-claude" class="choice-panel" data-choice-panel="claude"><div class="choice-heading"><img src="assets/claude.svg" width="28" height="28" alt=""><h3>Claude</h3><span class="choice-kind">模型</span></div><p>连接 Anthropic 模型服务，为 Pot 助手提供推理与工具调用能力。</p><a class="choice-guide" href="https://github.com/jjyr/pot/blob/main/docs/model-directory.md">配置这个模型 ↗</a></article>
+<article id="choice-gemini" class="choice-panel" data-choice-panel="gemini"><div class="choice-heading"><img src="assets/google.svg" width="28" height="28" alt=""><h3>Gemini</h3><span class="choice-kind">模型</span></div><p>连接 Google 模型服务，为 Pot 助手选择 Gemini 模型。</p><a class="choice-guide" href="https://github.com/jjyr/pot/blob/main/docs/model-directory.md">配置这个模型 ↗</a></article>
+<article id="choice-antigravity" class="choice-panel" data-choice-panel="antigravity"><div class="choice-heading"><img src="assets/antigravity.svg" width="28" height="28" alt=""><h3>Antigravity</h3><span class="choice-kind">Agent</span></div><p>通过 Agent Link 连接 Antigravity，和其中的助手交流与协作。</p><a class="choice-guide" href="https://github.com/jjyr/pot/blob/main/integrations/antigravity/README.md">连接这个 Agent ↗</a></article>
+<article id="choice-deepseek" class="choice-panel" data-choice-panel="deepseek"><div class="choice-heading"><img src="assets/deepseek.svg" width="28" height="28" alt=""><h3>DeepSeek</h3><span class="choice-kind">模型</span></div><p>连接 DeepSeek 模型服务，用你选择的模型驱动 Pot 助手。</p><a class="choice-guide" href="https://github.com/jjyr/pot/blob/main/docs/model-directory.md">配置这个模型 ↗</a></article>
+<article id="choice-qwen" class="choice-panel" data-choice-panel="qwen"><div class="choice-heading"><img src="assets/qwen.svg" width="28" height="28" alt=""><h3>Qwen</h3><span class="choice-kind">模型</span></div><p>通过阿里云百炼等模型服务接入 Qwen，为 Pot 助手提供模型能力。</p><a class="choice-guide" href="https://github.com/jjyr/pot/blob/main/docs/model-directory.md">配置这个模型 ↗</a></article>
+<article id="choice-grok" class="choice-panel" data-choice-panel="grok"><div class="choice-heading"><img src="assets/grok.svg" width="28" height="28" alt=""><h3>Grok</h3><span class="choice-kind">模型</span></div><p>连接 xAI 模型服务，为 Pot 助手选择 Grok 模型。</p><a class="choice-guide" href="https://github.com/jjyr/pot/blob/main/docs/model-directory.md">配置这个模型 ↗</a></article>
+<article id="choice-glm" class="choice-panel" data-choice-panel="glm"><div class="choice-heading"><img src="assets/zhipuai.svg" width="28" height="28" alt=""><h3>GLM</h3><span class="choice-kind">模型</span></div><p>连接智谱模型服务，为 Pot 助手选择 GLM 模型。</p><a class="choice-guide" href="https://github.com/jjyr/pot/blob/main/docs/model-directory.md">配置这个模型 ↗</a></article>
+</div>
+<figcaption id="roster-caption">Agent 带来工具和工作环境，模型提供理解与推理。模型可用性取决于服务和配置。</figcaption>
 </figure>
-<div class="follow-through"><div><h4>工作也可以有下一次</h4><p>计划让约定的工作在指定时间触发；个人 GitHub 通知按订阅条件交给指定助手。每周资料整理或仓库通知，都可以成为后续工作的起点。</p><a href="https://github.com/jjyr/pot/blob/main/docs/scheduled-tasks.md">计划与定时任务 ↗</a><a href="https://github.com/jjyr/pot/blob/main/docs/plugins.md#github-notifications">GitHub 通知 ↗</a></div><p class="architecture-boundary">执行中的权限与审批由各自的运行环境管理。</p></div>
-</article></div>
-<p class="illustration-note wrap">以上画面由真实产品组件与合成数据组成，用于解释工作方式，不代表真实业务执行。</p>
+<div class="hero-bottom"><div><strong>一个入口，各有所长。</strong><p>Codex、Antigravity 和其他 Pot 通过 Agent Link 交流与协作。各自保留模型、工具和权限，工作有分工，反馈有去处。</p></div><a href="#workflow">看看如何分工与汇报 ↓</a></div>
 </section>
-<section id="models" class="wrap essay overview-section" aria-labelledby="overview-title"><h2 id="overview-title">项目概览</h2>
-<dl class="project-overview"><div><dt>使用自己的模型</dt><dd>连接模型服务，为助手选择合适的模型。<a href="https://github.com/jjyr/pot/blob/main/docs/model-directory.md">模型配置 ↗</a></dd></div><div><dt>在自己的环境运行</dt><dd>使用 macOS 桌面，或在自己的电脑、服务器上运行并通过浏览器访问；Linux 桌面仍为实验性支持。<a href="#start" data-switch-view="install">安装方式 ↗</a></dd></div><div><dt>明确执行边界</dt><dd>工具权限与审批由运行环境管理，连接的 Agent 保留各自的执行边界。<a href="#view-security" data-switch-view="security">安全与权限 ↗</a></dd></div></dl>
+<section id="philosophy" class="light-band" aria-labelledby="why-title"><div class="wrap philosophy">
+<div><p class="eyebrow">01 / 为什么是助手</p><h2 id="why-title">让助手多操一点心。</h2></div>
+<div class="philosophy-copy"><p>人关注目标、取舍和结果，助手承担更多执行与跟进。</p><p>持续对话，为积累习惯和背景提供基础，减少反复交代。</p><a class="further" href="https://jjylab.com/posts/why-agent-coding-is-exhausting/">为什么选择助手 ↗</a></div>
+</div></section>
+<section id="workflow" class="wrap workflow-section" aria-labelledby="workflow-title">
+<div class="section-intro"><div><p class="eyebrow">02 / 从目标到报告</p><h2 id="workflow-title">你交代目标，<br>助手分工、跟进、汇报。</h2></div><p>把一件事交给助手。它可以拆分工作、选择执行者，并把进展、成果和需要你判断的问题汇总回来。</p></div>
+<figure class="dispatch-board" aria-labelledby="dispatch-title" aria-describedby="dispatch-caption">
+<div class="console-top"><span id="dispatch-title">流程示例 · 开发订单导出功能</span><span class="example-label">示意，不是实时任务</span></div>
+<div class="task-map">
+<div class="task-goal"><span class="node-kicker">你提出目标</span><blockquote>“给订单列表增加 CSV 导出，支持导出筛选结果。”</blockquote></div>
+<div class="task-stem" aria-hidden="true"></div>
+<div class="task-organizer"><img src="assets/pot.png" width="42" height="42" alt=""><div><h3>Pot 助手</h3><p>理解目标，分配工作</p></div></div>
+<div class="task-branches" aria-hidden="true"><span></span><span></span></div>
+<div class="task-workers">
+<article class="task-worker"><div class="task-identity"><img src="assets/codex.png" width="36" height="36" alt=""><h4>Codex</h4></div><span class="worker-role">代码实现</span><p>实现导出按钮与接口</p></article>
+<article class="task-worker"><div class="task-identity"><img src="assets/deepseek.svg" width="36" height="36" alt=""><h4>DeepSeek</h4></div><span class="worker-role">任务 Agent</span><p>测试用例与使用说明</p></article>
+</div>
+<div class="task-branches task-merge" aria-hidden="true"><span></span><span></span></div>
+<div class="task-result"><img src="assets/pot.png" width="32" height="32" alt=""><div><h3>Pot 汇总交付给你</h3><p>代码改动、测试用例和使用说明，回到同一段对话。</p></div></div>
+</div>
+<figcaption id="dispatch-caption">示例用于说明工作方式。具体分工取决于指令、可用 Agent 和执行权限。</figcaption>
+</figure>
+<a class="workflow-doc text-link" href="https://github.com/jjyr/pot/blob/main/docs/task-coordination.md">了解任务与协作 ↗</a>
 </section>
-<section id="project" class="wrap essay project" aria-labelledby="project-title"><h2 id="project-title">持续建设中的开源项目</h2>
-<p class="release-note"><a href="https://github.com/jjyr/pot/releases/tag/v0.0.4">v0.0.4 ↗</a><time datetime="2026-10-27">2026-10-27</time></p>
-<p>最近的更新改善了离线启动、对话恢复与本地草稿，让工作更容易接着进行。</p>
-<p>Pot 仍在持续建设。Windows 暂不支持，Linux 桌面仍处于实验阶段。当前问题、讨论和贡献在仓库中公开，项目也通过这些反馈继续演进。</p>
-<div class="inline-links"><a href="#view-changelog" data-switch-view="changelog">更新记录 ↗</a><a href="https://github.com/jjyr/pot/issues">报告问题 ↗</a><a href="https://github.com/jjyr/pot/blob/main/docs/development.md">参与贡献 ↗</a></div>
-</section>
+<section id="mcp" class="mcp-band" aria-labelledby="mcp-title"><div class="wrap mcp-section">
+<div class="section-intro"><div><p class="eyebrow">03 / 从你熟悉的地方开始</p><h2 id="mcp-title">在已有的 Agent 里，<br>直接联系其他助手。</h2></div><div><p>Codex 通过 Pot 的 MCP 工具选择 Gemini 助手，需求经 Agent Link 直接送达。Gemini 处理后，将结果回复给 Codex。</p><a class="text-link" href="https://github.com/jjyr/pot/blob/main/docs/connect-with-agent.md">连接指南 ↗</a></div></div>
+<figure class="mcp-journey" aria-labelledby="mcp-journey-title" aria-describedby="mcp-caption">
+<div class="console-top"><span id="mcp-journey-title">流程示例 · Codex 请 Gemini 润色文案</span><span class="example-label">示意，不是实时任务</span></div>
+<div class="link-route">
+<div class="link-endpoint link-sender"><img src="assets/codex.png" width="48" height="48" alt=""><h3>Codex</h3><span>提出需求</span></div>
+<div class="link-channel"><strong>Pot MCP / Agent Link</strong><div class="link-send" aria-hidden="true"></div><div class="link-reply"><span aria-hidden="true">←</span><span>润色结果</span></div></div>
+<div class="link-endpoint link-receiver"><img src="assets/google.svg" width="48" height="48" alt=""><h3>Gemini</h3><span>润色文案</span></div>
+</div>
+<div class="copy-comparison">
+<div class="copy-before"><span class="node-kicker">原文</span><blockquote>“支持筛选后导出 CSV。”</blockquote></div>
+<div class="copy-after"><span class="node-kicker">润色后</span><blockquote>“只导出你需要的订单，一键保存为 CSV。”</blockquote></div>
+</div>
+<p class="copy-next">交回 Codex，继续完成界面</p>
+<figcaption id="mcp-caption">Codex 直接指定 Gemini 助手为收件人。Pot 提供连接与消息传递，各助手在自己的环境中处理请求。</figcaption>
+</figure>
+</div></section>
+<section id="models" class="light-band" aria-labelledby="models-title"><div class="wrap models-section">
+<div class="section-intro"><div><p class="eyebrow">04 / 选择你的模型</p><h2 id="models-title">模型，你来选。</h2></div><p>模型提供理解与推理能力；Agent 则拥有工具和工作环境。为 Pot 助手连接自己的模型服务。</p></div>
+<div class="model-grid">
+<div class="model"><img src="assets/openai.svg" width="32" height="32" alt=""><div><strong>GPT</strong><span>OpenAI</span></div></div>
+<div class="model"><img src="assets/claude.svg" width="32" height="32" alt=""><div><strong>Claude</strong><span>Anthropic</span></div></div>
+<div class="model"><img src="assets/google.svg" width="32" height="32" alt=""><div><strong>Gemini</strong><span>Google</span></div></div>
+<div class="model"><img src="assets/deepseek.svg" width="32" height="32" alt=""><div><strong>DeepSeek</strong><span>DeepSeek</span></div></div>
+<div class="model"><img src="assets/grok.svg" width="32" height="32" alt=""><div><strong>Grok</strong><span>xAI</span></div></div>
+<div class="model"><img src="assets/zhipuai.svg" width="32" height="32" alt=""><div><strong>GLM</strong><span>Zhipu AI</span></div></div>
+</div><div class="model-foot"><p>也可通过 OpenRouter 或自定义 API 接入。可用模型与能力取决于服务和配置。</p><a href="https://github.com/jjyr/pot/blob/main/docs/model-directory.md">模型配置 ↗</a></div>
+<div id="assistant" class="capabilities"><article><span class="feature-number">01</span><h3>工作可以接着聊</h3><p>开发、研究各有自己的助手，在各自的对话和指令中保留相关背景。</p><a href="https://github.com/jjyr/pot/blob/main/docs/agent-context.md">助手与上下文 ↗</a></article><article><span class="feature-number">02</span><h3>耗时工作，交给后台</h3><p>讨论好目标后交给任务执行，查看进展，再带着结果继续讨论。</p><a href="https://github.com/jjyr/pot/blob/main/docs/task-coordination.md">后台任务 ↗</a></article><article><span class="feature-number">03</span><h3>让工作有下一次</h3><p>计划触发定时任务，GitHub 通知进入助手对话，成为后续工作的起点。</p><a href="https://github.com/jjyr/pot/blob/main/docs/scheduled-tasks.md">计划与通知 ↗</a></article></div>
+</div></section>
+<section id="project" class="wrap project" aria-labelledby="project-title"><div><p class="eyebrow">05 / 开放建设中</p><h2 id="project-title">一起让 Pot<br>更有用。</h2><div class="actions"><a class="button primary" href="#start" data-switch-view="install">开始使用 Pot <span aria-hidden="true">↗</span></a><a class="text-link" href="https://github.com/jjyr/pot/blob/main/docs/development.md">参与贡献 ↗</a></div></div><div class="project-details"><p class="release-note"><a href="https://github.com/jjyr/pot/releases/tag/v0.0.4">v0.0.4 ↗</a><time datetime="2026-10-27">2026-10-27</time></p><p>最近的更新改善了离线启动、对话恢复与本地草稿，让工作更容易接着进行。</p><p>macOS 桌面与自部署 Web UI；Linux 桌面为实验性支持，Windows 暂不支持。</p><div class="inline-links"><a href="#view-changelog" data-switch-view="changelog">更新记录 ↗</a><a href="https://github.com/jjyr/pot/issues">报告问题 ↗</a><a href="https://github.com/jjyr/pot/blob/main/docs/README.md">文档 ↗</a></div></div></section>
 </div>
 
 <!-- ==================== VIEW 2: SECURITY ==================== -->

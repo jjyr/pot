@@ -17,112 +17,93 @@ await page.route('https://api.github.com/repos/jjyr/pot',async route=>{
  await route.fulfill({status:starMode==='missing'?404:starMode==='limited'?403:200,contentType:'application/json',body:JSON.stringify({stargazers_count:starMode==='invalid'?'wrong':starMode==='zero'?0:1234})});
 });
 await page.addInitScript(()=>{Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.copied=text;}}});});
-async function checkArchitecture(target,locale,width){
- assert(await target.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} document overflow at ${width}`);
- const overflow=await target.locator('.architecture').evaluate(figure=>{
-  const bounds=figure.getBoundingClientRect(),bad=[];
-  for(const node of figure.querySelectorAll('*')){
-   const rect=node.getBoundingClientRect();
-   if(rect.width&&rect.height&&(rect.left<bounds.left||rect.right>bounds.right))bad.push(node.className||node.tagName);
-  }
-  const walker=document.createTreeWalker(figure,NodeFilter.SHOW_TEXT);
-  while(walker.nextNode()){
-   const node=walker.currentNode;
-   if(!node.textContent.trim()||node.parentElement.closest('[aria-hidden=true]'))continue;
-   const container=node.parentElement.closest('.arch-node,.arch-trigger,.architecture-head,figcaption,.arch-outcomes')||figure;
-   const box=container.getBoundingClientRect(),range=document.createRange();range.selectNodeContents(node);
-   for(const rect of range.getClientRects())if(rect.width&&(rect.left<box.left-.5||rect.right>box.right+.5||rect.bottom>box.bottom+.5))bad.push(node.textContent.trim());
-  }
-  return bad;
+async function checkRoster(target,locale,width){
+ assert(await target.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} overflow at ${width}`);
+ const links=target.locator('.agent-tile');
+ assert.equal(await links.count(),8);
+ assert.deepEqual(await links.evaluateAll(nodes=>nodes.map(node=>node.dataset.choice)),['codex','claude','gemini','antigravity','deepseek','qwen','grok','glm']);
+ assert.deepEqual(await links.evaluateAll(nodes=>nodes.map(node=>node.getAttribute('href'))),['codex','claude','gemini','antigravity','deepseek','qwen','grok','glm'].map(id=>'#choice-'+id));
+ await target.evaluate(async()=>{
+  await document.fonts.ready;
+  const urls=[...new Set([...document.querySelectorAll('.pixel-portrait')].map(el=>getComputedStyle(el).backgroundImage.slice(5,-2)))];
+  await Promise.all(urls.map(src=>{const image=new Image();image.src=src;return image.decode();}));
  });
- assert.deepEqual(overflow,[],`${locale} architecture nodes and text fit at ${width}`);
- assert.equal(await target.locator('.arch-assistant-group .arch-notification').count(),1);
- assert.equal(await target.locator('.arch-task-unit .arch-schedule').count(),1);
- assert.equal(await target.locator('.architecture').getAttribute('aria-describedby'),'architecture-description');
- assert((await target.locator('#architecture-description').innerText()).length>80);
- assert(await target.locator('.architecture').evaluate(figure=>{
-  const mobile=innerWidth<=760,head=figure.querySelector('.architecture-head').getBoundingClientRect();
-  return [['.arch-notification','.arch-assistant'],['.arch-schedule','.arch-task']].every(([source,target])=>{
-   const a=figure.querySelector(source).getBoundingClientRect(),b=figure.querySelector(target).getBoundingClientRect();
-   return mobile?a.top>=b.bottom+20:a.top>=head.bottom&&a.bottom<=b.top-20;
-  });
- }),`${locale} triggers are separate from their targets at ${width}`);
-}
-async function architectureChecks(){
- for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
-  for(const width of [1280,390,320]){
-   await page.setViewportSize({width,height:900});
-   await page.goto(`${origin}/website/${locale}/#agent-link`);
-   assert.equal(await page.locator('html').getAttribute('lang'),locale);
-   assert(await page.locator('#view-overview').isVisible());
-   await checkArchitecture(page,locale,width);
+ await target.locator('.agent-select img').evaluateAll(images=>Promise.all(images.map(async image=>{
+  try { await image.decode(); } catch(error) { throw new Error(`Image decode failed: ${image.currentSrc || image.src}; complete=${image.complete}; naturalWidth=${image.naturalWidth}; ${error.message}`); }
+ })));
+ assert(await target.locator('.agent-select').evaluate(figure=>{
+  const box=figure.getBoundingClientRect(),center=figure.querySelector('.pot-portrait').getBoundingClientRect();
+  const codex=figure.querySelector('.tile-antigravity').getBoundingClientRect(),peer=figure.querySelector('.tile-deepseek').getBoundingClientRect();
+  const top=figure.querySelector('.tile-claude').getBoundingClientRect(),bottom=figure.querySelector('.tile-grok').getBoundingClientRect();
+  return Math.abs(center.left+center.width/2-(box.left+box.width/2))<1&&codex.right<center.left&&peer.left>center.right&&top.bottom<center.top&&bottom.top>center.bottom;
+ }),`${locale} Pot stays at the center of the selection screen at ${width}`);
+ const clipped=await target.locator('#view-overview').evaluate(root=>{
+  const result=[],walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
+  while(walker.nextNode()){
+   const node=walker.currentNode;if(!node.textContent.trim()||node.parentElement.closest('[aria-hidden=true]'))continue;
+   const range=document.createRange();range.selectNodeContents(node);
+   for(const box of range.getClientRects())if(box.width&&(box.left<-.5||box.right>innerWidth+.5))result.push(node.textContent.trim());
   }
-  console.log('Section 03: locale, direct link and 1280/390/320px passed:',locale);
- }
- await page.goto(`${origin}/website/zh-CN/#agent-link`);
- await page.selectOption('#language-select','ja');await page.waitForURL('**/ja/**');
- assert.equal(new URL(page.url()).hash,'#agent-link');
- await page.reload();assert.equal(new URL(page.url()).hash,'#agent-link');
- assert(await page.locator('.architecture').isVisible());
- await page.goBack();assert.equal(await page.locator('html').getAttribute('lang'),'zh-CN');
- await page.goForward();assert.equal(await page.locator('html').getAttribute('lang'),'ja');
- const noJS=await browser.newPage({javaScriptEnabled:false,viewport:{width:390,height:900}});
- try{
-  for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
-   await noJS.goto(`${origin}/website/${locale}/#agent-link`);
-   await checkArchitecture(noJS,locale,390);
-  }
- }finally{await noJS.close();}
- await page.goto(`${origin}/website/pot-preview.html#agent-link`);
- await page.selectOption('#language-select','es');
- assert.equal(await page.locator('html').getAttribute('lang'),'es');
- await checkArchitecture(page,'es',320);
- assert.deepEqual(errors,[]);
- console.log('Section 03: language switch, refresh/history, six no-JavaScript locales and offline preview passed');
+  return result;
+ });
+ assert.deepEqual(clipped,[],`${locale} homepage text fits at ${width}`);
+ assert(await target.locator('.tile-label').evaluateAll(labels=>labels.every(label=>label.scrollWidth<=label.clientWidth)),`${locale} tile labels fit at ${width}`);
+ assert.equal(await target.locator('.model').count(),6);
+ await checkWorkflows(target,locale,width);
 }
-async function captureArchitecture(){
- const dir='docs/pr-images/redesign-website';await fs.mkdir(dir,{recursive:true});
- for(const width of [1280,390])for(const version of ['before','after']){
-  await page.setViewportSize({width,height:900});
-  await page.goto(`${origin}/${version==='before'?'output/website-before-architecture/':''}website/zh-CN/#agent-link`);
-  await page.locator('.link-band img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
-  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${version} capture overflows at ${width}`);
-  await page.locator('.link-band').screenshot({path:`${dir}/architecture-03-${width}-${version}.png`});
+async function checkWorkflows(target,locale,width){
+ for(const selector of ['.dispatch-board','.mcp-journey']){
+  const figure=target.locator(selector);
+  assert(await figure.isVisible(),`${locale} ${selector} is visible at ${width}`);
+  assert(await figure.evaluate(root=>{
+   const bounds=root.getBoundingClientRect(),walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
+   while(walker.nextNode()){
+    const node=walker.currentNode;
+    if(!node.textContent.trim()||node.parentElement.closest('[aria-hidden=true]'))continue;
+    const range=document.createRange();range.selectNodeContents(node);
+    for(const rect of range.getClientRects())if(rect.width&&(rect.left<bounds.left||rect.right>bounds.right))return false;
+   }
+   return root.scrollWidth<=root.clientWidth;
+  }),`${locale} ${selector} content fits at ${width}`);
  }
- console.log('Section 03: paired desktop and 390px screenshots saved');
+ assert(await target.locator('.task-map').evaluate(root=>{
+  const box=selector=>root.querySelector(selector).getBoundingClientRect();
+  const goal=box('.task-goal'),pot=box('.task-organizer'),workers=box('.task-workers'),result=box('.task-result');
+  const [left,right]=[...root.querySelectorAll('.task-worker')].map(el=>el.getBoundingClientRect());
+  return goal.bottom<pot.top&&pot.bottom<workers.top&&workers.bottom<result.top&&left.right<right.left&&Math.abs(left.top-right.top)<1&&Math.abs(left.width-right.width)<1;
+ }),`${locale} delegation branches into aligned parallel workers and merges into the report at ${width}`);
+ assert(await target.locator('.link-route').evaluate(root=>{
+  const boxes=['.link-sender','.link-channel','.link-receiver'].map(s=>root.querySelector(s).getBoundingClientRect());
+  return boxes[0].right<boxes[1].left&&boxes[1].right<boxes[2].left&&Math.abs(boxes[0].top-boxes[2].top)<1;
+ }),`${locale} direct messaging keeps aligned endpoints at ${width}`);
+ assert(await target.locator('.copy-comparison').evaluate(root=>{
+  const a=root.querySelector('.copy-before').getBoundingClientRect(),b=root.querySelector('.copy-after').getBoundingClientRect();
+  return innerWidth<=600?a.bottom<b.top:a.right<b.left&&Math.abs(a.top-b.top)<1;
+ }),`${locale} copy comparison reads before then after at ${width}`);
 }
 async function capture(){
- const dir='docs/pr-images/redesign-website';await fs.mkdir(dir,{recursive:true});
- for(const width of [1280,390,320])for(const version of ['before','after']){
+ const dir='output/pr-images/stage-select';await fs.mkdir(dir,{recursive:true});
+ for(const width of [1280,390])for(const version of ['before','after']){
   await page.setViewportSize({width,height:900});
-  await page.goto(`${origin}/${version==='before'?'output/website-before-r2/':''}website/zh-CN/`);
-  await page.screenshot({path:`${dir}/balanced-home-${width}-${version}.png`});
+  await page.goto(`${origin}/${version==='before'?'output/website-before-stage-select/':''}website/zh-CN/`);
+  await page.locator('img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
+  await page.screenshot({path:`${dir}/home-${width}-${version}.png`,fullPage:true});
  }
  await page.setViewportSize({width:1280,height:900});
  for(const view of ['security','install','changelog'])for(const version of ['before','after']){
-  await page.goto(`${origin}/${version==='before'?'output/website-before-r2/':''}website/zh-CN/`);
-  await page.locator(`[data-view-tab="${view}"]`).click();
-  await page.screenshot({path:`${dir}/balanced-${view}-1280-${version}.png`});
+  await page.goto(`${origin}/${version==='before'?'output/website-before-stage-select/':''}website/zh-CN/#view-${view}`);
+  await page.screenshot({path:`${dir}/${view}-1280-${version}.png`});
  }
- for(const version of ['before','after']){
-  await page.goto(`${origin}/${version==='before'?'output/website-before-r2/':''}website/zh-CN/`);
-  await page.locator('img').evaluateAll(images=>images.forEach(image=>image.loading='eager'));
-  await page.locator('img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
-  await page.screenshot({path:`${dir}/balanced-home-full-1280-${version}.png`,fullPage:true});
- }
-
+ await page.goto(`${origin}/website/zh-CN/`);
+ await page.locator('.tile-claude').hover();
+ await page.locator('.agent-select').screenshot({path:`${dir}/agent-selection-hover-after.png`});
 }
-if(process.argv.includes('--architecture-only')){
- await architectureChecks();
- if(process.argv.includes('--capture'))await captureArchitecture();
-}else{
 if(process.argv.includes('--capture-only')){await capture();await browser.close();process.exit(0);}
 for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  await page.setViewportSize({width:1280,height:900});
  await page.goto(`${origin}/website/${locale}/`);
  assert.equal(await page.locator('#view-overview').isVisible(),true);
- await page.locator('.hero-figure img').evaluate(image=>image.decode());
- assert(await page.locator('.hero-figure img').evaluate(image=>image.complete&&image.naturalWidth===720),'Hero uses the captured product components');
+ await checkRoster(page,locale,1280);
  assert.equal(await page.locator('#view-security').isVisible(),false);
  assert.equal(await page.locator('#view-install').isVisible(),false);
  assert.equal(await page.locator('#view-changelog').isVisible(),false);
@@ -217,15 +198,10 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  assert.equal(await page.locator('#view-overview').isVisible(),true);
  const postHref=await page.locator('.further').getAttribute('href');
  assert.equal(postHref,locale==='zh-CN'||locale==='zh-TW'?'https://jjylab.com/posts/why-agent-coding-is-exhausting/':'https://jjylab.com/en/posts/why-agent-coding-is-exhausting/');
- for(const width of [1280,390,320]){
+ for(const width of [1280,820,390,320]){
   await page.setViewportSize({width,height:900});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} overview overflow at ${width}`);
-  for(const selector of ['.hero-figure','.work-figure','.assistants-figure']){
-   await page.locator(selector).scrollIntoViewIfNeeded();
-   await page.locator(selector+' img').evaluate(image=>image.decode());
-   assert(await page.locator(selector).evaluate(el=>el.getBoundingClientRect().right<=innerWidth),`${locale} figure bounds at ${width}`);
-  }
-  await checkArchitecture(page,locale,width);
+  await checkRoster(page,locale,width);
  }
  // Direct links, refresh and history must reveal their target panel.
  await page.goto(`${origin}/website/${locale}/#view-security`);
@@ -236,14 +212,38 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  await page.goBack();assert(await page.locator('#view-security').isVisible());
  await page.goForward();assert(await page.locator('#view-install').isVisible());
  await page.locator('[data-view-tab="overview"]').click();
- assert.equal(new URL(page.url()).hash,'#philosophy');
+ assert.equal(new URL(page.url()).hash,'#view-overview');
  assert(await page.locator('#philosophy').isVisible());
- assert.equal(await page.locator('.product-figure').count(),2);
- assert.equal(await page.locator('.architecture').count(),1);
- await page.locator('.product-figure img').first().scrollIntoViewIfNeeded();
- await page.locator('.product-figure img').first().evaluate(img=>img.decode());
- assert(await page.locator('.product-figure img').first().evaluate(img=>img.naturalWidth>300));
- assert.equal(await page.locator('.product-figure a').first().getAttribute('href'),'../assets/product-work.png');
+ await page.setViewportSize({width:1280,height:900});
+ const initialHeight=await page.locator('.agent-select').evaluate(el=>el.getBoundingClientRect().height);
+ for(const [id,direction,position] of [['codex','nw','0px 0px'],['claude','n','50% 0px'],['gemini','ne','100% 0px'],['antigravity','w','0px 48.5%'],['deepseek','e','100% 48.5%'],['qwen','sw','0px 97%'],['grok','s','50% 97%'],['glm','se','100% 97%']]){
+  const tile=page.locator(`[data-choice="${id}"]`);await tile.hover();
+  assert.equal(await tile.getAttribute('aria-pressed'),'true');
+  assert.equal(await tile.evaluate(el=>getComputedStyle(el).borderTopColor),'rgb(232, 190, 88)');
+  assert.equal(await tile.locator('.tile-corners').evaluate(el=>getComputedStyle(el).opacity),'1');
+  assert.equal(await page.locator('.pot-portrait').getAttribute('data-facing'),direction);
+  assert.equal(await page.locator('.pot-portrait .pixel-portrait').evaluate(el=>getComputedStyle(el).backgroundPosition),position);
+  assert.equal(await page.locator('.choice-panel:visible').count(),1);
+  assert(await page.locator(`#choice-${id}`).isVisible());
+  assert.equal(await page.locator('.agent-select').evaluate(el=>el.getBoundingClientRect().height),initialHeight,`${locale} selecting ${id} keeps board height stable`);
+ }
+ await page.mouse.move(0,0);await page.locator('.tile-codex').focus();await page.keyboard.press('ArrowRight');
+ assert(await page.locator('.tile-claude').evaluate(el=>el===document.activeElement));
+ await page.keyboard.press('ArrowDown');
+ assert(await page.locator('.tile-grok').evaluate(el=>el===document.activeElement),'Down skips the central Pot');
+ await page.keyboard.press('Home');await page.keyboard.press('ArrowDown');
+ assert(await page.locator('.tile-antigravity').evaluate(el=>el===document.activeElement));
+ await page.keyboard.press('ArrowRight');
+ assert(await page.locator('.tile-deepseek').evaluate(el=>el===document.activeElement),'Right skips the central Pot');
+ await page.keyboard.press('End');await page.keyboard.press(' ');
+ assert.equal(await page.locator('.tile-glm').getAttribute('aria-pressed'),'true');
+ await page.keyboard.press('Tab');
+ assert(await page.locator('#choice-glm .choice-guide').evaluate(el=>el===document.activeElement),'Only the active guide is focusable');
+ for(const view of ['security','changelog']){
+  await page.goto(`${origin}/website/${locale}/#view-${view}`);
+  for(const width of [390,320]){await page.setViewportSize({width,height:900});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} ${view} fits ${width}`);}
+ }
+
 
  }
  console.log(installOnly?'installation, responsive, clipboard and keyboard:':'locale, responsive, clipboard, changelog links and navigation:',locale,'passed');
@@ -309,8 +309,44 @@ for(const [language,saved,expected] of [['ja-JP',null,'ja'],['zh-Hant',null,'zh-
  await entry.goto(origin+'/website/en/');assert.equal(await entry.locator('html').getAttribute('lang'),'en');
  await context.close();
 }
-console.log('Root language detection, saved preference and explicit locale paths passed');
+for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
+ await noJS.setViewportSize({width:390,height:844});
+ await noJS.goto(`${origin}/website/${locale}/`);
+ await checkRoster(noJS,locale,390);
+ assert.equal(await noJS.locator('.choice-panel:visible').count(),8);
+ assert.equal(await noJS.locator('.choice-guide').count(),8);
 }
+for(const section of ['workflow','mcp']){
+await page.goto(`${origin}/website/zh-CN/?character=qwen#${section}`);
+await page.selectOption('#language-select','en');await page.waitForURL('**/en/**');
+assert.equal(new URL(page.url()).hash,`#${section}`);
+assert.equal(await page.locator('.tile-qwen').getAttribute('aria-pressed'),'true');
+await page.reload();assert(await page.locator(`#${section}`).isVisible());
+await page.goBack();assert.equal(await page.locator('html').getAttribute('lang'),'zh-CN');
+}
+await offline.locator('[data-view-tab="overview"]').click();
+await offline.locator('.tile-deepseek').click();
+await offline.locator('#mcp').scrollIntoViewIfNeeded();
+await offline.selectOption('#language-select','ja');
+assert.equal(await offline.locator('html').getAttribute('lang'),'ja');
+await checkRoster(offline,'ja',1280);
+assert.equal(await offline.locator('.tile-deepseek').getAttribute('aria-pressed'),'true');
+await offline.locator('.tile-glm').click();assert.equal(await offline.locator('.pot-portrait').getAttribute('data-facing'),'se');
+const touch=await browser.newPage({viewport:{width:390,height:844},hasTouch:true,isMobile:true});
+await touch.route('https://api.github.com/**',route=>route.abort());
+await touch.route('https://github.com/jjyr/pot/blob/main/integrations/codex/README.md',route=>route.fulfill({contentType:'text/html',body:'<title>Connection guide fixture</title>'}));
+await touch.goto(`${origin}/website/en/`);
+await touch.locator('.tile-gemini').tap();
+assert.equal(await touch.locator('.tile-gemini').getAttribute('aria-pressed'),'true');
+assert.equal(await touch.locator('.pot-portrait').getAttribute('data-facing'),'ne');
+assert(new URL(touch.url()).pathname.endsWith('/website/en/'),'Touch selects instead of navigating away');
+await touch.locator('.tile-codex').tap();
+await touch.locator('#choice-codex .choice-guide').tap();
+await touch.waitForURL('https://github.com/jjyr/pot/blob/main/integrations/codex/README.md');
+await touch.close();
+assert.deepEqual(errors,[]);assert.deepEqual(outgoing,[]);
+console.log('Selection hover/focus, touch link, six no-JS locales, workflow and MCP anchors/history and offline language passed');
+console.log('Root language detection, saved preference and explicit locale paths passed');
 } finally {
  await browser.close();
 }

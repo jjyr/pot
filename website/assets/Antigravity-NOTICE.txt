@@ -6,8 +6,7 @@ Declared as a favicon by the official https://antigravity.google/ website.
 The SVG is stored unmodified, with its original colors and proportions.
 
 The Antigravity name and image belong to Google. This image identifies an
-assistant whose Pot integration is coming soon; its inclusion does not imply
-endorsement or available connection support. It is not covered by Pot's MIT
+Antigravity Agent Link integration; its inclusion does not imply endorsement. It is not covered by Pot's MIT
 license and this notice grants no trademark or image license.
 
 Google brand guidance: https://about.google/brand-resource-center/
