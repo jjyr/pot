@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 
 // Exercise changed content in existing native views, including scalar Text
 // nodes. Identity witnesses come from connected candidate DOM, not CSS sizing.
@@ -47,7 +48,11 @@ export async function preparedRevisionTransfers(page,origin){
 }
 
 export async function preparedResponsiveMedia(page,origin){
- const results=[];
+ const policySource=await readFile(new URL('../../internal/webui/server.go',import.meta.url),'utf8'),policyMatch=policySource.match(/Set\("Content-Security-Policy", ("[^"\n]+")\)/);
+ assert(policyMatch,'Use the actual web UI response policy');const policy=JSON.parse(policyMatch[1]),results=[];
+ const documentRoute=async route=>{const response=await route.fetch();await route.fulfill({response,headers:{...response.headers(),'content-security-policy':policy}});};
+ await page.route('**/scripts/tests/fixtures/prepared-empty.html',documentRoute);
+ try{
  for(const [width,height]of [[1,1],[960,640],[280,960]]){
   await page.goto(origin+'/scripts/tests/fixtures/prepared-empty.html');
   const result=await page.evaluate(async({width,height})=>{
@@ -62,18 +67,19 @@ export async function preparedResponsiveMedia(page,origin){
    const draw=()=>ui.setMessages(rows),wait=async test=>{for(let i=0;i<600;i++){if(test())return;await new Promise(requestAnimationFrame);}throw Error('Responsive media did not settle '+JSON.stringify({prepared:ui.prepared,width:scroller.clientWidth,height:scroller.clientHeight,resource:host.querySelector('pot-resource')?.dataset.state,surfaces:document.querySelectorAll('[data-preparation-surface]').length,acquired,released,image:host.querySelector('img')?.outerHTML,natural:host.querySelector('img')?.naturalWidth}));};
    ui=createMessageWindow({scroller,host,requestRender:draw,render,dispose:record=>retirePreparedTree(record.row)});
    try{
-    draw();await wait(()=>ui.prepared&&host.querySelector('img')?.naturalWidth);const original=host.querySelector('pot-resource'),image=original.querySelector('img'),phases=[];
+    draw();await wait(()=>ui.prepared&&host.querySelector('img')?.naturalWidth);const original=host.querySelector('pot-resource'),image=original.querySelector('img'),phases=[],requests=()=>performance.getEntriesByType('resource').filter(entry=>entry.name===url).length;
     for(const [available,fontSize]of [[340,'16px'],[700,'18px']]){
-     const leases=acquired;scroller.style.width=available+'px';scroller.style.fontSize=fontSize;draw();await wait(()=>ui.prepared);
-     const reflow={available,fontSize,acquired:acquired-leases,sameOriginal:host.querySelector('pot-resource')===original,sameImage:original.querySelector('img')===image};
+     const leases=acquired,requestCount=requests();scroller.style.width=available+'px';scroller.style.fontSize=fontSize;draw();await wait(()=>ui.prepared);
+     const reflow={available,fontSize,acquired:acquired-leases,resourceRequests:requests()-requestCount,sameOriginal:host.querySelector('pot-resource')===original,sameImage:original.querySelector('img')===image,sameSource:image.src===url};
      const surface=createPreparationSurface(scroller,host),context=createPreparedRender(),fresh=withPreparedRender(context,'row',()=>render(rows[0]));surface.host.append(fresh.row);await settlePreparedTree(fresh.row,context).promise;
      const live=host.querySelector('article').getBoundingClientRect(),independent=fresh.row.getBoundingClientRect();phases.push({...reflow,parity:independent.height-live.height,liveHeight:live.height,freshHeight:independent.height,image:{width:image.clientWidth,height:image.clientHeight,naturalWidth:image.naturalWidth,naturalHeight:image.naturalHeight}});surface.close();
     }
     ui.close();await Promise.resolve();return {width,height,phases,acquired,released};
    }finally{ui.close();URL.revokeObjectURL(url);}
   },{width,height});
-  for(const phase of result.phases){assert(Math.abs(phase.parity)<0.6,'Ready image reflow matches an independent current-width render');assert(phase.sameOriginal&&phase.sameImage);assert.equal(phase.acquired,0,'Reflow retains the original resource lease');}
+  for(const phase of result.phases){assert(Math.abs(phase.parity)<0.6,'Ready image reflow matches an independent current-width render');assert(phase.sameOriginal&&phase.sameImage&&phase.sameSource);assert.equal(phase.acquired,0,'Reflow retains the original resource lease');assert.equal(phase.resourceRequests,0,'The intrinsic descriptor never requests the original resource');}
   assert.equal(result.acquired,result.released);results.push(result);
  }
- return results;
+ return {policy,results};
+ }finally{await page.unroute('**/scripts/tests/fixtures/prepared-empty.html',documentRoute);}
 }
