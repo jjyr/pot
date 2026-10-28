@@ -132,6 +132,10 @@ func main() {
 				notification("item/autoApprovalReview/started", map[string]any{"threadId": threadID, "turnId": "turn-1", "itemId": "command-1"})
 				notification("item/autoApprovalReview/completed", map[string]any{"threadId": threadID, "turnId": "turn-1", "itemId": "command-1", "review": map[string]string{"status": "approved", "rationale": "private automatic review"}})
 			}
+			if prompt == "fail-with-private-diagnostic" {
+				notification("turn/completed", map[string]any{"threadId": threadID, "turn": map[string]any{"id": "turn-1", "status": "failed", "error": map[string]any{"message": "private-native-error-secret", "additionalDetails": "https://private.invalid/token", "codexErrorInfo": map[string]any{"httpConnectionFailed": map[string]any{"httpStatusCode": 503}}}}})
+				continue
+			}
 			if prompt == "hang" {
 				continue
 			}

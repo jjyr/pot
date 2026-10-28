@@ -204,6 +204,14 @@ route and receipt behavior apply to these outcomes as well. The outbox publisher
 commits each terminal reply exactly once. Thread-open
 failures retain the RPC method, rejection code and bounded server diagnostic,
 so a resume failure can be investigated without replacing its saved thread.
+Failed terminal turns retain a whitelisted `codexErrorInfo` category and valid
+HTTP status, when supplied by the terminal event matching the bound thread/turn.
+Unknown or malformed details remain `codex_turn_failed`. Free-form native error
+messages, additional details and stderr are not persisted or forwarded by this
+classification. Independent `error` notifications do not complete a turn or
+supply guessed terminal diagnostics; Codex may still retry them and succeed.
+A completed notification naming a different bound turn is ignored. These
+identifiers describe the failure; they grant no retry or approval authority.
 App Server JSONL
 events are bounded to 4 MiB per line independently of the final-answer limit;
 read failures (including oversized events) are reported as

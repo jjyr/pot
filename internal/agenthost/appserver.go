@@ -325,8 +325,9 @@ func (a *appTurn) notification(m rpcMessage) {
 	var p struct {
 		ThreadID string `json:"threadId"`
 		Turn     struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
+			ID     string          `json:"id"`
+			Status string          `json:"status"`
+			Error  json.RawMessage `json:"error"`
 		} `json:"turn"`
 		Item struct {
 			Type    string `json:"type"`
@@ -341,8 +342,11 @@ func (a *appTurn) notification(m rpcMessage) {
 		return
 	}
 	a.mu.Lock()
-	thread := a.result.ThreadID
+	thread, turn := a.result.ThreadID, a.result.TurnID
 	a.mu.Unlock()
+	if m.Method == "turn/completed" && turn != "" && p.Turn.ID != "" && p.Turn.ID != turn {
+		return
+	}
 	if thread != "" && p.ThreadID != "" && thread != p.ThreadID {
 		return
 	}
@@ -365,6 +369,9 @@ func (a *appTurn) notification(m rpcMessage) {
 			status = "cancelled"
 		case "failed":
 			diagnostic = "codex_turn_failed"
+			if thread != "" && p.ThreadID == thread && turn != "" && p.Turn.ID == turn {
+				diagnostic = codexTurnFailure(p.Turn.Error)
+			}
 		default:
 			status = "failed"
 			diagnostic = "codex_unknown_turn_status"
