@@ -1,4 +1,4 @@
-import {currentPreparedRender,withPreparedRender,registerPreparedRoot,preparedDOM,preparedText} from './prepared-render.mjs';
+import {currentPreparedRender,withPreparedRender,registerPreparedRoot,preparedAsset,preparedDOM,preparedText} from './prepared-render.mjs';
 import {moveConversationNode as place} from './conversation-dom.mjs';
 import {createMessageWindow} from './message-window.mjs';
 import {createWorkRecordProjection,workRecordParents} from '../state/work-records.mjs';
@@ -73,6 +73,14 @@ export function createWorkRecordWindow({locale=()=> 'en',actor=()=>undefined,res
     group.row.dataset.sequenceBefore=message.sourceAnchor?.before||'';group.row.dataset.sequenceAfter=message.sourceAnchor?.after||'';
     const destination=window.destination?.id,nativeReading=message.members.some(member=>window.position?.anchors?.[0]?.key===`message:${member.viewKey}`);
     if(window.revealing&&(destination&&message.members.some(member=>member.id===destination||window.visibilityPath.has(member.id))||nativeReading&&window.visibilityPath.has(message.id))){group.details.open=true;if(!preparing)memory.set(currentScope+message.viewKey,{open:true});}
+    // A disclosure intent may change after this candidate was measured. Commit
+    // this batch's measured state; the new intent owns a subsequent preparation.
+    const intendedOpen=group.details.open;
+    group.details.open=preparedAsset('work-record-open',message.viewKey,()=>intendedOpen);
+    if(!preparing&&group.details.open!==intendedOpen)queueMicrotask(()=>{
+      if(!options.host.contains(group.row))return;
+      group.row.dispatchEvent(new CustomEvent('pot:prepare-resize',{bubbles:true}));options.requestRender();
+    });
     const work=message.work,format=value=>value.toLocaleString(locale()),t=key=>translate(locale(),'work.'+key);
     preparedText(group.title,'work-record-window:group.title',t('title'));
     preparedText(group.counts,'work-record-window:group.counts',(work.tools?[t('tools').replace('{count}',format(work.tools))]:[]).concat(work.messages?[t('messages').replace('{count}',format(work.messages))]:[]).join(' · '));
