@@ -27,15 +27,18 @@ export function createWorkRecordWindow({locale=()=> 'en',actor=()=>undefined,res
     const environment=currentPreparedRender(),preparing=environment?.context.phase==='prepare',entry=records.get(message.viewKey);
     if(preparing)registerPreparedRoot(environment.context,entry?.record.row);
     let record;
-    if(!preparing&&!entry&&preparedMembers?.has(message.viewKey)){
-      record=preparedMembers.get(message.viewKey);record.commit?.();record.preparing=false;
+    const preparedMember=!preparing&&!entry&&environment?.context.phase==='commit'
+      ?preparedAsset('work-record-member:'+message.viewKey,JSON.stringify(message),()=>{throw Error('Missing measured work-record member');})
+      :preparedMembers?.get(message.viewKey);
+    if(!preparing&&!entry&&preparedMember){
+      record=preparedMember;record.commit?.();record.preparing=false;
     }else{
       const build=()=>options.render({...message,workRecord:true},preparing?existing:entry?.record||existing);
       record=environment?withPreparedRender(environment.context,message.id,build):build();
     }
     record.row.dataset.windowKey=message.viewKey;
     if(preparing){
-      record.preparing=true;
+      record.preparing=true;preparedAsset('work-record-member:'+message.viewKey,JSON.stringify(message),()=>record);
       if(!record.registerWorkRecord){const commit=record.commit;record.commit=()=>{commit?.();record.preparing=false;records.set(message.viewKey,{record,owner});return record;};record.registerWorkRecord=true;}
     }else{record.preparing=false;records.set(message.viewKey,{record,owner});}
     return record;
@@ -111,7 +114,7 @@ export function createWorkRecordWindow({locale=()=> 'en',actor=()=>undefined,res
     group.preparing=preparing;return group;
   }
   function dispose(record){
-    if(record.preparing){for(const member of record.preparedMembers?.values()||[])options.dispose(member);if(!record.members)options.dispose(record);else record.row.remove();return;}
+    if(record.preparing){for(const member of record.preparedMembers?.values()||[])if(member.preparing)options.dispose(member);if(!record.members)options.dispose(record);else record.row.remove();return;}
     if(record.members){const moving=record.members.some(member=>owners.has(member.viewKey)&&owners.get(member.viewKey)!==record.row.dataset.windowKey);for(const member of record.members)forget(member.viewKey,record.row.dataset.windowKey);if(!moving)record.row.remove();}
     else forget(record.row.dataset.windowKey,record.row.dataset.windowKey);
   }
