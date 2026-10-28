@@ -272,6 +272,10 @@ run = "node scripts/tests/ui-regressions.mjs --group scroll"
 description = "Send and assistant-switch position contracts with isolated HTTP/SSE and IndexedDB"
 run = "node scripts/tests/chat-scroll-http-browser.mjs"
 
+[tasks."test:ui-assistant-create"]
+description = "Phone assistant creation with isolated HTTP/SSE, IndexedDB and trusted touch"
+run = "node scripts/tests/assistant-create-mobile-browser.mjs"
+
 [tasks."test:ui-chat-activity"]
 description = "Stable execution activity across reconnect, model/tool rounds and parallel inputs"
 run = ["node scripts/tests/chat-activity-browser.mjs", "node scripts/tests/chat-history-diagnostics-browser.mjs"]
@@ -279,6 +283,10 @@ run = ["node scripts/tests/chat-activity-browser.mjs", "node scripts/tests/chat-
 [tasks."test:ui-nav"]
 description = "Trusted touch Back intermediate frames and keyed conversation navigation"
 run = "node scripts/tests/ui-regressions.mjs --group nav"
+
+[tasks."test:ui-mobile-chat-back"]
+description = "Phone edge Back, browser directory history and retained conversation identity"
+run = "node scripts/tests/mobile-chat-back-browser.mjs"
 
 [tasks."test:ui-history"]
 description = "Automatic Task history, bounded reads, retry and cancellation"
