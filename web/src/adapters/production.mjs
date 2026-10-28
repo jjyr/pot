@@ -85,7 +85,7 @@ export async function createProductionClient({desktop = false, base = '', resour
   const service = 'github.com/jjyr/pot/internal/desktop.Service';
   const invoke = (method, ...args) => runtimeAPI.Call.ByName(`${service}.${method}`, ...args);
   const context = {owner: '', space: ''};
-  let client,displayReader,connectionAbort=new AbortController();const confirmedSessions=new Map();
+  let client,displayReader,connectionAbort=new AbortController(),directoryAbort=new AbortController(),directoryRevision=0;const confirmedSessions=new Map();
   const sessionKey=scope=>JSON.stringify([scope.space||'',scope.owner||'']);
   const acceptedCommands=new Map();
   async function commitCommand(path,method,body,value,capturedScope,signature){
@@ -144,6 +144,7 @@ export async function createProductionClient({desktop = false, base = '', resour
     if((client?.startup||options.configuration)&&options.requiredCapabilities?.length&&!options.requiredCapabilities.some(operation=>client.supports(operation,options)))throw localized(Object.assign(new APIError(403,{code:'agent_link_capability_unsupported'}),{uiKey:'agentLinks.capabilityUnavailable'}));
     const generation=client?.connectionGeneration;
     if(method==='GET')signal=signal?AbortSignal.any([signal,connectionAbort.signal]):connectionAbort.signal;
+    if(method==='GET'&&['/api/v1/spaces','/api/v1/assistants'].includes(path))signal=AbortSignal.any([signal,directoryAbort.signal]);
     const readCurrent=()=>!signal?.aborted&&generation===client?.connectionGeneration;
     const checkRead=()=>{if(method==='GET'&&!readCurrent())throw signal?.reason||new DOMException('Connection retired','AbortError');};
     const capturedScope={...context,...options};
@@ -196,6 +197,13 @@ export async function createProductionClient({desktop = false, base = '', resour
   }
   client = {production: true, desktop, runtime, startup:startupIdentity,onlineReady:!startupIdentity,
     connectionGeneration:0,directoryGeneration:startupIdentity?-1:0,directorySpaces:new Set(),
+    get directoryAuthorityRevision(){return directoryRevision;},
+    set directoryAuthorityRevision(value){
+      if(value===directoryRevision)return;directoryRevision=value;
+      // Directory storage retirement and fresh confirmation can both happen
+      // within one connection. Neither may inherit an older directory observer.
+      directoryAbort.abort();directoryAbort=new AbortController();
+    },
     get operationsReady(){return client.onlineReady&&client.directoryGeneration===client.connectionGeneration;},
     operationScopeReady(options={}){
       if(!client.operationsReady)return false;

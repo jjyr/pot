@@ -287,7 +287,8 @@ removal/Control replacement deletes that scope's copies and retires active
 frames and URLs across tabs. A later live authorized binding/original read may
 reopen the scope at its new generation; older requests cannot commit after that
 recovery. Directory observations retain their request's connection generation
-through local enumeration and the retirement transaction; a retired response cannot revoke a
+and directory authority revision through local enumeration and the retirement
+transaction; a retired response cannot revoke a
 replacement connection's copies or return as a current directory read.
 Logout retires readers before clearing display stores and advances the durable
 global epoch in that same transaction, so a delayed cross-tab forget message
