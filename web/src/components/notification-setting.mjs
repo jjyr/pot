@@ -20,7 +20,7 @@ export function notificationSetting({notifications,locale,desktop,host=window}) 
     toggle.input.setAttribute('aria-label',t('notifications.setting'));
     request.textContent=t('notifications.allow');request.disabled=pending||notifications.state.authorizing;
     const key=permission==='denied'?(desktop?'deniedMac':'deniedBrowser'):permission;
-    status.textContent=[t(!enabled?'notifications.off':`notifications.${key}`),(error||actionError)?t('notifications.failed'):''].filter(Boolean).join(' ');
+    root.setAttribute('aria-busy',String(permission==='loading'));status.hidden=enabled&&permission==='loading'&&!error&&!actionError;status.textContent=[enabled&&permission==='loading'?'':t(!enabled?'notifications.off':`notifications.${key}`),(error||actionError)?t('notifications.failed'):''].filter(Boolean).join(' ');
     request.hidden=!enabled||permission!=='default'&&!notifications.state.needsSubscription;
     note.textContent=[t('notifications.device'),notifications.state.channel?t(`notifications.channel.${notifications.state.channel}`):''].filter(Boolean).join(' ');summary.textContent=t('notifications.details');
     details.hidden=!(error||actionError);diagnostic.textContent=error||actionError;

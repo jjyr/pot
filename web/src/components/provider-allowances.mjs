@@ -53,7 +53,7 @@ export function createProviderAllowances({root,providersDomain,scope,profileID,l
  }
  function render(){
   if(disposed||!current())return;synchronizeIdentity();summary.textContent=t('allowances');refresh.textContent=t('allowanceRefresh');refresh.disabled=pending||!!memory.saving||!available();accountsRoot.replaceChildren();renderControls();
-  const view=memory.view;if(!available()){status.textContent=t('unavailable');return;}if(pending&&!view){status.textContent=t('allowanceLoading');return;}
+  content.setAttribute('aria-busy',String(pending));status.hidden=false;const view=memory.view;if(!available()){status.textContent=t('unavailable');return;}if(pending&&!view){status.hidden=true;status.textContent='';return;}
   const code=view?.status||'unavailable';status.textContent=view?t('status.'+code):'';status.className=code==='ready'?'hint':'inline-error';
   if(!view?.snapshot)return;const accounts=view.snapshot.accounts||[];
   if(!accounts.length)accountsRoot.append(n('p','hint',t('allowanceEmpty')));

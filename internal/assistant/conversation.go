@@ -565,6 +565,19 @@ func (c *Conversation) accept(ctx context.Context, request protocol.SendMessage,
 	if request.ConversationID != c.options.ConversationID {
 		return protocol.SendMessageAccepted{}, errors.New("wrong conversation")
 	}
+	// Ordinary sends cannot adopt an identity already accepted as guidance,
+	// whether it entered the active mailbox or the next-user inbox.
+	_, guidance, err := c.store.Get(ctx, "conversation.user_source."+request.RequestID)
+	if err != nil {
+		return protocol.SendMessageAccepted{}, err
+	}
+	var steering bool
+	if err := c.store.DB().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM assistant_steering WHERE id=?)", request.RequestID).Scan(&steering); err != nil {
+		return protocol.SendMessageAccepted{}, err
+	}
+	if guidance || steering {
+		return protocol.SendMessageAccepted{}, errors.New("request identity already used by guidance")
+	}
 	old, err := c.store.Duplicate(ctx, request.RequestID)
 	if err != nil {
 		return protocol.SendMessageAccepted{}, err

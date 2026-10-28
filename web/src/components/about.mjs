@@ -10,7 +10,7 @@ export async function renderAbout({client,root,scope,locale,updates,signal}) {
   const label=t('about.notices'),dialog=node('dialog','preferences about-notices');dialog.setAttribute('aria-label',label);
   const heading=node('div','preferences-heading'),close=action(t('updates.close'),()=>dialog.close());close.autofocus=true;
   heading.append(node('h2','',label),close);
-  const notices=node('div','about-notices-body'),loading=node('p','hint',t('loading'));
+  const notices=node('div','about-notices-body'),loading=node('p','hint');loading.hidden=true;notices.setAttribute('aria-busy','true');
   const font=node('a','','IBM Plex Sans — OFL');font.href=new URL('../assets/IBMPlexSans-OFL.txt',import.meta.url);font.target='_blank';font.rel='noopener';notices.append(font,loading);
   dialog.append(heading,notices);
   const open=action(label,()=>dialog.showModal());open.classList.add('about-notices-trigger');open.setAttribute('aria-haspopup','dialog');card.append(open,dialog);
@@ -26,13 +26,13 @@ export async function renderAbout({client,root,scope,locale,updates,signal}) {
       signal?.addEventListener('abort',()=>{stop();check.disabled=false;check.setAttribute('aria-busy','false');},{once:true});
       await updates.refresh(captured);
     }
-    loading.remove();
+    notices.removeAttribute('aria-busy');loading.remove();
     for(const license of about.licenses||[])notices.append(details(license.name,license.text));
     if(!about.notices_available)notices.append(node('p','hint',t('about.packagedNotices')));
   }catch(reason){
     if(root.isConnected&&card.isConnected){
       card.prepend(node('p','hint',t('about.unavailable')));
-      loading.textContent=t('about.noticesUnavailable');
+      loading.hidden=false;loading.textContent=t('about.noticesUnavailable');
     }
-  }
+  }finally{notices.removeAttribute('aria-busy');}
 }

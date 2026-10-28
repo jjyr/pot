@@ -176,7 +176,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     const truncated=cacheTruncated;
     const regions=[{key:'task-cache-notice',host:historyNotice,revision:JSON.stringify([truncated,locale()]),render:target=>{target.hidden=!truncated;target.textContent=t('tasks.cachedOutputBounded');}},
     {key:'task-history-status',host:boundary,revision:JSON.stringify([loading,historyError?.storage,historyError?.message,locale()]),render:target=>{
-      target.replaceChildren();if(loading)target.textContent=t('history.loading');else if(historyError)target.append(n('span','',t(historyError.storage?'storage.failed':'tasks.historyFailed')),action(t('retry'),()=>{historyFailure=null;historyAttempt='';loadEarlier();}));
+      target.replaceChildren();target.setAttribute('aria-busy',String(loading));if(!loading&&historyError)target.append(n('span','',t(historyError.storage?'storage.failed':'tasks.historyFailed')),action(t('retry'),()=>{historyFailure=null;historyAttempt='';loadEarlier();}));
     }},{key:'task-download',host:downloadNotice,revision:JSON.stringify([failure,locale()]),render:target=>renderDownloadFailure(target,failure)},
     {key:'task-files',host:files,revision:JSON.stringify([attachments,artifactError,locale()]),render:target=>{
       const open=files.querySelector('details')?.open||false;target.replaceChildren();

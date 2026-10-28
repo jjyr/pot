@@ -24,12 +24,12 @@ function register(){
   customElements.define('pot-resource',class extends HTMLElement{
     generation=0;
     queuePreparedState(change){
-      const iframe=this.querySelector('iframe'),boundedResize=change.resize!==undefined&&(this.dataset.preparedFallback==='true'||iframe?.nativePreparation?.fixedHeight!==undefined);
+      const iframe=this.querySelector('iframe'),boundedResize=change.resize!==undefined&&(this.dataset.preparedFallback==='true'||iframe?.classList.contains('prepared-frame')||iframe?.nativePreparation?.fixedHeight!==undefined);
       // A deadline viewport already has measured geometry. Pure height reports
       // cannot invalidate a result/notice transaction or reopen its preparation.
       this.resourceRenderState={...this.resourceRenderState,...change,revision:(this.resourceRenderState?.revision||0)+(boundedResize?0:1)};
       const hidden=!!this.closest('[data-preparation-surface]'),managed=hidden||this.closest('.prepared-row,.prepared-region');
-      if(change.resize!==undefined&&(hidden||iframe?.nativePreparation||this.dataset.preparedFallback==='true'))iframe?.style.setProperty('--resource-height',change.resize+'px');
+      if(change.resize!==undefined&&(hidden||iframe?.nativePreparation||boundedResize))iframe?.style.setProperty('--resource-height',change.resize+'px');
       if(boundedResize)return;
       if(hidden||!managed){this.projectPreparedState(this);if(hidden){let parent=this;while(parent&&!parent.preparedContext)parent=parent.parentElement;const context=parent?.preparedContext;if(context?.alive)context.changed?.();}return;}
       if(change.resize!==undefined&&iframe?.nativePreparation&&!iframe.nativePreparation.context.ready)return;
@@ -59,22 +59,22 @@ function register(){
       if(kind==='image')this.classList.add('is-expanded');
       const head=node('div','resource-heading'),identity=node('div','resource-identity'),badge=node('span','resource-type'),title=node('strong','resource-name',caption||resource.name),details=node('span','resource-details');
       const actions=node('div','resource-actions'),download=node('button','resource-action'),expand=node('button','resource-action'),status=node('p','resource-status'),saveStatus=node('p','resource-status resource-download-error'),body=node('div','resource-body'),notice=node('p','resource-status');
-      download.type=expand.type='button';status.setAttribute('role','status');saveStatus.setAttribute('role','alert');saveStatus.hidden=true;identity.append(title,details);head.append(badge,identity,actions);actions.append(expand,download);notice.hidden=!this.noticeKey;this.replaceChildren(head,status,saveStatus,body,notice);
+      download.type=expand.type='button';status.setAttribute('role','status');status.hidden=true;saveStatus.setAttribute('role','alert');saveStatus.hidden=true;identity.append(title,details);head.append(badge,identity,actions);actions.append(expand,download);notice.hidden=!this.noticeKey;this.replaceChildren(head,status,saveStatus,body,notice);
       this.lease=this.acquireResource?.(resource);const lease=this.lease;
       let error=false;
-      this.stopRetire=lease?.onRetire?.(()=>{this.retireRendering();body.replaceChildren();error=true;this.dataset.state='error';status.hidden=false;refresh();});
+      this.stopRetire=lease?.onRetire?.(()=>{this.retireRendering();body.replaceChildren();error=true;this.dataset.state='error';this.removeAttribute('aria-busy');status.hidden=false;refresh();});
       const current=()=>this.isConnected&&generation===this.generation;
       const setURL=(element,url)=>Promise.resolve(url).then(value=>{if(current())element.src=value;}).catch(fail);
-      const refresh=()=>{const size=resource.size,unit=size<1024?'byte':size<1024*1024?'kilobyte':'megabyte',divisor=size<1024?1:size<1024*1024?1024:1024*1024;details.textContent=`${resource.name} · ${new Intl.NumberFormat(document.documentElement.lang,{style:'unit',unit,unitDisplay:'narrow',maximumFractionDigits:1}).format(size/divisor)}`;badge.textContent=t(mode==='download'?'file':kind);download.textContent=t(resource.files.length>1?'downloadBundle':'download');download.setAttribute('aria-label',t('downloadName').replace('{name}',resource.download?.path.split('/').at(-1)||resource.name));expand.textContent=kind==='image'?translate(document.documentElement.lang,'markdown.imagePreview'):t(this.classList.contains('is-expanded')?'collapse':'expand');status.textContent=t(error?'unavailable':'loading');saveStatus.textContent=t('downloadFailed');if(this.noticeKey)notice.textContent=translate(document.documentElement.lang,this.noticeKey);const resultTitle=this.querySelector('.resource-result-title');if(resultTitle)resultTitle.textContent=t('result');};
-      const fail=()=>{if(!current())return;error=true;this.dataset.state='error';status.hidden=false;refresh();};
-      const ready=()=>{if(!current())return;this.dataset.state='ready';status.hidden=true;};
+      const refresh=()=>{const size=resource.size,unit=size<1024?'byte':size<1024*1024?'kilobyte':'megabyte',divisor=size<1024?1:size<1024*1024?1024:1024*1024;details.textContent=`${resource.name} · ${new Intl.NumberFormat(document.documentElement.lang,{style:'unit',unit,unitDisplay:'narrow',maximumFractionDigits:1}).format(size/divisor)}`;badge.textContent=t(mode==='download'?'file':kind);download.textContent=t(resource.files.length>1?'downloadBundle':'download');download.setAttribute('aria-label',t('downloadName').replace('{name}',resource.download?.path.split('/').at(-1)||resource.name));expand.textContent=kind==='image'?translate(document.documentElement.lang,'markdown.imagePreview'):t(this.classList.contains('is-expanded')?'collapse':'expand');status.textContent=error?t('unavailable'):'';saveStatus.textContent=t('downloadFailed');if(this.noticeKey)notice.textContent=translate(document.documentElement.lang,this.noticeKey);const resultTitle=this.querySelector('.resource-result-title');if(resultTitle)resultTitle.textContent=t('result');};
+      const fail=()=>{if(!current())return;error=true;this.dataset.state='error';this.removeAttribute('aria-busy');status.hidden=false;refresh();};
+      const ready=()=>{if(!current())return;this.dataset.state='ready';this.removeAttribute('aria-busy');status.hidden=true;};
       refresh();window.addEventListener('pot:locale',refresh);this.stopLocale=()=>window.removeEventListener('pot:locale',refresh);
       download.onclick=async()=>{download.disabled=true;saveStatus.hidden=true;try{await this.downloadResource(resource);}catch{if(current()){saveStatus.textContent=t('downloadFailed');saveStatus.hidden=false;}}finally{if(current())download.disabled=false;}};
       expand.onclick=()=>{this.classList.toggle('is-expanded');refresh();this.dispatchEvent(new CustomEvent('pot:prepare-resize',{bubbles:true}));};
       expand.hidden=kind==='audio';
-      if(mode==='download'||kind==='file'){body.hidden=expand.hidden=status.hidden=true;this.dataset.state='ready';return;}
+      if(mode==='download'||kind==='file'){body.hidden=expand.hidden=status.hidden=true;this.dataset.state='ready';this.removeAttribute('aria-busy');return;}
       if(!lease){fail();return;}
-      this.dataset.state='loading';
+      this.dataset.state='loading';this.setAttribute('aria-busy','true');
       if(kind==='image'){
         const image=node('img','resource-image');image.alt=caption||resource.name;image.loading='eager';image.decoding='async';image.hidden=true;image.onload=async()=>{try{await image.decode();if(current()){image.hidden=false;ready();}}catch{fail();}};image.onerror=fail;setURL(image,lease.url(resource.entry));body.append(image);
         expand.disabled=true;

@@ -11,6 +11,7 @@ Code defines actual behavior.
 | Local updates, interruption confirmation and release signing | [Updates](updates.md) |
 | Database schemas, version history and automatic upgrades | [Database migrations](database-migrations.md) |
 | Build, test and release | [Development](development.md) |
+| UI implementation rules and behavioral validation | [UI development](ui-development.md) |
 | Release gates, installation channels, signing and Homebrew | [Releases](releases.md) |
 | Native desktop packages and platform requirements | [Desktop installation](desktop-installation.md) |
 | PR screenshot storage and naming | [PR images](pr-images/README.md) |

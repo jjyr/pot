@@ -1,4 +1,4 @@
-import {outboxControls} from './outbox-controls.mjs';
+import {outboxIndicator} from './outbox-controls.mjs';
 import {createOutboxDialog} from './outbox-dialog.mjs';
 import {createChatOutbox} from '../state/chat-outbox.mjs';
 import {outboxTarget,outboxIdentityKey} from '../state/chat-outbox-store.mjs';
@@ -142,6 +142,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   input.rows = 1;
   input.setAttribute('autocapitalize', 'sentences');
   const send = button('send', t('send'), 'send-button');
+  const sendModes=['refresh','play','stop','send'];
+  const sendIcons=Object.fromEntries(sendModes.map(name=>[name,icon(name)]));
+  const showSendIcon=(node,visible)=>{const display=visible?'':'none';if(node.style.display!==display)node.style.display=display;};
+  for(const name of sendModes)showSendIcon(sendIcons[name],name==='send');
+  send.replaceChildren(...sendModes.map(name=>sendIcons[name]));
+  send.setAttribute('aria-label', t('send'));
+  let sendMode='send';
   form.append(input, send);
   composerArea.append(latest, form);
   const continuation=client.production?createTurnContinuation({client,locale:()=>locale,changed:()=>{if(!disposed)updateControls();}}):null;
@@ -470,14 +477,16 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const recovery=continuation?.state(),restoring=recovery?.pending&&!hasComposerInput(),resuming=client.operationsReady!==false&&draftReady&&recovery?.available&&!hasComposerInput();
     const stopping=running&&(!client.production||(!draft(state).trim()&&!attachmentUI?.items().length));
     const label = restoring||resuming ? recovery.label : stopping ? (cancelPending ? t('stopping') : t('stop')) : running?t('send.guidance'):t('send');
-    send.replaceChildren(icon(restoring ? 'refresh' : resuming ? 'play' : stopping ? 'stop' : 'send'));
+    const mode=restoring?'refresh':resuming?'play':stopping?'stop':'send';
+    if(mode!==sendMode){sendMode=mode;for(const name of sendModes)showSendIcon(sendIcons[name],name===mode);}
     send.setAttribute('aria-busy',String(!!restoring));
     send.title = label;
     send.setAttribute('aria-label', label);
-    send.disabled = restoring || (resuming ? recovery.disabled : stopping ? !can('chat.cancel')||selectedAssistant?.offline||cancelPending || connection !== 'connected' : client.production ? !localSubmissionReady() : !can('chat.send')||chatCacheFailed||saved?.loading||selectedAssistant?.offline|| !snapshot || editorOwner !== ownerKey(snapshot) || pending || (!draft(state).trim()&&!attachmentUI?.items().length) || !!attachmentUI?.problem() || connection !== 'connected');
+    const disabled = restoring || (resuming ? recovery.disabled : stopping ? !can('chat.cancel')||selectedAssistant?.offline||cancelPending || connection !== 'connected' : client.production ? !localSubmissionReady() : !can('chat.send')||chatCacheFailed||saved?.loading||selectedAssistant?.offline|| !snapshot || editorOwner !== ownerKey(snapshot) || pending || (!draft(state).trim()&&!attachmentUI?.items().length) || !!attachmentUI?.problem() || connection !== 'connected');
+    if(send.disabled!==disabled)send.disabled=disabled;
     attachmentUI?.update();
     updateReferenceDraft();
-    input.disabled = !snapshot && !editorOwner;
+    const inputDisabled=!snapshot&&!editorOwner;if(input.disabled!==inputDisabled)input.disabled=inputDisabled;
     completions?.refresh();
     const status=titlebar.querySelector('.connection-status');
     if(status)reconcile(status,connectionStatus());
@@ -668,10 +677,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   assistantProfile.addEventListener('toggle', event => {
     root.querySelector('.assistant-profile-trigger')?.setAttribute('aria-expanded', String(event.newState === 'open'));
   });
+  function setInert(node,value){if(node.inert!==value)node.inert=value;}
   function renderShell() {
     outboxDialog?.update();
     root.classList.toggle('is-local-startup',client.operationsReady===false);
-    unavailable.inert=!['tasks','usage','extensions'].includes(route)&&!configurationRoute(route)&&!pages?.editing&&(client.operationScopeReady?.()===false||pages?.authorityReady===false);approvals.inert=client.operationScopeReady?.()===false;
+    setInert(unavailable,!['tasks','usage','extensions'].includes(route)&&!configurationRoute(route)&&!pages?.editing&&(client.operationScopeReady?.()===false||pages?.authorityReady===false));setInert(approvals,client.operationScopeReady?.()===false);
     root.classList.toggle('is-background',document.visibilityState==='hidden');
     const showingChat=route==='chat'&&!(media.matches&&directoryOpen);
     if(chatShown&&!showingChat){rememberChatPosition();cancelChatPosition();initialLayout.cancel();messageWindow.suspend();}
@@ -815,7 +825,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     menuContent.append(menuHeading, navigation(true));menu.append(menuContent);
     menu.hidden = !menuOpen || !narrow;
     menu.setAttribute('aria-label', t('menu'));
-    workspace.inert = directory.inert = titlebar.inert = !menu.hidden;
+    const menuInert=!menu.hidden;setInert(workspace,menuInert);setInert(directory,menuInert);setInert(titlebar,menuInert);
     reconcile(shellRoots.rail,rail);reconcile(shellRoots.titlebar,titlebar);reconcile(shellRoots.menu,menu);
     if(!menu.hidden&&!shellRoots.menu.contains(document.activeElement))shellRoots.menu.querySelector('.icon-button')?.focus({preventScroll:true});
     if (preferencesOpen) renderPreferences();
@@ -947,7 +957,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(message.queue){
       const queued=message.queue,editing=queueEditors.has(outboxIdentityKey(queued)),signature=JSON.stringify([outboxIdentityKey(queued),queued.revision,locale,editing]);
       if(record.queueSignature!==signature||!record.queueNode?.isConnected){
-        const controls=preparedAsset('outbox-controls',signature,()=>outboxControls(queued,{outbox,editors:queueEditors,locale:()=>locale,changed:()=>renderMessages(),notify:value=>{error=value;updateControls();}}));
+        const controls=preparedAsset('outbox-controls',signature,()=>outboxIndicator(queued,locale));
         record.queueNode?.remove();record.queueNode=controls;record.queueSignature=signature;moveConversationNode(bubble,controls);
       }
     }else if(record.queueNode){record.queueNode.remove();record.queueNode=null;record.queueSignature='';}
@@ -960,9 +970,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       record.dot = el('span', 'activity-dot'); row.append(record.dot);
     } else if (message.status !== 'streaming' && record.dot) { record.dot.remove(); record.dot = null; }
     record.dot?.setAttribute('aria-label', t('working'));
-    if(message.role==='user'&&message.steering&&message.status==='accepted'){
-      if(!record.received){record.received=el('span','guidance-received');record.received.append(icon('clock'));row.append(record.received);}record.received.title=locale==='zh-CN'?'已接收':'Received';record.received.setAttribute('aria-label',record.received.title);
-    }else if(record.received){record.received.remove();record.received=null;}
+
 
     if(record.tool){
       const entry=forest.byID.get(message.tool.turn_id+':'+message.tool.id),children=entry?.children.map(child=>child.message)||[];
@@ -994,7 +1002,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     const {messages:visibleMessages,forest,roots,parents}=chatProjection;
     renderingSnapshot=snapshot;renderingSending=sending;renderingForest=forest;
-    const historyChrome={hidden:!chatSession?.hasHistory||!snapshot,disabled:!historyFailure&&!snapshot?.history?.has_more,label:t(historyLoading?'history.loading':historyFailure|| (snapshot?.history?.has_more?'history.earlier':'history.start'))};
+    const historyChrome={hidden:!chatSession?.hasHistory||!snapshot,disabled:!historyFailure&&!snapshot?.history?.has_more,label:t(historyFailure|| (snapshot?.history?.has_more?'history.earlier':'history.start'))};
     const tasks=client.production?projectedTasks(client.scope()):[];
     // Regions outside recycled rows join the same prepared geometry transaction.
     if(client.production){
@@ -1018,7 +1026,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const identities=messageIdentities(client).snapshot(client.scope?.());
     const machineLabels=Object.fromEntries(roots.flatMap(message=>[message.tool?.target?.runtime_id]).filter(Boolean).map(id=>[id,machinePresentation(client).label(id,client.scope?.(),locale)]));
     const referenceProps=roots.flatMap(message=>(message.references||[]).map(ref=>{const source=snapshot?.messages?.find(row=>row.id===ref.message_id);return [ref.message_id,source?.role,ref.quote?null:source?.text];}));
-    messageWindow.setMessages(roots,{parents,regions,afterCommit:()=>taskClock.refresh(),layoutEpoch:[layoutKey(),snapshot?.runtime_id,snapshot?.boot_id,snapshot?.owner_id,snapshot?.conversation_id,selectedAssistant?.name,selectedAssistant?.avatar,snapshot?.agent?.attachments,toolOffline,canRetrySend,identities,tasks,referenceProps,machineLabels],renderContext:{identities,tasks,machineLabels,snapshot,sending,forest,scope:{...client.scope?.()},assistant:selectedAssistant,t,offline:toolOffline,canRetrySend}});
+    // Task updates change tool presentation, not the layout generation of every
+    // reply or embedded document. Only dependent rows prepare a new version.
+    const taskPresentation=tasks.map(task=>[task.id,task.address,task.title,task.phase,task.run_id,task.agent_link,task.capabilities,task._space_id,task.assistant_id,task._stale]);
+    const presentationEpoch=JSON.stringify([identities,taskPresentation]);
+    messageWindow.setMessages(roots,{parents,regions,afterCommit:()=>taskClock.refresh(),presentationEpoch,presentationKey:message=>message.tool||message.members?presentationEpoch:null,layoutEpoch:[layoutKey(),snapshot?.runtime_id,snapshot?.boot_id,snapshot?.owner_id,snapshot?.conversation_id,selectedAssistant?.name,selectedAssistant?.avatar,snapshot?.agent?.attachments,toolOffline,canRetrySend,referenceProps,machineLabels],renderContext:{identities,tasks,machineLabels,snapshot,sending,forest,scope:{...client.scope?.()},assistant:selectedAssistant,t,offline:toolOffline,canRetrySend}});
     if(navigation&&snapshot&&navigation.kind!=='message')chatPosition=null;
     latest.hidden=messageWindow.following;
     state.uiAnchor=messageWindow.following?null:selectedSequence()||messageWindow.anchor?.sequence||null;
@@ -1119,6 +1131,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     return Promise.resolve();
   }
   async function selectAssistant(item, initial = false,record=true) {
+    if(!disposed&&route==='chat'&&!pages?.editing&&chatSession&&state.snapshot&&selectedAssistant&&selectedAssistant.id===item.id&&selectedAssistant.space_id===item.space_id&&selectedAssistant.control_id===item.control_id){
+      if(media.matches&&directoryOpen){directoryOpen=false;renderShell();}
+      return;
+    }
     const selection=++selectionGeneration;
     completions?.reset();
     if(editor.composing){input.blur();if(editor.composing)return;}

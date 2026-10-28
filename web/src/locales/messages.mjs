@@ -3,6 +3,8 @@ import serverMessages from './server.json' with {type:'json'};
 export const messages = {
   en: {
     "outbox.title": "Saved messages",
+    "assistant.modelInput": "Select or enter a model ID",
+    "outbox.pending": "Not sent yet",
     "outbox.destination": "Original destination",
     "outbox.empty": "No saved messages",
     "outbox.edit": "Edit",
@@ -153,7 +155,7 @@ export const messages = {
     "tasks.next":"Next →",
     "tasks.paginationSummary":"{total} records · Page {page} · {count} on this page",
     "tasks.paginationPartial":"Page {page} · {count} on this page · Sources incomplete",
-    "tasks.paginationLoading":"Loading · Page {page}",
+    "tasks.paginationPage":"Page {page}",
     "tasks.pagination":"Task pagination",
     "tasks.schedulePagination":"Schedule pagination",
     "tasks.pageNote":"Global pagination · The same assistant may appear on multiple pages.",
@@ -1214,6 +1216,8 @@ export const messages = {
   },
   'zh-CN': {
     "outbox.title": "已保存的消息",
+    "assistant.modelInput": "选择或输入模型 ID",
+    "outbox.pending": "尚未发送",
     "outbox.destination": "原始目标",
     "outbox.empty": "没有已保存的消息",
     "outbox.edit": "编辑",
@@ -1364,7 +1368,7 @@ export const messages = {
     "tasks.next":"下一页 →",
     "tasks.paginationSummary":"共 {total} 项 · 第 {page} 页 · 本页 {count} 项",
     "tasks.paginationPartial":"第 {page} 页 · 本页 {count} 项 · 来源不完整",
-    "tasks.paginationLoading":"正在加载 · 第 {page} 页",
+    "tasks.paginationPage":"第 {page} 页",
     "tasks.pagination":"任务分页",
     "tasks.schedulePagination":"定时任务分页",
     "tasks.pageNote":"统一按全局记录翻页 · 同一助手可能出现在多页。",

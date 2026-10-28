@@ -4,7 +4,8 @@ import {createChatOutboxStore,outboxTarget} from '../../web/src/state/chat-outbo
 import {createAssistantDrafts} from '../../web/src/state/assistant-drafts.mjs';
 import {createConversationState,ownerKey,setDraft,setDraftReferences,draft,draftReferences} from '../../web/src/state/conversation.mjs';
 import {clearBusinessCaches} from '../../web/src/state/cache-lifecycle.mjs';
-import {UI_CACHE_VERSION,migrateChatOutbox} from '../../pkg/storage/migrations/ui-cache/0007_chat_outbox.mjs';
+import {migrateChatOutbox} from '../../pkg/storage/migrations/ui-cache/0007_chat_outbox.mjs';
+import {UI_CACHE_VERSION} from '../../pkg/storage/migrations/ui-cache/0008_resource_bytes.mjs';
 import {migrateStartupIdentity} from '../../pkg/storage/migrations/ui-cache/0006_startup_identity.mjs';
 import {migrateChatCache} from '../../pkg/storage/migrations/ui-cache/0001_chat_cache.mjs';
 

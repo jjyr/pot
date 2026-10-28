@@ -34,6 +34,13 @@ adapter. Undeclared relative images and links remain literal text and do not
 fetch local or remote files. The existing bundle contract only permits HTML
 bundles; Markdown does not add an asset-bundle contract or bypass path limits.
 
+Loading file bindings, images, diagrams and resource previews does not insert
+transient status prose. Inline references retain their label; preparation queues
+and native viewport holds use silent placeholders. Busy state is exposed through
+`aria-busy`, while failures retain their explanation and recovery actions. File
+preview dialogs reserve a viewport from opening so asynchronous content does not
+resize and recenter the dialog.
+
 ## Image previews
 
 Saved resource images and uploaded chat image attachments start in the expanded

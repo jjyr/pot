@@ -23,12 +23,12 @@ const t=key=>translate(locale,key),button=key=>[...host.querySelectorAll('button
 const switchLocale=value=>{locale=value;document.documentElement.lang=value;window.dispatchEvent(new Event('pot:locale'));};
 async function run(){
   const loading=pages.assistant(assistant);await wait(()=>pending.length);
-  check(host.textContent.includes(t('loading.pending'))&&pages.hasParent,'Pending settings expose loading and a Back action');
+  check(!host.textContent.includes(t('loading.pending'))&&host.querySelector('[aria-busy="true"]')&&pages.hasParent,'Pending settings stay silent with busy state and a Back action');
   const knownName=host.querySelector('input[aria-label]');knownName.value='Known draft while loading';knownName.dispatchEvent(new Event('input',{bubbles:true}));
   check(!knownName.disabled,'Known profile fields remain editable while the authoritative read is pending');
   const readCount=calls.length;
   switchLocale(locale==='en'?'zh-CN':'en');
-  check(host.textContent.includes(t('loading.pending'))&&calls.length===readCount,'Language switch updates pending text without restarting IO');
+  check(!host.textContent.includes(t('loading.pending'))&&calls.length===readCount,'Language switch keeps pending state silent without restarting IO');
   pending.shift()();await loading;
   check(!host.textContent.includes(t('loading.pending'))&&host.querySelector('[role=alert]')&&button('retry'),'Failure replaces loading with an actionable error');
   check(host.textContent.includes(t('assistant.settingsLoadFailed')),'Load failure has a localized explanation');

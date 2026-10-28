@@ -25,6 +25,11 @@ try{
  if(host.querySelector('pot-resource')!==original||original.querySelector('iframe')!==originalFrame)throw Error('Interactive resource/frame native identity changed');
  if(stagedAfterResult!==null||loads!==0)throw Error('Outer HTML result/notice changed the stable native input surface');
  if(!live.title?.witness||!live.value?.witness||!live.notice?.witness)throw Error('Late HTML result Text did not enter from connected hidden preparation');
- if(reference.state!=='ready'||reference.fallback==='true'||reference.result!==live.value.text||Math.abs(reference.parity)>.6)throw Error('Late HTML event geometry differs from identical ready current-state reference: '+reference.parity);
+ const initial=observations.find(item=>item.label==='initial');
+ if(live.iframe!==initial.iframe)throw Error('Late document growth changed its committed viewport');
+ // A fresh document may choose a larger initial viewport. Compare the prepared
+ // result/notice geometry independently; the retained iframe keeps its viewport.
+ const outerParity=(reference.row-reference.iframe)-(live.row-live.iframe);
+ if(reference.state!=='ready'||reference.fallback==='true'||reference.result!==live.value.text||Math.abs(outerParity)>.6)throw Error('Prepared HTML result/notice geometry differs from current-state reference: '+outerParity);
 }catch(error){failure=error.stack;sample('failure');}
 stopped=true;observer.disconnect();ui.close();await Promise.resolve();const result={failure:failure||null,errors:window.fixtureErrors,observations,messages,actions,stagedAfterResult,loads,witnesses,acquired,released};window.preparedEventsResult=result;document.querySelector('#results').textContent=JSON.stringify({failure:result.failure,errors:result.errors,acquired,released,done:true},null,2);

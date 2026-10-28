@@ -51,9 +51,9 @@ export async function preparedNativeResizeBudget(browser,origin){
     const evidence=await page.evaluate(()=>nativeBudget),pending=evidence.pending;
     assert(pending.presentation&&!pending.ready,'Exercise the actual pending presentation');
     assert(afterBudget.at-pending.at>=5200);
-    assert(afterBudget.ready&&afterBudget.frame&&afterBudget.fallback==='true','Continuous child RO must finish within the original five-second budget in a fixed frame');
+    assert(afterBudget.ready&&afterBudget.frame&&afterBudget.fallback!=='true','A ready document keeps its measured viewport without falling back when child content grows');
     assert(afterBudget.viewport.fixed,'The original input viewport must have a measured fixed height too');
-    assert.equal(afterBudget.overflow,'auto');assert(afterBudget.height>=240);
+    assert.equal(afterBudget.overflow,'clip');assert(afterBudget.height>=240);
     assert(!afterBudget.stage&&!afterBudget.presentation&&!afterBudget.holds&&!afterBudget.surfaces);
     assert.equal(afterBudget.measured.registered,afterBudget.measured.actual,'Registered virtual geometry must equal the real fixed-frame row');
     assert.equal(afterBudget.focus,'after');assert.equal(afterBudget.token,pending.token);
@@ -61,11 +61,11 @@ export async function preparedNativeResizeBudget(browser,origin){
     assert(trace.every(sample=>sample.outerWidth===340),'The bounded case changes only child content after the single outer width change');
     assert(trace.filter(sample=>sample.deadline!==undefined).every(sample=>sample.deadline===pending.deadline),'Commit and RO must not renew the original component deadline');
     assert(afterBudget.revision>pending.revision+10,'Exercise repeated real document resizes');
-    const fallback=trace.filter(sample=>sample.fallback==='true'&&!sample.stage&&!sample.presentation);
-    assert(fallback.length>1&&fallback.every(sample=>sample.height===afterBudget.height),'Late resizes remain inside the measured fixed frame');
-    assert(afterBudget.revision>fallback[0].revision,'Real RO updates continue after the fixed frame is committed');
-    const completed=trace.findIndex(sample=>sample.ready&&sample.fallback==='true');
-    assert(completed>=0&&trace.slice(completed).every(sample=>sample.ready&&!sample.stage&&!sample.presentation&&!sample.surfaces&&!sample.holds),'Interior-only late resizes cannot reopen preparation after the bounded fallback completes');
+    const bounded=trace.filter(sample=>sample.ready&&sample.viewport?.fixed&&!sample.stage&&!sample.presentation);
+    assert(bounded.length>1&&bounded.every(sample=>sample.height===afterBudget.height),'Late resizes remain inside the measured fixed frame');
+    assert(afterBudget.revision>bounded[0].revision,'Real RO updates continue after the fixed frame is committed');
+    const completed=trace.findIndex(sample=>sample.ready&&sample.viewport?.fixed);
+    assert(completed>=0&&trace[completed].at-pending.at<5000&&trace.slice(completed).every(sample=>sample.ready&&!sample.stage&&!sample.presentation&&!sample.surfaces&&!sample.holds),'Interior-only late resizes cannot reopen preparation after the measured viewport is published');
     assert(trace.slice(completed).every(sample=>sample.viewport.height===afterBudget.viewport.height),'Late content cannot restart the real native viewport presentation boundary');
     await page.waitForFunction(()=>nativeBudget.ended);
     await page.waitForFunction(()=>nativeCase.ready);

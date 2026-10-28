@@ -66,7 +66,7 @@ const server=createServer(async(req,res)=>{try{
    if(path==='/api/v1/assistants/profile')return answer({id:'alpha',name:state.name,avatar:'',revision:state.revision});
    if(path==='/api/v1/agent')return answer({generation:1,revision:state.configRevision,pending:state.pending,selection:{profile_id:'synthetic-provider',profile_revision:1,model:state.model}});
    if(path==='/api/v1/instructions')return answer({text:state.rules,revision:state.rulesRevision});
-   if(path==='/api/v1/providers')return answer({default_provider_id:'synthetic-provider',profiles:[{id:'synthetic-provider',name:'Synthetic Provider',revision:1,model:'synthetic-original',models:['synthetic-original','synthetic-next']}],directory:[],provider_types:[],connections:[],configured_models:{'synthetic-provider':['synthetic-original','synthetic-next']}});
+   if(path==='/api/v1/providers')return answer(state.providers||{default_provider_id:'synthetic-provider',profiles:[{id:'synthetic-provider',name:'Synthetic Provider',revision:1,model:'synthetic-original',models:['synthetic-original','synthetic-next']}],directory:[],provider_types:[],connections:[],configured_models:{'synthetic-provider':['synthetic-original','synthetic-next']}});
    if(path==='/api/v1/permissions')return answer({pending:[],policy:{machines:{},rules:[],task_grants:[]}});
    if(path==='/api/v1/tasks/catalog'||path==='/api/v1/tasks/query')return answer({items:[],total:0,counts:{},next_offset:null});
    if(path==='/api/v1/assistants/bootstrap')return answer({assistant:null});
