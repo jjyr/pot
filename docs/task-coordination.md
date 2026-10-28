@@ -210,6 +210,13 @@ Worker output and plugin events remain untrusted reference data.
 The replacement retains the original brief, all additional inputs with their
 provenance, machine, resolved model, plugins, Skills and requirements. It runs
 under current machine authorization in a new workspace; old files are not imported.
+The original brief keeps the ordinary task-submission byte limit. Previously
+accepted inputs are replayed through the durable Task inbox, followed by the
+repair approach as owner guidance, rather than concatenated into a new brief.
+Each input keeps its kind, sender and causal provenance. The normal model boundary
+consumes and acknowledges them, including its existing user-guidance priority;
+references remain data and cannot grant authority. The repair approach retains
+its separate 8,192-byte limit, independent of accumulated accepted inputs.
 The model supplies only a repair approach and must not repeat owner-denied work
 or uncertain effects that it cannot verify. An unresolved blocker or required
 decision is reported to the user. Accepted recovery is silent; completion is
