@@ -75,6 +75,18 @@ export function createAssistantDrafts({client,state,attachments,changed,restored
     ready(key){return !!bindings.get(key)?.loaded;},
     status(key){const cleanup=[...deletions.values()].find(value=>value.error);if(cleanup)return {error:cleanup.error,cleanup:true};const entry=bindings.get(key);return entry?{loading:!entry.loaded,error:entry.error,dirty:entry.saved<entry.revision,saving:!!entry.flight}:null;},
     async flush(key){const entry=bindings.get(key);if(entry)await drain(entry);},
+    async enqueue(key,value,onCommitted){
+      const entry=bindings.get(key);if(!entry)throw Error('draft_identity_missing');
+      // Capture File references before waiting for a draft write. Later removal
+      // from the composer cannot strip originals from this explicit submission.
+      const ids=new Set((value.request.attachments||[]).map(item=>item.id));
+      const files=attachments.items(key).filter(item=>ids.has(item.attachment.id)&&item.file).map(item=>({id:item.attachment.id,blob:item.file,lastModified:item.file.lastModified}));
+      await drain(entry);if(!current(entry))throw Error('draft_identity_retired');
+      const submission=entry.submission={value,committed:false};
+      const operation=storage.enqueue(entry.key,value,files).then(sequence=>{submission.committed=true;onCommitted(sequence);if(entry.submission===submission)entry.submission=null;entry.revision++;entry.error=null;return sequence;}).catch(error=>{if(entry.submission===submission)entry.submission=null;entry.error=error;throw error;});
+      entry.flight=operation;
+      try{return await operation;}finally{if(entry.flight===operation)entry.flight=null;notify();if(current(entry))drain(entry).catch(()=>{});}
+    },
     async retry(key){for(const [target,value]of deletions){try{await storage.remove(target);deletions.delete(target);}catch(error){value.error=error;notify();throw error;}}const entry=bindings.get(key);if(!entry){notify();return;}if(!entry.loaded)await load(entry);await drain(entry);},
     async forget(scope){
       const key=assistantDraftKey(client,scope),entry=entries.get(key);
@@ -92,7 +104,17 @@ export function createAssistantDrafts({client,state,attachments,changed,restored
       const writes=[];
       for(const entry of entries.values()){
         clock.clearTimeout(entry.timer);entry.retired=true;
-        if(entry.loaded&&entry.saved<entry.revision){const {record,files}=snapshot(entry);writes.push(storage.write(entry.key,record,files));}
+        if(entry.loaded&&(entry.saved<entry.revision||entry.submission)){
+          const captured=snapshot(entry),submission=entry.submission;
+          writes.push(Promise.resolve(entry.flight).catch(()=>{}).then(()=>{
+            if(submission?.committed){const value=submission.value,ids=new Set((value.request.attachments||[]).map(item=>item.id));
+              if(captured.record.draftVersion===value.draftVersion&&captured.record.text===value.request.text)captured.record.text='';
+              if(captured.record.referenceVersion===value.referenceVersion&&JSON.stringify(captured.record.references)===JSON.stringify(value.request.references||[]))captured.record.references=[];
+              captured.record.attachments=captured.record.attachments.filter(item=>!ids.has(item.attachment.id));captured.files=captured.files.filter(item=>!ids.has(item.id));
+            }
+            return storage.write(entry.key,captured.record,captured.files);
+          }));
+        }
       }
       closed=true;Promise.allSettled(writes).finally(()=>storage.close());
     },

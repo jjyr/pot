@@ -1,3 +1,4 @@
+import {UI_CACHE_VERSION} from '../../pkg/storage/migrations/ui-cache/0007_chat_outbox.mjs';
 import {createIndexedStore,idbRequest} from '../../web/src/state/indexed-store.mjs';
 import {clearBusinessCaches} from '../../web/src/state/cache-lifecycle.mjs';
 import {createProductionClient} from '../../web/src/adapters/production.mjs';
@@ -6,7 +7,7 @@ import {createResourceReads,displayProjection} from '../../web/src/state/resourc
 import {createTaskRepository} from '../../web/src/state/task-repository.mjs';
 import {createChatCache} from '../../web/src/state/chat-cache.mjs';
 import {migrateChatCache} from '../../pkg/storage/migrations/ui-cache/0001_chat_cache.mjs';
-import {UI_CACHE_VERSION,migrateStartupIdentity} from '../../pkg/storage/migrations/ui-cache/0006_startup_identity.mjs';
+import {migrateStartupIdentity} from '../../pkg/storage/migrations/ui-cache/0006_startup_identity.mjs';
 import {migrateAssistantDrafts} from '../../pkg/storage/migrations/ui-cache/0005_assistant_drafts.mjs';
 import {createStartupIdentity} from '../../web/src/state/startup-identity.mjs';
 const remove=name=>new Promise((resolve,reject)=>{const op=indexedDB.deleteDatabase(name);op.onsuccess=resolve;op.onerror=()=>reject(op.error);});

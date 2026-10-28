@@ -158,7 +158,7 @@ export function createResourceReads(client,{storage=client.production?createProj
     async query(path,options={}){const meta={...describe(path,options),...(options.collection?{collection:true}:{})},key=JSON.stringify(meta);if(!storage){const value=cache.peek(key);return value===undefined?null:{value,...cache.status(key)};}await flushInvalidations();const saved=await storage.read(key);return saved?{value:saved.value,lastConfirmed:saved.lastConfirmed,freshness:saved.fresh?'retained':'stale'}:null;},
     async applyCommand(path,options,value,topics){
       if(!storage){result.invalidate(topics,options);return value;}
-      const meta={...describe(path,options),topics,path:'@command:'+path};
+      const meta={...describe(path,options),...(options.expectedControl?{control:options.expectedControl}:{}),topics,path:'@command:'+path};
       const id=options.commandID||options.body?.request_id||crypto.randomUUID(),key=JSON.stringify({...meta,id});
       await flushInvalidations();
       const saved=await storage.command(key,meta,displayProjection(path,value));

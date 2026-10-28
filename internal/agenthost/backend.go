@@ -174,7 +174,7 @@ func (b *backend) ownerConfigure(ctx context.Context, a assistant) error {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO agent_adapter_workspaces(id,workspace,mode) VALUES(?,?,?) ON CONFLICT(workspace,mode) DO NOTHING", scopeID(a.Workspace, a.Mode), a.Workspace, a.Mode); err != nil {
 			return err
 		}
-		var workspace, mode, existingName, existingModel, existingEffort string
+		var workspace, mode, existingName string
 		var retired bool
 		if err := tx.QueryRowContext(ctx, "SELECT deleted FROM agent_adapter_assistants WHERE id=?", a.ID).Scan(&retired); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
@@ -182,7 +182,7 @@ func (b *backend) ownerConfigure(ctx context.Context, a assistant) error {
 		if retired {
 			return agentlink.ErrNotFound
 		}
-		err := tx.QueryRowContext(ctx, "SELECT workspace,mode,name,model,effort FROM agent_adapter_assistants WHERE id=? AND deleted=0", a.ID).Scan(&workspace, &mode, &existingName, &existingModel, &existingEffort)
+		err := tx.QueryRowContext(ctx, "SELECT workspace,mode,name FROM agent_adapter_assistants WHERE id=? AND deleted=0", a.ID).Scan(&workspace, &mode, &existingName)
 		// A session's workspace/permission scope is immutable. Create another virtual
 		// assistant to use a different scope; accepted work keeps its original owner.
 		if err == nil && (workspace != a.Workspace || mode != a.Mode) {
@@ -190,15 +190,6 @@ func (b *backend) ownerConfigure(ctx context.Context, a assistant) error {
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
-		}
-		if err == nil && (a.Model != existingModel || a.Effort != existingEffort) {
-			var busy bool
-			if e := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_adapter_jobs WHERE assistant_id=? AND (json_extract(data,'$.task.state') NOT IN ('completed','failed','cancelled') OR json_extract(data,'$.cleanup_uncertain')=1)) OR EXISTS(SELECT 1 FROM agent_messages WHERE direction='incoming' AND state IN ('queued','read') AND json_extract(envelope,'$.to.agent_id')=?)`, a.ID, a.ID).Scan(&busy); e != nil {
-				return e
-			}
-			if busy {
-				return agentlink.ErrAssistantBusy
-			}
 		}
 		if a.Name == "" {
 			a.Name = existingName

@@ -32,7 +32,7 @@ func agyBackend(t *testing.T) *backend {
 	}
 	return b
 }
-func TestAntigravityManagementKeepsSessionsAndFencesBusyEdits(t *testing.T) {
+func TestAntigravityManagementKeepsSessionsAndSavesWhileInboxPending(t *testing.T) {
 	b := agyBackend(t)
 	ctx := context.Background()
 	from := protocol.AgentRef{NodeID: "pot", Kind: "user", AgentID: "operator"}
@@ -65,11 +65,16 @@ func TestAntigravityManagementKeepsSessionsAndFencesBusyEdits(t *testing.T) {
 	if _, e = mailbox.Deliver(ctx, parent); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = b.ManageAssistant(ctx, update); !errors.Is(e, agentlink.ErrAssistantBusy) {
-		t.Fatal("queued message scope changed", e)
+	saved, e := b.ManageAssistant(ctx, update)
+	if e != nil || saved.Assistant.Model != "model-two" {
+		t.Fatal("pending inbox blocked configuration", saved, e)
+	}
+	var pending int
+	if e = b.db.QueryRow("SELECT COUNT(*) FROM agent_messages WHERE id='incoming' AND state='queued'").Scan(&pending); e != nil || pending != 1 {
+		t.Fatal("configuration changed pending inbox", pending, e)
 	}
 	b.db.Exec("UPDATE agent_messages SET state='processed' WHERE id='incoming'")
-	saved, e := b.ManageAssistant(ctx, update)
+	saved, e = b.ManageAssistant(ctx, update)
 	if e != nil || saved.Assistant.Model != "model-two" {
 		t.Fatal(saved, e)
 	}

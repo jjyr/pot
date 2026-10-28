@@ -1,3 +1,4 @@
+import {waitForOutbox} from './outbox-persistence-browser.mjs';
 import {waitForDraftSaved} from './draft-persistence-browser.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
@@ -6,9 +7,10 @@ import {sourceServer,launchBrowser} from './browser-harness.mjs';
 import {attachmentPickerFixture} from './attachment-picker-fixture.mjs';
 
 const file={name:'synthetic.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP438DwHwAGgAJ/EEwb4QAAAABJRU5ErkJggg==','base64')};
-export async function assistantDraftsBrowser(browser,{sourceOrigin,captureDir,baseline=false}={}){
- const fixture=await attachmentPickerFixture(sourceOrigin),results=[];
+export async function assistantDraftsBrowser(browser,{sourceOrigin,captureDir,baseline=false,cases}={}){
+ const fixture=await attachmentPickerFixture(sourceOrigin),results=[];if(process.env.POT_DRAFT_REPORT)console.log('OWN_FIXTURE '+fixture.origin);
  const scenario=async(name,run)=>{
+  if(cases&&!cases.includes(name))return;
   const context=await browser.newContext({viewport:{width:390,height:852},serviceWorkers:'block'}),page=await context.newPage(),errors=[];
   page.setDefaultTimeout(10000);page.on('pageerror',error=>errors.push(error.message));
   await context.addCookies([{name:'picker-case',value:name,url:fixture.origin}]);
@@ -57,27 +59,29 @@ export async function assistantDraftsBrowser(browser,{sourceOrigin,captureDir,ba
   });
   await scenario('accepted-new-edits',async({page,control,saved,choose,uploaded,server,disk,ready,reference})=>{
    await page.locator('#pot-composer').fill('Submitted text');await reference();await choose();await uploaded();await saved();await control({holdSend:true});await page.getByRole('button',{name:'Send',exact:true}).click();
-   await page.waitForFunction(()=>document.querySelector('.connection-status')?.textContent.includes('Confirming'));await page.locator('#pot-composer').fill('Text written during submit');await page.locator('.message-reference-remove').click();await reference();await page.waitForFunction(()=>document.querySelector('.composer-references .message-reference'));await choose('new.png');await uploaded();await saved({pending:true});
+   await waitForOutbox(page,([rows])=>rows.length===1&&rows[0].started);await saved();assert.equal(await page.locator('#pot-composer').inputValue(),'');assert.equal(await page.locator('.attachment-card').count(),0);
+   await page.locator('#pot-composer').fill('Text written during submit');await reference();await choose('new.png');await uploaded();await saved();
    const first=(await server()).trace.find(row=>row.kind==='post');assert(first);assert.equal((await server()).trace.filter(row=>row.kind==='receipt').length,0,'Normal pending POST has no receipt reads');
-   await control({holdSend:false,releaseSends:true});await ready();await saved();assert.equal(await page.locator('#pot-composer').inputValue(),'Text written during submit');assert.equal(await page.locator('.composer-references .message-reference').count(),1);assert.equal(await page.locator('.attachment-card').count(),1);assert.equal((await disk()).files.length,1);assert.equal((await disk()).drafts[0].pending,null);
+   await control({holdSend:false,releaseSends:true});await waitForOutbox(page,([rows])=>rows[0].state==='accepted');await saved();assert.equal(await page.locator('#pot-composer').inputValue(),'Text written during submit');assert.equal(await page.locator('.composer-references .message-reference').count(),1);assert.equal(await page.locator('.attachment-card').count(),1);assert.equal((await disk()).files.length,1);assert.equal((await disk()).drafts[0].pending,null);
    await page.reload();await ready();await saved();await uploaded();assert.equal(await page.locator('#pot-composer').inputValue(),'Text written during submit');assert.equal(await page.locator('.attachment-name').innerText(),'new.png');assert.equal((await server()).trace.filter(row=>row.kind==='post').length,1);
   });
   await scenario('reload-pending-accepted',async({page,control,saved,choose,uploaded,server,disk,ready})=>{
-   await page.locator('#pot-composer').fill('Accepted before reload');await choose();await uploaded();await control({holdSend:true});await page.getByRole('button',{name:'Send',exact:true}).click();await page.waitForTimeout(100);await saved({pending:true});const prior=await disk();assert(prior.drafts[0].pending);assert.equal((await server()).trace.filter(row=>row.kind==='post').length,1);
-   await control({receipt:true});await page.reload();await ready();await saved();assert.equal(await page.locator('#pot-composer').inputValue(),'');assert.equal(await page.locator('.attachment-card').count(),0);assert.equal((await disk()).files.length,0);const evidence=await server();assert.equal(evidence.trace.filter(row=>row.kind==='post').length,1);assert(evidence.trace.filter(row=>row.kind==='receipt').every(row=>row.query.request_id===prior.drafts[0].pending.request.request_id));
+   await page.locator('#pot-composer').fill('Accepted before reload');await choose();await uploaded();await control({holdSend:true});await page.getByRole('button',{name:'Send',exact:true}).click();await saved();const prior=await waitForOutbox(page,([rows])=>rows.length===1&&rows[0].started);assert.equal((await server()).trace.filter(row=>row.kind==='post').length,1);
+   await control({receipt:true});await page.reload();await ready();await saved();await waitForOutbox(page,([rows])=>rows[0].state==='accepted',{timeout:45000});assert.equal(await page.locator('#pot-composer').inputValue(),'');assert.equal(await page.locator('.attachment-card').count(),0);assert.equal((await disk()).files.length,0);const evidence=await server();assert.equal(evidence.trace.filter(row=>row.kind==='post').length,1);assert(evidence.trace.filter(row=>row.kind==='receipt').every(row=>row.query.request_id===prior.rows[0].request.request_id));
   });
-  await scenario('rejected-and-unknown',async({page,control,saved,server,disk,ready})=>{
-   await page.locator('#pot-composer').fill('Keep on rejection');await control({rejectSend:true});await page.getByRole('button',{name:'Send',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.connection-status')?.textContent.includes('not accepted'));await saved();assert.equal(await page.locator('#pot-composer').inputValue(),'Keep on rejection');assert.equal((await disk()).drafts[0].pending,null);
-   await control({rejectSend:false,holdSend:true,acceptSend:false});await page.getByRole('button',{name:'Send',exact:true}).click();await page.waitForTimeout(100);await saved({pending:true});const id=(await disk()).drafts[0].pending.request.request_id;
-   await page.reload();await saved({pending:true});await page.waitForFunction(()=>document.querySelector('.connection-status')?.textContent.includes('Confirming')||document.querySelector('.connection-status')?.textContent.includes('may have been accepted'));assert.equal(await page.locator('#pot-composer').inputValue(),'Keep on rejection');assert((await disk()).drafts[0].pending);const evidence=await server();assert.equal(evidence.trace.filter(row=>row.kind==='post').length,2);assert(evidence.trace.filter(row=>row.kind==='receipt').every(row=>row.query.request_id===id));
+  await scenario('rejected-and-unknown',async({page,control,saved,server,ready})=>{
+   await page.locator('#pot-composer').fill('Keep on rejection');await control({rejectSend:true});await page.getByRole('button',{name:'Send',exact:true}).click();let persisted=await waitForOutbox(page,([rows])=>rows[0]?.state==='failed');await saved();assert.equal(persisted.rows[0].request.text,'Keep on rejection');assert.equal(await page.locator('#pot-composer').inputValue(),'');
+   await control({rejectSend:false});await page.locator('.history:not([data-preparation-surface]) .outbox-controls').getByRole('button',{name:'Retry',exact:true}).click();await waitForOutbox(page,([rows])=>rows[0].state==='accepted');
+   await control({holdSend:true,acceptSend:false});await page.locator('#pot-composer').fill('Keep unknown result');await page.getByRole('button',{name:'Send',exact:true}).click();persisted=await waitForOutbox(page,([rows])=>rows.length===2&&rows[1].started);const id=persisted.rows[1].request.request_id;
+   await page.reload();await ready();persisted=await waitForOutbox(page,([rows])=>rows.length===2&&rows[1].started);assert.equal(persisted.rows[1].request.request_id,id);assert.equal(persisted.rows[1].request.text,'Keep unknown result');assert.equal(await page.locator('#pot-composer').inputValue(),'');assert((await server()).trace.filter(row=>row.kind==='post'&&row.body.text==='Keep unknown result').every(row=>row.body.request_id===id));
   });
   await scenario('quota-retry-and-accept-cleanup',async({page,control,saved,server,disk,ready})=>{
    await page.evaluate(()=>{const put=IDBObjectStore.prototype.put;window.draftPut=put;IDBObjectStore.prototype.put=function(...args){if(this.name==='composerDrafts'&&window.failDraftWrites)throw new DOMException('Synthetic draft quota','QuotaExceededError');return put.apply(this,args);};window.failDraftWrites=true;});
-   await page.locator('#pot-composer').fill('Never pretend saved');await page.locator('.draft-storage-status.inline-error').waitFor();assert.match(await page.locator('.draft-storage-status').innerText(),/not saved/);await page.getByRole('button',{name:'Send',exact:true}).click();await page.waitForTimeout(100);assert.equal((await server()).trace.filter(row=>row.kind==='post').length,0);
+   await page.locator('#pot-composer').fill('Never pretend saved');await page.locator('.draft-storage-status.inline-error').waitFor();assert.match(await page.locator('.draft-storage-status').innerText(),/not saved/);await page.getByRole('button',{name:'Send',exact:true}).click();await page.waitForTimeout(100);assert.equal((await server()).trace.filter(row=>row.kind==='post').length,0);assert.equal(await page.locator('#pot-composer').inputValue(),'Never pretend saved');
    await page.evaluate(()=>dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:'zh-CN'}})));assert.match(await page.locator('.draft-storage-status').innerText(),/草稿未保存/);assert.equal(await page.locator('.draft-storage-status').getByRole('button',{name:'重试',exact:true}).count(),1);await page.evaluate(()=>dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:'en'}})));
    await page.locator('#pot-composer').fill('Latest after failed save');await page.evaluate(()=>window.failDraftWrites=false);await page.locator('.draft-storage-status').getByRole('button',{name:'Retry',exact:true}).click();await saved();assert.equal((await disk()).drafts[0].text,'Latest after failed save');
-   await control({holdSend:true});await page.getByRole('button',{name:'Send',exact:true}).click();await page.waitForTimeout(100);await saved({pending:true});await page.evaluate(()=>window.failDraftWrites=true);await control({releaseSends:true});await page.locator('.draft-storage-status.inline-error').waitFor();assert((await disk()).drafts[0].pending,'Disk retains a safe request fence when cleanup fails');
-   await page.locator('#pot-composer').fill('New input after accepted cleanup failure');await page.evaluate(()=>window.failDraftWrites=false);await page.locator('.draft-storage-status').getByRole('button',{name:'Retry',exact:true}).click();await saved();assert.equal((await disk()).drafts[0].text,'New input after accepted cleanup failure');assert.equal((await disk()).drafts[0].pending,null);
+   await control({holdSend:true});await page.getByRole('button',{name:'Send',exact:true}).click();await waitForOutbox(page,([rows])=>rows[0]?.started);await saved();await page.evaluate(()=>window.failDraftWrites=true);await page.locator('#pot-composer').fill('New input after accepted cleanup failure');await page.locator('.draft-storage-status.inline-error').waitFor();await control({releaseSends:true});await waitForOutbox(page,([rows])=>rows[0].state==='accepted');
+   await page.evaluate(()=>window.failDraftWrites=false);await page.locator('.draft-storage-status').getByRole('button',{name:'Retry',exact:true}).click();await saved();assert.equal((await disk()).drafts[0].text,'New input after accepted cleanup failure');assert.equal((await disk()).drafts[0].pending,null);
    await page.reload();await ready();await saved();assert.equal(await page.locator('#pot-composer').inputValue(),'New input after accepted cleanup failure');assert.equal((await server()).trace.filter(row=>row.kind==='post').length,1);
   });
   await scenario('accepted-projection-failure',async({page,saved,server,disk,ready})=>{
@@ -107,17 +111,11 @@ export async function assistantDraftsBrowser(browser,{sourceOrigin,captureDir,ba
   });
   for(const committedPost of [false,true])await scenario(committedPost?'explicit-original-duplicate':'preflight-before-post',async({page,control,saved,choose,uploaded,server,disk,reference})=>{
    await page.locator('#pot-composer').fill('Original fixed snapshot');await reference();await choose('original.png');await uploaded();await saved();
-   if(committedPost)await control({holdSend:true});
-   else await page.evaluate(()=>{
-    const complete=Object.getOwnPropertyDescriptor(IDBTransaction.prototype,'oncomplete'),put=IDBObjectStore.prototype.put;
-    Object.defineProperty(IDBTransaction.prototype,'oncomplete',{...complete,set(handler){complete.set.call(this,function(event){if(this.__holdPending){window.pendingCommitted=true;return;}return handler.call(this,event);});}});
-    IDBObjectStore.prototype.put=function(value,...args){if(this.name==='composerDrafts'&&value.pending)this.transaction.__holdPending=true;return put.call(this,value,...args);};
+   const original=await page.evaluate(async()=>{
+    const {createIndexedStore,idbRequest}=await import('/state/indexed-store.mjs'),db=createIndexedStore();try{return await db.transaction(['composerDrafts'],'readwrite',async tx=>{const store=tx.objectStore('composerDrafts'),records=await idbRequest(store.getAll()),record=records.find(row=>JSON.parse(row.key)[2]==='alpha');const request={request_id:crypto.randomUUID(),conversation_id:record.conversation_id,boot_id:'picker-boot',text:record.text,references:record.references,attachments:record.attachments.map(item=>item.attachment)};record.pending={request,key:record.state_key,draftVersion:record.draftVersion,referenceVersion:record.referenceVersion};store.put(record);return request;});}finally{db.close();}
    });
-   await page.getByRole('button',{name:'Send',exact:true}).click();
-   if(committedPost){await page.waitForFunction(()=>document.querySelector('.connection-status')?.textContent.includes('Confirming'));await saved({pending:true});}
-   else await page.waitForFunction(()=>window.pendingCommitted);
-   const original=(await disk()).drafts[0].pending.request;
-   assert.equal((await server()).trace.filter(row=>row.kind==='post').length,committedPost?1:0,'Snapshot committed before transport starts');
+   if(committedPost){await control({holdSend:true});await page.evaluate(request=>{const {boot_id,...body}=request;void fetch('/api/v1/messages?space_id=local&assistant_id=alpha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).catch(()=>{});},original);await page.waitForTimeout(100);}
+   assert.equal((await server()).trace.filter(row=>row.kind==='post').length,committedPost?1:0,'Legacy snapshot committed before transport starts');
    await page.reload();await saved({pending:true});await uploaded();
    await page.locator('#pot-composer').fill('New editor contents after reload');await page.locator('.message-reference-remove').click();await reference();await choose('new-after-reload.png');await uploaded();await saved({pending:true});
    const retry=page.getByRole('button',{name:'Check and retry',exact:true});await retry.waitFor({timeout:30000});
@@ -140,7 +138,8 @@ export async function assistantDraftsBrowser(browser,{sourceOrigin,captureDir,ba
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
  const source=await sourceServer({root:process.env.POT_DRAFT_SOURCE||process.cwd()}),browser=await launchBrowser();
- try{const results=await assistantDraftsBrowser(browser,{sourceOrigin:source.origin,captureDir:process.env.POT_DRAFT_CAPTURES,baseline:process.env.POT_DRAFT_BASELINE==='1'});console.log(JSON.stringify(results,null,2));if(process.env.POT_DRAFT_REPORT)await writeFile(process.env.POT_DRAFT_REPORT,JSON.stringify(results,null,2)+'\n');}
+ if(process.env.POT_DRAFT_REPORT)console.log('OWN_SOURCE '+source.origin);
+ try{const results=await assistantDraftsBrowser(browser,{sourceOrigin:source.origin,captureDir:process.env.POT_DRAFT_CAPTURES,baseline:process.env.POT_DRAFT_BASELINE==='1',cases:process.env.POT_DRAFT_CASES?.split(',')});console.log(JSON.stringify(results,null,2));if(process.env.POT_DRAFT_REPORT)await writeFile(process.env.POT_DRAFT_REPORT,JSON.stringify(results,null,2)+'\n');}
  catch(error){console.error(error.stack);if(process.env.POT_DRAFT_REPORT)await writeFile(process.env.POT_DRAFT_REPORT,JSON.stringify(error.results||{error:error.stack},null,2)+'\n');process.exitCode=1;}
  finally{await browser.close();await source.close();}
 }

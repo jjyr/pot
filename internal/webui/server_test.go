@@ -184,7 +184,7 @@ func TestBrowserReadPagesReachControl(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			path := "/api/v1/usage/" + kind + "?scope=main&timezone=Asia%2FShanghai&days=30&offset=20"
 			if kind == "send-receipt" {
-				path = "/api/v1/messages/receipt?space_id=remote&assistant_id=alice&conversation_id=main&request_id=send&user_message_id=original"
+				path = "/api/v1/messages/receipt?space_id=remote&assistant_id=alice&conversation_id=main&request_id=send&user_message_id=original&expected_control_id=owning-control"
 			}
 			r := httptest.NewRequest("GET", "http://localhost"+path, nil)
 			r.AddCookie(cookie)

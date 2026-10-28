@@ -478,6 +478,27 @@ guard. Pending saves block leaving while their result is handled. Browser histor
 contains only route/session markers, never credentials or form values. Reload
 recovery is outside this memory-only editor contract.
 
+Settings navigation, reading and editing are independent of assistant execution,
+conversation snapshots and conversation-stream recovery. General preferences use
+local state. Configuration locations and assistant editors retain their captured
+Control, Space and owner; an offline selected conversation never disables another
+configuration location. Known assistant profile fields remain editable while model
+configuration and instructions load separately. Loading failures retain the form
+and expose a retry for the affected section.
+
+Saving confirms current configuration authority independently of the conversation
+session. Directory revalidation may delay that request; unavailable Control,
+revoked capabilities and changed boot or Control identity produce an actionable
+error without discarding input. Cached capabilities only keep settings discoverable
+and never authorize writes. A pending save prevents duplicate submission while
+fields stay editable; edits made after submission remain dirty after acknowledgement.
+Configuration drafts and credentials stay in memory and are not automatically
+queued for later delivery. Saving does not stop, restart or await assistant work.
+Configuration resource requests carry `configuration_control_id` and
+`configuration_boot_id` preconditions through both browser and native transports.
+The serving application checks both before dispatch, so an old form cannot write
+to a replacement Control or boot even before its directory update reaches the UI.
+
 Nested Provider setup suspends the actual assistant form, including draft fields,
 expanded disclosures, focus and scroll. Save refreshes Provider choices and
 restores that form. Cancel returns through the same guard. Global navigation
@@ -844,13 +865,16 @@ installed shell -> startup locator -> committed directory/chat/view/draft -> UI
 
 While verification is pending or the device is offline, cached conversations are
 readable, cached assistants can be selected, and drafts can be edited and saved.
-Sending and online management require current access and Control verification,
+Message delivery and online management require current access and Control verification,
 fresh advertised capabilities, and the existing operation/session checks. Cached
 capabilities never grant authority. Notification permission invitations also wait
 for verified online startup. Network recovery revalidates identity and
 refreshes the directory and conversation without replacing the editor or its
-reading anchor. Interrupted sends keep their existing immutable confirmation
-fences; recovery never automatically submits or retries a message.
+reading anchor. Explicit Send can commit to the local [message outbox](chat-outbox.md)
+with a known saved target while offline. Reopening and reconnection reconcile
+and deliver only these submitted messages with their fixed request identities;
+ordinary drafts remain unsent. Older draft confirmation fences retain their
+explicit recovery action.
 
 Each browser connection has a transient generation. Suspension revokes operation
 authority and aborts the previous generation's reads. Access and runtime checks
@@ -889,6 +913,8 @@ API, access, native transport and foreign-origin requests never enter this cache
 
 Browser storage eviction can remove local availability. An origin needs one
 successful online shell installation before offline reopening works. Offline
-support covers cached chat windows and local drafts, not all history, attachments'
-remote content or management pages. It adds neither background connections nor an
-outbox. Native startup continues through the native runtime adapter.
+support covers cached chat windows, local drafts and explicit local submissions,
+not all history, attachments' remote content or management pages. The shell cache
+does not run background delivery; the separate [message outbox](chat-outbox.md)
+resumes in an open application. Native startup continues through the native runtime
+adapter.

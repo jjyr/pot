@@ -99,6 +99,25 @@ mise run licenses
 mise run build:linux
 ```
 
+`mise run test:settings-browser` uses isolated production HTTP/SSE services and
+temporary browser profiles to check settings independently of assistant activity.
+Set `POT_SETTINGS_BEFORE` to an extracted baseline tree containing `web/src` and
+the UI cache/notification migrations. Configure an existing Playwright module
+with `POT_PLAYWRIGHT_MODULE` and Chromium with `POT_CHROMIUM_EXECUTABLE`; no browser
+is downloaded. The runner checks desktop and 390px layouts, preserves native
+fields through reconnect, tests configuration preconditions and saves only
+synthetic data. `POT_SETTINGS_IMAGES` selects the paired screenshot directory.
+Native configuration tests use fake Codex/Antigravity processes and never call a
+model. Configuration drafts and keys are not persisted in a browser write queue.
+
+`node scripts/tests/pot-ui-settings-outbox-browser.mjs` exercises settings and
+submitted messages together at desktop and 390px widths. Set
+`POT_SETTINGS_SOURCE` to a fixed source tree with the complete UI migrations and
+the browser module/executable variables above. It holds synthetic configuration,
+snapshot and save responses while checking local submission, draft preservation,
+snapshot acknowledgement and active-turn delivery. `POT_COMBINED_OUTPUT` selects
+the local evidence directory.
+
 `mise run test:pwa` runs the shared notification/source/transport contracts and
 an isolated Chromium Service Worker scenario. The browser runner uses an existing
 Playwright installation (`POT_PLAYWRIGHT_MODULE` may name its module) and optional
