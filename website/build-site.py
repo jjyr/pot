@@ -278,8 +278,12 @@ def embedded_assets():
         "zhipuai": "zhipuai.svg",
         "deepinfra": "deepinfra.svg",
         "product_work": "product-work.png",
+        "product_hero": "product-hero.png",
+        "product_link": "product-link.png",
         "product_agent_link": "product-agent-link.png",
         "product_assistants": "product-assistants.png",
+        "product_assistants_mobile": "product-assistants-mobile.png",
+        "product_link_mobile": "product-link-mobile.png",
         "product_work_mobile": "product-work-mobile.png",
     }.items():
         path = ROOT / "assets" / file
@@ -313,8 +317,12 @@ def preview():
             "zhipuai": "zhipuai.svg",
             "deepinfra": "deepinfra.svg",
             "product_work": "product-work.png",
+            "product_hero": "product-hero.png",
+            "product_link": "product-link.png",
             "product_agent_link": "product-agent-link.png",
             "product_assistants": "product-assistants.png",
+            "product_assistants_mobile": "product-assistants-mobile.png",
+            "product_link_mobile": "product-link-mobile.png",
             "product_work_mobile": "product-work-mobile.png",
         }.items():
             body = body.replace("assets/" + file, assets[key])

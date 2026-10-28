@@ -1,9 +1,9 @@
 # Pot website
 
 The standalone website reads as a short project handbook: why Pot exists, its
-choices around ongoing conversations and background work, and an overview of the
-open-source project. Security, installation and release history have their own
-views. Static HTML, CSS and JavaScript need no product runtime or Node packages.
+choices around ongoing conversations and background work, with visible product
+examples and an overview of the open-source project. Security, installation and
+release history have their own views. Static HTML, CSS and JavaScript need no product runtime or Node packages.
 
 ## Build and preview
 
@@ -70,18 +70,44 @@ explanations in their existing views and linked documentation.
 
 ## Product illustrations
 
-`assets/product-work.png` and `assets/product-assistants.png` are focused crops of
-the real shared product UI, using the repository's read-only synthetic fixture.
-`product-work-mobile.png` uses the same fixture in a 390px viewport, selected by a
-native `picture` source on narrow screens. The assistant-list crop can scroll
-horizontally on phones to preserve legible text. Both figures link to the full
-image without requiring JavaScript. English fixture conversations remain verbatim;
-localized captions explain them and identify synthetic data.
+The homepage pairs the design rationale with a concrete release-preparation
+example: a returned document draft, running installation checks, and a desktop
+check awaiting more context. Separate sections show specialist conversations,
+source disagreements, connected-assistant review, schedules and notification
+triggers. Clay and sage surfaces group the product illustrations; prose and
+annotated steps explain what each view means.
 
-The screenshots show assistant avatars, the shared `icon('tasks')`, confirmed
-four-character task identities, state and elapsed time. They do not show user
-business data, credentials or real agent execution. Follow
-[product screenshot instructions](../docs/images/README.md) to refresh them.
+`assets/product-hero.png`, `product-work.png`, `product-assistants.png` and
+`product-link.png` are compositions of real shared product components using
+synthetic records. They are illustrations of behavior, not live business
+execution or an exact full-app screen layout. The website ships only raster
+images, not the product runtime. `product-work-mobile.png` uses the same hero
+composition in a real 390px viewport. The assistant and Agent Link compositions
+also have 390px sources (`product-assistants-mobile.png` and
+`product-link-mobile.png`). Native `picture` sources keep identities and text
+legible on narrow screens. All figures link to a full-resolution image without
+JavaScript. English example records are verbatim;
+localized captions explain the illustrations.
+
+The read-only fixture at `scripts/tests/fixtures/website-product.html` composes
+shared replies, resource previews, communication participants, communication
+records and background-task rows. Its layout styles only arrange the components.
+Full addresses resolve profiles and task colors from the synthetic catalogue;
+short Task IDs use exactly the first four characters of the authoritative
+`address.agent_id`. Missing profile photos use the generic person icon. Shared
+Task rows retain left-aligned state and a separate elapsed-time column. A returned
+file is distinct from an active Task completing or being archived.
+
+To refresh only the website illustrations from a locally served checkout:
+
+```sh
+node scripts/tests/product-overview-browser.mjs --website-only
+```
+
+The capture checks identities, colors, profile fallbacks, state/time alignment and
+absence of mutations or external requests. It never starts agents, schedules,
+connections, approvals or downloads. Full-app documentation screenshots still use
+the separate [product screenshot workflow](../docs/images/README.md).
 
 Agent Link links to the current Pot, Codex and Antigravity documentation. A model
 provider connection (including xAI) is separate from an Agent adapter; do not
@@ -118,8 +144,8 @@ node scripts/tests/website-star-browser.mjs
 external Playwright module, and `POT_CHROMIUM_EXECUTABLE` can select Chromium.
 `--install-only` restricts the first script to installation and shared behaviors.
 `--capture` also writes review screenshots under
-`docs/pr-images/redesign-website/`; it expects the previous PR website sources at
-`output/website-before/website/`. Review captures use matching viewport and locale.
+`docs/pr-images/redesign-website/`; it expects the previous PR head website sources at
+`output/website-before-r2/website/`. Review captures use matching viewport and locale.
 `--capture-only` refreshes those images without repeating interaction checks.
 The checks use synthetic clipboard and API responses, and never run installation
 commands or invoke agents.

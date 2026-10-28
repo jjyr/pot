@@ -22,42 +22,47 @@
 <main id="main">
 
 <div id="view-overview" class="site-view active" data-view-panel="overview">
-<section class="hero reading" aria-labelledby="hero-title">
-<p class="eyebrow">一个开源的个人 AI 助手项目</p>
+<section class="hero wrap" aria-labelledby="hero-title">
+<div class="hero-copy"><p class="eyebrow">一个开源的个人 AI 助手项目</p>
 <h1 id="hero-title">让助手跟进工作，<br>把精力留给目标和判断。</h1>
 <p class="hero-description">Pot 将持续对话、后台任务与 Agent 协作放在一起，探索一种更少反复交代、更少盯守执行过程的工作方式。</p>
-<div class="actions"><a href="#philosophy">了解它如何工作 ↓</a><a href="#start" data-switch-view="install">安装 Pot ↗</a></div>
+<div class="actions"><a class="button primary" href="#assistant">看看一次工作如何推进 ↓</a><a href="#start" data-switch-view="install">安装 Pot ↗</a></div>
+<p class="hero-note">先讨论目标，工作在后台推进，结果回到同一段对话。</p></div>
+<figure class="hero-figure"><a href="assets/product-hero.png" target="_blank" rel="noopener"><picture><source media="(max-width:580px)" srcset="assets/product-work-mobile.png"><img src="assets/product-hero.png" width="720" height="560" alt="发布准备示例：对话中返回文档初稿，三个后台任务分别显示身份、状态和耗时"></picture></a><figcaption><span>一次发布准备，回到同一段对话。</span><small>真实组件合成 · 示例数据 · 点击查看高清</small></figcaption></figure>
 </section>
-<section id="philosophy" class="reading essay" aria-labelledby="why-title">
-<h2 id="why-title">为什么需要这样的助手</h2>
-<p>与 Agent 一起工作，仍然可能消耗大量精力：重复交代习惯、检查执行进度，以及决定接下来该做什么。每次干预都很小，累积起来却让人始终无法离开执行过程。</p>
+<section id="philosophy" class="philosophy wrap" aria-labelledby="why-title">
+<div class="philosophy-heading"><p class="eyebrow">出发点</p><h2 id="why-title">为什么需要这样的助手</h2><dl class="attention"><div><dt>人</dt><dd>目标、判断与取舍</dd></div><div><dt>助手</dt><dd>组织、执行与跟进</dd></div></dl></div>
+<div class="philosophy-copy"><p>与 Agent 一起工作，仍然可能消耗大量精力：重复交代习惯、检查执行进度，以及决定接下来该做什么。每次干预都很小，累积起来却让人始终无法离开执行过程。</p>
 <p>Pot 尝试让持续对话的助手承接这些工作：先讨论目标，再组织任务、跟进进展，带着结果或需要判断的问题回到对话。</p>
-<p>人的注意力留给方向、取舍与结果，助手逐渐承担更多日常跟进。</p>
-<a class="further" href="https://jjylab.com/posts/why-agent-coding-is-exhausting/">用 Agent 编程，但我为什么这么累？ ↗</a>
+<p class="philosophy-emphasis">人的注意力留给方向、取舍与结果，助手逐渐承担更多日常跟进。</p>
+<a class="further" href="https://jjylab.com/posts/why-agent-coding-is-exhausting/">用 Agent 编程，但我为什么这么累？ ↗</a></div>
 </section>
 <section class="choices" aria-labelledby="choices-title">
-<h2 id="choices-title" class="reading">几个设计选择</h2>
-<article id="assistant" class="choice">
-<div class="reading"><p class="number">01</p><h3>先对齐目标，再交给任务执行</h3>
-<p>对话用来讨论需求与取舍，后台任务承接耗时工作。结果和文件回到原来的对话，检查、修改与下一步都可以接着聊。</p></div>
-<figure class="product-figure"><a href="assets/product-work.png" target="_blank" rel="noopener"><picture><source media="(max-width:580px)" srcset="assets/product-work-mobile.png"><img src="assets/product-work.png" width="950" height="790" alt="Pot 对话展示讨论目标、三个带身份与状态的后台任务，以及返回的文档" loading="lazy"></picture></a><figcaption>讨论目标 → 后台任务 → 返回结果与文件。真实组件，合成演示数据；点击查看高清。</figcaption></figure>
+<div class="choices-heading wrap"><p class="eyebrow">从想法到界面</p><h2 id="choices-title">几个设计选择</h2><p>以发布准备为例：讨论范围、并行检查、返回文档，仍需判断的部分也留在对话里。</p></div>
+<article id="assistant" class="choice work-choice wrap">
+<div class="choice-heading"><p class="number">01</p><h3>先对齐目标，再交给任务执行</h3><p>对话用来讨论需求与取舍，后台任务承接耗时工作。结果和文件回到原来的对话，检查、修改与下一步都可以接着聊。</p></div>
+<figure class="product-figure work-figure"><a href="assets/product-work.png" target="_blank" rel="noopener"><picture><source media="(max-width:580px)" srcset="assets/product-work-mobile.png"><img src="assets/product-work.png" width="1120" height="620" alt="发布文档初稿与独立任务列表：运行和等待状态左对齐，耗时单独成列" loading="lazy"></picture></a><figcaption>文档初稿已经返回；安装检查继续运行，桌面检查则带回了需要补充的环境问题。</figcaption></figure>
+<dl class="work-notes"><div><dt>讨论范围</dt><dd>先确定文档、安装检查和截图各自需要做到什么程度。</dd></div><div><dt>跟进任务</dt><dd>每项工作保留自己的身份、状态与耗时，运行和等待的部分清楚可见。</dd></div><div><dt>审阅结果</dt><dd>文件回到对话后，可以继续提修改，也可以先处理仍需判断的问题。</dd></div></dl>
 </article>
-<article id="assistants" class="choice">
-<div class="reading"><p class="number">02</p><h3>让不同助手持续负责不同的事</h3>
-<p>开发、运维、资料整理可以各有一个助手。独立的对话与指令为每类工作积累相关背景，减少重新交代的负担；持续对话并不意味着永远记得或自动判断正确。</p></div>
-<figure class="product-figure compact"><a href="assets/product-assistants.png" target="_blank" rel="noopener"><img src="assets/product-assistants.png" width="1000" height="460" alt="助手列表与当前对话：Pot、开发、运维和资料整理各自保留独立入口" loading="lazy"></a><figcaption>为不同工作保留各自的对话。真实组件，合成演示数据。</figcaption></figure>
+<article id="assistants" class="choice assistants-choice wrap">
+<div class="choice-copy"><p class="number">02</p><h3>让不同助手持续负责不同的事</h3>
+<p>开发、运维、资料整理可以各有一个助手。独立的对话与指令为每类工作积累相关背景，减少重新交代的负担；持续对话并不意味着永远记得或自动判断正确。</p>
+<ul class="use-cases"><li><b>开发与审查</b><span>围绕仓库规范、实现取舍和交付继续讨论。</span></li><li><b>资料整理</b><span>保留来源、分歧与待判断的问题，接着形成下一份整理。</span></li><li><b>日常运维</b><span>围绕环境、巡检与问题跟进积累相关背景。</span></li></ul></div>
+<figure class="product-figure assistants-figure"><a href="assets/product-assistants.png" target="_blank" rel="noopener"><picture><source media="(max-width:580px)" srcset="assets/product-assistants-mobile.png"><img src="assets/product-assistants.png" width="920" height="440" alt="专职助手列表与资料整理对话：来源有分歧时，助手带回待判断的问题" loading="lazy"></picture></a><figcaption>分开的对话承接不同工作，也保留各自需要继续讨论的问题。</figcaption></figure>
 </article>
-<article id="agent-link" class="choice reading"><p class="number">03</p><h3>让助手拥有组织后续工作的方式</h3>
+<div class="link-band"><article id="agent-link" class="choice link-choice wrap"><div class="choice-copy"><p class="number">03</p><h3>让助手拥有组织后续工作的方式</h3>
 <p>任务承接执行，计划与通知提供触发，Agent Link 连接其他 Agent。助手可以组织后续工作，并把进展与结果带回对话。</p>
-<figure class="flow-figure"><ol class="work-flow"><li>讨论目标</li><li>助手组织工作</li><li>任务 / 其他 Agent</li><li>结果反馈回助手</li></ol><figcaption>执行中的权限与审批由各自的运行环境管理。</figcaption></figure>
 <p>Agent Link 支持连接 Pot、Codex 与 Antigravity，让不同环境中的助手通过对话与任务协作。</p>
-<div class="inline-links"><a href="https://github.com/jjyr/pot/blob/main/docs/agent-links.md">Agent Link 文档 ↗</a><a href="https://github.com/jjyr/pot/blob/main/integrations/codex/README.md">Codex ↗</a><a href="https://github.com/jjyr/pot/blob/main/integrations/antigravity/README.md">Antigravity ↗</a></div>
-</article>
+<div class="inline-links"><a href="https://github.com/jjyr/pot/blob/main/docs/agent-links.md">Agent Link 文档 ↗</a><a href="https://github.com/jjyr/pot/blob/main/integrations/codex/README.md">Codex ↗</a><a href="https://github.com/jjyr/pot/blob/main/integrations/antigravity/README.md">Antigravity ↗</a></div></div>
+<figure class="product-figure link-figure"><a href="assets/product-link.png" target="_blank" rel="noopener"><picture><source media="(max-width:580px)" srcset="assets/product-link-mobile.png"><img src="assets/product-link.png" width="800" height="510" alt="Pot 与连接的开发助手通过 Agent Link 讨论文档审查，并将发现带回原对话" loading="lazy"></picture></a><figcaption>连接的是具体助手。对话与结果跨环境传递，执行权限仍由各自环境管理。</figcaption></figure>
+<div class="follow-through"><div><h4>工作也可以有下一次</h4><p>计划让约定的工作在指定时间触发；个人 GitHub 通知按订阅条件交给指定助手。每周资料整理或仓库通知，都可以成为后续工作的起点。</p><a href="https://github.com/jjyr/pot/blob/main/docs/scheduled-tasks.md">计划与定时任务 ↗</a><a href="https://github.com/jjyr/pot/blob/main/docs/plugins.md#github-notifications">GitHub 通知 ↗</a></div><figure class="flow-figure"><ol class="work-flow"><li>讨论目标</li><li>助手组织工作</li><li>任务 / 其他 Agent</li><li>结果反馈回助手</li></ol><figcaption>执行中的权限与审批由各自的运行环境管理。</figcaption></figure></div>
+</article></div>
+<p class="illustration-note wrap">以上画面由真实产品组件与合成数据组成，用于解释工作方式，不代表真实业务执行。</p>
 </section>
-<section id="models" class="reading essay" aria-labelledby="overview-title"><h2 id="overview-title">项目概览</h2>
+<section id="models" class="wrap essay overview-section" aria-labelledby="overview-title"><h2 id="overview-title">项目概览</h2>
 <dl class="project-overview"><div><dt>使用自己的模型</dt><dd>连接模型服务，为助手选择合适的模型。<a href="https://github.com/jjyr/pot/blob/main/docs/model-directory.md">模型配置 ↗</a></dd></div><div><dt>在自己的环境运行</dt><dd>使用 macOS 桌面，或在自己的电脑、服务器上运行并通过浏览器访问；Linux 桌面仍为实验性支持。<a href="#start" data-switch-view="install">安装方式 ↗</a></dd></div><div><dt>明确执行边界</dt><dd>工具权限与审批由运行环境管理，连接的 Agent 保留各自的执行边界。<a href="#view-security" data-switch-view="security">安全与权限 ↗</a></dd></div></dl>
 </section>
-<section id="project" class="reading essay project" aria-labelledby="project-title"><h2 id="project-title">持续建设中的开源项目</h2>
+<section id="project" class="wrap essay project" aria-labelledby="project-title"><h2 id="project-title">持续建设中的开源项目</h2>
 <p class="release-note"><a href="https://github.com/jjyr/pot/releases/tag/v0.0.4">v0.0.4 ↗</a><time datetime="2026-10-27">2026-10-27</time></p>
 <p>最近的更新改善了离线启动、对话恢复与本地草稿，让工作更容易接着进行。</p>
 <p>Pot 仍在持续建设。Windows 暂不支持，Linux 桌面仍处于实验阶段。当前问题、讨论和贡献在仓库中公开，项目也通过这些反馈继续演进。</p>

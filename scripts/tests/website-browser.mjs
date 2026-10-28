@@ -21,24 +21,30 @@ async function capture(){
  const dir='docs/pr-images/redesign-website';await fs.mkdir(dir,{recursive:true});
  for(const width of [1280,390,320])for(const version of ['before','after']){
   await page.setViewportSize({width,height:900});
-  await page.goto(`${origin}/${version==='before'?'output/website-before/':''}website/zh-CN/`);
-  await page.screenshot({path:`${dir}/manual-home-${width}-${version}.png`});
+  await page.goto(`${origin}/${version==='before'?'output/website-before-r2/':''}website/zh-CN/`);
+  await page.screenshot({path:`${dir}/balanced-home-${width}-${version}.png`});
  }
  await page.setViewportSize({width:1280,height:900});
  for(const view of ['security','install','changelog'])for(const version of ['before','after']){
-  await page.goto(`${origin}/${version==='before'?'output/website-before/':''}website/zh-CN/`);
+  await page.goto(`${origin}/${version==='before'?'output/website-before-r2/':''}website/zh-CN/`);
   await page.locator(`[data-view-tab="${view}"]`).click();
-  await page.screenshot({path:`${dir}/manual-${view}-1280-${version}.png`});
+  await page.screenshot({path:`${dir}/balanced-${view}-1280-${version}.png`});
  }
- await page.goto(`${origin}/website/zh-CN/#assistant`);
- await page.locator('img').evaluateAll(images=>images.forEach(image=>image.loading='eager'));
- await page.locator('img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
- await page.screenshot({path:`${dir}/manual-design-1280-after.png`,fullPage:true});
+ for(const version of ['before','after']){
+  await page.goto(`${origin}/${version==='before'?'output/website-before-r2/':''}website/zh-CN/`);
+  await page.locator('img').evaluateAll(images=>images.forEach(image=>image.loading='eager'));
+  await page.locator('img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
+  await page.screenshot({path:`${dir}/balanced-home-full-1280-${version}.png`,fullPage:true});
+ }
+
 }
 if(process.argv.includes('--capture-only')){await capture();await browser.close();process.exit(0);}
 for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
+ await page.setViewportSize({width:1280,height:900});
  await page.goto(`${origin}/website/${locale}/`);
  assert.equal(await page.locator('#view-overview').isVisible(),true);
+ await page.locator('.hero-figure img').evaluate(image=>image.decode());
+ assert(await page.locator('.hero-figure img').evaluate(image=>image.complete&&image.naturalWidth===720),'Hero uses the captured product components');
  assert.equal(await page.locator('#view-security').isVisible(),false);
  assert.equal(await page.locator('#view-install').isVisible(),false);
  assert.equal(await page.locator('#view-changelog').isVisible(),false);
@@ -136,6 +142,11 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  for(const width of [1280,390,320]){
   await page.setViewportSize({width,height:900});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} overview overflow at ${width}`);
+  for(const selector of ['.hero-figure','.work-figure','.assistants-figure','.link-figure']){
+   await page.locator(selector).scrollIntoViewIfNeeded();
+   await page.locator(selector+' img').evaluate(image=>image.decode());
+   assert(await page.locator(selector).evaluate(el=>el.getBoundingClientRect().right<=innerWidth),`${locale} figure bounds at ${width}`);
+  }
  }
  // Direct links, refresh and history must reveal their target panel.
  await page.goto(`${origin}/website/${locale}/#view-security`);
@@ -148,7 +159,7 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  await page.locator('[data-view-tab="overview"]').click();
  assert.equal(new URL(page.url()).hash,'#philosophy');
  assert(await page.locator('#philosophy').isVisible());
- assert.equal(await page.locator('.product-figure').count(),2);
+ assert.equal(await page.locator('.product-figure').count(),3);
  await page.locator('.product-figure img').first().scrollIntoViewIfNeeded();
  await page.locator('.product-figure img').first().evaluate(img=>img.decode());
  assert(await page.locator('.product-figure img').first().evaluate(img=>img.naturalWidth>300));
