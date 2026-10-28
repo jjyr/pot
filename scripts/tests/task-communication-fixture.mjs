@@ -24,7 +24,7 @@ const messages=[
   {id:'reply',reply_to:'review',role:'assistant',status:'complete',text:'Synthetic messages only. No real Task or model was started.'},
 ].map((message,index)=>({...message,sequence:String(index+1),version:1,created_at_ms:0}));
 if(params.has('single'))messages.splice(2,5);
-let emit,cursor=1;
+let emit,connectionStatus,cursor=1,allowCommands=true,releaseTasks;
 const space={id:'review-local',control_id:'review-local',name:'Review fixture',kind:'local',connected:true};
 let scope={space:space.id,owner:'pot'};
 const errors=[];
@@ -38,19 +38,20 @@ if(params.has('identity')){
   catalogue[0].title='Layout review · Long task title that truncates while keeping its identity visible';
   catalogue.push({id:'unknown-catalogue',title:'Unconfirmed address',phase:'queued'},...Array.from({length:3},(_,index)=>({id:edge?'extra-'+index:['d3618b5a-6722-4f38-bdf4-cf269db87e83','e4724fa2-fdef-46f1-b36a-8eb1bd25ed13','f583a019-a3bf-43b9-80ef-f9d651f549bf'][index],address:{node_id:'review-local',kind:'task',agent_id:edge?'extra-'+index:['d3618b5a-6722-4f38-bdf4-cf269db87e83','e4724fa2-fdef-46f1-b36a-8eb1bd25ed13','f583a019-a3bf-43b9-80ef-f9d651f549bf'][index]},title:'Background check '+(index+1),phase:'running'})));
 }
+if(params.has('task-status'))for(const task of catalogue)task.started_at_ms=Date.now()-138000;
 const changes=new Set(),requests=[];
 const client={production:true,runtime:{runtime_id:space.id,boot_id:'review'},spaces:[space],scope:()=>({...scope}),setScope:value=>scope={...scope,...value},changes:callback=>{changes.add(callback);return()=>changes.delete(callback);},
-  subscribe(receive,status){emit=receive;queueMicrotask(()=>{status('connected');receive(snapshot());});return()=>{};},
+  subscribe(receive,status){emit=receive;connectionStatus=status;queueMicrotask(()=>{status('connected');receive(snapshot());});return()=>{};},
   async request(path,options={}){
     if(options.method&&options.method!=='GET')throw Error('Review fixture rejects mutations');
     const name=new URL(path,location.href).pathname;
     requests.push({path:name,space:options.space,owner:options.owner});
     if(name==='/api/v1/spaces')return {items:[space],active_space_id:space.id};
-    if(name==='/api/v1/tasks/query')return {items:catalogue};
+    if(name==='/api/v1/tasks/query'){if(releaseTasks)await releaseTasks.promise;return {items:catalogue};}
     if(name==='/api/v1/runtime')return {runtime_id:'fixture',host:{}};
     const task=catalogue.find(task=>name==='/api/v1/tasks/'+encodeURIComponent(task.id));
     if(task)return {info:task,request:{text:task.title},capabilities:{version:1,operations:['task.read']}};
-    if(name==='/api/v1/assistants')return {items:[{id:'pot',name:'Pot',capabilities:{version:1,operations:['chat.read','task.list']}}]};
+    if(name==='/api/v1/assistants')return {items:[{id:'pot',name:'Pot',capabilities:{version:1,operations:['chat.read',...(allowCommands?['task.list',...(params.has('task-status')?['chat.send']:[])]:[])]}}]};
     if(name==='/api/v1/agent-links')return {items:[{id:'review-link',peer:{node_id:remote.node_id,kind:'codex',name:'Codex'},status:'connected',assistants:[{address:remote,name:'Code reviewer',adapter:'codex'}]}]};
     return {items:[],pending:[],policy:{}};
   },
@@ -58,6 +59,12 @@ const client={production:true,runtime:{runtime_id:space.id,boot_id:'review'},spa
 mountApp(document.querySelector('#app'),client);
 const frame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
 window.taskCommunication={errors,messages,send,receive,taskA,taskB,taskC,client,catalogue,requests,
+  async gate({online=true,operations=true,capability=true,scopeReady=true}={}){
+    client.onlineReady=online;client.operationsReady=operations;client.operationScopeReady=()=>scopeReady;allowCommands=capability;
+    connectionStatus?.(online?'connected':'offline');if(online)emit?.(snapshot());for(const callback of changes)callback(['assistants','tasks'],{space:space.id});await frame();await frame();
+  },
+  holdTasks(){let resolve;const promise=new Promise(done=>resolve=done);releaseTasks={promise,resolve};},
+  releaseTasks(){const held=releaseTasks;releaseTasks=null;held?.resolve();},
   async tasks(change){change(catalogue);for(const callback of changes)callback(['tasks'],{space:space.id});await frame();await frame();},
   async update(change){change(messages);cursor++;emit(snapshot());await frame();await frame();},
   async prepare(){
