@@ -257,3 +257,11 @@ alongside preceding migrations in one upgrade transaction. Existing history,
 startup, views, composer originals and outbox originals remain in their existing
 stores. Display retention never changes their ownership or release rules; see
 [Display resources](display-resources.md#persistent-offline-display-copies).
+
+`ui-cache/0009_stable_projections.mjs` separates persistent display keys from
+service boot identity. Existing display projections are rekeyed within the same
+Control, Space, assistant and query; duplicate copies retain the latest confirmed
+projection and cache accounting is rebuilt. Command receipts retain their
+original keys. Boot provenance remains available to live read and write fences;
+restored display values do not restore operation authority. The upgrade leaves
+transcripts, startup identity, drafts, outbox records and original Blobs intact.

@@ -151,6 +151,10 @@ run = ["node scripts/tests/prepared-group-intent-browser.mjs", "node scripts/tes
 description = "Verify settings reads, drafts and writes independently of assistant activity with synthetic HTTP/SSE"
 run = "node scripts/tests/pot-ui-settings-independent-browser.mjs"
 
+[tasks."test:ui-local-first"]
+description = "Verify local display before transport, stable cache upgrades and editor authority"
+run = ["node scripts/tests/directory-local-first.mjs", "node scripts/tests/directory-local-first-browser.mjs", "node scripts/tests/stable-projections-browser.mjs", "node scripts/tests/settings-local-first-browser.mjs"]
+
 [tasks."test:hooks"]
 description = "Verify hook timing and failure propagation"
 run = "python scripts/tests/hook-timing.py"

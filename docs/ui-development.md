@@ -5,6 +5,52 @@ described here when changing components, asynchronous data flows or navigation.
 Use the [internationalization rules](internationalization.md) for all changed
 user-visible text, including accessible labels.
 
+## Local-first display
+
+Read committed IndexedDB projections before waiting for transport when opening a
+page or restoring a conversation. Publish available local content immediately;
+refresh it in the background and publish network results only after their local
+transaction commits. Memory may retain committed projections for rendering, but
+must not become a separate source of truth or a fallback for failed storage.
+
+Apply this rule to the complete page read chain, not just the storage helper.
+Cached assistants must not wait for machine labels, Agent Links or another Space
+before they can appear. Publish independent sections progressively. Keep existing
+content when enrichment is slow or fails; refresh keyed nodes without disturbing
+focus, scroll position or prepared geometry. A cache miss may wait for transport,
+but cannot block unrelated cached sections.
+
+Separate stable display identity from live connection authority. A service restart
+must not make otherwise valid display projections unreachable merely because its
+boot ID changed. Scope retained data to its Control, Space, assistant and query;
+preserve expiry, revocation and logout boundaries. Connection generations and
+invalidation epochs must still fence late responses and stale writers.
+
+Cached display never grants permission to execute an operation. Confirm current
+identity, capabilities and configuration revisions before saving or running work.
+Settings may show retained values and accept local edits while confirmation is
+pending; fresh responses must not overwrite dirty fields. A cached extension
+catalogue may contain safe display metadata, never credentials, authorization
+URLs/codes or an offline authorization grant. Use shared repositories rather than
+adding per-page caches. Follow [Shared UI](shared-ui.md#committed-local-projections)
+for storage ownership and [Database migrations](database-migrations.md) for
+persisted-format changes.
+
+```text
+Open page -> IndexedDB projection -> initial display
+                     ^
+Background refresh -> commit -> incremental display update
+
+User operation -> current identity / permission / revision -> server
+```
+
+Verify warm-cache opening with transport deliberately held, service boot changes,
+partial cache misses and failed refreshes using real IndexedDB. Assert that cached
+content appears before transport completes and that stale data cannot enable
+commands. Exercise a refresh while a field is dirty or focused. Writing a network
+response to IndexedDB before rendering it alone does not establish local-first
+display.
+
 ## Layout stability
 
 Treat layout stability as correctness. Conversation components must prepare at

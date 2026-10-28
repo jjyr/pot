@@ -1202,22 +1202,23 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       const changed=[];if(previousMachines!==machinePresentation(client).revision)changed.push('machines');if(previousSpaces!==JSON.stringify(spaces))changed.push('spaces');if(previousOwners!==JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.profile_name,item.avatar,item.origin,item.offline,item.capabilities])))changed.push('assistants');if(changed.length)pages.refresh(changed,{domainNotified:true});
       for(const item of assistants){const arrival=replies.observe(controlOf(item),item.id,item.reply_id||'',item.reply_count||0,!item.offline);if(arrival.arrived&&route==='chat'&&document.visibilityState!=='hidden'&&!reducedMotion.matches){reactions.set(replyKey(controlOf(item),item.id),performance.now());setTimeout(()=>{if(!disposed){directorySignature='';renderShell();}},650);}}saveReads();
       if(directory.partial)error=t('partialOffline');else if(error===t('partialOffline'))error='';
-      if(selectedAssistant&&!pages.editing&&!assistants.some(item=>item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id)){
+      const directoryLoading=!!directory.loading;
+      if(selectedAssistant&&!directoryLoading&&!pages.editing&&!assistants.some(item=>item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id)){
         const missing=selectedAssistant;try{const confirmed=await domains.directory.confirm(missing);if(ticket!==directoryEpoch||disposed)return;if(confirmed){assistants=[...assistants,confirmed];client.assistants=assistants;}else clearSelectedAssistant();}catch(reason){if(reason.storage){directoryStorageFailed=true;error=t('storage.failed');}else error=t('partialOffline');}
       }
       if (selectedAssistant){const watchingTasks=!!backgroundTasks;selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;if(selectedAssistant.offline)connection='offline';if(watchingTasks!==can('task.list'))refreshBackgroundTasks();}
       renderShell();renderMessages();
-      if(!assistants.length&&route==='chat'&&!pages.editing){
+      if(!assistants.length&&!directoryLoading&&route==='chat'&&!pages.editing){
         const available=!directory.partial&&spaces.some(space=>space.connected!==false);
         if(available){directoryOpen=true;saveNavigation('chat',true);directoryOpen=false;route='add-assistant';saveNavigation('add-assistant');renderShell();await pages.show('add-assistant');}else{directoryOpen=false;renderShell();const empty=el('div','empty-chat');empty.append(el('p','hint',t('partialOffline')));const retry=el('button','control',t('retry'));retry.onclick=()=>loadDirectory();empty.append(retry);messageColumn.replaceChildren(empty);}
       }
       mainReady();
-      if(pendingSelection){const chosen=assistants.find(item=>item.id===pendingSelection.id&&item.space_id===pendingSelection.space_id);pendingSelection=null;if(chosen){await selectAssistant(chosen);notifications?.directory({epoch:notificationEpoch});return;}}
+      if(pendingSelection){const chosen=assistants.find(item=>item.id===pendingSelection.id&&item.space_id===pendingSelection.space_id);if(chosen||!directoryLoading){pendingSelection=null;if(chosen){await selectAssistant(chosen);notifications?.directory({epoch:notificationEpoch});return;}}}
       if (route==='chat' && !selectedAssistant && assistants.length && !pages.editing) {
         const retained=restoredDirectory&&client.startup?.owner?client.startup:null;
         const requested=retained?.owner||params.get('assistant_id')||client.startup?.owner;const requestedSpace=retained?.space||params.get('space_id')||client.startup?.space;
         const selected=requested?assistants.find(item=>item.id===requested&&(!requestedSpace||item.space_id===requestedSpace)):assistants[0];
-        if(!selected){error=t('missingAssistant');connection='offline';updateControls();notifications?.directory({epoch:notificationEpoch});return;}
+        if(!selected){if(directoryLoading){notifications?.directory({epoch:notificationEpoch});return;}error=t('missingAssistant');connection='offline';updateControls();notifications?.directory({epoch:notificationEpoch});return;}
         await selectAssistant(selected,restoredDirectory||!params.get('assistant_id'));
       }
       notifications?.directory({epoch:notificationEpoch});

@@ -21,7 +21,7 @@ globalThis.document={createElement:tag=>new Element(tag),createElementNS:(_,tag)
 globalThis.window=new EventTarget();window.confirm=()=>{throw Error('Browser confirm is unavailable in native WKWebView');};
 let locale='en',items=[{id:'fixture',name:'Fixture MCP',transport:'http',url:'http://127.0.0.1:18744',enabled:true,revision:0}],posts=[];
 const root=new Element('main');document.body.append(root);
-const component=createExtensions({root,locale:()=>locale,client:{scope:()=>({space:'local',owner:'main'}),request:async(path,options={})=>{if(options.method==='POST'){posts.push(options);if(options.body.action==='remove')items=[];else {const server={...options.body.server,revision:(options.body.server.revision||0)+1};items.push(server);return server;}return {};}return {items:[],mcp:items};}}});
+const component=createExtensions({root,locale:()=>locale,client:{runtime:{runtime_id:'extensions-fixture',boot_id:'boot'},scope:()=>({space:'local',owner:'main'}),request:async(path,options={})=>{if(options.method==='POST'){posts.push(options);if(options.body.action==='remove')items=[];else {const server={...options.body.server,revision:(options.body.server.revision||0)+1};items.push(server);return server;}return {};}return {items:[],mcp:items};}}});
 const button=(host,key)=>host.querySelectorAll('button').find(node=>node.dataset.extensionText===key);
 const editor=()=>document.body.querySelector('.extensions-dialog'),confirmation=()=>document.body.querySelector('.extension-confirmation');
 await component.load();root.querySelector('.extension-open').click();
@@ -39,4 +39,10 @@ pending=component.leave();button(confirmation(),'cancel').click();assert.equal(a
 pending=component.leave();button(confirmation(),'discardChanges').click();assert.equal(await pending,true);assert.equal(editor(),null);
 root.querySelectorAll('button').find(node=>node.getAttribute('aria-label')==='添加 MCP').click();editor().dispatchEvent(new Event('input'));
 pending=component.leave();component.dispose();assert.equal(await pending,false);assert.equal(confirmation(),null);assert.equal(editor(),null);assert.equal(posts.length,2);
-console.log('Extensions: explicit import/remove/discard, cancel/Escape, duplicate actions, live locale, draft retention and disposal passed');
+// A retained existing row with revision zero is not a creation request. If it
+// disappears before Save, live confirmation must not recreate it.
+const removedRoot=new Element('main');document.body.append(removedRoot);let removedItems=[{id:'zero',name:'Revision zero',revision:0,transport:'http',url:'https://fixture.invalid',enabled:true}],removedPosts=0;
+const removed=createExtensions({root:removedRoot,locale:()=> 'en',client:{runtime:{id:'zero-fixture',boot_id:'boot'},scope:()=>({space:'zero',owner:'owner'}),request:async(path,options={})=>{if(options.method==='POST'){removedPosts++;return {};}return {items:[],mcp:removedItems};}}});
+await removed.load();removedRoot.querySelector('.extension-open').click();await button(editor(),'edit').click();
+removedItems=[];await button(editor(),'save').click();assert.equal(removedPosts,0,'Deleted existing revision-zero server cannot be recreated by a stale editor');assert(editor(),'Failed confirmation preserves the editor');removed.dispose();
+console.log('Extensions: explicit import/remove/discard, cancel/Escape, duplicate actions, live locale, draft retention, deleted revision-zero fencing and disposal passed');

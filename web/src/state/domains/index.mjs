@@ -14,6 +14,6 @@ export function domainsFor(client){
   const result={resources,retain(){consumers++;let active=true;return()=>{if(active){active=false;if(!--consumers)result.dispose();}};},chat:createChatDomain(client),directory:createDirectoryDomain(client,context),tasks:createTasksDomain(client,context),schedules:createSchedulesDomain(client,context),providers:createProvidersDomain(client,context),
     extensions:createExtensionsDomain(client,context),
     changed(topics,source={}){if(source.reset||source.boot||topics.includes('spaces'))result.tasks.clear();return resources.invalidate(topics,source);},
-    dispose(){if(closed)return;closed=true;clients.delete(client);queries.dispose();commands.dispose();result.chat.dispose();result.tasks.dispose();result.extensions.dispose();if(ownsResources){resources.clear();if(client.resources===resources){delete client.resources;if(ownsRead)delete client.read;}}},
+    dispose(){if(closed)return;closed=true;clients.delete(client);queries.dispose();commands.dispose();result.directory.dispose();result.chat.dispose();result.tasks.dispose();result.extensions.dispose();if(ownsResources){resources.clear();if(client.resources===resources){delete client.resources;if(ownsRead)delete client.read;}}},
   };clients.set(client,result);return result;
 }

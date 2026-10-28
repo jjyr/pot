@@ -312,23 +312,34 @@ HTTP / native / SSE / successful mutation
               DOM views
 ```
 
-Keys include the local node, boot, presentation scope, assistant and full query.
+Display keys include the Control, presentation scope, assistant and full query.
+Boot identity belongs to live reads and write fences, not the persistent display
+key. A new boot can restore the previous committed display as retained data;
+it must establish its own operation authority. Command receipts remain bound to
+their original identities and do not become reusable across boots.
 Provider summaries share one local entry across assistant contexts. Credential
 bytes and authorization URLs/codes are excluded from persisted provider,
 integration and Agent Link display projections. Authentication, pairing, live
-permissions, editor revision reads, binary resources and conversation transport
+permissions, authoritative editor revision reads, binary resources and conversation transport
 keep their specialized interfaces. The machine editor stores only its derived
 policy summary; a failed live read exposes that summary as read-only and never
 stores pending approvals or restores authorization. See [UI events](ui-events.md) for transcript
 commit boundaries.
 
 A returning page first queries its committed local data and refreshes in the
-background. Queries carry `lastConfirmed` and fresh/stale/retained state. Dynamic
+background, following [UI development rules](ui-development.md#local-first-display).
+Directory sections publish independently: machine metadata, linked assistants
+and slow Spaces cannot delay available local assistants. Partial publication
+does not mean a missing assistant was deleted or that onboarding is required.
+Queries carry `lastConfirmed` and fresh/stale/retained state. Dynamic
 lists remain fresh for 5 seconds, configuration for 30 seconds; freshness checks
 on access create no polling. A retained directory cannot restore execution,
 approval counts or operation capabilities. Task and schedule controls wait for
 current authoritative metadata; approvals always read the server. Provider
-selection and creation flows explicitly wait for current configuration revisions.
+selection and creation commands explicitly wait for current configuration revisions.
+Assistant settings restore safe configuration and instruction projections for
+display and local editing, then verify current revisions before saving. Fresh
+responses preserve dirty fields and cannot silently replace user intent.
 The server remains the business and permission authority for every command.
 
 Projections retain at most 256 entries and 64 MiB, with a seven-day expiry;

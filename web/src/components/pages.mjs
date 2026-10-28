@@ -1,3 +1,4 @@
+import {createRetainedSection,mergeEditorProjection} from '../state/retained-section.mjs';
 import {bindModelInput} from './model-input.mjs';
 import {resourceAuthorityCurrent} from '../state/resource-authority.mjs';
 import {captureUsageWait} from '../state/usage-wait.mjs';
@@ -289,7 +290,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
         await linkedProfile(definition,{name:definition.name,avatar:definition.avatar||'',revision:definition.revision},captured);return;
       }
       assistantLoad=null;
-      let providers={},thread,rules,configurationReady=false,instructionsReady=false;
+      let providers={},thread,rules,configurationReady=false,configurationDisplayed=false,instructionsReady=false;
       let profiles=providers.profiles||[],revision=definition?.revision,generation=thread?.generation||0,configurationRevision=thread?.revision||0,rulesRevision=rules?.revision||'';
       const selection=thread?.selection||{},profileID=selection.profile_id||thread?.config?.source_profile_id||providers.default_provider_id||'',profile=profiles.find(value=>value.id===profileID);
       const initial={space_id:captured.space,name:definition.name,avatar:definition.avatar||'',profile_id:profileID,model:selection.model||thread?.config?.model||profile?.model||'',context_window:selection.context_window??null,max_output_tokens:selection.max_output_tokens??null,reasoning_effort:selection.reasoning_effort||'',task_profile_id:selection.task_default?.profile_id||'',task_model:selection.task_default?.model||'',text:rules?.text||''};
@@ -306,18 +307,19 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
         {name:'task_model',label:translate(locale(),'assistant.taskModel'),help:translate(locale(),'assistant.taskHelp')},
         {name:'text',label:translate(locale(),'assistant.personality'),kind:'textarea',help:translate(locale(),'assistant.personalityHelp')},
       ],async(values,context,session,sections)=>{
-        const selection=sections.configurationReady?selectValue(values):null;
+        const baseline=sections.initial,selection=sections.configurationReady?sections.selection:null;
         const selectionFields=['profile_id','model','context_window','max_output_tokens','reasoning_effort','task_profile_id','task_model'];
-        const selectionChanged=sections.configurationReady&&selectionFields.some(key=>JSON.stringify(values[key])!==JSON.stringify(initial[key]));
+        const selectionChanged=selectionFields.some(key=>JSON.stringify(values[key])!==JSON.stringify(baseline[key]));
+        if(selectionChanged&&!sections.configurationReady||values.text!==baseline.text&&!sections.instructionsReady)throw Object.assign(Error('Settings not confirmed'),{uiKey:'assistant.settingsLoadFailed'});
         if(selectionChanged&&(!selection||!values.model.trim()))throw Object.assign(Error('Provider and model required'),{uiKey:'settings.providerRequired'});
         if(selectionChanged&&values.task_profile_id&&!values.task_model.trim())throw Object.assign(Error('Task model required'),{uiKey:'assistant.taskModelRequired'});
-        if(values.name!==initial.name||values.avatar!==initial.avatar){const saved=await domains.directory.update(captured,definition.id,{name:values.name,...(values.avatar!==initial.avatar?{avatar:values.avatar}:{}),revision});revision=saved.revision;initial.name=values.name;initial.avatar=values.avatar;session.acknowledge({name:values.name,avatar:values.avatar});}
+        if(values.name!==baseline.name||values.avatar!==baseline.avatar){const saved=await domains.directory.update(captured,definition.id,{name:values.name,...(values.avatar!==baseline.avatar?{avatar:values.avatar}:{}),revision});revision=saved.revision;initial.name=values.name;initial.avatar=values.avatar;session.acknowledge({name:values.name,avatar:values.avatar});}
         const signature=JSON.stringify(selection);
-        if(selectionChanged&&selection&&signature!==initialSelection){const saved=await domains.directory.configure(captured,{request_id:context.request_id,expected_generation:generation,expected_revision:configurationRevision,selection});generation=saved.generation;configurationRevision=saved.revision;initialSelection=signature;const fields=Object.fromEntries(selectionFields.map(key=>[key,values[key]]));Object.assign(initial,fields);session.acknowledge(fields);}
-        if(sections.instructionsReady&&values.text!==initial.text){const saved=await domains.directory.saveInstructions(captured,{text:values.text,revision:rulesRevision});rulesRevision=saved.revision;initial.text=values.text;session.acknowledge({text:values.text});}
+        if(selectionChanged&&selection&&signature!==sections.initialSelection){const saved=await domains.directory.configure(captured,{request_id:context.request_id,expected_generation:sections.generation,expected_revision:sections.configurationRevision,selection});generation=saved.generation;configurationRevision=saved.revision;initialSelection=signature;const fields=Object.fromEntries(selectionFields.map(key=>[key,values[key]]));Object.assign(initial,fields);session.acknowledge(fields);}
+        if(sections.instructionsReady&&values.text!==baseline.text){const saved=await domains.directory.saveInstructions(captured,{text:values.text,revision:sections.rulesRevision});rulesRevision=saved.revision;initial.text=values.text;session.acknowledge({text:values.text});}
       },{returnChat:true,capturedScope:captured,capability:'assistant.configure'});
       const controls=form.controls,session=form.session;
-      form.lifecycle.captureSave=()=>({configurationReady,instructionsReady});
+      form.lifecycle.captureSave=()=>({configurationReady,instructionsReady,initial:structuredClone(initial),selection:selectValue(session.values),initialSelection,generation,configurationRevision,rulesRevision});
       form.lifecycle.requiredCapabilities=(values,sections)=>{
         const required=[];
         if(values.name!==initial.name||values.avatar!==initial.avatar)required.push(['assistant.configure','assistant.profile']);
@@ -353,11 +355,11 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       const defaults=()=>{const profile=profiles.find(value=>value.id===session.values.profile_id),catalog=profileDirectoryID(providers,profile?.id),limits=modelDefaults(providers,catalog,session.values.model);const same=profile?.model===session.values.model;controls.get('context_window').placeholder=String(same?(profile?.model_settings?.context_window||limits.context):limits.context);controls.get('max_output_tokens').placeholder=String(same?(profile?.model_settings?.max_output_tokens||limits.output):limits.output);controls.get('reasoning_effort').placeholder=profile?.params?.reasoning_effort||tr('Provider default','提供商默认值');controls.get('profile_id').required=false;controls.get('model').required=false;};
       const modelInput=bindModelInput(controls.get('model'),locale);
       const taskModelInput=bindModelInput(controls.get('task_model'),locale);
-      const updateTaskModels=()=>{taskModelInput.update(session.values.task_profile_id?profileModelChoices(providers,session.values.task_profile_id,session.values.task_model):[]);controls.get('task_model').disabled=!configurationReady||controls.get('task_profile_id').disabled||!session.values.task_profile_id;controls.get('task_model').placeholder=translate(locale(),session.values.task_profile_id?'assistant.modelInput':'assistant.taskFollow');};
+      const updateTaskModels=()=>{taskModelInput.update(session.values.task_profile_id?profileModelChoices(providers,session.values.task_profile_id,session.values.task_model):[]);controls.get('task_model').disabled=!configurationDisplayed||controls.get('task_profile_id').disabled||!session.values.task_profile_id;controls.get('task_model').placeholder=translate(locale(),session.values.task_profile_id?'assistant.modelInput':'assistant.taskFollow');};
       const updateModels=()=>{modelInput.update(profileModelChoices(providers,session.values.profile_id,session.values.model));defaults();updateTaskModels();};
-      controls.get('profile_id').addEventListener('change',()=>{const selected=profiles.find(value=>value.id===session.values.profile_id);set('model',selected?.model||'');updateModels();});
+      controls.get('profile_id').addEventListener('change',()=>{touched.add('profile_id');touched.add('model');const selected=profiles.find(value=>value.id===session.values.profile_id);set('model',selected?.model||'');updateModels();});
       controls.get('model').addEventListener('input',defaults);
-      controls.get('task_profile_id').addEventListener('change',()=>{const selected=profiles.find(value=>value.id===session.values.task_profile_id);set('task_model',selected?.model||'');updateTaskModels();});
+      controls.get('task_profile_id').addEventListener('change',()=>{touched.add('task_profile_id');touched.add('task_model');const selected=profiles.find(value=>value.id===session.values.task_profile_id);set('task_model',selected?.model||'');updateTaskModels();});
       updateModels();
       const instructionsRow=controls.get('text').closest('.form-row'),parameters=n('details','editor-disclosure');parameters.dataset.section='parameters';parameters.append(n('summary','',tr('Model parameters','模型参数')));for(const name of ['context_window','max_output_tokens','reasoning_effort'])parameters.append(controls.get(name).closest('.form-row'));instructionsRow.before(parameters);
       const instructions=n('details','editor-disclosure');instructions.dataset.section='instructions';instructions.append(n('summary'));instructionsRow.before(instructions);instructions.append(instructionsRow);
@@ -373,30 +375,44 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       controls.get('profile_id').closest('.form-row').before(loadingStatus);instructions.append(rulesStatus);
       const controller=new AbortController(),dispose=form.lifecycle.dispose;form.lifecycle.dispose=()=>{controller.abort();dispose?.();};
       const current=()=>editor?.session===session&&!disposed&&!controller.signal.aborted;
-      const adopt=values=>{for(const [key,value]of Object.entries(values)){set(key,value);initial[key]=value;}session.acknowledge(values);};
-      const loadSection=async(status,fields,work)=>{
-        for(const key of fields)controls.get(key).disabled=true;
-        status.hidden=true;status.className='hint';status.dataset.sectionState='loading';status.replaceChildren();
-        try{await work();if(current())status.hidden=true;}
-        catch(reason){if(current()){status.hidden=false;status.className='inline-error';status.dataset.sectionState='error';status.replaceChildren(n('span','',translate(locale(),'assistant.settingsLoadFailed')),action(translate(locale(),'retry'),()=>loadSection(status,fields,work)));}}
-        finally{if(current()){for(const key of fields)controls.get(key).disabled=status.className==='inline-error';updateTaskModels();}}
+      const touched=new Set();
+      for(const key of [...configurationFields,'text'])controls.get(key).addEventListener('input',()=>{const group=key==='text'?['text']:key.startsWith('task_')?['task_profile_id','task_model']:configurationFields.filter(name=>!name.startsWith('task_'));for(const name of group)touched.add(name);});
+      const adopt=values=>mergeEditorProjection(values,{initial,session,controls,touched});
+      const ensureCurrent=()=>{if(!configurationIdentityCurrent(client,captured))throw Object.assign(Error('Configuration identity changed'),{uiKey:'identityChanged'});};
+      const renderSection=(status,fields,state,retry)=>{
+        for(const key of fields)controls.get(key).disabled=!state.displayed;
+        status.hidden=!state.error;status.dataset.sectionState=state.error?'error':state.pending?'loading':'ready';status.className=state.error?'inline-error':'hint';
+        status.replaceChildren();if(state.error)status.append(n('span','',translate(locale(),'assistant.settingsLoadFailed')),action(translate(locale(),'retry'),retry));
+        updateTaskModels();
       };
+      const applyConfiguration=({catalog,configuration},{fresh})=>{
+        ensureCurrent();providers=catalog||providers;thread=configuration;profiles=providers.profiles||[];
+        if(fresh){generation=thread.generation||0;configurationRevision=thread.revision||0;}
+        const selection=thread.selection||{},profileID=selection.profile_id||thread.config?.source_profile_id||providers.default_provider_id||'',profile=profiles.find(value=>value.id===profileID);
+        const values={profile_id:profileID,model:selection.model||thread.config?.model||profile?.model||'',context_window:selection.context_window??null,max_output_tokens:selection.max_output_tokens??null,reasoning_effort:selection.reasoning_effort||'',task_profile_id:selection.task_default?.profile_id||'',task_model:selection.task_default?.model||''};
+        const input=controls.get('profile_id'),selected=touched.has('profile_id')?session.values.profile_id:profileID;
+        const options=[['',tr('Select a Provider','选择提供商')],...profiles.map(value=>[value.id,value.name])];
+        if(selected&&!options.some(([id])=>id===selected))options.push([selected,selected]);
+        input.replaceChildren(...options.map(([value,label])=>{const option=n('option','',label);option.value=value;return option;}));input.value=selected;
+        adopt(values);configurationDisplayed=true;
+        if(fresh)initialSelection=JSON.stringify({...selectValue(initial),profile_revision:selection.profile_revision||profile?.revision});
+        updateTaskProviders();updateModels();providerHelp.hidden=profiles.length>0;
+        if(fresh){if(thread.pending&&!pendingHint){pendingHint=n('p','hint',translate(locale(),'assistant.configurationPending'));form.root.prepend(pendingHint);}else if(!thread.pending&&pendingHint){pendingHint.remove();pendingHint=null;}}
+      };
+      const configurationSection=createRetainedSection({current,
+        hydrate:async()=>{const [catalog,configuration]=await Promise.all([domains.providers.retained(captured),domains.directory.cachedConfiguration(captured)]);return configuration?{catalog:catalog?.value,configuration:configuration.value}:null;},
+        refresh:async()=>{const [catalog,configuration]=await Promise.all([domains.providers.query({...captured,signal:controller.signal},{authoritative:true}),domains.directory.configuration(captured,controller.signal)]);return {catalog,configuration};},
+        apply:applyConfiguration,onState:state=>{configurationReady=state.ready;configurationDisplayed=state.displayed;renderSection(loadingStatus,configurationFields,state,()=>configurationSection.load());},
+      });
+      const instructionsSection=createRetainedSection({current,
+        hydrate:async()=>(await domains.directory.cachedInstructions(captured))?.value,
+        refresh:()=>domains.directory.instructions(captured,controller.signal),
+        apply:(value,{fresh})=>{ensureCurrent();if(fresh)rulesRevision=value.revision;adopt({text:value.text||''});},
+        onState:state=>{instructionsReady=state.ready;renderSection(rulesStatus,['text'],state,()=>instructionsSection.load());},
+      });
       const refreshLocale=form.lifecycle.locale;form.lifecycle.locale=()=>{refreshLocale();for(const status of [loadingStatus,rulesStatus]){if(status.dataset.sectionState==='error'){status.querySelector('span').textContent=translate(locale(),'assistant.settingsLoadFailed');status.querySelector('button').textContent=translate(locale(),'retry');}}if(pendingHint)pendingHint.textContent=translate(locale(),'assistant.configurationPending');};
-      await Promise.all([
-        loadSection(loadingStatus,configurationFields,async()=>{
-          const options={...captured,signal:controller.signal};
-          const [catalog,configuration]=await Promise.all([domains.providers.query(options,{authoritative:true}),domains.directory.configuration(captured,controller.signal)]);
-          if(!current())return;
-          if(!configurationIdentityCurrent(client,captured))throw Object.assign(Error('Configuration identity changed'),{uiKey:'identityChanged'});
-          providers=catalog;thread=configuration;profiles=providers.profiles||[];generation=thread.generation||0;configurationRevision=thread.revision||0;
-          const selection=thread.selection||{},profileID=selection.profile_id||thread.config?.source_profile_id||providers.default_provider_id||'',profile=profiles.find(value=>value.id===profileID);
-          const input=controls.get('profile_id');input.replaceChildren();for(const [value,label]of [['',tr('Select a Provider','选择提供商')],...profiles.map(value=>[value.id,value.name])]){const option=n('option','',label);option.value=value;input.append(option);}
-          adopt({profile_id:profileID,model:selection.model||thread.config?.model||profile?.model||'',context_window:selection.context_window??null,max_output_tokens:selection.max_output_tokens??null,reasoning_effort:selection.reasoning_effort||'',task_profile_id:selection.task_default?.profile_id||'',task_model:selection.task_default?.model||''});
-          configurationReady=true;initialSelection=JSON.stringify({...selectValue(session.values),profile_revision:selection.profile_revision||profile?.revision});updateTaskProviders();updateModels();providerHelp.hidden=profiles.length>0;
-          if(thread.pending){pendingHint=n('p','hint',translate(locale(),'assistant.configurationPending'));form.root.prepend(pendingHint);}
-        }),
-        loadSection(rulesStatus,['text'],async()=>{const value=await domains.directory.instructions(captured,controller.signal);if(!current())return;if(!configurationIdentityCurrent(client,captured))throw Object.assign(Error('Configuration identity changed'),{uiKey:'identityChanged'});rulesRevision=value.revision;adopt({text:value.text||''});instructionsReady=true;}),
-      ]);
+      form.lifecycle.providersInvalidated=()=>{configurationReady=false;configurationSection.load();};
+      await Promise.all([configurationSection.load(),instructionsSection.load()]);
     }catch(reason){if(gate.current(token)&&!disposed){assistantLoad={definition,scope:captured,root:loading,error:reason};renderAssistantLoad();}}
   }
   async function linkedProfile(definition,profile,captured){
