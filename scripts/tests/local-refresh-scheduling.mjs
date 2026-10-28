@@ -7,7 +7,7 @@ import {createResourceReads} from '../../web/src/state/resource-cache.mjs';
 import {createMemoryProjectionStore} from '../../web/src/state/projection-store.mjs';
 import {createProvidersDomain} from '../../web/src/state/domains/providers.mjs';
 import {createPages} from '../../web/src/components/pages.mjs';
-import {createProductionClient} from '../../web/src/adapters/production.mjs';
+import {createProductionClient,mutationTopics} from '../../web/src/adapters/production.mjs';
 
 installDOM();
 const original={now:Date.now,setTimeout,clearTimeout,setInterval,clearInterval};
@@ -19,6 +19,8 @@ const scope={space:'one',owner:'a'},evidence={oauth:{},providers:{},permissions:
 const host=()=>{const node=new Element('main');document.body.append(node);return node;};
 const button=(root,key)=>root.querySelectorAll('button').find(node=>node.dataset.extensionText===key);
 try{
+ assert.equal(mutationTopics('/api/v1/extensions/mcp/oauth/begin'),null,'authorization handoff changes no catalogue projection');
+ assert(mutationTopics('/api/v1/extensions/mcp/oauth/complete').includes('extensions'),'accepted OAuth credentials still invalidate the catalogue');
  // Actual browser transport ownership (a synthetic EventSource, no browser or
  // network): opening is insufficient, boot/generation and idle retirement fence
  // health. Native has no equivalent proof and therefore retains fallback.
@@ -35,7 +37,7 @@ try{
  // Two consumers share one slow catalog read. OAuth fallback never overlaps
  // itself; a changed revision adopts that exact response without a second GET.
  {
-  const root=host(),calls=[];let inflight=0,maxInflight=0,publishes=0;
+  const root=host(),calls=[],popup={location:'',close(){}};window.open=()=>popup;let inflight=0,maxInflight=0,publishes=0;
   const client={runtime:{id:'fixture',boot_id:'boot'},connectionGeneration:1,scope:()=>scope,request:(path,options={})=>{
    if(options.method==='POST'){assert.equal(options.transient,true,'OAuth session response must bypass persistent command receipts');return Promise.resolve({state:'synthetic',authorization_url:'https://fixture.invalid/auth'});}
    const gate=deferred();inflight++;maxInflight=Math.max(maxInflight,inflight);calls.push({scope:{space:options.space,owner:options.owner},path,...gate});return gate.promise.finally(()=>inflight--);
@@ -44,7 +46,7 @@ try{
   const initial=component.load(),shared=domain.catalog(scope).value();await tick();assert.equal(calls.length,1);const catalog=revision=>({items:[],mcp:[{id:'m',name:'M',revision,auth:'oauth',transport:'http',url:'https://fixture.invalid/mcp',enabled:true}],authorization_url:'must-not-survive',oauth_session:{secret:'synthetic'}});
   calls[0].resolve(catalog(1));await Promise.all([initial,shared]);assert.equal(domain.catalog(scope).snapshot.data.oauth_session,undefined);assert.equal(domain.catalog(scope).snapshot.data.authorization_url,undefined);
   root.querySelector('.extension-open').click();await button(document.body.querySelector('.extensions-dialog'),'oauthConnect').click();const list=root.querySelector('.extensions-list'),replace=list.replaceChildren.bind(list);list.replaceChildren=(...nodes)=>{publishes++;return replace(...nodes);};
-  await advance(1500);assert.equal(calls.length,2);await advance(30000);assert.equal(calls.length,2,'slow 30s read must remain single flight');calls[1].resolve(catalog(2));await tick();assert.equal(calls.length,2,'reuse the complete changed catalog');assert.equal(publishes,1);await advance(60000);assert.equal(calls.length,2,'successful OAuth cancels its fallback');
+  await advance(1500);assert.equal(calls.length,2);const completion=new Event('message');Object.assign(completion,{origin:location.origin,source:popup,data:{type:'pot:mcp-oauth',state:'synthetic',completed:true}});window.dispatchEvent(completion);await tick();await advance(30000);assert.equal(calls.length,2,'slow 30s read must remain single flight');calls[1].resolve(catalog(2));await tick();assert.equal(calls.length,2,'reuse the complete changed catalog');assert.equal(publishes,1);await advance(60000);assert.equal(calls.length,2,'successful OAuth cancels its fallback');
   // Dispose an OAuth generation with a GET in flight. No late UI publication.
   root.querySelector('.extension-open').click();await button(document.body.querySelector('.extensions-dialog'),'oauthConnect').click();await advance(1500);assert.equal(calls.length,3);component.dispose();const before=publishes;calls[2].resolve(catalog(3));await tick();await advance(60000);assert.equal(publishes,before);assert.equal(inflight,0);
   evidence.oauth={GETs:calls.length,maxInflight,publishes,scopes:calls.map(call=>call.scope),latePublish:0};root.remove();

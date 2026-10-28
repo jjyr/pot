@@ -146,6 +146,9 @@ report their errors. OAuth uses a serial fallback with delays from 1.5 to 15
 seconds and a ten-minute lifetime. It reuses each complete catalogue response;
 changing scope or disposing the page retires its timer and response ownership.
 Authorization URLs and OAuth sessions remain transient.
+Beginning an authorization session does not invalidate the catalogue. A callback
+first joins an in-flight status read and only revalidates if that read has not
+observed the server's changed revision.
 
 Search, filters and disclosure state remain local while writes are pending.
 Editors capture an immutable submitted value, prevent duplicate writes for the
@@ -154,3 +157,8 @@ success or failure. A successful MCP save advances the editor's exact returned
 revision; a skill save also verifies the submitted content before adopting its
 new digest. An externally changed skill retains the local draft and requires
 reopening the current version.
+Batch imports remember only their own accepted IDs, revisions and submitted
+configurations in dialog memory. Partial retries skip unchanged accepted entries;
+later edits use those exact accepted revisions. A missing operation receipt
+requires reviewing the server list and reopening import before another write.
+Changing scope, connection or boot retires an existing dialog's write authority.

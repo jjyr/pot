@@ -8,8 +8,8 @@ import {translate} from '../locales/messages.mjs';
 export function createExtensions({root,client,locale,memory={},onSettings,onPermissions}) {
  const t=key=>translate(locale(),key),key=name=>'extensions.'+name;
  const domains=domainsFor(client),releaseDomains=domains.retain(),domain=domains.extensions,pending=new Set(),panels=new WeakMap();
- let catalog,stopCatalog,oauthRun,confirmation;let disposed=false,version=0,busy=false,dialog=null,dirty=false,selectedSpace=memory.space||client.scope().space||client.spaces?.[0]?.id||'',snapshot={items:[],mcp:[]},failed=false;
- const scope=()=>({space:selectedSpace,owner:client.scope().owner||''});
+ let catalog,stopCatalog,oauthRun,confirmation,snapshotIdentity;let disposed=false,version=0,busy=false,dialog=null,dirty=false,selectedSpace=memory.space||client.scope().space||client.spaces?.[0]?.id||'',snapshot={items:[],mcp:[]},failed=false;
+ const scope=()=>({space:selectedSpace,owner:client.scope().owner||''}),connectionIdentity=()=>JSON.stringify([client.connectionGeneration,client.runtime?.boot_id]);
  memory.collapsed??={};memory.query??='';memory.source??='all';memory.status??='all';
  const shell=n('div','extensions-page'),heading=n('div','extensions-heading'),title=n('div'),toolbar=n('div','extensions-toolbar'),list=n('div','extensions-list'),status=n('div','extensions-status');status.setAttribute('role','status');
  function text(tag,cls,name){const el=n(tag,cls,t(key(name)));el.dataset.extensionText=name;return el}
@@ -25,16 +25,16 @@ export function createExtensions({root,client,locale,memory={},onSettings,onPerm
  if((client.spaces||[]).length>1){const spaces=n('select','field-input extensions-space');label(spaces,'space');for(const space of client.spaces){const option=n('option','',space.name);option.value=space.id;spaces.append(option)}spaces.value=selectedSpace;spaces.onchange=async()=>{if(!await leave()){spaces.value=selectedSpace;return}stopOAuth();stopCatalog?.();catalog=null;selectedSpace=spaces.value;memory.space=selectedSpace;load().catch(()=>{})};heading.append(spaces)}
  shell.append(heading,toolbar,status,list,text('p','hint extensions-foot','defaultHint'));root.append(shell);
  function updateLabels(){if(dialog)dialog.setAttribute('aria-label',t(key(dialog.dataset.extensionLabel)));for(const el of [shell,...(dialog?[dialog]:[])]){for(const node of el.querySelectorAll('[data-extension-text]'))node.textContent=t(key(node.dataset.extensionText));for(const node of el.querySelectorAll('[data-extension-label]'))node.setAttribute('aria-label',t(key(node.dataset.extensionLabel)));for(const node of el.querySelectorAll('[data-extension-placeholder]'))node.placeholder=t(key(node.dataset.extensionPlaceholder))}confirmation?.refresh();renderList()}
- function setBusy(){busy=pending.size>0;for(const control of shell.querySelectorAll('.extensions-space'))control.disabled=busy;for(const control of dialog?.querySelectorAll('button')||[])control.disabled=!!panels.get(dialog)?.pending}
+ function setBusy(){busy=pending.size>0;for(const control of shell.querySelectorAll('.extensions-space'))control.disabled=busy;for(const control of dialog?.querySelectorAll('button')||[])control.disabled=!!panels.get(dialog)?.pending||!!panels.get(dialog)?.unconfirmed&&control.dataset.extensionText==='import'}
  function showError(reason,target=status){if(target?.classList.contains('extensions-dialog')){let box=target.querySelector('.extension-error');if(!box){box=n('div','extension-error');target.append(box)}target=box}const diagnostic=details(t(key('diagnostics')),reason.message||String(reason));diagnostic.querySelector('summary').dataset.extensionText='diagnostics';target.replaceChildren(text('p','inline-error','error'),diagnostic);target.setAttribute('role','alert')}
- function adopt(value){if(disposed)return;if(JSON.stringify(snapshot)===JSON.stringify(value)){failed=false;return;}snapshot=value;failed=false;status.replaceChildren();if(value.diagnostics?.length)status.append(details(t(key('diagnostics')),value.diagnostics.join('\n')));renderList();}
- function current(captured,generation){return !disposed&&captured.space===selectedSpace&&captured.owner===scope().owner&&generation===client.connectionGeneration;}
+ function adopt(value){if(disposed)return;snapshotIdentity=connectionIdentity();const unchanged=JSON.stringify(snapshot)===JSON.stringify(value);snapshot=value;failed=false;status.replaceChildren();if(value.diagnostics?.length)status.append(details(t(key('diagnostics')),value.diagnostics.join('\n')));if(!unchanged)renderList();}
+ function current(captured,generation){return !disposed&&captured.space===selectedSpace&&captured.owner===scope().owner&&generation===connectionIdentity();}
  function query(){
   const next=domain.catalog(scope());if(catalog===next)return next;
-  stopCatalog?.();catalog=next;const captured=scope(),generation=client.connectionGeneration;
+  stopCatalog?.();catalog=next;const captured=scope(),generation=connectionIdentity();
   stopCatalog=next.watch(state=>{if(!current(captured,generation))return;if(state.data)adopt(state.data);if(state.error){failed=true;showError(state.error);status.append(button('retry',()=>load(true).catch(()=>{})));}});return next;
  }
- async function load(force=false){const captured=scope(),generation=client.connectionGeneration;status.replaceChildren(text('p','hint','loading'));try{const value=await query().value(force);if(current(captured,generation))adopt(value);return value;}catch(reason){if(current(captured,generation)){failed=true;showError(reason);status.append(button('retry',()=>load(true).catch(()=>{})));renderList();}throw reason;}}
+ async function load(force=false){const captured=scope(),generation=connectionIdentity();status.replaceChildren(text('p','hint','loading'));try{const value=await query().value(force);if(current(captured,generation))adopt(value);return value;}catch(reason){if(current(captured,generation)){failed=true;showError(reason);status.append(button('retry',()=>load(true).catch(()=>{})));renderList();}throw reason;}}
  function matches(item){return (memory.source==='all'||(item.source||'user')===memory.source)&&(memory.status==='all'||memory.status==='enabled'&&item.enabled||memory.status==='disabled'&&!item.enabled||memory.status==='attention'&&item.kind==='mcp'&&item.status!=='ready')&&`${itemName(item)} ${itemDescription(item)||''}`.toLowerCase().includes(memory.query.toLowerCase())}
  function itemName(item){return item.kind==='plugins'&&['github','computer-use','codex'].includes(item.id)?t(key('plugin.'+item.id)):item.name}
  function itemDescription(item){return item.kind==='plugins'&&['github','computer-use','codex'].includes(item.id)?t(key('plugin.'+item.id+'.description')):item.kind==='mcp'?(item.transport==='stdio'?item.command:item.url):item.description}
@@ -50,6 +50,7 @@ export function createExtensions({root,client,locale,memory={},onSettings,onPerm
  if(!count&&(memory.query||memory.source!=='all'||memory.status!=='all'))list.append(text('p','hint extension-empty','noMatches'));
  for(const control of list.querySelectorAll('input'))control.disabled=pending.has(control.dataset.operation);
  }
+ const paneCurrent=pane=>{const state=panels.get(pane);return state&&current(state.scope,state.identity);};
  function navigateDialog(work){if(!dialog&&!busy)return work();return leave().then(allowed=>{if(allowed)return work();});}
  function closeDialog(){confirmation?.finish(false);if(dialog){dialog.close();dialog.remove();dialog=null}dirty=false}
  async function leave(){if(busy)return false;if(dirty&&!await confirmAction('discard',{},'discardChanges',true))return false;if(disposed)return false;closeDialog();return true}
@@ -67,10 +68,11 @@ export function createExtensions({root,client,locale,memory={},onSettings,onPerm
    document.body.append(pane);pane.showModal();cancel.focus();
   });
  }
- function modal(name){closeDialog();dialog=n('dialog','extensions-dialog');label(dialog,name);const heading=n('div','extensions-dialog-heading'),title=text('h2','',name),close=label(n('button','icon-button'),'close');close.type='button';close.append(icon('close'));close.onclick=leave;heading.append(title,close);dialog.append(heading);dialog.addEventListener('cancel',event=>{event.preventDefault();leave()});const state={version:0,pending:false};panels.set(dialog,state);const edited=()=>{state.version++;dirty=true;};dialog.addEventListener('input',edited);dialog.addEventListener('change',edited);document.body.append(dialog);dialog.showModal();return dialog}
+ function modal(name){closeDialog();dialog=n('dialog','extensions-dialog');label(dialog,name);const heading=n('div','extensions-dialog-heading'),title=text('h2','',name),close=label(n('button','icon-button'),'close');close.type='button';close.append(icon('close'));close.onclick=leave;heading.append(title,close);dialog.append(heading);dialog.addEventListener('cancel',event=>{event.preventDefault();leave()});const state={version:0,pending:false,scope:scope(),identity:connectionIdentity()};panels.set(dialog,state);const edited=()=>{state.version++;dirty=true;};dialog.addEventListener('input',edited);dialog.addEventListener('change',edited);document.body.append(dialog);dialog.showModal();return dialog}
  async function mutate(body,mcp=false,{after,ack}={}){
-  const captured=scope(),generation=client.connectionGeneration,target=dialog,state=target&&panels.get(target),editVersion=state?.version,operation=(mcp?'mcp':body.kind)+':'+(body.server?.id||body.id||'new');
+  const captured=scope(),generation=connectionIdentity(),target=dialog,state=target&&panels.get(target),editVersion=state?.version,operation=(mcp?'mcp':body.kind)+':'+(body.server?.id||body.id||'new');
   if(pending.has(operation)||state?.pending)return;
+  if(target?!paneCurrent(target):snapshotIdentity!==generation){showError(Error(t('identityChanged')),target||status);return;}
   const submitted=structuredClone(mcp?{action:body.action,server:cleanServer(body.server),...(body.credentials?{credentials:body.credentials}:{})}:body);
   pending.add(operation);if(state)state.pending=true;setBusy();renderList();
   try{const value=await client.request('/api/v1/extensions'+(mcp?'/mcp':''),{...captured,method:'POST',body:submitted});if(!current(captured,generation))return;
@@ -88,7 +90,7 @@ export function createExtensions({root,client,locale,memory={},onSettings,onPerm
  function chooseType(){const pane=modal('add');for(const kind of ['plugins','mcp','skills']){const entry=button('kind.'+kind,()=>addType(kind));entry.classList.add('extension-type-option');pane.append(entry,text('p','hint','kind.'+kind+'.description'))}}
  function formField(container,name,value='',options={}){const entry=field(t(key(name)),value,options);entry.row.classList.add('extension-field');entry.row.querySelector('.form-label').dataset.extensionText=name;entry.input.dataset.extensionLabel=name;if(name==='authentication')for(const option of entry.input.options)option.dataset.extensionText=option.value==='oauth'?'authOAuth':'authHeaders';container.append(entry.row);return entry.input}
  function install(kind){const pane=modal(kind==='plugins'?'addPlugin':'importSkill');const input=formField(pane,'sourcePath');pane.append(text('p','hint',kind==='plugins'?'pluginImportHint':'skillImportHint'));pane.append(button('install',()=>mutate({action:'install',kind,source:input.value.trim()}),{primary:true}))}
- async function skillEditor(item){const capturedScope=scope(),generation=client.connectionGeneration,pane=modal(item?'skillContent':'createSkill');let content='',digest='';if(item){try{const loaded=await client.request('/api/v1/extensions/skills/'+encodeURIComponent(item.id),capturedScope);if(!current(capturedScope,generation)||dialog!==pane)return;content=loaded.content;digest=loaded.digest}catch(reason){showError(reason,pane);return}}
+ async function skillEditor(item){const capturedScope=scope(),generation=connectionIdentity(),pane=modal(item?'skillContent':'createSkill');let content='',digest='';if(item){try{const loaded=await client.request('/api/v1/extensions/skills/'+encodeURIComponent(item.id),capturedScope);if(!current(capturedScope,generation)||dialog!==pane)return;content=loaded.content;digest=loaded.digest}catch(reason){showError(reason,pane);return}}
  const name=!item?formField(pane,'name'):null,body=formField(pane,'content',content,{kind:'textarea',readOnly:item?.source==='builtin'});body.classList.add('extension-skill-editor');let savedName='';
  if(item?.source==='builtin'){pane.append(text('p','hint','builtinHint'));return;}
  pane.append(button('save',()=>{
@@ -119,7 +121,7 @@ export function createExtensions({root,client,locale,memory={},onSettings,onPerm
  }
  function stopOAuth(){const run=oauthRun;oauthRun=null;if(run){clearTimeout(run.timer);run.cleanup?.();}}
  async function oauthConnect(item){
-  if(oauthRun)return;const captured=scope(),generation=client.connectionGeneration,authPane=dialog,popup=client.desktop?null:window.open('about:blank','pot-mcp-auth','popup,width=600,height=750');if(!client.desktop&&!popup){showError(Error(t(key('oauthPopup'))),dialog);return;}
+  if(oauthRun)return;if(dialog&&!paneCurrent(dialog)){showError(Error(t('identityChanged')),dialog);return;}const captured=scope(),generation=connectionIdentity(),authPane=dialog,popup=client.desktop?null:window.open('about:blank','pot-mcp-auth','popup,width=600,height=750');if(!client.desktop&&!popup){showError(Error(t(key('oauthPopup'))),dialog);return;}
   const run=oauthRun={started:Date.now(),delay:1500},alive=()=>oauthRun===run&&current(captured,generation);
   try{const result=await client.request('/api/v1/extensions/mcp/oauth/begin',{...captured,transient:true,method:'POST',body:{id:item.id,revision:item.revision,redirect_uri:client.desktop?'':location.origin+'/mcp-oauth-callback.html?'+new URLSearchParams({space_id:captured.space})}});if(!alive()){popup?.close();return;}
    const finish=()=>{if(!alive())return;stopOAuth();if(dialog===authPane&&!dirty)closeDialog();};
@@ -133,12 +135,41 @@ export function createExtensions({root,client,locale,memory={},onSettings,onPerm
    else{popup.location=result.authorization_url;const receive=async event=>{
     if(!alive()||event.origin!==location.origin||event.source!==popup||event.data?.type!=='pot:mcp-oauth'||event.data.state!==result.state)return;
     if(event.data.error||!event.data.completed){showError(Error(t(key('oauthFailed'))),dialog||status);stopOAuth();return;}
-    try{await load(true);if(alive())finish();}catch(reason){if(alive())showError(reason,dialog||status);}
+    try{const value=await query().value();if(!alive())return;if(value.mcp?.find(server=>server.id===item.id)?.revision===item.revision){client.resources.invalidate(['extensions'],captured);await load();}if(alive())finish();}catch(reason){if(alive())showError(reason,dialog||status);}
    };window.addEventListener('message',receive);run.cleanup=()=>window.removeEventListener('message',receive);}
    if(alive())run.timer=setTimeout(poll,run.delay);
   }catch(reason){popup?.close();if(alive()){showError(reason,dialog||status);stopOAuth();}}
  }
- function importMCP(){const pane=modal('importJSON'),input=formField(pane,'content','',{kind:'textarea'});pane.append(text('p','hint','importJSONHint'),button('import',async()=>{try{const raw=JSON.parse(input.value),entries=Object.entries(raw.mcpServers||{});if(!entries.length||entries.length>32)throw Error(t(key('invalidJSON')));for(const [id,config]of entries){if(!/^[a-zA-Z0-9_-]{1,32}$/.test(id)||!config||typeof config!=='object'||!config.command&&!config.url)throw Error(t(key('invalidJSON')))}if(!await confirmAction('importConfirm',{count:entries.length},'import')||disposed)return;const state=panels.get(pane),editVersion=state.version,captured=scope(),generation=client.connectionGeneration;if(state.pending)return;state.pending=true;pending.add('import');setBusy();for(const [id,config]of entries){if(disposed)return;await client.request('/api/v1/extensions/mcp',{...captured,method:'POST',body:{action:'save',server:{id,name:id,revision:0,enabled:true,transport:config.command?'stdio':'http',command:config.command,args:config.args||[],url:config.url},...(Object.keys(config.env||{}).length||Object.keys(config.headers||{}).length?{credentials:{env:config.env||{},headers:config.headers||{}}}:{})}})}if(current(captured,generation)&&dialog===pane&&state.version===editVersion){dirty=false;closeDialog();}if(!client.production)await client.resources.invalidate(['extensions'],captured);await load()}catch(reason){if(!disposed)showError(reason instanceof SyntaxError?Error('invalid_mcp_json'):reason,pane)}finally{pending.delete('import');const state=panels.get(pane);if(state)state.pending=false;setBusy()}},{primary:true}))}
+ function importMCP(){
+  const pane=modal('importJSON'),input=formField(pane,'content','',{kind:'textarea'}),accepted=new Map();
+  pane.append(text('p','hint','importJSONHint'),button('import',async()=>{
+   const state=panels.get(pane);if(state.pending||state.unconfirmed)return;
+   if(!paneCurrent(pane)){showError(Error(t('identityChanged')),pane);return;}
+   try{
+    const raw=JSON.parse(input.value),entries=Object.entries(raw.mcpServers||{});
+    if(!entries.length||entries.length>32)throw Error(t(key('invalidJSON')));
+    for(const [id,config]of entries)if(!/^[a-zA-Z0-9_-]{1,32}$/.test(id)||!config||typeof config!=='object'||!config.command&&!config.url)throw Error(t(key('invalidJSON')));
+    if(!await confirmAction('importConfirm',{count:entries.length},'import')||disposed)return;
+    if(!paneCurrent(pane)){showError(Error(t('identityChanged')),pane);return;}
+    const editVersion=state.version,captured=scope(),generation=connectionIdentity();state.pending=true;pending.add('import');setBusy();
+    for(const [id,config]of entries){
+     if(!current(captured,generation))return;
+     const credentials=Object.keys(config.env||{}).length||Object.keys(config.headers||{}).length?{env:config.env||{},headers:config.headers||{}}:undefined;
+     const desired={action:'save',server:{id,name:id,enabled:true,transport:config.command?'stdio':'http',command:config.command,args:config.args||[],url:config.url},...(credentials?{credentials}:{})},signature=JSON.stringify(desired),prior=accepted.get(id);
+     if(prior?.signature===signature)continue;
+     const value=await client.request('/api/v1/extensions/mcp',{...captured,method:'POST',body:{...desired,server:{...desired.server,revision:prior?.revision||0}}});
+     if(!current(captured,generation))return;
+     // Only this exact command's response can advance an imported row's base.
+     // Keep accepted entries in this dialog's memory across later edits/retries.
+     if(value?.id!==id||!Number.isSafeInteger(value.revision)){state.unconfirmed=true;pane.append(text('p','inline-error','importReceiptMissing'));throw Error('missing_mcp_receipt');}
+     accepted.set(id,{signature,revision:value.revision});
+    }
+    if(dialog===pane&&state.version===editVersion){dirty=false;closeDialog();}
+    if(!client.production)await client.resources.invalidate(['extensions'],captured);await load();
+   }catch(reason){if(!disposed)showError(reason instanceof SyntaxError?Error('invalid_mcp_json'):reason,pane);}
+   finally{pending.delete('import');state.pending=false;if(!disposed)setBusy();}
+  },{primary:true}));
+ }
  const beforeUnload=event=>{if(dirty||busy){event.preventDefault();event.returnValue=''}};
  window.addEventListener('pot:locale',updateLabels);window.addEventListener('beforeunload',beforeUnload);
  return {load,leave,refresh:()=>load(true),dispose(){stopOAuth();disposed=true;version++;closeDialog();stopCatalog?.();releaseDomains();window.removeEventListener('pot:locale',updateLabels);window.removeEventListener('beforeunload',beforeUnload)}};
