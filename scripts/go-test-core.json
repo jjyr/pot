@@ -46,7 +46,13 @@
       "TestTaskAdmissionAndRunCreationRollbackTogether",
       "TestIdempotencyOwnershipGuidanceReferencesAndStop",
       "TestTaskApprovalStateWakesWaitAndResumesOriginalRun",
-      "TestRetryPreservesScopeAndHasOneDurableReplacementPerSource"
+      "TestRetryPreservesScopeAndHasOneDurableReplacementPerSource",
+      "TestRetryReplaysAcceptedInputsAtFirstModelBoundary",
+      "TestRetryInputPersistenceRollsBackWithReplacement",
+      "TestConcurrentRetryDoesNotDuplicateInputs",
+      "TestRetryKeepsSubmissionAndRepairByteLimits",
+      "TestRetryPreservesHistoricalInputDigestReceipt",
+      "TestRetryRechecksAllEligibilityBeforePersistingInputs"
     ],
     "./internal/transport": [
       "TestSocketProductCreateEventsAuthAndRestart",
