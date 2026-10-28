@@ -19,7 +19,7 @@ func TestApprovalPreservesExactFileAndNetworkScope(t *testing.T) {
 			var output bytes.Buffer
 			a := &appTurn{input: nopWriteCloser{&output}, ctx: context.Background(), done: make(chan struct{}), reviews: map[string]context.CancelFunc{}, result: TurnResult{ThreadID: "thread", TurnID: "turn"}}
 			if method == "item/fileChange/requestApproval" {
-				a.notification(rpcMessage{Method: "item/started", Params: json.RawMessage(`{"threadId":"thread","item":{"id":"item","type":"fileChange","changes":[{"path":"/work/config","diff":"+setting"}]}}`)})
+				a.notification(rpcMessage{Method: "item/started", Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","item":{"id":"item","type":"fileChange","changes":[{"path":"/work/config","diff":"+setting"}]}}`)})
 			}
 			a.events.Review = func(ctx context.Context, got string, raw json.RawMessage) (string, error) {
 				var params map[string]json.RawMessage
@@ -51,7 +51,7 @@ func TestApprovalPreservesExactFileAndNetworkScope(t *testing.T) {
 func TestAutomaticReviewNotificationsStayInsideCodex(t *testing.T) {
 	for _, status := range []string{"approved", "denied", "timedOut"} {
 		t.Run(status, func(t *testing.T) {
-			a := &appTurn{done: make(chan struct{}), readerDone: make(chan struct{}), pending: map[int]chan rpcMessage{}, result: TurnResult{ThreadID: "thread"}, events: turnEvents{Review: func(context.Context, string, json.RawMessage) (string, error) {
+			a := &appTurn{done: make(chan struct{}), readerDone: make(chan struct{}), pending: map[int]chan rpcMessage{}, result: TurnResult{ThreadID: "thread", TurnID: "turn"}, events: turnEvents{Review: func(context.Context, string, json.RawMessage) (string, error) {
 				t.Fatal("automatic review requested human approval")
 				return "", nil
 			}}}
@@ -63,7 +63,7 @@ func TestAutomaticReviewNotificationsStayInsideCodex(t *testing.T) {
 				}
 			}
 			for _, event := range []map[string]any{
-				{"method": "item/completed", "params": map[string]any{"threadId": "thread", "item": map[string]string{"type": "agentMessage", "phase": "final_answer", "text": "task result"}}},
+				{"method": "item/completed", "params": map[string]any{"threadId": "thread", "turnId": "turn", "item": map[string]string{"type": "agentMessage", "phase": "final_answer", "text": "task result"}}},
 				{"method": "turn/completed", "params": map[string]any{"threadId": "thread", "turn": map[string]string{"id": "turn", "status": "completed"}}},
 			} {
 				if err := enc.Encode(event); err != nil {
@@ -132,7 +132,7 @@ func TestAppServerReadFailureIsDistinctFromProcessExit(t *testing.T) {
 }
 
 func TestAppServerKeepsOnlyAnswerAndStopsAtTurnCompletion(t *testing.T) {
-	a := &appTurn{done: make(chan struct{}), readerDone: make(chan struct{}), pending: map[int]chan rpcMessage{}, result: TurnResult{ThreadID: "thread"}}
+	a := &appTurn{done: make(chan struct{}), readerDone: make(chan struct{}), pending: map[int]chan rpcMessage{}, result: TurnResult{ThreadID: "thread", TurnID: "turn"}}
 	var stream strings.Builder
 	enc := json.NewEncoder(&stream)
 	for _, item := range []map[string]string{
@@ -140,7 +140,7 @@ func TestAppServerKeepsOnlyAnswerAndStopsAtTurnCompletion(t *testing.T) {
 		{"type": "agentMessage", "phase": "partial_answer", "text": "preliminary"},
 		{"type": "agentMessage", "phase": "final_answer", "text": "answer"},
 	} {
-		if err := enc.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread", "item": item}}); err != nil {
+		if err := enc.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread", "turnId": "turn", "item": item}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -148,7 +148,7 @@ func TestAppServerKeepsOnlyAnswerAndStopsAtTurnCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Later notifications cannot change the answer of the completed turn.
-	if err := enc.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread", "item": map[string]string{"type": "agentMessage", "phase": "final_answer", "text": "later answer"}}}); err != nil {
+	if err := enc.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread", "turnId": "turn", "item": map[string]string{"type": "agentMessage", "phase": "final_answer", "text": "later answer"}}}); err != nil {
 		t.Fatal(err)
 	}
 	a.read(strings.NewReader(stream.String()))

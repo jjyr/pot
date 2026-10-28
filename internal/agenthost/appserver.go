@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/processscope"
 )
 
@@ -64,23 +65,27 @@ type rpcMessage struct {
 }
 
 type appTurn struct {
-	input         io.WriteCloser
-	writing       sync.Mutex
-	mu            sync.Mutex
-	seq           int
-	pending       map[int]chan rpcMessage
-	done          chan struct{}
-	readerDone    chan struct{}
-	once          sync.Once
-	result        TurnResult
-	workspace     string
-	denied        bool
-	approvalError string
-	ctx           context.Context
-	reviews       map[string]context.CancelFunc
-	reviewWG      sync.WaitGroup
-	fileChanges   map[string]json.RawMessage
-	events        turnEvents
+	input            io.WriteCloser
+	writing          sync.Mutex
+	mu               sync.Mutex
+	seq              int
+	pending          map[int]chan rpcMessage
+	pendingMethods   map[int]string
+	starting         int
+	startBuffer      []rpcMessage
+	startBufferBytes int
+	done             chan struct{}
+	readerDone       chan struct{}
+	once             sync.Once
+	result           TurnResult
+	workspace        string
+	denied           bool
+	approvalError    string
+	ctx              context.Context
+	reviews          map[string]context.CancelFunc
+	reviewWG         sync.WaitGroup
+	fileChanges      map[string]json.RawMessage
+	events           turnEvents
 }
 
 func (a *appTurn) send(v any) error {
@@ -94,8 +99,25 @@ func (a *appTurn) rpc(ctx context.Context, method string, params any) (json.RawM
 	id := a.seq
 	ch := make(chan rpcMessage, 1)
 	a.pending[id] = ch
+	if a.pendingMethods == nil {
+		a.pendingMethods = map[int]string{}
+	}
+	a.pendingMethods[id] = method
+	if method == "turn/start" {
+		a.starting = id
+	}
 	a.mu.Unlock()
-	defer func() { a.mu.Lock(); delete(a.pending, id); a.mu.Unlock() }()
+	defer func() {
+		a.mu.Lock()
+		delete(a.pending, id)
+		delete(a.pendingMethods, id)
+		if a.starting == id {
+			a.starting = 0
+			a.startBuffer = nil
+			a.startBufferBytes = 0
+		}
+		a.mu.Unlock()
+	}()
 	if err := a.send(map[string]any{"id": id, "method": method, "params": params}); err != nil {
 		return nil, err
 	}
@@ -151,7 +173,15 @@ func (a *appTurn) read(output io.Reader) {
 			if json.Unmarshal(m.ID, &id) == nil {
 				a.mu.Lock()
 				ch := a.pending[id]
+				method := a.pendingMethods[id]
+				delete(a.pendingMethods, id)
 				a.mu.Unlock()
+				if ch != nil && method == "turn/start" {
+					a.bindStartResponse(id, m)
+				}
+				if a.isDone() {
+					return
+				}
 				if ch != nil {
 					select {
 					case ch <- m:
@@ -163,11 +193,13 @@ func (a *appTurn) read(output io.Reader) {
 			}
 			continue
 		}
-		if len(m.ID) > 0 {
-			a.approval(m)
-			continue
+		if !a.bufferBeforeStart(m) {
+			if len(m.ID) > 0 {
+				a.approval(m)
+			} else {
+				a.notification(m)
+			}
 		}
-		a.notification(m)
 		select {
 		case <-a.done:
 			return
@@ -181,13 +213,16 @@ func (a *appTurn) read(output io.Reader) {
 	a.finish("failed", "codex_process_ended_outcome_unknown")
 }
 func (a *appTurn) approval(m rpcMessage) {
+	if a.isDone() {
+		return
+	}
 	if a.events.Review != nil && (m.Method == "item/commandExecution/requestApproval" || m.Method == "item/fileChange/requestApproval") {
 		var binding struct {
 			ThreadID string `json:"threadId"`
 			TurnID   string `json:"turnId"`
 		}
 		a.mu.Lock()
-		valid := json.Unmarshal(m.Params, &binding) == nil && binding.ThreadID == a.result.ThreadID && binding.TurnID != "" && binding.TurnID == a.result.TurnID
+		valid := validEventJSON(m.Params) && json.Unmarshal(m.Params, &binding) == nil && binding.ThreadID != "" && binding.ThreadID == a.result.ThreadID && binding.TurnID != "" && binding.TurnID == a.result.TurnID
 		a.mu.Unlock()
 		if !valid {
 			a.finish("failed", "codex_approval_binding_mismatch")
@@ -243,7 +278,7 @@ func (a *appTurn) approval(m rpcMessage) {
 			action, err := a.events.Review(ctx, m.Method, m.Params)
 			a.mu.Lock()
 			delete(a.reviews, string(m.ID))
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || a.doneLocked() {
 				a.mu.Unlock()
 				return
 			}
@@ -278,6 +313,23 @@ func (a *appTurn) approval(m rpcMessage) {
 	}
 }
 func (a *appTurn) notification(m rpcMessage) {
+	if a.isDone() {
+		return
+	}
+	switch m.Method {
+	case "item/started", "item/completed", "turn/started", "turn/completed":
+		thread, turn, ok := eventBinding(m)
+		a.mu.Lock()
+		matches := ok && thread == a.result.ThreadID && turn == a.result.TurnID && !a.doneLocked()
+		a.mu.Unlock()
+		if !matches {
+			return
+		}
+	case "serverRequest/resolved":
+		if !validEventJSON(m.Params) {
+			return
+		}
+	}
 	if m.Method == "item/started" {
 		var p struct {
 			ThreadID string          `json:"threadId"`
@@ -289,7 +341,7 @@ func (a *appTurn) notification(m rpcMessage) {
 		}
 		if json.Unmarshal(m.Params, &p) == nil && json.Unmarshal(p.Item, &item) == nil && item.Type == "fileChange" && len(p.Item) <= maxBody {
 			a.mu.Lock()
-			if p.ThreadID == a.result.ThreadID {
+			if p.ThreadID != "" && p.ThreadID == a.result.ThreadID && !a.doneLocked() {
 				if a.fileChanges == nil {
 					a.fileChanges = map[string]json.RawMessage{}
 				}
@@ -308,7 +360,7 @@ func (a *appTurn) notification(m rpcMessage) {
 		}
 		if json.Unmarshal(m.Params, &p) == nil {
 			a.mu.Lock()
-			if p.ThreadID == a.result.ThreadID {
+			if p.ThreadID != "" && p.ThreadID == a.result.ThreadID && !a.doneLocked() {
 				if cancel := a.reviews[string(p.RequestID)]; cancel != nil {
 					cancel()
 				}
@@ -325,8 +377,9 @@ func (a *appTurn) notification(m rpcMessage) {
 	var p struct {
 		ThreadID string `json:"threadId"`
 		Turn     struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
+			ID     string          `json:"id"`
+			Status string          `json:"status"`
+			Error  json.RawMessage `json:"error"`
 		} `json:"turn"`
 		Item struct {
 			Type    string `json:"type"`
@@ -340,23 +393,10 @@ func (a *appTurn) notification(m rpcMessage) {
 	if json.Unmarshal(m.Params, &p) != nil {
 		return
 	}
-	a.mu.Lock()
-	thread := a.result.ThreadID
-	a.mu.Unlock()
-	if thread != "" && p.ThreadID != "" && thread != p.ThreadID {
-		return
-	}
 	switch m.Method {
 	case "turn/started":
-		a.mu.Lock()
-		a.result.TurnID = p.Turn.ID
-		a.mu.Unlock()
-		if a.events.Started != nil {
-			if a.events.Started(p.Turn.ID) != nil {
-				a.finish("failed", "codex_state_persistence_failed_outcome_unknown")
-				a.interrupt()
-			}
-		}
+		// Only the matching turn/start response establishes and persists identity.
+		return
 	case "turn/completed":
 		status, diagnostic := p.Turn.Status, ""
 		switch status {
@@ -364,7 +404,7 @@ func (a *appTurn) notification(m rpcMessage) {
 		case "interrupted":
 			status = "cancelled"
 		case "failed":
-			diagnostic = "codex_turn_failed"
+			diagnostic = codexTurnFailure(p.Turn.Error)
 		default:
 			status = "failed"
 			diagnostic = "codex_unknown_turn_status"
@@ -381,6 +421,9 @@ func (a *appTurn) notification(m rpcMessage) {
 	case "item/completed":
 		a.mu.Lock()
 		defer a.mu.Unlock()
+		if a.doneLocked() {
+			return
+		}
 		// Phase is optional in the App Server protocol. Explicit intermediate
 		// messages never become the final reply or consume its bounded space.
 		if p.Item.Type == "agentMessage" && (p.Item.Phase == "" || p.Item.Phase == "final_answer") {
@@ -568,23 +611,11 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 	if s.Effort != "" {
 		turnParams["effort"] = s.Effort
 	}
-	raw, err = a.rpc(ctx, "turn/start", turnParams)
+	_, err = a.rpc(ctx, "turn/start", turnParams)
 	if err != nil {
 		a.finish("failed", "codex_turn_start_failed_outcome_unknown: "+err.Error())
 		return
 	}
-	var turn struct {
-		Turn struct {
-			ID string `json:"id"`
-		} `json:"turn"`
-	}
-	if json.Unmarshal(raw, &turn) != nil || turn.Turn.ID == "" {
-		a.finish("failed", "codex_invalid_turn_outcome_unknown")
-		return
-	}
-	a.mu.Lock()
-	a.result.TurnID = turn.Turn.ID
-	a.mu.Unlock()
 	timer := time.NewTimer(30 * time.Minute)
 	defer timer.Stop()
 	select {
@@ -601,4 +632,156 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 		a.finish("failed", "codex_deadline_outcome_unknown")
 	}
 	return
+}
+
+// doneLocked must be called while holding mu when guarding result mutations.
+func (a *appTurn) doneLocked() bool {
+	select {
+	case <-a.done:
+		return true
+	default:
+		return false
+	}
+}
+func (a *appTurn) isDone() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.doneLocked()
+}
+
+// Raw maps retain provider-owned extensions while rejecting ambiguous fields.
+func validEventJSON(raw json.RawMessage) bool {
+	var fields map[string]json.RawMessage
+	return core.DecodeJSON(raw, &fields) == nil
+}
+func eventBinding(m rpcMessage) (thread, turn string, ok bool) {
+	if !validEventJSON(m.Params) {
+		return
+	}
+	var p struct {
+		ThreadID string `json:"threadId"`
+		TurnID   string `json:"turnId"`
+		Turn     struct {
+			ID string `json:"id"`
+		} `json:"turn"`
+	}
+	if json.Unmarshal(m.Params, &p) != nil {
+		return
+	}
+	turn = p.TurnID
+	if m.Method == "turn/started" || m.Method == "turn/completed" {
+		turn = p.Turn.ID
+	}
+	return p.ThreadID, turn, p.ThreadID != "" && turn != ""
+}
+
+// Bind in the reader before it consumes the next JSONL message. Delivering a
+// response to rpc's buffered channel alone does not synchronize its caller.
+func (a *appTurn) bindStartResponse(requestID int, m rpcMessage) {
+	var response struct {
+		Turn struct {
+			ID string `json:"id"`
+		} `json:"turn"`
+	}
+	rejected := len(m.Error) > 0 && string(m.Error) != "null"
+	valid := !rejected && validEventJSON(m.Result) && json.Unmarshal(m.Result, &response) == nil && response.Turn.ID != ""
+	a.mu.Lock()
+	if a.doneLocked() || a.starting != requestID || a.pending[requestID] == nil {
+		a.mu.Unlock()
+		return
+	}
+	buffered := a.startBuffer
+	a.starting = 0
+	a.startBuffer = nil
+	a.startBufferBytes = 0
+	if rejected {
+		a.mu.Unlock()
+		return
+	}
+	if !valid {
+		a.mu.Unlock()
+		a.finish("failed", "codex_invalid_turn_outcome_unknown")
+		return
+	}
+
+	id := response.Turn.ID
+	if a.doneLocked() {
+		a.mu.Unlock()
+		return
+	}
+	if a.result.TurnID != "" {
+		same := a.result.TurnID == id
+		a.mu.Unlock()
+		if !same {
+			a.finish("failed", "codex_invalid_turn_outcome_unknown")
+		}
+		return
+	}
+	a.result.TurnID = id
+	a.mu.Unlock()
+	if a.events.Started != nil && a.events.Started(id) != nil {
+		a.finish("failed", "codex_state_persistence_failed_outcome_unknown")
+		a.interrupt()
+		return
+	}
+	for _, message := range buffered {
+		if a.isDone() {
+			return
+		}
+		if len(message.ID) > 0 {
+			a.approval(message)
+		} else {
+			a.notification(message)
+		}
+	}
+}
+
+// Events can precede the start response. Retain only handled events until that
+// authoritative identity arrives, bounded in both count and bytes.
+func (a *appTurn) bufferBeforeStart(m rpcMessage) bool {
+	a.mu.Lock()
+	if a.doneLocked() || a.starting == 0 || a.result.TurnID != "" {
+		a.mu.Unlock()
+		return false
+	}
+	thread := a.result.ThreadID
+	a.mu.Unlock()
+	if len(m.ID) == 0 {
+		switch m.Method {
+		case "turn/started", "turn/completed", "item/started", "item/completed":
+			eventThread, _, ok := eventBinding(m)
+			if !ok || eventThread != thread {
+				return true
+			}
+		case "serverRequest/resolved":
+			var p struct {
+				ThreadID string `json:"threadId"`
+			}
+			if !validEventJSON(m.Params) || json.Unmarshal(m.Params, &p) != nil || p.ThreadID == "" || p.ThreadID != thread {
+				return true
+			}
+		default:
+			return false
+		}
+	}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return true
+	}
+	a.mu.Lock()
+	if a.doneLocked() || a.starting == 0 || a.result.TurnID != "" {
+		a.mu.Unlock()
+		return true
+	}
+	if len(a.startBuffer) >= 64 || a.startBufferBytes+len(raw) > maxAppServerMessage {
+		a.startBuffer = nil
+		a.startBufferBytes = 0
+		a.mu.Unlock()
+		a.finish("failed", "codex_turn_event_buffer_exceeded_outcome_unknown")
+		return true
+	}
+	a.startBuffer = append(a.startBuffer, m)
+	a.startBufferBytes += len(raw)
+	a.mu.Unlock()
+	return true
 }
