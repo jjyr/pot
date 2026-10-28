@@ -384,9 +384,9 @@ export async function createProductionClient({desktop = false, base = '', resour
         notify(event.data.topics,event.data.space_id,event.data.boot_id||'');
       });return()=>{changeStreams.delete(health);stop();};}
       const deliver=(event,initial)=>{
-        if(!client.onlineReady)return false;
+        if(!client.onlineReady||generation!==client.connectionGeneration)return false;
         const value=JSON.parse(event.data),id=event.lastEventId||'',separator=id.lastIndexOf(':');
-        return ()=>{health.boot=separator<0?'':id.slice(0,separator);health.healthy=!!health.boot;if(initial)onChange([],{space:scope.space,reset:true});
+        return ()=>{if(!client.onlineReady||generation!==client.connectionGeneration)return;health.boot=separator<0?'':id.slice(0,separator);health.healthy=!!health.boot;if(initial)onChange([],{space:scope.space,reset:true});
           notify(value.topics||value,scope.space,separator<0?'':id.slice(0,separator));};
       };
       const reconnect=guardReconnect(),stop=createEventStream({url:`${base}${scopedPath('/api/v1/changes',scope)}`,

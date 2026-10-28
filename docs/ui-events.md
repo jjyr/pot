@@ -772,7 +772,7 @@ SSE keepalive comments run every 15 seconds; writes have bounded deadlines that
 are cleared after flushing, so idle HTTP/2 streams remain open between frames.
 Backend shutdown or request cancellation closes subscriptions. Browser logout
 revokes access and reloads into authentication. Window/client disposal removes
-listeners and releases subscriptions.
+listeners and releases subscriptions. Browser changes streams also reject both parsed and deferred notifications from a retired client connection generation; an old stream cannot become healthy or refresh a replacement connection.
 
 Execution, schedule deadlines, authorization expiry, resource preparation and
 Agent Link recovery retain their own backend lifecycle responsibilities.
