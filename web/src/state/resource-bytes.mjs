@@ -73,7 +73,7 @@ export function createResourceCopies({name='pot-chat-cache',indexedDB=globalThis
         check();
         for(const row of rows){store.delete(row.key);stats.bytes-=row.bytes;stats.count--;}
         tx.objectStore('cacheStats').put(stats);
-      });committed=true;}finally{if(compacted&&committed)notify({kind:'compact'});if(committed||!signal?.aborted&&isCurrent())notify({kind:'retire',scope});}
+      });committed=true;}catch(error){if(signal?.aborted)throw signal.reason||new DOMException('Directory read retired','AbortError');throw error;}finally{if(compacted&&committed)notify({kind:'compact'});if(committed||!signal?.aborted&&isCurrent())notify({kind:'retire',scope});}
     },
     subscribe(listener){listeners.add(listener);return()=>listeners.delete(listener);},
     close(){stop();closed=true;listeners.clear();channel?.close();db.close();},
