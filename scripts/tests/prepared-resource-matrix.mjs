@@ -19,10 +19,10 @@ export async function preparedResourceMatrix(page){
     acquired++;let done=false;return {release(){if(!done){done=true;released++;}},read:async()=>new Blob([value.mime_type==='text/markdown'?'# Nested ready\n\n```mermaid\ngraph TD\n A --> B\n```':'Bound resource'],{type:value.mime_type}),url:()=>{
      if(value.mime_type==='image/png')return png;
      const url=URL.createObjectURL(new Blob(['%PDF-1.4\n1 0 obj <</Type /Catalog /Pages 2 0 R>> endobj\n2 0 obj <</Type /Pages /Kids [] /Count 0>> endobj\ntrailer <</Root 1 0 R>>\n%%EOF'],{type:'application/pdf'}));urls.push(url);return url;
-    },renderURL:token=>{
+    },renderDocument:async token=>{
      const script=`const send=(action,value)=>parent.postMessage({type:'pot-resource',token:${JSON.stringify(token)},action,value},'*');send('resize',180);send('ready');addEventListener('message',event=>{if(event.data==='grow')send('resize',900)});`;
-     const url=URL.createObjectURL(new Blob(['<!doctype html><p>Isolated synthetic HTML</p><script>'+script+'</script>'],{type:'text/html'}));urls.push(url);return url;
-    }};
+     return '<!doctype html><p>Isolated synthetic HTML</p><script>'+script+'</script>';
+    },trackDocumentURL:url=>urls.push(url)};
    }};
    const rows=Array.from({length:100},(_,index)=>({id:'matrix-'+index,viewKey:'matrix-'+index,role:'assistant',text:'Synthetic row '+index,...(index===99?{resources:true}:{})}));
    let window;const render=(message,old)=>{
