@@ -73,19 +73,26 @@ explanations in their existing views and linked documentation.
 The homepage pairs the design rationale with a concrete release-preparation
 example: a returned document draft, running installation checks, and a desktop
 check awaiting more context. Separate sections show specialist conversations,
-source disagreements, connected-assistant review, schedules and notification
-triggers. Clay and sage surfaces group the product illustrations; prose and
-annotated steps explain what each view means.
+source disagreements and the flow of follow-up work. Section 03 uses an accessible
+HTML/CSS architecture diagram with live localized text, monospace type and a dark
+sage surface. Solid connections show discussion, parallel execution through
+background tasks or Agent Link, and feedback to the assistant. Independent dashed
+branches send personal GitHub notifications to the assistant and scheduled
+occurrences to background tasks. The mobile layout stacks nodes and keeps those
+trigger branches distinct. Its caption describes the complete flow without
+depending on the drawn connections or JavaScript. Clay and sage surfaces group
+the product illustrations; prose and annotated steps explain what each view means.
 
 `assets/product-hero.png`, `product-work.png`, `product-assistants.png` and
 `product-link.png` are compositions of real shared product components using
 synthetic records. They are illustrations of behavior, not live business
-execution or an exact full-app screen layout. The website ships only raster
-images, not the product runtime. `product-work-mobile.png` uses the same hero
-composition in a real 390px viewport. The assistant and Agent Link compositions
-also have 390px sources (`product-assistants-mobile.png` and
+execution or an exact full-app screen layout. The website ships static images
+and the live-text architecture diagram, without the product runtime. The retained
+Agent Link raster assets are not used by section 03. `product-work-mobile.png`
+uses the same hero composition in a real 390px viewport. The assistant and Agent
+Link compositions also have 390px sources (`product-assistants-mobile.png` and
 `product-link-mobile.png`). Native `picture` sources keep identities and text
-legible on narrow screens. All figures link to a full-resolution image without
+legible on narrow screens. Raster figures link to a full-resolution image without
 JavaScript. English example records are verbatim;
 localized captions explain the illustrations.
 

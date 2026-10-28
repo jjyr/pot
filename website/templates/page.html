@@ -54,8 +54,20 @@
 <p>任务承接执行，计划与通知提供触发，Agent Link 连接其他 Agent。助手可以组织后续工作，并把进展与结果带回对话。</p>
 <p>Agent Link 支持连接 Pot、Codex 与 Antigravity，让不同环境中的助手通过对话与任务协作。</p>
 <div class="inline-links"><a href="https://github.com/jjyr/pot/blob/main/docs/agent-links.md">Agent Link 文档 ↗</a><a href="https://github.com/jjyr/pot/blob/main/integrations/codex/README.md">Codex ↗</a><a href="https://github.com/jjyr/pot/blob/main/integrations/antigravity/README.md">Antigravity ↗</a></div></div>
-<figure class="product-figure link-figure"><a href="assets/product-link.png" target="_blank" rel="noopener"><picture><source media="(max-width:580px)" srcset="assets/product-link-mobile.png"><img src="assets/product-link.png" width="800" height="510" alt="Pot 与连接的开发助手通过 Agent Link 讨论文档审查，并将发现带回原对话" loading="lazy"></picture></a><figcaption>连接的是具体助手。对话与结果跨环境传递，执行权限仍由各自环境管理。</figcaption></figure>
-<div class="follow-through"><div><h4>工作也可以有下一次</h4><p>计划让约定的工作在指定时间触发；个人 GitHub 通知按订阅条件交给指定助手。每周资料整理或仓库通知，都可以成为后续工作的起点。</p><a href="https://github.com/jjyr/pot/blob/main/docs/scheduled-tasks.md">计划与定时任务 ↗</a><a href="https://github.com/jjyr/pot/blob/main/docs/plugins.md#github-notifications">GitHub 通知 ↗</a></div><figure class="flow-figure"><ol class="work-flow"><li>讨论目标</li><li>助手组织工作</li><li>任务 / 其他 Agent</li><li>结果反馈回助手</li></ol><figcaption>执行中的权限与审批由各自的运行环境管理。</figcaption></figure></div>
+<figure class="architecture" aria-labelledby="architecture-title" aria-describedby="architecture-description">
+<div class="architecture-head"><h4 id="architecture-title">工作如何回到对话</h4><div class="architecture-key"><span>实线：工作与反馈</span><span>虚线：触发来源</span></div></div>
+<div class="architecture-map">
+<div class="arch-user arch-node"><span class="arch-index">01 / 对话</span><strong>讨论目标</strong><p>目标、判断与取舍</p></div>
+<span class="arch-talk arch-wire" aria-hidden="true">↔</span>
+<div class="arch-assistant-group"><div class="arch-assistant arch-node"><span class="arch-index">02 / 组织</span><strong>持续对话的助手</strong><p>组织工作 · 跟进进展</p><span class="arch-context">同一段对话，继续讨论与修改</span></div><div class="arch-trigger arch-notification"><strong>个人 GitHub 通知</strong><span>按订阅条件进入对话</span></div></div>
+<span class="arch-dispatch" aria-hidden="true"><span>→</span><span>→</span></span>
+<div class="arch-execution"><div class="arch-task-unit"><div class="arch-task arch-node"><span class="arch-index">03 / 执行</span><strong>后台任务</strong><p>独立执行耗时工作</p></div><div class="arch-trigger arch-schedule"><strong>计划到期</strong><span>触发后台任务</span></div></div><div class="arch-peer arch-node"><strong>其他 Agent</strong><p>经 Agent Link 协作</p></div></div>
+<span class="arch-return-end" aria-hidden="true"></span><span class="arch-return-wire" aria-hidden="true"></span><span class="arch-return-start" aria-hidden="true"></span><span class="arch-mobile-return" aria-hidden="true"></span>
+<p class="arch-outcomes">进展、结果、需判断的问题</p>
+</div>
+<figcaption id="architecture-description">助手在原对话中组织后台任务，或经 Agent Link 与其他 Agent 协作；进展、结果和待判断的问题回到助手。计划到期可以触发后台任务，个人通知按订阅条件进入对话。</figcaption>
+</figure>
+<div class="follow-through"><div><h4>工作也可以有下一次</h4><p>计划让约定的工作在指定时间触发；个人 GitHub 通知按订阅条件交给指定助手。每周资料整理或仓库通知，都可以成为后续工作的起点。</p><a href="https://github.com/jjyr/pot/blob/main/docs/scheduled-tasks.md">计划与定时任务 ↗</a><a href="https://github.com/jjyr/pot/blob/main/docs/plugins.md#github-notifications">GitHub 通知 ↗</a></div><p class="architecture-boundary">执行中的权限与审批由各自的运行环境管理。</p></div>
 </article></div>
 <p class="illustration-note wrap">以上画面由真实产品组件与合成数据组成，用于解释工作方式，不代表真实业务执行。</p>
 </section>

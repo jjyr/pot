@@ -142,11 +142,22 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  for(const width of [1280,390,320]){
   await page.setViewportSize({width,height:900});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} overview overflow at ${width}`);
-  for(const selector of ['.hero-figure','.work-figure','.assistants-figure','.link-figure']){
+  for(const selector of ['.hero-figure','.work-figure','.assistants-figure']){
    await page.locator(selector).scrollIntoViewIfNeeded();
    await page.locator(selector+' img').evaluate(image=>image.decode());
    assert(await page.locator(selector).evaluate(el=>el.getBoundingClientRect().right<=innerWidth),`${locale} figure bounds at ${width}`);
   }
+  assert(await page.locator('.architecture').evaluate(el=>{
+   const nodes=[el,...el.querySelectorAll('*')];
+   return nodes.every(node=>{
+    const rect=node.getBoundingClientRect();
+    return rect.width===0||(rect.left>=0&&rect.right<=innerWidth&&node.scrollWidth<=node.clientWidth+1);
+   });
+  }),`${locale} architecture text and nodes fit at ${width}`);
+  assert.equal(await page.locator('.arch-assistant-group .arch-notification').count(),1);
+  assert.equal(await page.locator('.arch-task-unit .arch-schedule').count(),1);
+  assert.equal(await page.locator('.architecture').getAttribute('aria-describedby'),'architecture-description');
+  assert((await page.locator('#architecture-description').innerText()).length>80);
  }
  // Direct links, refresh and history must reveal their target panel.
  await page.goto(`${origin}/website/${locale}/#view-security`);
@@ -159,7 +170,8 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  await page.locator('[data-view-tab="overview"]').click();
  assert.equal(new URL(page.url()).hash,'#philosophy');
  assert(await page.locator('#philosophy').isVisible());
- assert.equal(await page.locator('.product-figure').count(),3);
+ assert.equal(await page.locator('.product-figure').count(),2);
+ assert.equal(await page.locator('.architecture').count(),1);
  await page.locator('.product-figure img').first().scrollIntoViewIfNeeded();
  await page.locator('.product-figure img').first().evaluate(img=>img.decode());
  assert(await page.locator('.product-figure img').first().evaluate(img=>img.naturalWidth>300));
