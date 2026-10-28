@@ -56,7 +56,17 @@ can publish. A query fetched before an event or successful command cannot replac
 a newer projection, including across tabs. In-memory invalidation immediately
 revokes stale selection eligibility; query subscribers consume only committed
 values. Storage failure retains the prior projection and retries the pending
-invalidation before another refresh.
+invalidation before another refresh. Reading an existing display projection does
+not depend on namespace registration writes succeeding. Pending epochs still fence
+new reads and commits; destructive scope retirement cannot fall back to retained
+data. Retained display values never grant command capabilities. A directory storage
+failure retires the shared directory generation used by command dispatch while
+retaining the last committed directory and known connectivity. Only a successful
+authoritative read of fresh directory resources restores the affected qualification;
+retained Retry data cannot restore it. Connection, serving boot, Control identities
+and an authority revision prevent an old failure from revoking a later confirmation.
+A known immutable Chat target may still commit an explicit submission locally; its
+dispatch waits for that same directory authority to recover.
 
 Shared domain queries serialize reads and coalesce changes into one later read.
 Resource commit notifications and business invalidations have separate matching
@@ -86,6 +96,13 @@ during that batch may schedule another local query without extending the forced
 call's wait. Storage failures remain explicit errors with the prior committed
 projection available for retry; directory and host metadata loaders must not
 turn them into successful offline results.
+
+Command receipts already advance resource epochs and notify domain queries.
+Provider default changes wait for that event revalidation rather than adding a
+forced read. General editor completion does not reload the assistant directory;
+its subscribed query owns presentation updates. Provider catalogue/settings
+queries declare their concrete resource paths and Control-level owner scope, so
+an unrelated usage resource commit cannot reassemble them merely by topic.
 
 Change callbacks retain their originating scope and boot identity. Each view
 declares the domains and scope it reads; unrelated notifications do not refresh
@@ -119,6 +136,41 @@ unavailable actions. Settings remains available. Handlers recheck current capabi
 scope and subscription identity; turn controls also require the same active turn,
 conversation boot and pause state before sending a request.
 
+Known scoped Task transcripts mount as retained, read-only output before metadata
+or machine labels finish loading. Current metadata gates commands and new event
+reads. Metadata IO captures serving Runtime/boot, source Control/boot, connection
+generation and owner/Space; that provenance stays with the query data and fences
+commands and history writes after asynchronous storage waits. A changed run retires
+the old transcript window as soon as current authoritative metadata confirms it,
+including while its event read is pending. Retained or failed metadata keeps the
+old output read-only. Task detail queries publish this intermediate retained
+window during refresh as well as during their first load. Task event catch-up reads
+at most 5000 events per batch, then schedules a serial next batch while the active
+detail remains subscribed. It reports catching up until the last page is committed;
+a storage failure or removed subscriber stops that continuation. Event pages carry
+`run_id` from the journal run actually queried, including a previous-launch
+fallback or unavailable source. The journal sequence remains cumulative across
+Task runs. Detail and earlier reads reject a missing or different run before any
+local write. A continuation follows freshly confirmed metadata, retires the old
+window and reconstructs the new run's checkpoint from that cumulative journal.
+
+Metadata results retain their Control, source boot and connection generation.
+Views compare this provenance when consuming a query and again before command IO;
+a late query cannot adopt a newer connection's authority. A local Task transaction
+also validates its captured generation after waiting for storage admission.
+
+Cached Chat history windows are projected in a readonly transaction from committed
+records and coverage, with the current conversation and reader-intent fences.
+Position and layout hints save independently; a failed hint write cannot hide a
+readable window. New network history still commits before presentation.
+
+Tasks, schedules and Usage allow cache browsing, local filtering and disclosures
+without current command authority. Schedule display sources use only known scoped
+identities and existing cache entries when management is unavailable. Freshness,
+capabilities and backend authorization still gate mutations. Usage cancel reads a
+normalized authority snapshot without confirming a session or changing Chat's
+reading window, and rechecks the waiting request and captured identity before POST.
+
 Task details refresh metadata, results, files and guidance alongside their
 incremental execution transcript. Schedule details and run history share the same
 background lifecycle as lists. Machine settings expand locally without reads. Agent Link state retains the
@@ -126,9 +178,23 @@ selected node and assistant directory across refreshes.
 Third-party account login status uses the same queue and retains its row during
 the bounded login-session status checks.
 
+Visible approval regions use local change events while the browser changes
+stream is confirmed healthy for the current scope, connection and boot. Opening
+a stream alone is insufficient; transport retirement clears health. Native has
+no equivalent health proof, and linked owners have no guaranteed approval push,
+so they retain a serial recovery read with 5–30 second failure backoff. Approval
+decisions still perform their own fresh context checks. Topology's ten-second
+sample-expiry redraw does no IO. Its thirty-second observation recovery reads
+runtime and Agent Link display resources through their TTLs; initial load and
+permission/Space invalidation separately read permission authority.
+
 The desktop local UI adapter consumes the same backend subscriptions and emits
 `pot:changed` through Wails. Responses and changes retain their local scope;
-Agent Link peer operations use their explicit connection identity.
+Agent Link peer operations use their explicit connection identity. A suspended
+desktop startup generation ignores changes from its retired listeners.
+The manager preserves the `/changes` SSE ID's Runtime boot in the native
+`pot:changed.boot_id` envelope, independently of domain version markers. A reset
+or changed boot revalidates desktop startup even when no Chat is selected.
 
 ## Browser stream recovery
 
@@ -242,7 +308,33 @@ the stream write deadline. No token queue grows behind a slow consumer.
 
 The browser uses EventSource and closes the old source when switching owners.
 Desktop forwards the same frames through `pot:snapshot`; its local UI adapter
-reconnects with bounded backoff. Every new connection begins with a reset. The
+reconnects with bounded backoff. The WebView allocates an opaque subscription
+token before calling `Service.Subscribe(token, space, owner, locale)`. The host
+rejects duplicate live tokens and caps active subscriptions at 128. The production
+`localui.NativeSubscriptions` bridge owns the registry and recovery loop; the
+Wails service delegates to it and broadcasts its emitted payloads.
+
+```text
+main WebView (token A) --+                        +--> pot:snapshot/subscription
+                        +--> Wails Service --> localui bridge --> Manager --> Control
+tray WebView (token B) --+                        +--> token + connection generation
+```
+
+Both `pot:snapshot` and `pot:subscription` carry `token`, `generation`,
+`space_id` and `owner`. Each connection attempt increments generation and emits
+`connecting` before its first frame. A WebView accepts only its token, scope,
+current startup generation and current connection attempt. A binding receipt
+does not mean connected; the first accepted reset must precede connected status.
+The Chat domain still confirms its session only after the snapshot commits to
+IndexedDB. Unsubscribe retires listeners immediately, including while the native
+binding promise is pending. Shutdown cancels and joins the bridge's streams.
+
+For a retained desktop client, transport loss or a changed frame boot revokes
+the startup generation before an old pending commit can confirm a session.
+Startup revalidation confirms native runtime/boot before the UI creates one
+replacement watch. Retained waiters defer resumption until that synchronous
+replacement can cancel them. The connected callback does not request another
+UI reattachment. Every new connection begins with a reset. The
 client rejects old cursors and duplicate deltas and renews the subscription on a
 base-cursor gap or boot change. Read versions prevent a concurrent older page
 from overwriting newer token text. A bounded recent-update map also covers
@@ -599,11 +691,18 @@ diagnostic details rather than entering this page exception log.
 
 ## Task execution transcripts
 
-`GET /api/v1/tasks/{id}/events?after=...&limit=...` pages the original run's
-durable ordered log. Each row has an outer sequence and its execution update:
+`GET /api/v1/tasks/{id}/events?after=...&limit=...` pages a Task's cumulative
+durable ordered log across its runs. Each row has an outer sequence and its execution update:
 message boundaries, text deltas, tool starts/output/results and turn outcomes.
-The reply contains `cursor`, `has_more` and `unavailable`. Historical remote pages
-remain cached and marked unavailable. Task details advertise `task.events` when
+The reply contains `run_id`, `cursor`, `has_more` and `unavailable`. `run_id` is
+transient API provenance from the actual selected journal launch, including a
+previous-launch fallback or an unavailable linked receipt; it does not change
+persisted events or checkpoints. Rows keep their cumulative Task sequence and
+may contain earlier execution turns. Clients confirm current metadata before
+adopting a new run, then rebuild that run's window from the cumulative journal.
+Missing or mismatched page provenance cannot append, backfill or confirm a fresh
+window, even when its sequence matches. Historical remote pages remain cached
+and marked unavailable. Task details advertise `task.events` when
 transcript reads are supported. Clients omit unsupported reads and controls;
 direct unsupported requests return a capability error. The original execution
 owner remains fixed.
@@ -673,7 +772,7 @@ SSE keepalive comments run every 15 seconds; writes have bounded deadlines that
 are cleared after flushing, so idle HTTP/2 streams remain open between frames.
 Backend shutdown or request cancellation closes subscriptions. Browser logout
 revokes access and reloads into authentication. Window/client disposal removes
-listeners and releases subscriptions.
+listeners and releases subscriptions. Browser changes streams also reject both parsed and deferred notifications from a retired client connection generation; an old stream cannot become healthy or refresh a replacement connection.
 
 Execution, schedule deadlines, authorization expiry, resource preparation and
 Agent Link recovery retain their own backend lifecycle responsibilities.

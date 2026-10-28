@@ -3,6 +3,11 @@ import {createIndexedStore,idbRequest} from './indexed-store.mjs';
 export function validStartup(value){
   return value?.schema_version===1&&value.key==='last'&&['runtime_id','boot_id','space','owner','surface'].every(key=>typeof value[key]==='string')&&!!value.runtime_id;
 }
+// Desktop retained startup needs an exact previously confirmed selection. An
+// online runtime-only record still fits v1, but cannot select an offline owner.
+export function completeStartup(value){
+  return validStartup(value)&&['boot_id','space','owner'].every(key=>!!value[key])&&['main','tray'].includes(value.surface);
+}
 export function createStartupIdentity(options){
   const db=createIndexedStore(options);
   return {

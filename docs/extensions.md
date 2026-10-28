@@ -137,3 +137,28 @@ file mutation is serialized on the owning node. Catalogue refreshes and live
 locale changes preserve open drafts. Closing or navigating away from a modified
 draft asks to discard it; pending writes block leaving. Errors keep inputs and
 provide a localized summary with diagnostics.
+
+Catalogue consumers share an owner/Space/connection-scoped query and a redacted
+memory cache. The catalogue is not a persisted editor baseline. Command commit
+invalidation owns its refresh; completion joins the same query instead of forcing
+another GET. Explicit Refresh and Retry still wait for authoritative reads and
+report their errors. OAuth uses a serial fallback with delays from 1.5 to 15
+seconds and a ten-minute lifetime. It reuses each complete catalogue response;
+changing scope or disposing the page retires its timer and response ownership.
+Authorization URLs and OAuth sessions remain transient.
+Beginning an authorization session does not invalidate the catalogue. A callback
+first joins an in-flight status read and only revalidates if that read has not
+observed the server's changed revision.
+
+Search, filters and disclosure state remain local while writes are pending.
+Editors capture an immutable submitted value, prevent duplicate writes for the
+same operation, and acknowledge only that value. New input remains dirty after
+success or failure. A successful MCP save advances the editor's exact returned
+revision; a skill save also verifies the submitted content before adopting its
+new digest. An externally changed skill retains the local draft and requires
+reopening the current version.
+Batch imports remember only their own accepted IDs, revisions and submitted
+configurations in dialog memory. Partial retries skip unchanged accepted entries;
+later edits use those exact accepted revisions. A missing operation receipt
+requires reviewing the server list and reopening import before another write.
+Changing scope, connection or boot retires an existing dialog's write authority.

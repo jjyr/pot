@@ -1,0 +1,7 @@
+import assert from 'node:assert/strict';
+import {createProductionClient} from '../../web/src/adapters/production.mjs';
+import {createMemoryProjectionStore} from '../../web/src/state/projection-store.mjs';
+import {createMemoryResourceCopies} from './resource-copies-memory.mjs';
+const previous=globalThis.EventSource,sources=[];globalThis.EventSource=class extends EventTarget{static CLOSED=2;readyState=1;constructor(){super();sources.push(this);}close(){this.readyState=2;}emit(boot){const event=new Event('changed');Object.assign(event,{data:JSON.stringify({topics:{permissions:1}}),lastEventId:boot+':1'});this.dispatchEvent(event);}};
+const client=await createProductionClient({startupIdentity:{runtime_id:'synthetic',boot_id:'boot'},resourceStorage:createMemoryProjectionStore(),resourceCopies:createMemoryResourceCopies()});client.confirmStartup({runtime_id:'synthetic',boot_id:'boot'});const received=[];const stop=client.changes((topics,scope)=>received.push({topics,scope}),{space:'local'});
+try{sources[0].emit('boot');const before=received.length;client.suspendStartup();client.confirmStartup({runtime_id:'synthetic',boot_id:'boot'});sources[0].emit('retired-boot');console.log(JSON.stringify({before,after:received.length,health:client.changesHealthy('local'),received}));assert.equal(received.length,before,'Retired browser changes must not notify a replacement connection');}finally{stop();client.resources.clear();client.resourceCopies.close();globalThis.EventSource=previous;}

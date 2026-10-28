@@ -20,6 +20,14 @@ mise run open
 `build`/`bundle` create `.local/pot/PotPreview.app`, an independent development
 bundle identified as `dev.pot.preview`. Release packaging uses the production identity. Do not replace a running product's files implicitly.
 
+`mise run test:ui-native` exercises desktop startup and subscription isolation
+without a browser or Wails frameworks. Its native binding fixture runs the real
+Go local UI manager and subscription bridge against a synthetic Control caller,
+then routes their events into the production JavaScript adapter. The fixture
+builds under a fresh home-directory temporary path and removes it after exit.
+Startup orchestration uses the production app with synthetic DOM mounting and
+locator storage; it does not replace real WebView or IndexedDB acceptance.
+
 The macOS builder downloads the pinned Wails module before applying its
 checksum-verified patches to a disposable copy. A fresh module cache is supported;
 the original cache and repository module files remain unchanged.

@@ -214,7 +214,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   const updates=client.production?createUpdates({client,locale:()=>locale,changed:()=>{if(!disposed)renderShell();},notify:message=>{error=message;updateControls();}}):null;
  if(updates)root.append(updates.dialog);
- const pages = client.production ? createPages({updates,chatVisible:()=>route==='chat'&&!root.classList.contains('show-directory'),onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, chatApprovalHost:chatApprovals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: async value => {if(value?.assistant)pendingSelection=value.assistant;const removed=value?.deletedAssistant;if(removed){attachmentUI?.forget(removed);await assistantDrafts?.forget(removed).catch(()=>{error=t('drafts.cleanupFailed');});const selected=selectedAssistant?.id===removed.owner&&selectedAssistant?.space_id===removed.space;if(selected)clearSelectedAssistant();await domains.chat.remove(removed).catch(cacheFailure);}await loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:async target=>{if(target?.assistant)directoryEpoch++;if(target?.owner&&(!selectedAssistant||selectedAssistant.id!==target.owner||selectedAssistant.space_id!==target.space)){let assistant=assistants.find(item=>item.id===target.owner&&item.space_id===target.space);if(!assistant&&target.assistant){assistant={...target.assistant,space_id:target.space};assistants=[...assistants,assistant];client.assistants=assistants;}if(assistant)await selectAssistant(assistant,false,false);}route='chat';directoryOpen=!!target?.directory;if(target?.created)saveNavigation('chat',true);renderShell();renderMessages();pages.permissions();if(!selectedAssistant&&!target?.directory)loadDirectory();}}) : null;
+ const pages = client.production ? createPages({updates,chatVisible:()=>route==='chat'&&!root.classList.contains('show-directory'),onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, chatApprovalHost:chatApprovals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: async value => {if(value?.assistant)pendingSelection=value.assistant;const removed=value?.deletedAssistant;if(removed){attachmentUI?.forget(removed);await assistantDrafts?.forget(removed).catch(()=>{error=t('drafts.cleanupFailed');});const selected=selectedAssistant?.id===removed.owner&&selectedAssistant?.space_id===removed.space;if(selected)clearSelectedAssistant();await domains.chat.remove(removed).catch(cacheFailure);}}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:async target=>{if(target?.assistant)directoryEpoch++;if(target?.owner&&(!selectedAssistant||selectedAssistant.id!==target.owner||selectedAssistant.space_id!==target.space)){let assistant=assistants.find(item=>item.id===target.owner&&item.space_id===target.space);if(!assistant&&target.assistant){assistant={...target.assistant,space_id:target.space};assistants=[...assistants,assistant];client.assistants=assistants;}if(assistant)await selectAssistant(assistant,false,false);}route='chat';directoryOpen=!!target?.directory;if(target?.created)saveNavigation('chat',true);renderShell();renderMessages();pages.permissions();if(!selectedAssistant&&!target?.directory)loadDirectory();}}) : null;
   const media = matchMedia('(max-width: 719px)');
   const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
   const saveReads=()=>{if(!client.desktop)persist('pot-ui-read-v1',JSON.stringify(replies.records()));};
@@ -514,7 +514,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function saveNavigation(next,replace=false){const value={potRoute:next,potScope:client.scope?.()||{},potDirectory:directoryOpen};window.history[replace?'replaceState':'pushState'](value,'',location.href);}
   async function navigate(next,{replace=false,record=true}={}) {
-    if(client.operationsReady===false&&next!=='chat'&&!configurationRoute(next))return;
+    if(client.operationsReady===false&&!['chat','tasks','usage','extensions'].includes(next)&&!configurationRoute(next))return;
     if (pages && !await pages.leave()) return;
     if(client.production&&record&&next==='add-assistant'&&route==='chat'){const prior=directoryOpen;directoryOpen=true;saveNavigation('chat',true);directoryOpen=prior;}
     route = next;
@@ -534,7 +534,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (inMenu) item.append(el('span', '', t(name === 'chat' ? 'assistants' : name)));
       item.classList.toggle('is-selected', route === name);
       if (route === name) item.setAttribute('aria-current', 'page');
-      item.disabled=client.operationsReady===false&&name!=='chat'&&!configurationRoute(name);
+      item.disabled=client.operationsReady===false&&!['chat','tasks','usage','extensions'].includes(name)&&!configurationRoute(name);
       item.onclick = () => navigate(name);
       fragment.append(item);
     }
@@ -671,7 +671,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function renderShell() {
     outboxDialog?.update();
     root.classList.toggle('is-local-startup',client.operationsReady===false);
-    unavailable.inert=!configurationRoute(route)&&!pages?.editing&&(client.operationScopeReady?.()===false||pages?.authorityReady===false);approvals.inert=client.operationScopeReady?.()===false;
+    unavailable.inert=!['tasks','usage','extensions'].includes(route)&&!configurationRoute(route)&&!pages?.editing&&(client.operationScopeReady?.()===false||pages?.authorityReady===false);approvals.inert=client.operationScopeReady?.()===false;
     root.classList.toggle('is-background',document.visibilityState==='hidden');
     const showingChat=route==='chat'&&!(media.matches&&directoryOpen);
     if(chatShown&&!showingChat){rememberChatPosition();cancelChatPosition();initialLayout.cancel();messageWindow.suspend();}
@@ -1112,8 +1112,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (value === 'offline') {disconnected = true;connectionError = reason?.uiKey?reason:reason?.message || t('streamDisconnected');}
       if (value === 'connected') connectionError = '';
       if(value==='connecting'&&client.production)awaitingSnapshot=true;
-      if (value === 'connected' && disconnected && client.desktop) { disconnected = false; loadSnapshot(true); }
-      else { connection = value==='connected'&&awaitingSnapshot?'connecting':value; updateControls(); }
+      connection = value==='connected'&&awaitingSnapshot?'connecting':value; updateControls();
     }});
     if(!client.production)return loadSnapshot();
     // Both SSE and the desktop subscription send an authoritative initial snapshot.
@@ -1293,9 +1292,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       domains.changed(keys,source);
  if(relevantChange(keys,['updates','spaces','runtime'],client.scope().space,source))updates?.refresh(client.scope());
       if(source.boot&&state.snapshot&&(!source.space||source.space===client.scope().space)&&state.snapshot.boot_id!==source.boot)loadSnapshot(true);
-      if(source.reset){notifications?.refresh({reset:true,space:source.space});loadDirectory();}
+      if(source.reset){notifications?.refresh({reset:true,space:source.space});}
       else if(relevantChange(keys,['task-outcomes','permissions']))notifications?.refresh({topics:keys,space:source.space});
-      if(relevantChange(keys,['spaces','assistants','assistant-mail','agent-links','conversation','runtime','permissions','tasks']))loadDirectory();
       if(relevantChange(keys,['tasks'],client.scope().space,source))refreshBackgroundTasks();
       pages.refresh(keys,{...source,domainNotified:true});if(relevantChange(keys,['permissions','spaces','runtime'],pages.approvalSpace,source))pages.permissions();
     },{space:''});

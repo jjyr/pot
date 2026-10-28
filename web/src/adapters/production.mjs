@@ -5,6 +5,8 @@ import {createTopicVersions} from '../state/changes.mjs';
 import {createEventStream} from '../state/event-stream.mjs';
 import {validSnapshot} from '../state/conversation.mjs';
 import {createFileImages} from '../state/file-images.mjs';
+import {createResourceReader} from '../state/resource-reader.mjs';
+import {resourceScope} from '../state/resource-bytes.mjs';
 import {createDisplayResources} from '../state/display-resources.mjs';
 import {configurationIdentityCurrent} from '../state/settings-access.mjs';
 // Shared product transport. Every operation captures its Space/owner before IO.
@@ -20,6 +22,24 @@ export function decodeDesktopResponse(raw) {
       &&value.error&&typeof value.error==='object'&&!Array.isArray(value.error)
       &&typeof value.error.code==='string'&&typeof value.error.message==='string')throw new APIError(value.status,value.error);
   return value;
+}
+// Startup identity reads deliberately bypass the retained client's request gate.
+// They only confirm the local Control; they never replay a business operation.
+export async function readDesktopStartup({signal}={}) {
+  const api=await import('/wails/runtime.js');
+  const invoke=(method,...args)=>api.Call.ByName(`github.com/jjyr/pot/internal/desktop.Service.${method}`,...args);
+  const read=async(method,...args)=>{
+    signal?.throwIfAborted();
+    const pending=invoke(method,...args);
+    let abort;
+    try{return await (signal?Promise.race([pending,new Promise((_,reject)=>{abort=()=>{pending.cancel?.();reject(signal.reason);};signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();})]):pending);}
+    finally{if(abort)signal.removeEventListener('abort',abort);}
+  };
+  const runtime=decodeDesktopResponse(await read('Call','GET','/api/v1/runtime',''));
+  if(!(runtime?.runtime_id||runtime?.id)||!runtime.boot_id)throw Error('Runtime identity is unavailable');
+  const readBaselines=await read('AssistantReads');
+  signal?.throwIfAborted();
+  return {runtime,readBaselines};
 }
 export function scopedPath(path, {owner = '', space = '',configuration=false,control_id,configurationBoot,expectedControl} = {}) {
   const [base, query = ''] = path.split('?');
@@ -42,6 +62,7 @@ export function normalizeSnapshot(frame, runtime, owner, space = '') {
 // for upload chunks, login polling, model checks or other read-like commands.
 export function mutationTopics(path,body,value) {
   if(path==='/api/v1/schedules/preview')return null;
+  if(path==='/api/v1/extensions/mcp/oauth/begin')return null;
   if(path==='/api/v1/attachments'||/\/(resolve|check)$/.test(path))return null;
   if(path==='/api/v1/assistants/bootstrap'&&!value?.assistant)return null;
   if(path==='/api/v1/agent-links/invitation')return null;
@@ -59,15 +80,15 @@ export function mutationTopics(path,body,value) {
   if(path.startsWith('/api/v1/spaces'))return ['spaces','machines'];
   return [];
 }
-export async function createProductionClient({desktop = false, base = '', resourceStorage, startupIdentity} = {}) {
+export async function createProductionClient({desktop = false, base = '', resourceStorage, startupIdentity,resourceCopies} = {}) {
   let runtimeAPI;
   if (desktop) runtimeAPI = await import('/wails/runtime.js');
   const service = 'github.com/jjyr/pot/internal/desktop.Service';
   const invoke = (method, ...args) => runtimeAPI.Call.ByName(`${service}.${method}`, ...args);
   const context = {owner: '', space: ''};
-  let client,connectionAbort=new AbortController();const confirmedSessions=new Map();
+  let client,displayReader,connectionAbort=new AbortController(),directoryAbort=new AbortController(),directoryRevision=0;const confirmedSessions=new Map();
   const sessionKey=scope=>JSON.stringify([scope.space||'',scope.owner||'']);
-  const acceptedCommands=new Map();
+  const acceptedCommands=new Map(),changeStreams=new Set();
   async function commitCommand(path,method,body,value,capturedScope,signature){
     const topics=mutationTopics(path,body,value);
     if(!topics?.length)return value;
@@ -124,6 +145,9 @@ export async function createProductionClient({desktop = false, base = '', resour
     if((client?.startup||options.configuration)&&options.requiredCapabilities?.length&&!options.requiredCapabilities.some(operation=>client.supports(operation,options)))throw localized(Object.assign(new APIError(403,{code:'agent_link_capability_unsupported'}),{uiKey:'agentLinks.capabilityUnavailable'}));
     const generation=client?.connectionGeneration;
     if(method==='GET')signal=signal?AbortSignal.any([signal,connectionAbort.signal]):connectionAbort.signal;
+    if(method==='GET'&&['/api/v1/spaces','/api/v1/assistants'].includes(path))signal=AbortSignal.any([signal,directoryAbort.signal]);
+    const readCurrent=()=>!signal?.aborted&&generation===client?.connectionGeneration;
+    const checkRead=()=>{if(method==='GET'&&!readCurrent())throw signal?.reason||new DOMException('Connection retired','AbortError');};
     const capturedScope={...context,...options};
     // Every assistant uses the same product routes. Agent Link resolves its
     // destination and authorization on the host; presentation IDs never choose
@@ -142,7 +166,8 @@ export async function createProductionClient({desktop = false, base = '', resour
       try {
         const raw = await pending;
         if (signal?.aborted) throw signal.reason;
-        let value;try{value=decodeDesktopResponse(raw);}catch(error){throw localized(error);}configurationResult();if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);return value;
+        if(method==='GET'&&generation!==client?.connectionGeneration)throw new DOMException('Connection retired','AbortError');
+        let value;try{value=decodeDesktopResponse(raw);}catch(error){throw localized(error);}configurationResult();if(method==='GET')await displayReader?.observe(path,value,capturedScope,{isCurrent:readCurrent,signal}).catch(error=>{client.resourceCopiesError=error;});checkRead();if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);return value;
       } finally { signal?.removeEventListener('abort', abort); }
     }
     const response = await fetch(`${base}${fullPath}`, {method, signal, credentials: 'same-origin',
@@ -152,14 +177,16 @@ export async function createProductionClient({desktop = false, base = '', resour
     if(method==='GET'&&generation!==client?.connectionGeneration)throw new DOMException('Connection retired','AbortError');
     if (!response.ok) throw localized(new APIError(response.status, value));
     configurationResult();
+    if(method==='GET')await displayReader?.observe(path,value,capturedScope,{isCurrent:readCurrent,signal}).catch(error=>{client.resourceCopiesError=error;});
+    checkRead();
     if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);
     return value;
   }
   const runtime = startupIdentity?{runtime_id:startupIdentity.runtime_id,boot_id:startupIdentity.boot_id}:await request('/api/v1/runtime', {owner: '', space: ''});
   if (!runtime || !(runtime.runtime_id || runtime.id)) throw Error('Runtime identity is unavailable');
-  const readBaselines=desktop?await invoke('AssistantReads'):[];
+  const readBaselines=desktop&&!startupIdentity?await invoke('AssistantReads'):[];
   const attachmentURLs=new Map(),attachmentLeases=new Map();
-  const attachmentKey=(attachment,options)=>{const scope={...context,...options};return JSON.stringify([scope.expectedControl||'',scope.space,scope.owner,attachment.id]);};
+  const attachmentKey=(attachment,options)=>{const scope={...context,...options};return JSON.stringify([displayReader?resourceScope(displayReader.identity(scope)):'',attachment.id,attachment.size,attachment.mime_type]);};
   const onlineWaiters=new Set();
   const whenOnline=handler=>{onlineWaiters.add(handler);return()=>onlineWaiters.delete(handler);};
   async function resourceRequest(path,options={}){
@@ -171,6 +198,13 @@ export async function createProductionClient({desktop = false, base = '', resour
   }
   client = {production: true, desktop, runtime, startup:startupIdentity,onlineReady:!startupIdentity,
     connectionGeneration:0,directoryGeneration:startupIdentity?-1:0,directorySpaces:new Set(),
+    get directoryAuthorityRevision(){return directoryRevision;},
+    set directoryAuthorityRevision(value){
+      if(value===directoryRevision)return;directoryRevision=value;
+      // Directory storage retirement and fresh confirmation can both happen
+      // within one connection. Neither may inherit an older directory observer.
+      directoryAbort.abort();directoryAbort=new AbortController();
+    },
     get operationsReady(){return client.onlineReady&&client.directoryGeneration===client.connectionGeneration;},
     operationScopeReady(options={}){
       if(!client.operationsReady)return false;
@@ -190,10 +224,19 @@ export async function createProductionClient({desktop = false, base = '', resour
       client.onlineReady=false;client.connectionGeneration++;client.directoryGeneration=-1;client.directorySpaces.clear();confirmedSessions.clear();
       connectionAbort.abort();connectionAbort=new AbortController();client.resources.resetConnection();
     },
-    confirmStartup(value){if((value.runtime_id||value.id)!==runtime.runtime_id)throw Error('Startup identity changed');Object.assign(runtime,value);client.onlineReady=true;for(const handler of [...onlineWaiters])handler();onlineWaiters.clear();}, transport:request,request:resourceRequest,readBaselines,
-    messageFiles(message,options={}){return request(`/api/v1/message-files/${encodeURIComponent(message)}?${new URLSearchParams({task_id:options.task||''})}`,options);},
+    confirmStartup(value){
+      if((value.runtime_id||value.id)!==runtime.runtime_id){client.suspendStartup();throw Error('Startup identity changed');}
+      if(client.onlineReady&&runtime.boot_id&&value.boot_id!==runtime.boot_id)client.suspendStartup();
+      Object.assign(runtime,value);client.onlineReady=true;
+      const resume=()=>{if(!client.onlineReady)return;for(const handler of [...onlineWaiters]){if(onlineWaiters.delete(handler))handler();}};
+      // The mounted desktop UI synchronously replaces its scoped watches on
+      // confirmation. Let it cancel retained waiters before starting a stream.
+      if(desktop)queueMicrotask(resume);else resume();
+    }, transport:request,request:resourceRequest,readBaselines,
+    messageFiles(message,options={}){return displayReader.bindings(message,options);},
+
     retryMessageFile(message,ref,options={}){return request(`/api/v1/message-files/${encodeURIComponent(message)}/${encodeURIComponent(ref)}?${new URLSearchParams({task_id:options.task||''})}`,{...options,method:'POST'});},
-    acquireResource:createDisplayResources(request,()=>context,(resource,path,scope,operation='content',token='')=>desktop?`/pot-resource-content?${new URLSearchParams({id:resource.id,path,assistant_id:scope.owner,space_id:scope.space,render:operation==='render'?'1':'0',token})}`:`${base}${scopedPath(`/api/v1/resources/${encodeURIComponent(resource.id)}/${operation}?${new URLSearchParams({path,token})}`,scope)}`),
+
     async downloadResource(resource,options={}){
       const scope={...context,...options};
       if(desktop)return invoke('DownloadResource',resource.id,resource.download.path.split('/').at(-1),scope.owner,scope.space,'@download');
@@ -245,23 +288,18 @@ export async function createProductionClient({desktop = false, base = '', resour
       const scope={...context,...options},key=attachmentKey(attachment,scope);
       if(attachmentURLs.has(key))return attachmentURLs.get(key);
       const pending=(async()=>{
-        const parts=[];let offset=0;
-        while(offset<attachment.size){
-          const chunk=await request(`/api/v1/attachments/${encodeURIComponent(attachment.id)}?offset=${offset}`,scope);
-          if(chunk.offset!==offset||chunk.size!==attachment.size||chunk.revision!==attachment.id)throw Error('Attachment read changed');
-          const binary=atob(chunk.data),bytes=Uint8Array.from(binary,c=>c.charCodeAt(0));
-          if(!bytes.length||bytes.length>192*1024||offset+bytes.length>attachment.size)throw Error('Invalid attachment chunk');
-          parts.push(bytes);offset+=bytes.length;
-        }
-        return URL.createObjectURL(new Blob(parts,{type:attachment.mime_type}));
+        const source=displayReader.identity(scope),blob=await displayReader.attachment(attachment,scope);
+        if(!displayReader.current(source))throw new DOMException('Attachment released','AbortError');
+        return URL.createObjectURL(blob);
       })();
       attachmentURLs.set(key,pending);
-      pending.catch(()=>attachmentURLs.delete(key));
+      pending.catch(()=>{if(attachmentURLs.get(key)===pending)attachmentURLs.delete(key);});
       return pending;
     },
     async downloadAttachment(attachment,options={}){
       const scope={...context,...options};
       if(desktop)return invoke('DownloadAttachment',attachment.id,attachment.name,scope.owner,scope.space);
+      await request(`/api/v1/attachments/${encodeURIComponent(attachment.id)}?offset=0`,scope);
       const release=client.retainAttachment(attachment,scope);let url;try{url=await client.attachmentURL(attachment,scope);}catch(reason){release();throw reason;}const link=document.createElement('a');link.href=url;link.download=attachment.name;document.body.append(link);try{link.click();}finally{link.remove();setTimeout(release,1000);}
     },
     releaseAttachments(){for(const pending of attachmentURLs.values())pending.then(url=>URL.revokeObjectURL(url)).catch(()=>{});attachmentURLs.clear();},
@@ -279,27 +317,48 @@ export async function createProductionClient({desktop = false, base = '', resour
     subscribe(onSnapshot, onStatus = () => {}, options = {}) {
       const scope = {...context,...options};
       if(!client.onlineReady){let active=true,stop;onStatus('connecting');const cancel=whenOnline(()=>{if(active)stop=client.subscribe(onSnapshot,onStatus,scope);});return ()=>{active=false;cancel();stop?.();};}
-      let active = true, token;
+      let active = true;
+      const connectionGeneration=client.connectionGeneration;
+      const current=()=>active&&client.onlineReady&&connectionGeneration===client.connectionGeneration;
       const deliver = value => {
-        if (!active||!client.onlineReady) return;
+        if (!current()) return;
         let snapshot;
         try { snapshot = normalizeSnapshot(value, runtime, scope.owner, scope.space); }
         catch (reason) { onStatus('offline', reason); return; }
         onSnapshot(snapshot);
       };
       if (desktop) {
+        // Allocate before Subscribe: the native goroutine can emit its initial
+        // reset before the binding promise resolves, even in a second WebView.
+        const token=crypto.randomUUID();let source=0,hasFrame=false;
+        const matches=value=>current()&&value.token===token&&value.space_id===scope.space&&value.owner===scope.owner&&Number.isSafeInteger(value.generation)&&value.generation>0;
+        const revalidate=()=>{client.suspendStartup();client.revalidateStartup?.();};
+        const failure=reason=>localized(Object.assign(reason,{uiKey:reason.uiKey||'connection.streamUnavailable'}));
+        onStatus('connecting');
         const stop = runtimeAPI.Events.On('pot:snapshot', event => {
           const value = event.data;
-          if (value.space_id === scope.space && value.owner === scope.owner) deliver(value.snapshot);
+          if(!matches(value)||value.generation!==source)return;
+          if(client.startup&&value.snapshot?.view?.state?.boot_id!==runtime.boot_id){revalidate();return;}
+          let snapshot;try{snapshot=normalizeSnapshot(value.snapshot,runtime,scope.owner,scope.space);if(!validSnapshot(snapshot)||!hasFrame&&snapshot.kind!=='reset')throw Error('Invalid initial conversation frame');}
+          catch(reason){onStatus('offline',failure(reason));if(client.startup)revalidate();return;}
+          hasFrame=true;deliver(value.snapshot);
         });
         const stopStatus=runtimeAPI.Events.On('pot:subscription',event=>{
           const value=event.data;
-          if(active&&value.space_id===scope.space&&value.owner===scope.owner)onStatus(value.status,value.error?new Error(value.error):undefined);
+          if(!matches(value)||value.generation<source)return;
+          if(value.status==='connecting'){
+            if(value.generation===source)return;
+            source=value.generation;hasFrame=false;
+            // A reconnect may belong to a new Control boot. Verify it before
+            // accepting any frame; startup confirmation owns the new attachment.
+            if(source>1&&client.startup){revalidate();return;}
+          }else if(value.generation!==source||value.status==='connected'&&!hasFrame)return;
+          if(value.status==='offline')confirmedSessions.delete(sessionKey(scope));
+          onStatus(value.status,value.error?failure(new Error(value.error)):undefined);
+          if(value.status==='offline'&&client.startup)revalidate();
         });
-        invoke('Subscribe', scope.space, scope.owner, client.uiLocale?.()||'en').then(value => {
-          token = value; if (!active) invoke('Unsubscribe', value).catch(() => {}); else onStatus('connected');
-        }).catch(reason => { if (active) onStatus('offline', reason); });
-        return () => { active = false; stop(); stopStatus(); if (token) invoke('Unsubscribe', token).catch(() => {}); };
+        invoke('Subscribe',token,scope.space,scope.owner,client.uiLocale?.()||'en').then(()=>{if(!active)invoke('Unsubscribe',token).catch(()=>{});}).catch(reason=>{if(current()){onStatus('offline',failure(reason));if(client.startup)revalidate();}});
+        return () => { active = false; stop(); stopStatus(); confirmedSessions.delete(sessionKey(scope));invoke('Unsubscribe', token).catch(() => {}); };
       }
       return createEventStream({url:`${base}${scopedPath('/api/v1/events?'+new URLSearchParams({locale:client.uiLocale?.()||'en'}),scope)}`,
         events:{conversation:(event,initial)=>{
@@ -309,26 +368,38 @@ export async function createProductionClient({desktop = false, base = '', resour
           return ()=>onSnapshot(snapshot);
         }},onStatus:guardReconnect(onStatus),terminal:terminalStreamFailure});
     },
+    changesHealthy(space=''){return !desktop&&client.onlineReady&&[...changeStreams].some(stream=>stream.healthy&&stream.generation===client.connectionGeneration&&stream.boot===client.runtime.boot_id&&(!stream.space||stream.space===space));},
     changes(onChange,{space=context.space}={}) {
       const scope = {...context,space};
       if(!client.onlineReady){let active=true,stop;const cancel=whenOnline(()=>{if(active)stop=client.changes(onChange,{space});});return ()=>{active=false;cancel();stop?.();};}
+      const health={space,generation:client.connectionGeneration,boot:client.runtime.boot_id,healthy:false};changeStreams.add(health);
       const versions=createTopicVersions();
+      const generation=client.connectionGeneration;
       const notify=(topics,sourceSpace,boot)=>{const changed=versions(topics,sourceSpace,boot);if(changed.length)onChange(changed,{space:sourceSpace,boot});};
-      if (desktop) return runtimeAPI.Events.On('pot:changed', event => {
+      if (desktop) {const stop=runtimeAPI.Events.On('pot:changed', event => {
+        if(!client.onlineReady||generation!==client.connectionGeneration)return;
         if(scope.space&&event.data.space_id!==scope.space)return;
+        if(client.startup&&(event.data.reset||event.data.boot_id&&event.data.boot_id!==runtime.boot_id)){client.suspendStartup();client.revalidateStartup?.();return;}
         if(event.data.reset){onChange([],{space:event.data.space_id,reset:true});return;}
         notify(event.data.topics,event.data.space_id,event.data.boot_id||'');
-      });
+      });return()=>{changeStreams.delete(health);stop();};}
       const deliver=(event,initial)=>{
-        if(!client.onlineReady)return false;
+        if(!client.onlineReady||generation!==client.connectionGeneration)return false;
         const value=JSON.parse(event.data),id=event.lastEventId||'',separator=id.lastIndexOf(':');
-        return ()=>{if(initial)onChange([],{space:scope.space,reset:true});
+        return ()=>{if(!client.onlineReady||generation!==client.connectionGeneration)return;health.boot=separator<0?'':id.slice(0,separator);health.healthy=!!health.boot;if(initial)onChange([],{space:scope.space,reset:true});
           notify(value.topics||value,scope.space,separator<0?'':id.slice(0,separator));};
       };
-      return createEventStream({url:`${base}${scopedPath('/api/v1/changes',scope)}`,
-        events:{changed:deliver,changes:deliver,message:deliver},onStatus:guardReconnect(),terminal:terminalStreamFailure});
+      const reconnect=guardReconnect(),stop=createEventStream({url:`${base}${scopedPath('/api/v1/changes',scope)}`,
+        events:{changed:deliver,changes:deliver,message:deliver},onStatus:(state,reason)=>{health.healthy=false;reconnect(state,reason);},terminal:terminalStreamFailure});
+      return()=>{changeStreams.delete(health);stop();};
     },
   };
+  displayReader=createResourceReader(client,request,{base,desktop,...(resourceCopies?{copies:resourceCopies}:{})});
+  client.resourceCopies=displayReader.copies;
+  client.onResourceRetire=(scope,listener)=>{const key=resourceScope(displayReader.identity(scope));return displayReader.copies.subscribe(event=>{if(event.kind==='clear'||event.kind==='retire'&&event.scope===key)listener();});};
+  client.retireResourceCopies=scope=>displayReader.retire(displayReader.identity(scope));
+  client.acquireResource=createDisplayResources(displayReader.read,()=>context,(resource,path,scope,operation='content',token='')=>desktop?`/pot-resource-content?${new URLSearchParams({id:resource.id,path,assistant_id:scope.owner,space_id:scope.space,render:operation==='render'?'1':'0',token})}`:`${base}${scopedPath(`/api/v1/resources/${encodeURIComponent(resource.id)}/${operation}?${new URLSearchParams({path,token})}`,scope)}`,{copies:displayReader.copies,identity:displayReader.identity,current:displayReader.current});
+  displayReader.copies.subscribe(event=>{if(event.kind==='clear'||event.kind==='retire'){for(const [key,pending] of attachmentURLs){if(event.kind==='clear'||JSON.parse(key)[0]===event.scope){attachmentURLs.delete(key);pending.then(url=>URL.revokeObjectURL(url)).catch(()=>{});}}}});
   client.resources=createResourceReads(client,{storage:resourceStorage});
   client.read=(path,options)=>client.resources.read(path,options);
   return client;

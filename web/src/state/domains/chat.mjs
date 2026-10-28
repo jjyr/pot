@@ -28,7 +28,9 @@ export function createChatDomain(client){
         const version=generation;
         const check=()=>{current();if(signal?.aborted)throw signal.reason;if(version!==generation||!valid())throw new DOMException('Chat history retired','AbortError');};
         check();if(!snapshot||!session.hasHistory)return null;
-        let page=cache?await stored(cache.readPage(key,query)):null;check();
+        const cached=cache?await stored(cache.projectPage(key,query,{identity:{boot_id:snapshot.boot_id,conversation_id:snapshot.conversation_id},context:commitContext,around,currentPosition,validate:check})):null;check();
+        if(cached){snapshot=cached;return cached;}
+        let page=null;
         if(!page){
           if(cachedOnly)return null;
           const requestKey=JSON.stringify([key,query]);let flight=historyReads.get(requestKey);

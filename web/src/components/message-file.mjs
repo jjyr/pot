@@ -21,7 +21,7 @@ function register(){
       const read=this.readGeneration=(this.readGeneration||0)+1;
       const generation=this.generation,abort=this.abort,current=()=>this.isConnected&&this.started&&generation===this.generation&&read===this.readGeneration&&!abort.signal.aborted;
       try{
-        const rows=await this.options.messageFiles(this.message,{signal:abort.signal});if(!current())return;
+        const rows=await this.options.messageFiles(this.message,{signal:abort.signal,sourceText:this.options.sourceText});if(!current())return;
         const row=rows.find(row=>row.href===this.reference.href);this.row=row;
         // Completion can reach the UI just before the separate binding commit.
         // Poll metadata briefly; an absent binding never authorizes a path read.
@@ -38,7 +38,7 @@ function register(){
       }catch(error){if(current()){this.dataset.state='error';this.state=error.status?'unavailable':'source_offline';this.showStatus();this.retryButton();}}
     }
     showStatus(){if(!this.status){this.status=document.createElement('span');this.status.className='file-reference-status';this.status.setAttribute('role','status');this.append(this.status);}this.refresh();}
-    updatePreparedProperties(properties){const pending=this.options.pending;Object.assign(this,properties);if(pending&&!this.options.pending&&this.started&&!this.preview){clearTimeout(this.timer);this.load();}}
+    updatePreparedProperties(properties){const pending=this.options.pending,sourceText=this.options.sourceText;Object.assign(this,properties);if((pending&&!this.options.pending||sourceText!==this.options.sourceText)&&this.started&&!this.preview){clearTimeout(this.timer);this.emptyReads=0;this.load();}}
     open(){
       if(!this.row?.resource)return;this.dialog?.close();this.releaseDialogScroll?.();
       const dialog=this.dialog=document.createElement('dialog');dialog.className='file-reference-dialog';dialog.setAttribute('aria-label',this.reference.label||this.row.resource.name);

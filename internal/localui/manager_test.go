@@ -69,3 +69,26 @@ func TestChangedEventRejectsUnchangedAndRetainsScopeReset(t *testing.T) {
 		t.Fatal("restart baseline discarded")
 	}
 }
+
+func TestChangedEventPreservesProductionSSEBoot(t *testing.T) {
+	first, versions, dirty := changedEvent(Event{ID: "boot-a:1", Data: json.RawMessage(`{"tasks":1}`)}, nil)
+	if !dirty || string(versions["boot_id"]) != `"boot-a"` || !json.Valid(first.Data) {
+		t.Fatalf("lost initial SSE identity: %s %+v", first.Data, versions)
+	}
+	_, _, dirty = changedEvent(Event{ID: "boot-a:2", Data: json.RawMessage(`{"tasks":1}`)}, versions)
+	if dirty {
+		t.Fatal("SSE sequence without a version change invalidated state")
+	}
+	changed, _, dirty := changedEvent(Event{ID: "boot-b:1", Data: json.RawMessage(`{"tasks":1}`)}, versions)
+	var value map[string]json.RawMessage
+	_ = json.Unmarshal(changed.Data, &value)
+	if !dirty || string(value["boot_id"]) != `"boot-b"` || string(value["tasks"]) != "1" {
+		t.Fatalf("boot change did not invalidate the complete baseline: %s", changed.Data)
+	}
+	for _, body := range []string{`null`, `{"versions":null}`} {
+		_, kept, dirty := changedEvent(Event{ID: "boot-c:1", Data: json.RawMessage(body)}, versions)
+		if !dirty || string(kept["boot_id"]) != `"boot-a"` {
+			t.Fatalf("invalid version map established a boot: %s", body)
+		}
+	}
+}

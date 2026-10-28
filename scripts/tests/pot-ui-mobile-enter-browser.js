@@ -43,7 +43,7 @@ async (page, {base='http://127.0.0.1:18729',captureOnly=false,browser=page.conte
         (path==='/api/v1/tasks/query'||path==='/api/v1/tasks/catalog')?{items:[{id:'task-enter',title:'Enter fixture task',assistant_id:'alpha',phase:'running'}],total:1}:
         path==='/api/v1/tasks/task-enter'?{run_id:'task-run',info:{phase:'running'},request:{text:'Fixture task goal'},config:{model:'fixture'},capabilities}:
         path==='/api/v1/tasks/task-enter/messages'?[]:
-        path==='/api/v1/tasks/task-enter/events'?{events:[],cursor:0,has_more:false}:
+        path==='/api/v1/tasks/task-enter/events'?{run_id:'task-run',events:[],cursor:0,has_more:false}:
         path==='/api/v1/completions'?{items:[{token:'/skill:review',label:'Review',detail:'Review changes'}]}:{items:[]};
       await route.fulfill({json:data});
     });

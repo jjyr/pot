@@ -68,6 +68,10 @@ for(const topic of ['tasks','runner']){
 // newly selected Space, and never place request credentials into a read cache.
 const {createProductionClient}=await import('../../web/src/adapters/production.mjs');
 const originalFetch=globalThis.fetch,transportCalls=[];let save=deferred(),version=1;
+const committedRefresh=(resources,path,space)=>new Promise((resolve,reject)=>{
+  const timer=setTimeout(()=>{stop();reject(Error('Resource refresh did not commit: '+path));},5000);
+  const stop=resources.subscribe((meta,error)=>{if(meta.path!==path||meta.space!==space)return;clearTimeout(timer);stop();if(error)reject(error);else resolve();});
+});
 globalThis.fetch=async(path,options={})=>{transportCalls.push({path,method:options.method});const url=new URL(path,'http://fixture');if(options.method==='POST'&&url.pathname==='/api/v1/assistants/bootstrap')return new Response(JSON.stringify({assistant:null}));if(options.method==='POST'){await save.promise;version++;return new Response(JSON.stringify({saved:true}));}return new Response(JSON.stringify(url.pathname==='/api/v1/runtime'?{runtime_id:'transport',boot_id:'boot'}:url.pathname==='/api/v1/providers'?{profiles:[{id:'one',name:'Fixture',revision:version}]}:{version}));};
 try{
   const transport=await createProductionClient({resourceStorage:createMemoryProjectionStore()});transport.spaces=[{id:'a',control_id:'a'},{id:'b',control_id:'b'}];
@@ -75,8 +79,8 @@ try{
   transport.setScope({space:'b',owner:'beta'});await transport.read('/api/v1/providers');transport.setScope({space:'a',owner:'alpha'});
   const writing=transport.request('/api/v1/providers',{method:'POST',body:{api_key:'fixture-private-key'}});transport.setScope({space:'b',owner:'beta'});save.resolve();await writing;
   const beforeReads=transportCalls.length;await transport.read('/api/v1/providers');assert.equal(transportCalls.length,beforeReads,'A save finishing after navigation cannot invalidate the new Space');
-  transport.setScope({space:'a',owner:'alpha'});assert.equal((await transport.read('/api/v1/providers')).profiles[0].revision,1,'Save invalidation preserves visible content while refreshing');await tick();assert.equal((await transport.read('/api/v1/providers')).profiles[0].revision,2);
-  await transport.read('/api/v1/agent/routing');await tick();assert.equal(transportCalls.filter(call=>call.path.includes('/agent/routing')).length,2,'Saving providers invalidates associated routing data');
+  transport.setScope({space:'a',owner:'alpha'});const providersCommitted=committedRefresh(transport.resources,'/api/v1/providers','a');assert.equal((await transport.read('/api/v1/providers')).profiles[0].revision,1,'Save invalidation preserves visible content while refreshing');await providersCommitted;assert.equal((await transport.read('/api/v1/providers')).profiles[0].revision,2);
+  const routingCommitted=committedRefresh(transport.resources,'/api/v1/agent/routing','a');await transport.read('/api/v1/agent/routing');await routingCommitted;assert.equal(transportCalls.filter(call=>call.path.includes('/agent/routing')).length,2,'Saving providers invalidates associated routing data');
   // With no Provider, first-use bootstrap is a read-only no-op. Invalidating
   // directory reads here would make their background refresh bootstrap again.
   await transport.read('/api/v1/assistants');await transport.read('/api/v1/spaces');

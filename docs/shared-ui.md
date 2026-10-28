@@ -916,5 +916,25 @@ successful online shell installation before offline reopening works. Offline
 support covers cached chat windows, local drafts and explicit local submissions,
 not all history, attachments' remote content or management pages. The shell cache
 does not run background delivery; the separate [message outbox](chat-outbox.md)
-resumes in an open application. Native startup continues through the native runtime
-adapter.
+resumes in an open application.
+
+Desktop transport uses the native runtime adapter, independently of whether its
+first displayed data comes from local storage. Desktop startup reuses the v1
+locator and committed UI caches, without a new persisted format. It opens a
+retained interface only when the locator includes a previously confirmed
+runtime, nonempty boot, Space, assistant and main/tray reading surface. A
+runtime-only locator cannot guess an assistant from the directory. Normal
+successful runtime and directory confirmation allow the existing view-save path
+to remember that exact selection; retained-only browsing cannot overwrite the
+confirmed locator.
+
+Cached desktop startup does not wait for native runtime or AssistantReads.
+The background verification reads both through the native binding with a bounded
+deadline, retrying temporary failures. It never uses browser access endpoints.
+Runtime confirmation restores reads; current directory and committed session
+barriers still control business authority. A changed Control disposes the old
+UI and writers before mounting its namespace, while a changed boot retires the
+prior connection's authority. First startup without a complete locator remains
+unavailable when the local Control cannot be confirmed. Internet offline events
+do not revoke a working local desktop Control. Native transport failure does
+trigger revalidation, as described in [UI events](ui-events.md).

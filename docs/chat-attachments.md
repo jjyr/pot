@@ -124,3 +124,10 @@ it creates neither another upload nor another user message. The retry receipt is
 idempotent. Unknown message acceptance reconciles its fixed request receipt before an
 identical retry. Unknown model outcomes retain the existing execution recovery
 fence and are never automatically replayed.
+
+Successfully read sent image/PDF originals can also have an independent bounded
+[offline display copy](display-resources.md#persistent-offline-display-copies).
+This copy is created through the owner-bound read API, never by transferring a
+composer/outbox Blob. The outbox still releases its original only after acceptance
+and local projection commit. Displaying a saved original does not authorize a
+new download; the live owner-bound read/save check remains required.

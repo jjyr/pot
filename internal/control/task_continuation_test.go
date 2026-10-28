@@ -222,6 +222,9 @@ func TestTaskArchiveBatchAndContinuedWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if events.RunID != next.RunID {
+		t.Fatalf("continuation page has wrong source run: %q, want %q", events.RunID, next.RunID)
+	}
 	seen := map[string]bool{}
 	applied := false
 	for i, event := range events.Events {
