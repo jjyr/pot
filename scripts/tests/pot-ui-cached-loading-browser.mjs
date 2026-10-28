@@ -82,6 +82,7 @@ window.addEventListener('pagehide',()=>{pages.dispose();client.resources?.clear(
 
 async function chatChecks(){
   const {mountApp}=await import('/web/src/components/ui.js');
+  const {createChatCache}=await import('/web/src/state/chat-cache.mjs');
   let subscriptions=0,snapshotReads=0,change,deliver,chatBoot='boot',holdChatSnapshot=false;const directoryReads={catalog:0,a:0,b:0};
   context={space:'a',owner:'alpha'};delays={};failProviders=false;
   const raw=client.request;
@@ -94,13 +95,26 @@ async function chatChecks(){
   host.replaceChildren();host.style.height='700px';const dispose=mountApp(host,client);
   await wait(()=>host.querySelector('.message-column')?.textContent.includes('a alpha confirmed'));
   const select=name=>{const row=[...host.querySelectorAll('.assistant-row')].find(node=>node.querySelector('.assistant-title').textContent===name);if(!row)throw Error('Missing assistant '+name);row.click();};
-  select('Beta');await wait(()=>host.querySelector('.message-column').textContent.includes('a beta confirmed'));select('Alpha');await pause(40);
-  check(host.querySelector('.message-column').textContent.includes('a alpha confirmed'),'Chat restores confirmed cached messages before subscription');
+  select('Beta');await wait(()=>host.querySelector('.message-column').textContent.includes('a beta confirmed'));
+  const initialCache=createChatCache({name:client.chatCacheName});let initialAlpha,wrongControl,wrongSpace,wrongOwner;
+  try{initialAlpha=await initialCache.read(JSON.stringify(['ca','a','alpha']));wrongControl=await initialCache.read(JSON.stringify(['impossible-control','a','alpha']));wrongSpace=await initialCache.read(JSON.stringify(['ca','impossible-space','alpha']));wrongOwner=await initialCache.read(JSON.stringify(['ca','a','impossible-owner']));}finally{initialCache.close();}
+  check(initialAlpha?.snapshot.runtime_id==='fixture-control'&&initialAlpha.snapshot.owner_id===JSON.stringify(['a','alpha'])&&initialAlpha.snapshot.conversation_id==='alpha'&&initialAlpha.snapshot.boot_id==='boot'&&initialAlpha.snapshot.messages.some(message=>message.text==='a alpha confirmed'),'Same-Space return has the already committed cached identity');
+  check(wrongControl===null&&wrongSpace===null&&wrongOwner===null,'Cached identity cannot cross Control, Space or assistant');
+  // A 40 ms textContent read can see either an empty or a connected hidden
+  // candidate. Hold subscription delivery until the cache is actually prepared
+  // and visible, and reject wrong-scope content on every visible frame.
+  holdChatSnapshot=true;const firstFrames=[];let firstSampling=true;const firstStarted=performance.now();
+  const firstSample=()=>{const history=host.querySelector('.history:not([data-preparation-surface])');return {at:performance.now(),scope:{...client.scope()},selected:host.querySelector('.assistant-row.is-selected')?.dataset.viewKey,visible:!!history&&getComputedStyle(history).visibility==='visible'&&!history.hidden,busy:history?.getAttribute('aria-busy'),preparedPending:history?.querySelector('.message-window')?.hasAttribute('aria-busy'),text:history?.textContent};};
+  function firstTick(){if(!firstSampling)return;firstFrames.push(firstSample());requestAnimationFrame(firstTick);}requestAnimationFrame(firstTick);select('Alpha');
+  try{await wait(()=>{const state=firstSample();return state.scope.space==='a'&&state.scope.owner==='alpha'&&state.selected===JSON.stringify(['a','alpha'])&&state.visible&&!state.busy&&!state.preparedPending&&state.text.includes('a alpha confirmed');});await new Promise(requestAnimationFrame);}
+  finally{firstSampling=false;window.cachedFirstReturnEvidence={started:firstStarted,frames:firstFrames,streamHeld:holdChatSnapshot,cache:{key:JSON.stringify(['ca','a','alpha']),snapshot:initialAlpha.snapshot},negativeIdentities:{wrongControl,wrongSpace,wrongOwner}};}
+  check(holdChatSnapshot&&firstFrames.some(frame=>frame.visible&&frame.text.includes('a alpha confirmed'))&&!firstFrames.some(frame=>frame.visible&&frame.scope.space==='a'&&frame.scope.owner==='alpha'&&(frame.text.includes('a beta confirmed')||frame.text.includes('b alpha confirmed'))),'Chat restores confirmed cached messages before subscription');
   check(host.querySelector('.connection-status').textContent.includes('Connecting'),'Cached chat waits for an authoritative snapshot');
+  holdChatSnapshot=false;
   await pause(300);let rolledBack=false;const column=host.querySelector('.message-column'),observer=new MutationObserver(()=>{rolledBack ||= column.textContent.includes('old stream');});observer.observe(column,{subtree:true,childList:true,characterData:true});
   deliver(3,'newer stream');await pause(30);deliver(2,'old stream');await wait(()=>column.textContent.includes('newer stream')&&!column.querySelector('.message-window[aria-busy]'));observer.disconnect();check(!rolledBack&&column.textContent.includes('newer stream'),'Older snapshots cannot roll back streaming content');
   select('Remote Alpha');await wait(()=>host.querySelector('.message-column').textContent.includes('b alpha confirmed'));
-  const {createChatCache}=await import('/web/src/state/chat-cache.mjs');const committedCache=createChatCache({name:client.chatCacheName});
+  const committedCache=createChatCache({name:client.chatCacheName});
   const cachedKey=JSON.stringify(['ca','a','alpha']);let committedAlpha;
   try{committedAlpha=await committedCache.read(cachedKey);}finally{committedCache.close();}
   check(committedAlpha?.snapshot.runtime_id==='fixture-control'&&committedAlpha.snapshot.owner_id===JSON.stringify(['a','alpha'])&&committedAlpha.snapshot.conversation_id==='alpha'&&committedAlpha.snapshot.boot_id==='boot'&&committedAlpha.snapshot.messages.some(message=>message.text==='a newer stream'),'Returning scope has the correct already committed cached identity');

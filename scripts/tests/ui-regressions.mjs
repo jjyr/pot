@@ -45,7 +45,7 @@ else {
         if(name==='machines')return contract('pot-ui-machines-browser.js',page,{origin:server.origin});
         if(/^(assistant-start|first-connection|settings|composer|usage)-/.test(name)||name==='linked-approvals'||name==='patch-approvals')return focused(page,name,server.origin);
         if(name==='controller')return contract('pot-ui-conversation-controller-browser.js',page,{origin:server.origin});
-        if(fixtures[name]){const result=await fixture(page,server.origin,name,fixtures[name]);if(name==='cached-loading.html')return {...result,cacheReturn:await page.evaluate(()=>window.cachedScopeReturnEvidence)};return name==='chat-cache-ui.html'?{...result,readiness:await page.evaluate(()=>window.cacheViewportEvidence)}:result;}
+        if(fixtures[name]){const result=await fixture(page,server.origin,name,fixtures[name]);if(name==='cached-loading.html')return {...result,firstCacheReturn:await page.evaluate(()=>window.cachedFirstReturnEvidence),cacheReturn:await page.evaluate(()=>window.cachedScopeReturnEvidence)};return name==='chat-cache-ui.html'?{...result,readiness:await page.evaluate(()=>window.cacheViewportEvidence)}:result;}
         if(name==='scroll-components')return fixture(page,server.origin,'chat-scroll.html?contract=window','DONE scrolling checks');
         if(name==='task-continuity')return taskContinuity(page,{origin:server.origin});
         if(name==='task-history')return taskHistoryBrowser(page,{origin:server.origin});
