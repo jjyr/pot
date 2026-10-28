@@ -486,6 +486,18 @@ late resource content. Live activity, elapsed-time text and disclosure changes
 use this same preparation entry point. Width and font changes retain the old
 committed layout until the replacement measurements are ready. Live observer
 callbacks cannot insert unprepared sizes into the index.
+Interactive HTML keeps the viewport measured before publication; later document
+growth scrolls inside it. A genuine width change prepares its new viewport before
+committing, preserving the original iframe document, focus and application state.
+Ready preview wrappers do not add another scrolling layer; the content viewport
+owns scrolling. Unresolved deadline fallbacks retain a bounded scrolling frame.
+Background task regions reconcile stable keyed nodes and publish their candidate
+records only on commit. Cancelled preparations cannot replace live click targets.
+Task presentation updates invalidate dependent tool rows without reopening the
+layout generation of unrelated replies or embeds. Elapsed clocks still prepare
+their new text and geometry. The composer, its mode-switching button and icons
+remain mounted independently of these transactions; selecting the current chat
+does not retire its subscription or interrupt composition.
 A delayed or repeated measurement of an already accounted height yields zero
 remaining displacement. Independent height changes can receive independent
 corrections. The controller records requested and actual native landings. When
@@ -780,3 +792,15 @@ Animation frames advance only active presentation effects; Reduced Motion makes
 activity indicators static and disables avatar/tray animation. Local stream keepalives do not add UI snapshot reads.
 
 See [Development](development.md) for backend and shared UI verification commands.
+
+
+## Silent page loading
+
+Page reads and metadata refreshes do not insert temporary loading prose. Existing
+content stays visible during refresh; asynchronous controls use `aria-busy` and
+retain their normal labels. Initial empty surfaces stay silent, and pagination
+keeps its previous summary or a neutral page number until results arrive.
+Assistant settings preserve editable known fields while individual sections load.
+Errors and retry actions remain visible, including failed startup, permissions,
+model discovery and metadata reads. Operation progress such as downloading an
+upgrade is separate from page loading.

@@ -114,7 +114,8 @@ elapsed 90-minute interval). Definition edits preserve each in-flight occurrence
 Model selection uses optional `spec.profile` (configured Provider connection ID)
 and `spec.model`. Selection is autonomous and requires no routing approval or
 allowlist. Each occurrence resolves these fields anew; omitting both uses the
-owning assistant's active configuration. See [Task routing](task-coordination.md#autonomous-model-routing).
+owning assistant's Task default, or its active configuration when that default is
+unset. See [Task routing](task-coordination.md#autonomous-model-routing).
 
 Creation saves `spec.machine_id` (defaulting to the owning node when omitted).
 Updates without `machine_id` preserve the saved selection. Every occurrence

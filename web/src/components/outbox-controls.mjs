@@ -1,3 +1,4 @@
+import {icon} from './icons.mjs';
 import {translate} from '../locales/messages.mjs';
 import {outboxIdentityKey} from '../state/chat-outbox-store.mjs';
 const node=(tag,className,text)=>{const value=document.createElement(tag);value.className=className;if(text!==undefined)value.textContent=text;return value;};
@@ -14,5 +15,13 @@ export function outboxControls(value,{outbox,editors,locale,changed,notify}){
       host.append(editor,action('outbox.save',async()=>{const saved=await outbox.edit(value,editors.get(key));if(saved)editors.delete(key);else notify(t('outbox.changed'));changed();}),action('outbox.discardEdit',()=>{editors.delete(key);changed();}));
     }else host.append(action('outbox.edit',()=>{editors.set(key,value.request.text);changed();}),action('outbox.cancel',async()=>{if(!await outbox.cancel(value))notify(t('outbox.started'));}));
   }
+  return host;
+}
+
+// Chat keeps delivery metadata out of the message body. Detailed recovery and
+// editing controls remain available from Saved messages in the title bar.
+export function outboxIndicator(value,locale){
+  const host=node('span','message-pending');host.hidden=['accepted','cancelled'].includes(value.state);
+  const label=translate(locale,'outbox.pending');host.setAttribute('role','img');host.setAttribute('aria-label',label);host.title=label;host.append(icon('clock'));
   return host;
 }

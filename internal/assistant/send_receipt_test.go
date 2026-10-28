@@ -72,6 +72,9 @@ func TestSendReceiptDurableIdentityAndOrderedSteering(t *testing.T) {
 	if value, err := c.SendReceipt(ctx, q); err != nil || value.State != "accepted" {
 		t.Fatal(value, err)
 	}
+	if duplicate, err := c.Steer(ctx, first); err != nil || !duplicate.Duplicate || duplicate.MessageID != receipt.MessageID {
+		t.Fatal("duplicate guidance depends on the in-memory transcript page", duplicate, err)
+	}
 	c.mu.Lock()
 	c.messages = saved
 	c.mu.Unlock()
@@ -111,8 +114,8 @@ func TestSendReceiptDurableIdentityAndOrderedSteering(t *testing.T) {
 		t.Fatal(value, err)
 	}
 	q.RequestID = "never-accepted"
-	if value, err := restarted.SendReceipt(ctx, q); err != nil || value.State != "rejected" {
-		t.Fatal("ended target should reject an absent steer", value, err)
+	if value, err := restarted.SendReceipt(ctx, q); err != nil || value.State != "unconfirmed" {
+		t.Fatal("ended target can still accept guidance into its user inbox", value, err)
 	}
 	q.UserMessageID = ""
 	if value, err := restarted.SendReceipt(ctx, q); err != nil || value.State != "unconfirmed" {

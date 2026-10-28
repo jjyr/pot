@@ -35,8 +35,10 @@ assistants progress independently. Closed browsers do not execute background
 work; persisted messages continue when the application opens again. Browser
 storage eviction or clearing site data can remove local messages.
 
-Waiting, sending, receipt reconciliation, acceptance and blocked delivery have
-separate labels. The Saved messages action keeps local submissions inspectable
+Chat marks an unaccepted submission with a small clock at the bottom right;
+acceptance removes the clock. It does not insert delivery explanations or links
+into the message body. Waiting, sending, receipt reconciliation, acceptance and
+blocked delivery have separate labels in Saved messages. That action keeps local submissions inspectable
 even after the assistant or conversation is removed. Its content uses the same
 prepared message window and shows each original destination. Edit and Cancel apply only before dispatch claims the entry.
 Their revision checks and the dispatch claim share IndexedDB write transactions;
@@ -65,6 +67,14 @@ already captured while submitting guidance stays fixed. Once the first dispatch
 binds a turn, reconnecting cannot steer a successor. The receiver owns whether
 that input steers an active Main turn or joins its existing pending-user lane;
 the browser does not launch another execution or use continuation to submit text.
+If the captured turn has ended, is stopping/finalizing, or has been superseded,
+the receiver validates its durable original message and commits the input to the
+existing user inbox. Acceptance and the original target marker commit together.
+The message then starts through the normal user-input scheduler. Retries after
+consumption or restart return the same receipt; ordinary sends cannot reuse a
+guidance request identity. Missing receipts for valid ended turns remain unknown,
+not rejected. Previously failed `turnRetired` browser entries resume with their
+original identity; an actual receiver rejection still requires explicit recovery.
 Requests carry an `expected_control_id` precondition checked by the serving
 application before dispatch. A replacement Control rejects the old target even
 before its updated directory reaches the browser. This precondition does not

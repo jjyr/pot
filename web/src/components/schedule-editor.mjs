@@ -55,9 +55,9 @@ export function connectScheduleEditor({view,preview:readPreview,locale,current,d
   const render=()=>{
     title.textContent=t('preview');summary.textContent=t('diagnostics');raw.textContent=result?.diagnostic||'';diagnostic.hidden=!raw.textContent;
     for(const [name,error]of errors){const invalid=result?.field===name;error.textContent=invalid?t(result.code==='timezone'?'timezoneError':'ruleError'):'';controls.get(name).setAttribute('aria-invalid',String(invalid));}
-    content.replaceChildren();
-    if(state==='loading')content.append(n('p','hint',t('loading')));
-    else if(state==='failed')content.append(n('p','inline-error',t('previewFailed')));
+    content.setAttribute('aria-busy',String(state==='loading'));content.replaceChildren();
+    if(state==='loading')return;
+    if(state==='failed')content.append(n('p','inline-error',t('previewFailed')));
     else if(result?.field)content.append(n('p','hint',t('fixRule')));
     else if(!result?.times?.length)content.append(n('p','inline-error',t('noFuture')));
     else {

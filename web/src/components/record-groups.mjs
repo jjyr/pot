@@ -37,8 +37,9 @@ export function createRecordPagination({locale,label,move}) {
   const buttons=n('div','record-page-buttons'),previous=action(translate(locale(),'tasks.previous'),()=>move(-1)),next=action(translate(locale(),'tasks.next'),()=>move(1));
   previous.dataset.pageDirection='previous';next.dataset.pageDirection='next';buttons.append(previous,next);root.append(summary,buttons);
   return {root,previous,next,update({offset=0,count=0,total=0,nextOffset=null,loading=false,partial=false}) {
-    const key=loading?'tasks.paginationLoading':partial?'tasks.paginationPartial':'tasks.paginationSummary';
-    summary.textContent=translate(locale(),key).replace('{total}',total.toLocaleString(locale())).replace('{page}',(Math.floor(offset/20)+1).toLocaleString(locale())).replace('{count}',count.toLocaleString(locale()));
+    root.setAttribute('aria-busy',String(loading));
+    const key=loading?'tasks.paginationPage':partial?'tasks.paginationPartial':'tasks.paginationSummary';
+    if(!loading||!summary.textContent)summary.textContent=translate(locale(),key).replace('{total}',total.toLocaleString(locale())).replace('{page}',(Math.floor(offset/20)+1).toLocaleString(locale())).replace('{count}',count.toLocaleString(locale()));
     previous.disabled=loading||!offset;next.disabled=loading||nextOffset==null;
   }};
 }

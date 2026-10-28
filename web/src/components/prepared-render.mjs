@@ -1,7 +1,6 @@
 import {moveConversationNode} from './conversation-dom.mjs';
 // A preparation is local to one render transaction. It carries no backend or
 // persisted state. Async component work stays owned by its candidate DOM tree.
-import {translate} from '../locales/messages.mjs';
 const components='pot-resource,pot-message-file,pot-mermaid,pot-file-image';
 let rendering;
 const componentKey=element=>JSON.stringify([element.localName,element.renderSlot||'',
@@ -31,7 +30,7 @@ export function deferPreparedConnection(element,start){
   let context;for(let parent=element;parent&&!context;parent=parent.parentElement)context=parent.preparedContext;
   if(!context?.alive)return false;
   if(element.preparationTicket)return true;
-  const placeholder=element.ownerDocument.createElement('span');placeholder.className='resource-status';placeholder.setAttribute('role','status');placeholder.textContent=translate(element.ownerDocument.documentElement.lang,'resource.loading');element.append(placeholder);element.dataset.state='loading';
+  const placeholder=element.ownerDocument.createElement('span');placeholder.className='resource-preparation-placeholder';placeholder.setAttribute('aria-hidden','true');if(element.matches('pot-message-file[data-block="false"]'))placeholder.textContent=element.reference.label||element.reference.href;element.append(placeholder);element.dataset.state='loading';element.setAttribute('aria-busy','true');
   const entry={element,context,placeholder,start(){
     placeholder.remove();element.preparationAdmitted=true;
     entry.observer=new MutationObserver(()=>{if(element.dataset.state!=='loading')entry.release();});entry.observer.observe(element,{attributes:true,attributeFilter:['data-state']});start();
@@ -136,17 +135,19 @@ function stageNativeIslands(context){
     const {original,owner}=entry;if(entry.home)continue;
     if(!original.isConnected)throw Error('Prepared native document lost its original owner');
     const box=(entry.projection||original).getBoundingClientRect(),oldBox=original.getBoundingClientRect();
+    const viewportChanged=!!entry.projection&&(box.width!==(original.preparedViewportWidth??oldBox.width)||owner.classList.contains('is-expanded')!==original.preparedViewportExpanded);
     // Outer result/notice revisions still measure their new DOM in the hidden
     // candidate. An unchanged embedded viewport already has its real layout:
     // staging it would unnecessarily retire the browser's current input surface.
-    if(entry.projection&&box.width===oldBox.width&&box.height===oldBox.height&&entry.projection.clientWidth===original.clientWidth&&entry.projection.clientHeight===original.clientHeight)continue;
+    if(entry.projection&&!viewportChanged&&box.width===oldBox.width&&box.height===oldBox.height&&entry.projection.clientWidth===original.clientWidth&&entry.projection.clientHeight===original.clientHeight)continue;
     original.nativePresentation?.cancel();
     owner.nativeReflowDeadline??=performance.now()+5000;
     entry.style=original.getAttribute('style');entry.framed=original.classList.contains('prepared-frame');entry.popover=original.getAttribute('popover');entry.inert=original.inert;entry.hidden=original.getAttribute('aria-hidden');entry.tabindex=original.getAttribute('tabindex');entry.focus=document.activeElement===original;
+    if(viewportChanged&&owner.dataset.preparedFallback!=='true'){original.classList.remove('prepared-frame');entry.projection.classList.remove('prepared-frame');}
     entry.home=original.ownerDocument.createElement('div');entry.home.className=original.className;entry.home.style.cssText='box-sizing:border-box;width:'+oldBox.width+'px;height:'+oldBox.height+'px;max-width:100%';entry.home.inert=true;entry.home.setAttribute('aria-hidden','true');entry.home.dataset.conversationHold='';entry.home.dataset.nativePreparationPlaceholder='';
     // Prepare the temporary status in the same connected hidden surface. The
     // old measured frame is a hold, never ready content or a reading anchor.
-    const status=original.ownerDocument.createElement('p');status.className='resource-status';status.textContent=translate(original.ownerDocument.documentElement.lang,'resource.loading');entry.home.append(status);context.root.append(entry.home);entry.home.getBoundingClientRect();moveConversationNode(original.parentNode,entry.home,original);
+    context.root.append(entry.home);entry.home.getBoundingClientRect();moveConversationNode(original.parentNode,entry.home,original);
     if(entry.projection){const projection=original.ownerDocument.createElement('div');projection.className=entry.projection.className;projection.style.cssText=entry.projection.style.cssText;entry.projection.replaceWith(projection);entry.projection=projection;}else entry.projection=entry.home;
     entry.projection.dataset.nativePreparation='';entry.projection.nativePreparation=entry;original.nativePreparation=entry;
     original.style.cssText+=';position:fixed;inset:auto;left:0;top:0;margin:0;padding:0;border:0;max-height:none;opacity:0;visibility:visible;pointer-events:none;box-sizing:border-box;width:'+box.width+'px;min-width:0;max-width:none';if(!entry.focus)original.inert=true;original.setAttribute('aria-hidden','true');
@@ -221,11 +222,16 @@ export function finishPreparedNative(context,{commit=false,preparedOnly=false}={
     // A commit only ends this transaction. The original component keeps its
     // budget through later content/resize revisions until retireRendering.
     if(!home)continue;
+    // Interactive documents keep the viewport measured before publication.
+    // Later document growth scrolls inside that viewport; it must not start a
+    // new chat geometry transaction or temporarily remove the input surface.
+    if(commit){const box=original.getBoundingClientRect();entry.fixedHeight??=box.height;original.preparedViewportWidth=box.width;original.preparedViewportExpanded=entry.owner.classList.contains('is-expanded');}
     const height=original.style.getPropertyValue('--resource-height');
     if(original.matches(':popover-open'))original.hidePopover();
     if(entry.popover===null)original.removeAttribute('popover');else original.setAttribute('popover',entry.popover);
     if(entry.style===null)original.removeAttribute('style');else original.setAttribute('style',entry.style);
-    if(entry.fixedHeight!==undefined){if(commit)framePreparedElement(original,entry.fixedHeight);else if(!entry.framed)original.classList.remove('prepared-frame');}
+    if(commit&&entry.fixedHeight!==undefined)framePreparedElement(original,entry.fixedHeight);
+    else original.classList.toggle('prepared-frame',entry.framed);
     if(commit&&height)original.style.setProperty('--resource-height',height);
     if(commit&&projection.closest('pot-resource')?.dataset.preparedFallback==='true')entry.owner.dataset.preparedFallback='true';
     original.inert=entry.inert;if(entry.hidden===null)original.removeAttribute('aria-hidden');else original.setAttribute('aria-hidden',entry.hidden);
@@ -326,7 +332,7 @@ function frame(element,fallback){
   const box=element.getBoundingClientRect();if(!box.height)return;
   const inline=element.matches('pot-message-file[data-block="false"]');
   const unresolvedFallback=fallback||element.preparationSurrogate&&element.dataset.preparedFallback==='true'&&element.dataset.state==='loading';
-  const height=unresolvedFallback&&!inline?Math.max(240,box.height):box.height;
+  const height=unresolvedFallback&&!inline&&element.localName!=='img'?Math.max(240,box.height):box.height;
   element.style.setProperty('--prepared-height',height+'px');
   if(inline)element.style.setProperty('--prepared-width',box.width+'px');
   element.classList.add('prepared-frame');

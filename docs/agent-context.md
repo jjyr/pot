@@ -275,11 +275,13 @@ ordinary node execution authorization.
 Task model routing is autonomous and requires no routing confirmation or user
 allowlist. The invoking assistant uses explicit task instructions, its AGENTS.md,
 the available configured Provider/model catalog and task requirements to select a
-route. With no explicit route, Control snapshots that assistant's active model
-configuration. No separate user-managed task default, Follow Chat toggle or
-worker-model configuration is required. Model selection and execution-machine
-placement remain independent. Unavailable explicit routes fail visibly rather
-than silently changing models. Provider/model definitions are shared within a
+route. With no explicit route, Control uses that assistant's optional default Task
+Provider and model, otherwise snapshots its active model configuration. Assistant
+settings offer an editable model picker and a Follow assistant choice for Tasks.
+See [Task routing](task-coordination.md#autonomous-model-routing) for precedence
+and when saved changes take effect. Model selection and execution-machine
+placement remain independent. Unavailable explicit or default routes fail visibly
+rather than silently changing models. Provider/model definitions are shared within a
 Space; chat choices and instructions belong to each assistant.
 
 A fresh registry has no assistants. AI settings can be saved before explicitly

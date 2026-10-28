@@ -20,6 +20,7 @@ function fixture(){
     async sendReceipt(request,scope){trace.push({kind:'receipt',request:clone(request)});return {...request,runtime_id:'control',owner_id:scope.owner,state:accepted.has(JSON.stringify([scope.space,scope.owner,request.request_id]))?'accepted':'unconfirmed',message_id:request.request_id};},
   };
   const storage={
+    async retry(expected){const row=rows.find(value=>value.sequence===expected.sequence&&value.revision===expected.revision&&outboxIdentityKey(value)===outboxIdentityKey(expected));if(!row||row.state!=='failed')return null;row.state=row.started?'uncertain':'queued';row.problem=null;row.revision++;return clone(row);},
     async list(){return clone(rows);},async files(){return [];},async releaseFiles(expected){const value=rows.find(row=>row.sequence===expected.sequence);if(value?.state==='accepted'&&value.target.key===expected.target.key&&value.request.request_id===expected.request.request_id){value.projection_pending=false;value.revision++;return clone(value);}return null;},
     async claim(sequence,token,now,lease){const value=rows.find(row=>row.sequence===sequence);if(!value||['failed','accepted','cancelled'].includes(value.state)||value.claim?.until>now||rows.some(row=>row.target.key===value.target.key&&row.sequence<sequence&&!['accepted','cancelled'].includes(row.state)))return null;value.claim={token,until:now+lease};value.state=value.started?'uncertain':'delivering';value.revision++;return clone(value);},
     async update(sequence,token,patch){const value=rows.find(row=>row.sequence===sequence);if(value?.claim?.token!==token)return null;Object.assign(value,clone(patch));value.revision++;return clone(value);},close(){},
@@ -56,13 +57,24 @@ for(const [name,change,problem]of [
  ['Control change',f=>f.client.spaces[0].control_id='replacement','identityChanged'],
  ['Conversation retired',f=>f.client.snapshot=async()=>snapshot('a',{conversation_id:'new'}),'conversationRetired'],
  ['Permission revoked',f=>f.client.assistants[0].capabilities.operations=[],'permission'],
- ['Old running turn',()=>{},'turnRetired'],
 ]){
  const f=fixture();f.add('fenced','a',name==='Old running turn'?{user_message_id:'retired'}:{});f.client.onlineReady=true;change(f);const w=f.worker();try{await w.wake();await w.wake();check(f.trace.length===0&&f.rows[0].state==='failed'&&f.rows[0].problem===problem,name+' preserves message and never retries automatically');}finally{w.close();}
 }
 {
  const f=fixture();f.add('guidance');f.client.onlineReady=true;f.client.snapshot=async()=>snapshot('a',{running:true,turn_id:'original'});f.setMode('before');const w=f.worker();try{
-  await w.wake();f.client.snapshot=async()=>snapshot('a',{running:true,turn_id:'successor'});await w.wake();check(f.trace.filter(row=>row.kind==='send').length===1&&f.trace[0].request.user_message_id==='original'&&f.rows[0].problem==='turnRetired','First authoritative snapshot selects existing steer; retry never steers a successor');
+  await w.wake();f.client.snapshot=async()=>snapshot('a',{running:true,turn_id:'successor'});await w.wake();check(f.trace.filter(row=>row.kind==='send').length===2&&f.trace.filter(row=>row.kind==='send').every(row=>row.request.user_message_id==='original')&&f.rows[0].state==='accepted','Retry preserves original steer identity after the turn changes; receiver queues it');
+ }finally{w.close();}
+}
+{
+ const f=fixture(),old=f.add('old-guidance','a',{user_message_id:'retired'});old.state='failed';old.problem='turnRetired';old.started=true;f.add('following');f.client.onlineReady=true;const w=f.worker();try{
+  await w.wake();check(old.state==='accepted'&&f.trace[0].kind==='receipt'&&f.trace[1].request.user_message_id==='retired','Previously stranded guidance reconciles and resumes its original identity');
+  await w.wake();check(f.rows[1].state==='accepted','Recovered guidance unblocks its FIFO lane');
+ }finally{w.close();}
+}
+{
+ const f=fixture(),row=f.add('invalid-target','a',{user_message_id:'unknown'});row.started=true;row.state='uncertain';f.client.onlineReady=true;
+ f.client.sendReceipt=async()=>({...row.request,runtime_id:'control',owner_id:'a',state:'rejected'});const w=f.worker();try{
+  await w.wake();await w.wake();check(row.state==='failed'&&row.problem==='rejected'&&!f.trace.length,'Actual receiver rejection does not enter the legacy turn-retired recovery loop');
  }finally{w.close();}
 }
 {

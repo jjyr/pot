@@ -71,7 +71,11 @@ func TestNotificationConsumerUpgradePreservesHistoryAndSecrets(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer db.Close()
-			if migrationCount(t, db) != before || before != 4 {
+			definitions, err := loadMigrations(migrationFiles, ControlDatabase)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if migrationCount(t, db) != before || before != len(definitions) {
 				t.Fatal("upgrade/reopen lineage changed")
 			}
 			var rows string

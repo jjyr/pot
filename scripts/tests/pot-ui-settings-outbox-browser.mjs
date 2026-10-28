@@ -78,8 +78,8 @@ try{
       await config({failSave:true});await save.click();await page.getByText(t('settings.saveFailed'),{exact:true}).waitFor();
       check(await name.inputValue()==='Newer settings edit '+width,'unreachable Control retains settings input '+width);
       await config({failSave:false,hold:['snapshot'],release:'all',phase:'running',change:true});
-      await page.waitForFunction(()=>{const input=document.querySelector('select[aria-label="Model"],select[aria-label="模型"]');return input&&!input.disabled;});
-      await page.getByLabel(locale==='en'?'Model':'模型',{exact:true}).selectOption('synthetic-next');
+      await page.waitForFunction(()=>{const input=document.querySelector('input[list][aria-label="Model"],input[list][aria-label="模型"]');return input&&!input.disabled;});
+      await page.getByLabel(locale==='en'?'Model':'模型',{exact:true}).fill('synthetic-next');
       await save.click();await page.locator('.editor-form').waitFor({state:'hidden'});
       const saved=await config();check(saved.state.model==='synthetic-next'&&saved.state.pending,'running saves next configuration without ending execution '+width);
       // Snapshot reads are held at the network; cached chat and local input

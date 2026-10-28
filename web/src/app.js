@@ -16,11 +16,14 @@ document.documentElement.dataset.platform = desktop ? 'desktop' : 'browser';
 let dispose=()=>{},client,identity,store,verifying=false,retryTimer,stopped=false,currentAbort,verification=0;
 const notice=document.createElement('aside');notice.className='startup-status';notice.setAttribute('role','status');
 function status(key){
+  if(key==='startup.loading'){root.setAttribute('aria-busy','true');notice.remove();return;}
+  root.removeAttribute('aria-busy');
   notice.replaceChildren(document.createTextNode(t(key)+' '));
   const retry=document.createElement('button');retry.className='text-button';retry.textContent=t('retry');retry.onclick=()=>verify(true);notice.append(retry);
   if(!notice.isConnected)document.body.append(notice);
 }
 function mount(value){
+  root.removeAttribute('aria-busy');
   dispose();client?.resources?.clear();client=value;
   document.title=client.production?'Pot':'Pot — Go developer preview';
   window.potErrors?.configureIssueReport({version:client.runtime?.version,desktop,openExternal:client.openExternal});
@@ -40,13 +43,13 @@ function bindIdentity(value){
   };
 }
 const online=()=>{if(!client||client.onlineReady===false)verify();};
-function suspend(){if(client?.production){client.suspendStartup();client.startupConfirmed();status('startup.local');}}
+function suspend(showNotice=true){if(client?.production){client.suspendStartup();client.startupConfirmed();if(showNotice)status('startup.local');}}
 async function verify(force=false,resetScope=false){
-  if(stopped||verifying&&force!==true)return;currentAbort?.abort();suspend();verifying=true;clearTimeout(retryTimer);
+  if(stopped||verifying&&force!==true)return;currentAbort?.abort();suspend(false);verifying=true;clearTimeout(retryTimer);
   const ticket=++verification,abort=new AbortController(),timer=setTimeout(()=>abort.abort(),10000);currentAbort=abort;
   try{
     if(!client&&!changingAccess){
-      try{identity=await store.read();if(desktop&&!completeStartup(identity))identity=null;if(identity){const value=await createProductionClient({desktop,startupIdentity:identity});if(ticket!==verification||stopped)return;bindIdentity(value);mount(value);status('startup.local');}}catch(error){console.error('Pot startup storage:',error);}
+      try{identity=await store.read();if(desktop&&!completeStartup(identity))identity=null;if(identity){const value=await createProductionClient({desktop,startupIdentity:identity});if(ticket!==verification||stopped)return;bindIdentity(value);mount(value);status('startup.loading');}}catch(error){console.error('Pot startup storage:',error);}
     }
     let access,runtime,readBaselines;
     if(desktop){({runtime,readBaselines}=await readDesktopStartup({signal:abort.signal}));}
@@ -84,7 +87,7 @@ async function verify(force=false,resetScope=false){
     // Retry only authentication/identity reads. No command or interrupted send
     // is queued here. Explicit access failures retain their existing flow.
     if(![401,403].includes(error.status))retryTimer=setTimeout(()=>verify(),3000);
-  }finally{clearTimeout(timer);if(ticket===verification)verifying=false;}
+  }finally{clearTimeout(timer);if(ticket===verification){verifying=false;root.removeAttribute('aria-busy');}}
 }
 try{
   if(desktop&&params.get('mode')==='preview'){
@@ -94,7 +97,7 @@ try{
     store=createStartupIdentity();status('startup.loading');
     try{identity=changingAccess?null:await store.read();}catch(error){console.error('Pot startup storage:',error);}
     if(desktop&&!completeStartup(identity))identity=null;
-    if(identity){const value=await createProductionClient({desktop,startupIdentity:identity});bindIdentity(value);mount(value);status('startup.local');}
+    if(identity){const value=await createProductionClient({desktop,startupIdentity:identity});bindIdentity(value);mount(value);status('startup.loading');}
     else status('startup.loading');
     verify();
     // Losing the internet does not revoke a working local desktop Control.

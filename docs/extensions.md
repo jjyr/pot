@@ -138,8 +138,10 @@ locale changes preserve open drafts. Closing or navigating away from a modified
 draft asks to discard it; pending writes block leaving. Errors keep inputs and
 provide a localized summary with diagnostics.
 
-Catalogue consumers share an owner/Space/connection-scoped query and a redacted
-memory cache. The catalogue is not a persisted editor baseline. Command commit
+Catalogue consumers share an owner/Space-scoped committed display projection.
+Reopening first displays safe IndexedDB metadata while the current connection
+refreshes the catalogue. Retained data is not an authorized editor baseline;
+mutations require current identity and revisions. Command commit
 invalidation owns its refresh; completion joins the same query instead of forcing
 another GET. Explicit Refresh and Retry still wait for authoritative reads and
 report their errors. OAuth uses a serial fallback with delays from 1.5 to 15

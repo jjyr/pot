@@ -93,7 +93,6 @@ export function createWorkRecordWindow({locale=()=> 'en',actor=()=>undefined,res
     preparedDOM(group.participants,'work-participants',participantRevision,target=>{
       const marks=node('span','work-record-participants');
       work.participants.forEach((address,index)=>{const mark=communicationParticipant(address,{resolveIdentity,locale});mark.dataset.participantIndex=String(index);marks.append(mark);});
-      if(work.participants.length>2){const more=node('span','work-record-more',`+${format(work.participants.length-2)}`);more.title=t('participants').replace('{count}',format(work.participants.length));more.setAttribute('aria-label',more.title);marks.append(more);}
       reconcile(target,marks);
     });group.participants.hidden=!work.participants.length;
     preparedDOM(group.people,'work-people',participantRevision,target=>{

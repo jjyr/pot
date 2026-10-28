@@ -20,6 +20,7 @@ let scenarioNumber=0;
 class Element {
   children=[];dataset={};isConnected=false;
   setAttribute(){}
+  removeAttribute(){}
   replaceChildren(...children){this.children=children;}
   append(...children){this.children.push(...children);for(const child of children)child.isConnected=true;}
   remove(){this.isConnected=false;}
