@@ -106,6 +106,14 @@ const evidence={scope,forms:[],integrations:{},extensions:{}};
  const component=createExtensions({root:host,locale,client:{runtime:{id:'fixture',boot_id:'b'},scope:()=>scope,request:async(path,options={})=>{if(options.method==='POST'){const gate=deferred();calls.push({path,options,...gate});return gate.promise;}return catalog;}}});await component.load();host.querySelector('.extension-open').click();button(document.body.querySelector('.extensions-dialog'),'Edit configuration').click();const pane=()=>document.body.querySelector('.extensions-dialog');
  input(field(pane(),'Name'),'A');const save=button(pane(),'Save').click();input(field(pane(),'Name'),'B');assert.equal(host.querySelector('.extension-search').disabled,false);assert.equal(field(pane(),'Name').disabled,false);assert.equal(button(pane(),'Save').disabled,true);assert.equal(calls[0].options.body.server.name,'A');catalog.mcp[0]={...catalog.mcp[0],name:'A',revision:2};calls[0].resolve(catalog.mcp[0]);await save;assert(pane());assert.equal(field(pane(),'Name').value,'B');const next=button(pane(),'Save').click();assert.equal(calls[1].options.body.server.revision,2);assert.equal(calls[1].options.body.server.name,'B');calls[1].reject(Error('synthetic failure'));await next;assert.equal(field(pane(),'Name').value,'B');component.dispose();host.remove();evidence.extensions={writes:calls.length,newDraft:'B',acknowledgedRevision:2};
 }
+// A row write does not block search or group disclosure. Search expansion
+// must expose the Boolean ARIA state, regardless of the entered query text.
+{
+ const host=root(),gate=deferred(),catalog={items:[],mcp:[{id:'m',name:'Synthetic MCP',enabled:true,revision:1,transport:'http',url:'https://fixture.invalid/mcp'}]};
+ const component=createExtensions({root:host,locale,client:{runtime:{id:'fixture',boot_id:'b'},scope:()=>scope,request:async(path,options={})=>options.method==='POST'?gate.promise:catalog}});await component.load();
+ const toggle=host.querySelector('.extension-switch input');toggle.checked=false;const save=toggle.onchange(),search=host.querySelector('.extension-search'),group=()=>host.querySelectorAll('.extension-collapse').find(node=>node.getAttribute('aria-controls')==='extensions-mcp');
+ assert.equal(search.disabled,false);group().click();assert.equal(group().getAttribute('aria-expanded'),'false');input(search,'Synthetic');assert.equal(group().getAttribute('aria-expanded'),'true');assert.equal(host.querySelectorAll('.extension-open').length,1);gate.resolve({...catalog.mcp[0],enabled:false,revision:2});await save;assert.equal(search.value,'Synthetic');component.dispose();host.remove();
+}
 // Batch imports keep their own accepted revisions in memory. A partial failure
 // retries only the unresolved entry, and later edits update an accepted ID with
 // that exact revision rather than replaying its original create operation.
