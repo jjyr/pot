@@ -154,6 +154,11 @@ external Playwright module, and `POT_CHROMIUM_EXECUTABLE` can select Chromium.
 `docs/pr-images/redesign-website/`; it expects the previous PR head website sources at
 `output/website-before-r2/website/`. Review captures use matching viewport and locale.
 `--capture-only` refreshes those images without repeating interaction checks.
+`--architecture-only` focuses on section 03: six locales at 1280, 390 and 320px,
+trigger separation, text bounds, direct links, language switching, refresh/history,
+no-JavaScript content and the offline preview. Add `--capture` to save its paired
+1280px and 390px section screenshots; this mode reads the previous PR head from
+`output/website-before-architecture/website/`.
 The checks use synthetic clipboard and API responses, and never run installation
 commands or invoke agents.
 

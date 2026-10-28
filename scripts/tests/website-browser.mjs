@@ -17,6 +17,80 @@ await page.route('https://api.github.com/repos/jjyr/pot',async route=>{
  await route.fulfill({status:starMode==='missing'?404:starMode==='limited'?403:200,contentType:'application/json',body:JSON.stringify({stargazers_count:starMode==='invalid'?'wrong':starMode==='zero'?0:1234})});
 });
 await page.addInitScript(()=>{Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.copied=text;}}});});
+async function checkArchitecture(target,locale,width){
+ assert(await target.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} document overflow at ${width}`);
+ const overflow=await target.locator('.architecture').evaluate(figure=>{
+  const bounds=figure.getBoundingClientRect(),bad=[];
+  for(const node of figure.querySelectorAll('*')){
+   const rect=node.getBoundingClientRect();
+   if(rect.width&&rect.height&&(rect.left<bounds.left||rect.right>bounds.right))bad.push(node.className||node.tagName);
+  }
+  const walker=document.createTreeWalker(figure,NodeFilter.SHOW_TEXT);
+  while(walker.nextNode()){
+   const node=walker.currentNode;
+   if(!node.textContent.trim()||node.parentElement.closest('[aria-hidden=true]'))continue;
+   const container=node.parentElement.closest('.arch-node,.arch-trigger,.architecture-head,figcaption,.arch-outcomes')||figure;
+   const box=container.getBoundingClientRect(),range=document.createRange();range.selectNodeContents(node);
+   for(const rect of range.getClientRects())if(rect.width&&(rect.left<box.left-.5||rect.right>box.right+.5||rect.bottom>box.bottom+.5))bad.push(node.textContent.trim());
+  }
+  return bad;
+ });
+ assert.deepEqual(overflow,[],`${locale} architecture nodes and text fit at ${width}`);
+ assert.equal(await target.locator('.arch-assistant-group .arch-notification').count(),1);
+ assert.equal(await target.locator('.arch-task-unit .arch-schedule').count(),1);
+ assert.equal(await target.locator('.architecture').getAttribute('aria-describedby'),'architecture-description');
+ assert((await target.locator('#architecture-description').innerText()).length>80);
+ assert(await target.locator('.architecture').evaluate(figure=>{
+  const mobile=innerWidth<=760,head=figure.querySelector('.architecture-head').getBoundingClientRect();
+  return [['.arch-notification','.arch-assistant'],['.arch-schedule','.arch-task']].every(([source,target])=>{
+   const a=figure.querySelector(source).getBoundingClientRect(),b=figure.querySelector(target).getBoundingClientRect();
+   return mobile?a.top>=b.bottom+20:a.top>=head.bottom&&a.bottom<=b.top-20;
+  });
+ }),`${locale} triggers are separate from their targets at ${width}`);
+}
+async function architectureChecks(){
+ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
+  for(const width of [1280,390,320]){
+   await page.setViewportSize({width,height:900});
+   await page.goto(`${origin}/website/${locale}/#agent-link`);
+   assert.equal(await page.locator('html').getAttribute('lang'),locale);
+   assert(await page.locator('#view-overview').isVisible());
+   await checkArchitecture(page,locale,width);
+  }
+  console.log('Section 03: locale, direct link and 1280/390/320px passed:',locale);
+ }
+ await page.goto(`${origin}/website/zh-CN/#agent-link`);
+ await page.selectOption('#language-select','ja');await page.waitForURL('**/ja/**');
+ assert.equal(new URL(page.url()).hash,'#agent-link');
+ await page.reload();assert.equal(new URL(page.url()).hash,'#agent-link');
+ assert(await page.locator('.architecture').isVisible());
+ await page.goBack();assert.equal(await page.locator('html').getAttribute('lang'),'zh-CN');
+ await page.goForward();assert.equal(await page.locator('html').getAttribute('lang'),'ja');
+ const noJS=await browser.newPage({javaScriptEnabled:false,viewport:{width:390,height:900}});
+ try{
+  for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
+   await noJS.goto(`${origin}/website/${locale}/#agent-link`);
+   await checkArchitecture(noJS,locale,390);
+  }
+ }finally{await noJS.close();}
+ await page.goto(`${origin}/website/pot-preview.html#agent-link`);
+ await page.selectOption('#language-select','es');
+ assert.equal(await page.locator('html').getAttribute('lang'),'es');
+ await checkArchitecture(page,'es',320);
+ assert.deepEqual(errors,[]);
+ console.log('Section 03: language switch, refresh/history, six no-JavaScript locales and offline preview passed');
+}
+async function captureArchitecture(){
+ const dir='docs/pr-images/redesign-website';await fs.mkdir(dir,{recursive:true});
+ for(const width of [1280,390])for(const version of ['before','after']){
+  await page.setViewportSize({width,height:900});
+  await page.goto(`${origin}/${version==='before'?'output/website-before-architecture/':''}website/zh-CN/#agent-link`);
+  await page.locator('.link-band img').evaluateAll(images=>Promise.all(images.map(image=>image.decode())));
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${version} capture overflows at ${width}`);
+  await page.locator('.link-band').screenshot({path:`${dir}/architecture-03-${width}-${version}.png`});
+ }
+ console.log('Section 03: paired desktop and 390px screenshots saved');
+}
 async function capture(){
  const dir='docs/pr-images/redesign-website';await fs.mkdir(dir,{recursive:true});
  for(const width of [1280,390,320])for(const version of ['before','after']){
@@ -38,6 +112,10 @@ async function capture(){
  }
 
 }
+if(process.argv.includes('--architecture-only')){
+ await architectureChecks();
+ if(process.argv.includes('--capture'))await captureArchitecture();
+}else{
 if(process.argv.includes('--capture-only')){await capture();await browser.close();process.exit(0);}
 for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  await page.setViewportSize({width:1280,height:900});
@@ -147,17 +225,7 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
    await page.locator(selector+' img').evaluate(image=>image.decode());
    assert(await page.locator(selector).evaluate(el=>el.getBoundingClientRect().right<=innerWidth),`${locale} figure bounds at ${width}`);
   }
-  assert(await page.locator('.architecture').evaluate(el=>{
-   const nodes=[el,...el.querySelectorAll('*')];
-   return nodes.every(node=>{
-    const rect=node.getBoundingClientRect();
-    return rect.width===0||(rect.left>=0&&rect.right<=innerWidth&&node.scrollWidth<=node.clientWidth+1);
-   });
-  }),`${locale} architecture text and nodes fit at ${width}`);
-  assert.equal(await page.locator('.arch-assistant-group .arch-notification').count(),1);
-  assert.equal(await page.locator('.arch-task-unit .arch-schedule').count(),1);
-  assert.equal(await page.locator('.architecture').getAttribute('aria-describedby'),'architecture-description');
-  assert((await page.locator('#architecture-description').innerText()).length>80);
+  await checkArchitecture(page,locale,width);
  }
  // Direct links, refresh and history must reveal their target panel.
  await page.goto(`${origin}/website/${locale}/#view-security`);
@@ -242,6 +310,7 @@ for(const [language,saved,expected] of [['ja-JP',null,'ja'],['zh-Hant',null,'zh-
  await context.close();
 }
 console.log('Root language detection, saved preference and explicit locale paths passed');
+}
 } finally {
  await browser.close();
 }
