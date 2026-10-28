@@ -1,9 +1,11 @@
 // Serve the checkout root locally; provide Playwright externally (no website runtime dependency).
-const {chromium}=await import(process.env.POT_PLAYWRIGHT_MODULE||'playwright');
+const {chromium,webkit}=await import(process.env.POT_PLAYWRIGHT_MODULE||'playwright');
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 const installOnly=process.argv.includes('--install-only');
-const browser=await chromium.launch({headless:true,executablePath:process.env.POT_CHROMIUM_EXECUTABLE});
+const engine=process.env.POT_WEBSITE_BROWSER||'chromium';
+assert(['chromium','webkit'].includes(engine),'POT_WEBSITE_BROWSER must be chromium or webkit');
+const browser=await ({chromium,webkit})[engine].launch({headless:true,executablePath:engine==='chromium'?process.env.POT_CHROMIUM_EXECUTABLE:undefined});
 try {
 const origin=process.env.POT_WEBSITE_ORIGIN||'http://127.0.0.1:4173',errors=[];
 const install=JSON.parse(await fs.readFile('website/install.json','utf8'));
@@ -23,6 +25,11 @@ async function checkRoster(target,locale,width){
  assert.equal(await links.count(),8);
  assert.deepEqual(await links.evaluateAll(nodes=>nodes.map(node=>node.dataset.choice)),['codex','claude','gemini','antigravity','deepseek','qwen','grok','glm']);
  assert.deepEqual(await links.evaluateAll(nodes=>nodes.map(node=>node.getAttribute('href'))),['codex','claude','gemini','antigravity','deepseek','qwen','grok','glm'].map(id=>'#choice-'+id));
+ // Loaded backgrounds alone do not prove that their absolutely positioned boxes are visible.
+ assert(await target.locator('.pixel-portrait').evaluateAll(portraits=>portraits.every(portrait=>{
+  const image=portrait.getBoundingClientRect(),tile=portrait.parentElement.getBoundingClientRect();
+  return image.width>=44&&image.height>=44&&image.left>=tile.left&&image.right<=tile.right&&image.top>=tile.top&&image.bottom<=tile.bottom;
+ })),`${locale} every portrait has visible area inside its tile at ${width}`);
  await target.evaluate(async()=>{
   await document.fonts.ready;
   const urls=[...new Set([...document.querySelectorAll('.pixel-portrait')].map(el=>getComputedStyle(el).backgroundImage.slice(5,-2)))];
@@ -237,7 +244,8 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  assert(await page.locator('.tile-deepseek').evaluate(el=>el===document.activeElement),'Right skips the central Pot');
  await page.keyboard.press('End');await page.keyboard.press(' ');
  assert.equal(await page.locator('.tile-glm').getAttribute('aria-pressed'),'true');
- await page.keyboard.press('Tab');
+ // macOS WebKit uses Option+Tab to include ordinary links in keyboard navigation.
+ await page.keyboard.press(engine==='webkit'&&process.platform==='darwin'?'Alt+Tab':'Tab');
  assert(await page.locator('#choice-glm .choice-guide').evaluate(el=>el===document.activeElement),'Only the active guide is focusable');
  for(const view of ['security','changelog']){
   await page.goto(`${origin}/website/${locale}/#view-${view}`);
@@ -335,6 +343,23 @@ await offline.locator('.tile-glm').click();assert.equal(await offline.locator('.
 const touch=await browser.newPage({viewport:{width:390,height:844},hasTouch:true,isMobile:true});
 await touch.route('https://api.github.com/**',route=>route.abort());
 await touch.route('https://github.com/jjyr/pot/blob/main/integrations/codex/README.md',route=>route.fulfill({contentType:'text/html',body:'<title>Connection guide fixture</title>'}));
+// Start at mobile width: a desktop layout followed by resize can mask WebKit grid sizing bugs.
+for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
+ await touch.setViewportSize({width:390,height:844});
+ await touch.goto(`${origin}/website/${locale}/`);
+ await checkRoster(touch,locale,390);
+ const height=await touch.locator('.roster').evaluate(el=>el.getBoundingClientRect().height);
+ for(const tile of await touch.locator('.agent-tile').all()){
+  await tile.tap();
+  const id=await tile.getAttribute('data-choice');
+  assert.equal(await tile.getAttribute('aria-pressed'),'true');
+  assert.equal(await touch.locator('.pot-portrait').getAttribute('data-facing'),await tile.getAttribute('data-direction'));
+  assert(await touch.locator(`#choice-${id}`).isVisible());
+  assert.equal(await touch.locator('.roster').evaluate(el=>el.getBoundingClientRect().height),height);
+ }
+ await touch.setViewportSize({width:320,height:844});
+ await checkRoster(touch,locale,320);
+}
 await touch.goto(`${origin}/website/en/`);
 await touch.locator('.tile-gemini').tap();
 assert.equal(await touch.locator('.tile-gemini').getAttribute('aria-pressed'),'true');

@@ -164,11 +164,15 @@ Serve the checkout root as above. With Playwright available externally:
 
 ```sh
 node scripts/tests/website-browser.mjs
+POT_WEBSITE_BROWSER=webkit node scripts/tests/website-browser.mjs
 node scripts/tests/website-star-browser.mjs
 ```
 
 `POT_WEBSITE_ORIGIN` overrides the origin; `POT_PLAYWRIGHT_MODULE` can point to an
 external Playwright module, and `POT_CHROMIUM_EXECUTABLE` can select Chromium.
+Run the website checks with both Chromium (the default) and WebKit for iOS layout
+coverage. The roster checks require visible portrait bounds and exercise every
+choice by touch after opening directly at mobile width, in all six locales.
 `--install-only` restricts the first script to installation and shared behaviors.
 The full check covers six locales at desktop, tablet and narrow mobile widths, centered selection
 geometry, eight directional sprites, stable selection height, workflow reading order,

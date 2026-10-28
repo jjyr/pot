@@ -77,7 +77,8 @@ h4 { font-size: 19px; }
 .stage-title > span:first-child,.stage-title > span:last-child { color: var(--yellow); font: 11px/1 var(--mono); }
 .stage-subtitle { margin: 8px 0 25px; text-align: center; color: #bdb4a1; font-size: 11px; letter-spacing: .08em; }
 .roster { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 17px; align-items: stretch; }
-.agent-tile,.pot-portrait { position: relative; aspect-ratio: 1.02; min-width: 0; border: 3px solid; border-color: #b9b09c #6c6558 #4f493e #968c77; background: #131311; box-shadow: 0 0 0 1px #0c0c0a, 3px 3px 0 #0c0c0a, inset 0 0 0 2px #38352d; }
+/* Give WebKit a definite tile width before it sizes rows from the aspect ratio. */
+.agent-tile,.pot-portrait { position: relative; width: 100%; aspect-ratio: 1.02; min-width: 0; border: 3px solid; border-color: #b9b09c #6c6558 #4f493e #968c77; background: #131311; box-shadow: 0 0 0 1px #0c0c0a, 3px 3px 0 #0c0c0a, inset 0 0 0 2px #38352d; }
 .agent-tile { display: block; padding: 0; color: #f2ecd9; text-decoration: none; cursor: pointer; }
 .pixel-portrait { display: block; position: absolute; inset: 3px 3px 37px; background-image: url("assets/agent-roster.png"); background-size: 400% 200%; background-repeat: no-repeat; image-rendering: pixelated; }
 .sprite-0 { background-position: 0 0; }.sprite-1 { background-position: 33.3333% 0; }.sprite-2 { background-position: 66.6667% 0; }.sprite-3 { background-position: 100% 0; }.sprite-4 { background-position: 0 100%; }.sprite-5 { background-position: 33.3333% 100%; }.sprite-6 { background-position: 66.6667% 100%; }.sprite-7 { background-position: 100% 100%; }
