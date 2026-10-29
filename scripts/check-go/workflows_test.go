@@ -61,7 +61,7 @@ func TestProductWorkflowRouting(t *testing.T) {
 	}
 	light, full := tests.Jobs["lightweight"], tests.Jobs["product"]
 	if light.If != "github.event_name != 'workflow_dispatch' && inputs.ref == ''" || full.If != "github.event_name == 'workflow_dispatch' || inputs.ref != ''" {
-		t.Fatal("PR/main must be lightweight; manual and resolved-source calls must be full independently of publication")
+		t.Fatal("PR/main must use automatic checks; manual and resolved-source calls must be full independently of publication")
 	}
 	if light.RunsOn != "ubuntu-24.04" || light.Name != "Lightweight checks (Linux)" || len(light.Strategy.Matrix.OS) != 0 {
 		t.Fatal("automatic checks must stay on one explicitly named Linux runner")
@@ -83,6 +83,20 @@ func TestProductWorkflowRouting(t *testing.T) {
 	}
 	if !hasRun(light.Steps, "mise run ci:light") || !hasRun(full.Steps, "mise run ci:normal") || !hasRun(full.Steps, "mise exec -- python scripts/test_go.py race --shard ${{ matrix.plan.shard }} --count=1") {
 		t.Fatal("lightweight or complete product entrypoint changed")
+	}
+	sandbox, ok := tests.Jobs["sandbox"]
+	if !ok {
+		t.Fatal("sandbox job missing")
+	}
+	if sandbox.If != full.If || sandbox.RunsOn != "${{ matrix.os }}" {
+		t.Fatal("sandbox must run independently for every full validation")
+	}
+	if !reflect.DeepEqual(sandbox.Strategy.Matrix.OS, []string{"ubuntu-24.04", "macos-26"}) || !hasRun(sandbox.Steps, "mise run test:sandbox") {
+		t.Fatal("independent sandbox checks must retain real qualification on both platforms")
+	}
+	lifecycle, ok := tests.Jobs["macos-lifecycle"]
+	if !ok || lifecycle.If != light.If || lifecycle.RunsOn != "macos-26" {
+		t.Fatal("PR/main must retain targeted macOS lifecycle checks")
 	}
 	caller := ci.Jobs["product"]
 	if caller.Uses != "./.github/workflows/tests.yml" || caller.With["ref"] != "${{ needs.source.outputs.sha }}" || caller.If != "" {
@@ -121,7 +135,7 @@ func TestProductWorkflowRouting(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, contract := range []string{
-		`depends = ["test:go:ci", "check:ci", "test:contracts", "test:release", "test:sandbox"]`,
+		`depends = ["test:go:ci", "check:ci", "test:contracts", "test:release"]`,
 		`depends = ["lint", "test:i18n", "test:core", "test:ui", "test:packaging"]`,
 	} {
 		if !strings.Contains(string(mise), contract) {
