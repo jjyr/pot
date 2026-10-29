@@ -80,7 +80,15 @@ saved snapshot. A quota permission failure does not disable inference.
 
 Assistant creation and settings use one editable model input with native cached
 suggestions and a full-model picker that remains unfiltered by the current input.
-The default Task model uses the same controls.
+The settings page separates assistant and Task model sections, each with its own
+connection, model, context window, output limit and reasoning effort. Both sections
+start collapsed; expanding one reveals its full configuration. Following
+the assistant inherits its complete active model configuration. Selecting a Task
+connection enables independent parameters, including when selecting the same
+connection and model as the assistant. Empty Task parameters inherit the selected
+connection/model defaults, not assistant overrides. Changes apply to new Tasks;
+explicit launch selections retain precedence and existing Task snapshots do not
+change. The default Task model uses the same model picker controls.
 The connection type's directory binding selects the public catalog,
 falling back to the profile's explicit directory binding. Unbound Custom API
 connections can suggest IDs across the public directory. Cached connection facts

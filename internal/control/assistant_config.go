@@ -24,8 +24,11 @@ type AssistantSelection struct {
 	TaskDefault     *TaskModelSelection `json:"task_default,omitempty"`
 }
 type TaskModelSelection struct {
-	ProfileID string `json:"profile_id" required:"true"`
-	Model     string `json:"model" required:"true"`
+	ContextWindow   *uint64 `json:"context_window"`
+	MaxOutputTokens *uint64 `json:"max_output_tokens"`
+	ReasoningEffort *string `json:"reasoning_effort"`
+	ProfileID       string  `json:"profile_id" required:"true"`
+	Model           string  `json:"model" required:"true"`
 }
 type SaveAssistantConfiguration struct {
 	RequestID          string             `json:"request_id" required:"true"`
@@ -48,6 +51,13 @@ func normalizedSelection(value AssistantSelection) AssistantSelection {
 		taskDefault := *value.TaskDefault
 		taskDefault.ProfileID = strings.TrimSpace(taskDefault.ProfileID)
 		taskDefault.Model = strings.TrimSpace(taskDefault.Model)
+		if taskDefault.ReasoningEffort != nil {
+			effort := strings.TrimSpace(*taskDefault.ReasoningEffort)
+			taskDefault.ReasoningEffort = &effort
+			if effort == "" {
+				taskDefault.ReasoningEffort = nil
+			}
+		}
 		value.TaskDefault = &taskDefault
 	}
 	if value.ReasoningEffort != nil {
@@ -61,6 +71,14 @@ func normalizedSelection(value AssistantSelection) AssistantSelection {
 	return value
 }
 func (t TaskModelSelection) Validate() error {
+	for _, value := range []*uint64{t.ContextWindow, t.MaxOutputTokens} {
+		if value != nil && (*value == 0 || *value > core.MaxSafeInteger) {
+			return errors.New("task token overrides must be positive supported integers")
+		}
+	}
+	if t.ReasoningEffort != nil && len(*t.ReasoningEffort) > 128 {
+		return errors.New("task reasoning effort exceeds supported length")
+	}
 	if !core.Identifier(t.ProfileID) || strings.TrimSpace(t.Model) == "" || len(t.Model) > 256 {
 		return errors.New("task default requires a Provider and concrete model")
 	}
@@ -180,7 +198,7 @@ func (s *Service) resolveTaskDefault(ctx context.Context, selection TaskModelSel
 	if profile == nil {
 		return core.ResolvedSpec{}, errors.New("Task default Provider is unavailable")
 	}
-	spec, err := s.Profiles.ResolveAssistant(AssistantSelection{ProfileID: profile.ID, ProfileRevision: profile.Revision, Model: selection.Model})
+	spec, err := s.Profiles.ResolveAssistant(AssistantSelection{ProfileID: profile.ID, ProfileRevision: profile.Revision, Model: selection.Model, ContextWindow: selection.ContextWindow, MaxOutputTokens: selection.MaxOutputTokens, ReasoningEffort: selection.ReasoningEffort})
 	if err != nil {
 		return core.ResolvedSpec{}, err
 	}

@@ -322,7 +322,7 @@ func TestTaskDefaultControlMigration(t *testing.T) {
 			if err := db.QueryRowContext(ctx, "SELECT intent FROM assistant_initial_intent WHERE id='explicit'").Scan(&explicit); err != nil {
 				t.Fatal(err)
 			}
-			if explicit != `{"task_default":{"profile_id":"p","model":"keep"},"other":true}` {
+			if explicit != `{"task_default":{"profile_id":"p","model":"keep","context_window":null,"max_output_tokens":null,"reasoning_effort":null},"other":true}` {
 				t.Fatalf("explicit default changed: %q", explicit)
 			}
 			if err := migrateDatabase(ctx, db, ControlDatabase, migrationFiles); err != nil {

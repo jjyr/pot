@@ -378,3 +378,48 @@ func TestMainRefreshIgnoresMissingTaskDefaultProvider(t *testing.T) {
 		t.Fatalf("main configuration refresh did not ignore task default: %+v", fresh)
 	}
 }
+
+func TestTaskDefaultIndependentParameters(t *testing.T) {
+	ctx := context.Background()
+	service, profile := configurationService(t)
+	assistant, err := service.CreateAssistant(ctx, CreateAssistant{RequestID: "assistant", Name: "Assistant"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	window, output, effort := uint64(64000), uint64(4000), " high "
+	saveTaskDefaultSelection(t, ctx, service, assistant.ID, "parameters", &TaskModelSelection{ProfileID: profile.ID, Model: "second", ContextWindow: &window, MaxOutputTokens: &output, ReasoningEffort: &effort})
+	spec := mustSelectTaskConfig(t, ctx, service, assistant.ID, protocol.CreateTask{})
+	requireTaskConfig(t, spec, profile.ID, "second", window, output)
+	if spec.Params.ReasoningEffort == nil || *spec.Params.ReasoningEffort != "high" {
+		t.Fatalf("task effort: %v", spec.Params.ReasoningEffort)
+	}
+	view, err := service.AssistantConfiguration(ctx, assistant.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Config.Model != "first" || view.Config.ContextWindow != 60000 {
+		t.Fatalf("assistant changed: %+v", view.Config)
+	}
+	if view.Selection.TaskDefault.ReasoningEffort == nil || *view.Selection.TaskDefault.ReasoningEffort != "high" {
+		t.Fatal("task effort not normalized")
+	}
+	explicit := "first"
+	explicitSpec := mustSelectTaskConfig(t, ctx, service, assistant.ID, protocol.CreateTask{Model: &explicit})
+	if explicitSpec.ContextWindow == window || explicitSpec.Params.MaxOutputTokens == output {
+		t.Fatal("explicit selection inherited task overrides")
+	}
+	saveTaskDefaultSelection(t, ctx, service, assistant.ID, "clear-parameters", nil)
+	followed := mustSelectTaskConfig(t, ctx, service, assistant.ID, protocol.CreateTask{})
+	requireTaskConfig(t, followed, profile.ID, view.Config.Model, view.Config.ContextWindow, view.Config.Params.MaxOutputTokens)
+}
+
+func TestTaskDefaultParameterValidation(t *testing.T) {
+	zero, tooLarge := uint64(0), core.MaxSafeInteger+uint64(1)
+	for _, value := range []*uint64{&zero, &tooLarge} {
+		for _, selection := range []TaskModelSelection{{ProfileID: "provider", Model: "model", ContextWindow: value}, {ProfileID: "provider", Model: "model", MaxOutputTokens: value}} {
+			if selection.Validate() == nil {
+				t.Fatal("invalid token limit accepted")
+			}
+		}
+	}
+}

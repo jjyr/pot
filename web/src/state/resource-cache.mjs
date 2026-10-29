@@ -260,7 +260,7 @@ export function displayProjection(path,value){
   if(base==='/api/v1/integrations')return redact({items:(value?.items||[]).map(item=>pick(item,['id','name','status','login_available','account','login']))});
   if(base==='/api/v1/agent'){
     const selection=pick(value?.selection,['profile_id','profile_revision','model','context_window','max_output_tokens','reasoning_effort']);
-    if(value?.selection?.task_default)selection.task_default=pick(value.selection.task_default,['profile_id','profile_revision','model']);
+    if(value?.selection?.task_default)selection.task_default=pick(value.selection.task_default,['profile_id','model','context_window','max_output_tokens','reasoning_effort']);
     return redact({...pick(value,['generation','revision','pending']),selection,config:pick(value?.config,['source_profile_id','model'])});
   }
   if(base==='/api/v1/instructions')return pick(value,['text','revision']);
