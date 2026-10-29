@@ -561,8 +561,7 @@ Chromium executable without downloading another browser. It uses independent fre
 theme and dimensions for each pair: 1280×1000 collapsed/send/receive/dark, 1280×1400 expanded
 details, and 390×1000 phone receive in light and dark themes, all at device scale 1. It checks safe Markdown,
 send/receive direction, native disclosure state, loaded images and horizontal fit.
-Draft PNGs go to `output/pr-images/communication-review/`; copy only reviewed
-captures into the source branch's [PR image directory](pr-images/README.md).
+PNG captures go to `output/pr-images/communication-review/`.
 Stop the fixture server with Ctrl-C. This export route is separate from the
 computer-use API's inline observations and uses no tool browser session/profile.
 
@@ -625,8 +624,7 @@ tool and process-session integration checks. Use the `POT_PLAYWRIGHT_MODULE` and
 
 Use private temporary data roots for service integration tests. Never open the
 same root in App and standalone Runtime concurrently. Report checks and limitations
-in the task/PR, not repository validation reports. Store only reviewed UI comparison
-screenshots under [PR image conventions](pr-images/README.md).
+in the task/PR, not repository validation reports.
 
 `hk.pkl` owns pre-commit and pre-push checks. Run commands through `mise`; do not
 bypass failed hooks. `mise run check:push` runs the same local gate without

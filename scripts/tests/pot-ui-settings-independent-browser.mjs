@@ -6,7 +6,7 @@ import {mkdir,mkdtemp,rm,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {translate} from '../../web/src/locales/messages.mjs';
 const output=resolve(process.env.POT_SETTINGS_OUTPUT||'.pot-artifacts/settings-browser');await mkdir(output,{recursive:true});
-const images=resolve(process.env.POT_SETTINGS_IMAGES||'docs/pr-images/fix-settings-independent-status');await mkdir(images,{recursive:true});
+const images=resolve(process.env.POT_SETTINGS_IMAGES||'output/pr-images/fix-settings-independent-status');await mkdir(images,{recursive:true});
 const beforeRoot=process.env.POT_SETTINGS_BEFORE;assert(beforeRoot,'POT_SETTINGS_BEFORE must name the exact baseline source tree');
 const {chromium}=await import(process.env.POT_PLAYWRIGHT_MODULE||'playwright');
 const children=[],origins=[],report={passed:false,checks:[],errors:[],observations:[]};let context,profile;

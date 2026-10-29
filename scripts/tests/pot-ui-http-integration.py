@@ -95,7 +95,7 @@ def run(binary, base, env, cli_command, profile_only=False):
             code = (
                 code.replace("http://127.0.0.1:17702", origin)
                 .replace("STATE", json.dumps({"origin": origin}))
-                .replace("docs/pr-images/", str(ROOT / "output/pr-images/regression") + "/")
+                .replace("output/pr-images/", str(ROOT / "output/pr-images/regression") + "/")
             )
             wrapper = (
                 "async page => { const context = await page.context().browser().newContext({locale:'en-US',viewport:{width:1280,height:800},serviceWorkers:'block',storageState:await page.context().storageState()}); "

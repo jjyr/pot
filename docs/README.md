@@ -14,7 +14,6 @@ Code defines actual behavior.
 | UI implementation rules and behavioral validation | [UI development](ui-development.md) |
 | Release gates, installation channels, signing and Homebrew | [Releases](releases.md) |
 | Native desktop packages and platform requirements | [Desktop installation](desktop-installation.md) |
-| PR screenshot storage and naming | [PR images](pr-images/README.md) |
 | Current product scope and deferred platform work | [Development plan](development-plan.md) |
 | Assistant rules, project AGENTS.md, routing and Skills | [Agent context](agent-context.md) |
 | Visual language, responsive navigation and editing-page interactions | [Design language](design-language.md) |
