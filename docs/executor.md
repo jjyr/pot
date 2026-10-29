@@ -168,6 +168,14 @@ identities and per-sandbox policy membership probes, including detached members;
 these native interfaces are qualified by the real sandbox suite. Host authority
 is broader than this protection and is not an OS isolation guarantee.
 
+Startup uses a bounded private handshake: the supervisor first confirms native
+preparation and signal handling, then waits for the parent's launch decision.
+Configuration writes and readiness reads share one deadline. Cancellation that
+wins before launch authorization sends a cancellation decision instead, so no
+workload starts and the supervisor can confirm that empty scope as clean. After
+launch authorization, cancellation follows the ordinary descendant drain. Ready
+bytes are never cleanup proof; missing or malformed receipts remain errors.
+
 On macOS, cancellation skips the reaping window when its first membership scan
 finds no descendants and force-stops the original workload immediately. Otherwise,
 it stops leaf descendants first and gives their parents a shared 250 ms window

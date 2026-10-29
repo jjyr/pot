@@ -20,6 +20,7 @@ import (
 
 const WorkerArgument = "--internal-process-supervisor"
 const childArgument = "--internal-process-child"
+const startupTimeout = 5 * time.Second
 
 type Markers struct {
 	Allow string
@@ -36,12 +37,17 @@ type receipt struct {
 	Error string `json:"error,omitempty"`
 }
 type Scope struct {
-	config     *os.File
-	proof      *os.File
-	childFiles []*os.File
-	payload    launch
-	once       sync.Once
-	result     error
+	startupDone      chan struct{}
+	startupOnce      sync.Once
+	startupMu        sync.Mutex
+	stopRequested    bool
+	startupCancelled bool
+	config           *os.File
+	proof            *os.File
+	childFiles       []*os.File
+	payload          launch
+	once             sync.Once
+	result           error
 }
 
 // Prepare reserves private descriptors, never forwarded into workload code.
@@ -62,22 +68,55 @@ func Prepare(command *exec.Cmd, worker []string, markers Markers) (*Scope, error
 		config.Close()
 		return nil, err
 	}
-	s := &Scope{config: config, proof: proof, childFiles: []*os.File{input, output}, payload: launch{Markers: markers, Argv: command.Args, Env: command.Env, Directory: command.Dir}}
+	s := &Scope{startupDone: make(chan struct{}), config: config, proof: proof, childFiles: []*os.File{input, output}, payload: launch{Markers: markers, Argv: command.Args, Env: command.Env, Directory: command.Dir}}
 	command.Path = worker[0]
 	command.Args = append(append([]string{}, worker...), WorkerArgument)
 	command.Env = []string{"PATH=/usr/bin:/bin", "LANG=C.UTF-8", "GORACE=atexit_sleep_ms=0"}
 	command.ExtraFiles = s.childFiles
 	return s, nil
 }
+
+// Started confirms native preparation and signal handling before authorizing the
+// workload. A stop requested during startup instead authorizes clean cancellation.
 func (s *Scope) Started() error {
+	defer s.startupOnce.Do(func() { close(s.startupDone) })
+	defer func() { s.payload = launch{}; _ = s.config.Close() }()
 	for _, f := range s.childFiles {
 		_ = f.Close()
 	}
 	s.childFiles = nil
-	err := json.NewEncoder(s.config).Encode(s.payload)
-	s.payload = launch{}
-	_ = s.config.Close()
-	return err
+	deadline := time.Now().Add(startupTimeout)
+	if err := s.config.SetWriteDeadline(deadline); err != nil {
+		return fmt.Errorf("supervisor configuration deadline: %w", err)
+	}
+	if err := s.proof.SetReadDeadline(deadline); err != nil {
+		return fmt.Errorf("supervisor readiness deadline: %w", err)
+	}
+	if err := json.NewEncoder(s.config).Encode(s.payload); err != nil {
+		return fmt.Errorf("supervisor configuration: %w", err)
+	}
+	var ready [1]byte
+	_, readErr := io.ReadFull(s.proof, ready[:])
+	resetErr := s.proof.SetReadDeadline(time.Time{})
+	if err := errors.Join(readErr, resetErr); err != nil {
+		return fmt.Errorf("supervisor readiness: %w", err)
+	}
+	if ready[0] != 'R' {
+		return fmt.Errorf("unexpected supervisor readiness byte %q", ready[0])
+	}
+	// Serialize the final launch decision with early cancellation. No fallible
+	// operation follows a successful ACK: before ACK there is no workload.
+	s.startupMu.Lock()
+	defer s.startupMu.Unlock()
+	decision := byte('A')
+	if s.stopRequested {
+		decision = 'C'
+	}
+	if _, err := s.config.Write([]byte{'"', decision, '"', '\n'}); err != nil {
+		return fmt.Errorf("supervisor startup decision: %w", err)
+	}
+	s.startupCancelled = s.stopRequested
+	return nil
 }
 func (s *Scope) Abort() {
 	for _, f := range s.childFiles {
@@ -85,8 +124,27 @@ func (s *Scope) Abort() {
 	}
 	s.config.Close()
 	s.proof.Close()
+	s.startupOnce.Do(func() { close(s.startupDone) })
 }
+
+// Stop requests cancellation; only Finish supplies cleanup proof.
 func (s *Scope) Stop(pid int) error {
+	s.startupMu.Lock()
+	s.stopRequested = true
+	s.startupMu.Unlock()
+	timer := time.NewTimer(startupTimeout)
+	defer timer.Stop()
+	select {
+	case <-s.startupDone:
+	case <-timer.C:
+		return errors.New("supervisor startup did not settle before cancellation")
+	}
+	s.startupMu.Lock()
+	cancelled := s.startupCancelled
+	s.startupMu.Unlock()
+	if cancelled {
+		return nil
+	}
 	err := syscall.Kill(pid, syscall.SIGTERM)
 	if errors.Is(err, syscall.ESRCH) {
 		return nil
@@ -150,7 +208,8 @@ func supervise() int {
 	defer config.Close()
 	defer proof.Close()
 	var spec launch
-	if json.NewDecoder(io.LimitReader(config, 8*1024*1024)).Decode(&spec) != nil || len(spec.Argv) == 0 {
+	decoder := json.NewDecoder(io.LimitReader(config, 8*1024*1024))
+	if decoder.Decode(&spec) != nil || len(spec.Argv) == 0 {
 		return 125
 	}
 	if err := prepareNative(); err != nil {
@@ -160,6 +219,27 @@ func supervise() int {
 	signals := make(chan os.Signal, 2)
 	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT)
 	defer signal.Stop(signals)
+	// Ready and the final cleanup receipt share a private pipe. The parent reads
+	// exactly one ready byte, leaving the JSON cleanup proof untouched.
+	if _, err := proof.Write([]byte{'R'}); err != nil {
+		return 125
+	}
+	var decision string
+	// Preserve decoder buffering and whitespace across the configuration and
+	// decision frames. Until launch authorization, no workload may be started.
+	if decoder.Decode(&decision) != nil {
+		return 125
+	}
+	switch decision {
+	case "C":
+		if json.NewEncoder(proof).Encode(receipt{Clean: true}) != nil {
+			return 125
+		}
+		return 130
+	case "A":
+	default:
+		return 125
+	}
 	read, write, err := os.Pipe()
 	if err != nil {
 		return 125
