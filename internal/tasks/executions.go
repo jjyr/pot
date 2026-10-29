@@ -69,7 +69,7 @@ func (s *Service) AcceptExecutionTx(ctx context.Context, tx *sql.Tx, record Reco
 }
 
 // UpdateExecution serializes polling with guidance and dispositions. The original
-// run reference is a compare-and-swap fence against stale backend responses.
+// run reference and record revision fence stale backend responses.
 func (s *Service) UpdateExecution(ctx context.Context, record Record, expectedRun string) (bool, error) {
 	var changed bool
 	err := storage.Transaction(ctx, s.db, func(tx *sql.Tx) error {
@@ -83,14 +83,14 @@ func (s *Service) UpdateExecution(ctx context.Context, record Record, expectedRu
 	return changed, err
 }
 
-// UpdateExecutionTx applies the existing expected-run fence and outcome indexes
+// UpdateExecutionTx applies the expected-run and revision fences and outcome indexes
 // in the same Tasks transaction as a transport event receipt.
 func (s *Service) UpdateExecutionTx(ctx context.Context, tx *sql.Tx, record Record, expectedRun string) (bool, error) {
 	current, err := read(ctx, tx, record.AssistantID, record.Info.ID)
 	if err != nil {
 		return false, err
 	}
-	if current == nil || current.Execution == nil || current.Execution.Receipt.RunID != expectedRun {
+	if current == nil || current.Execution == nil || current.Execution.Receipt.RunID != expectedRun || current.Revision != record.Revision {
 		return false, nil
 	}
 	// A delayed poll cannot reopen an already-ended execution. Continuation

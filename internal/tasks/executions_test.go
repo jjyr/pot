@@ -48,6 +48,13 @@ func TestTaskCatalogueSharesLocalAndAgentLinkLifecycle(t *testing.T) {
 	if err = s.StopExecution(ctx, "assistant", linked.Info.ID); err != nil {
 		t.Fatal(err)
 	}
+	if ok, err := s.UpdateExecution(ctx, *stored, ""); err != nil || ok {
+		t.Fatal("stale projection replaced cancellation intent", ok, err)
+	}
+	stored, err = s.Get(ctx, "assistant", linked.Info.ID)
+	if err != nil || stored == nil {
+		t.Fatal(stored, err)
+	}
 	stored.Execution.Receipt = agentlink.Task{ID: "thread", RequestID: "linked", RunID: "turn-one", State: "completed", Result: "Codex result"}
 	stored.Info.Phase = protocol.TaskComplete
 	stored.Info.RunID = "run-one"
@@ -140,5 +147,49 @@ func TestLinkedTaskDoesNotRequireLocalExecutionServices(t *testing.T) {
 	waiting, err := s.Get(ctx, "assistant", "task")
 	if err != nil || !waiting.Info.RemoteWaiting || waiting.Info.Phase != protocol.TaskQueued || waiting.Execution.Receipt.ID != "" {
 		t.Fatal("unavailable owner changed execution facts", waiting, err)
+	}
+}
+
+func TestUpdateExecutionRejectsStaleSameRunProjection(t *testing.T) {
+	s, _, _ := fixture(t)
+	ctx := context.Background()
+	record := Record{AssistantID: "assistant", Request: protocol.CreateTask{RequestID: "linked", Text: "work", Target: &protocol.AgentRef{NodeID: "codex", Kind: "node", AgentID: "codex"}}, Info: protocol.TaskInfo{ID: "linked-task", AssistantID: "assistant", Phase: protocol.TaskQueued, RunID: "run-one", AgentLink: &protocol.AgentLinkOrigin{LinkID: "connection", NodeID: "codex", Kind: "codex"}}, Execution: &Execution{Request: agentlink.TaskRequest{Target: agentlink.NodeTarget("codex"), RequestID: "linked", Text: "work", From: protocol.AgentRef{NodeID: "source", Kind: "assistant", AgentID: "assistant"}}, Receipt: agentlink.Task{ID: "thread", RequestID: "linked", RunID: "run-one", State: "queued"}}}
+	if err := s.AcceptExecution(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	read := func() *Record {
+		t.Helper()
+		r, err := s.Get(ctx, "assistant", record.Info.ID)
+		if err != nil || r == nil || r.Execution == nil {
+			t.Fatalf("read execution: %+v %v", r, err)
+		}
+		return r
+	}
+	stale, current := read(), read()
+	current.Info.Phase = protocol.TaskRunning
+	current.Info.StartedAtMS = 123
+	current.Execution.Receipt.State = "running"
+	if ok, err := s.UpdateExecution(ctx, *current, "run-one"); err != nil || !ok {
+		t.Fatal("fresh running projection", ok, err)
+	}
+	saved := read()
+	if ok, err := s.UpdateExecution(ctx, *stale, "run-one"); err != nil || ok {
+		t.Errorf("stale same-run projection accepted: %v %v", ok, err)
+	}
+	after := read()
+	if after.Info.Phase != protocol.TaskRunning || after.Execution.Receipt.State != "running" || after.Info.StartedAtMS != 123 || after.Revision != saved.Revision {
+		t.Fatalf("stale projection changed committed state: phase=%s state=%s start=%d revision=%d, want revision=%d", after.Info.Phase, after.Execution.Receipt.State, after.Info.StartedAtMS, after.Revision, saved.Revision)
+	}
+	// Waiting and running may legitimately alternate within the same run.
+	for _, phase := range []protocol.TaskPhase{protocol.TaskWaiting, protocol.TaskRunning} {
+		next := read()
+		next.Info.Phase = phase
+		next.Execution.Receipt.State = string(phase)
+		if ok, err := s.UpdateExecution(ctx, *next, "run-one"); err != nil || !ok {
+			t.Fatal("fresh phase transition rejected", phase, ok, err)
+		}
+		if got := read(); got.Info.Phase != phase || got.Revision != next.Revision+1 {
+			t.Fatalf("fresh transition not committed: %+v", got)
+		}
 	}
 }
