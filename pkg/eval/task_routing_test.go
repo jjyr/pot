@@ -473,7 +473,7 @@ func (s *routingNoRetryStream) Read(b []byte) (int, error) {
 	}
 	return n, err
 }
-func (routingCappedServices) Compaction(context.Context, json.RawMessage) error {
+func (*routingCappedServices) Compaction(context.Context, json.RawMessage) error {
 	return errors.New("routing eval forbids compaction")
 }
 
