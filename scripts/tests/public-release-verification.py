@@ -243,12 +243,18 @@ class TransportAndScope(unittest.TestCase):
         with self.assertRaises(ValueError):
             network.data(FEED_URL)
 
-    def test_public_verification_stays_out_of_workflows(self):
+    def test_public_verification_runs_only_after_publication(self):
         self.assertFalse((ROOT / ".github/workflows/verify-release.yml").exists())
         for path in (ROOT / ".github/workflows").glob("*.yml"):
             with self.subTest(workflow=path.name):
                 text = path.read_text()
-                self.assertNotIn("scripts/verify-release", text)
+                if path.name == "release-publish.yml":
+                    self.assertLess(
+                        text.index("scripts/publish-container"),
+                        text.index("scripts/verify-release"),
+                    )
+                else:
+                    self.assertNotIn("scripts/verify-release", text)
                 self.assertNotIn("mise run verify:release", text)
                 self.assertNotIn("./.github/workflows/verify-release.yml", text)
 

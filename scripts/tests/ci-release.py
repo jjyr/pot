@@ -67,72 +67,42 @@ class ReleaseIntent(unittest.TestCase):
     def resolve(self, endpoint, query):
         return OTHER if endpoint.startswith("pulls/") else SHA
 
-    def test_every_tag_checks_but_only_stable_version_tags_publish(self):
-        for tag, official, version in [
-            ("nightly", "false", "0.0.0"),
-            ("构建+preview", "false", "0.0.0"),
-            ("v1.2.3-rc.1", "false", "0.0.0"),
-            ("v01.2.3", "false", "0.0.0"),
-            ("v1.2.3", "true", "1.2.3"),
+    def test_tag_versions_never_select_publication(self):
+        for tag, version in [
+            ("nightly", "0.0.0"),
+            ("构建+preview", "0.0.0"),
+            ("v1.2.3-rc.1", "0.0.0"),
+            ("v01.2.3", "0.0.0"),
+            ("v1.2.3", "1.2.3"),
         ]:
             with self.subTest(tag=tag):
-                result = plan("push", "refs/tags/" + tag, "", "", False, SHA, self.resolve)
-                self.assertEqual((result["official"], result["version"]), (official, version))
+                self.assertEqual(
+                    plan("refs/tags/" + tag, "", "", SHA, self.resolve),
+                    {"sha": SHA, "version": version},
+                )
 
-    def test_candidate_version_is_never_allowed_to_override_publication(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            env = dict(
-                os.environ,
-                GITHUB_EVENT_NAME="workflow_dispatch",
-                GITHUB_REF="refs/heads/main",
-                GITHUB_SHA=SHA,
-                GITHUB_REPOSITORY="jjyr/pot",
-                GITHUB_OUTPUT=str(Path(temporary) / "output"),
-                VALIDATION_VERSION="0.0.1",
-                SOURCE_REF="",
-                PR_NUMBER="",
-                PUBLISH="false",
+    def test_validation_version_overrides_tag_and_pr(self):
+        for pr in ["", "123"]:
+            self.assertEqual(
+                plan("refs/tags/v1.2.3", "", pr, SHA, self.resolve, "2.0.0")["version"], "2.0.0"
             )
-            with mock.patch.dict(os.environ, env, clear=True):
-                main = plan.__globals__["main"]
-                main()
-                self.assertIn("version=0.0.1", Path(env["GITHUB_OUTPUT"]).read_text())
-                with mock.patch.dict(
-                    main.__globals__,
-                    plan=lambda *args: {"sha": SHA, "version": "1.2.3", "official": "true"},
-                ):
-                    with self.assertRaisesRegex(ValueError, "nonpublishing"):
-                        main()
-
-    def test_manual_semantic_tag_defaults_to_validation(self):
-        self.assertEqual(
-            plan("workflow_dispatch", "refs/tags/v1.2.3", "", "", False, SHA, self.resolve)[
-                "official"
-            ],
-            "false",
-        )
-
-    def test_manual_release_requires_explicit_stable_tag(self):
-        result = plan(
-            "workflow_dispatch",
-            "refs/heads/main",
-            "refs/tags/v1.2.3",
-            "",
-            True,
-            OTHER,
-            self.resolve,
-        )
-        self.assertEqual(result, {"sha": SHA, "version": "1.2.3", "official": "true"})
-        for ref in ["refs/heads/main", "v1.2.3", "refs/tags/v1.2.3-rc.1"]:
-            with self.subTest(ref=ref), self.assertRaises(ValueError):
-                plan("workflow_dispatch", ref, "", "", True, SHA, self.resolve)
-
-    def test_pr_sha_is_pinned_and_never_publishes(self):
-        result = plan("workflow_dispatch", "refs/tags/v1.2.3", "", "123", False, SHA, self.resolve)
-        self.assertEqual(result["sha"], OTHER)
-        self.assertEqual(result["official"], "false")
         with self.assertRaises(ValueError):
-            plan("workflow_dispatch", "refs/tags/v1.2.3", "", "123", True, SHA, self.resolve)
+            plan("refs/heads/main", "", "", SHA, self.resolve, "1.2.3-rc.1")
+
+    def test_explicit_ref_is_resolved_once(self):
+        resolver = mock.Mock(return_value=SHA)
+        self.assertEqual(
+            plan("refs/heads/main", "refs/heads/topic", "", OTHER, resolver),
+            {"sha": SHA, "version": "0.0.0"},
+        )
+        resolver.assert_called_once_with("commits/refs/heads/topic", ".sha")
+
+    def test_pr_is_pinned_and_cannot_inherit_selected_tag_version(self):
+        resolver = mock.Mock(return_value=OTHER)
+        self.assertEqual(
+            plan("refs/tags/v1.2.3", "", "123", SHA, resolver), {"sha": OTHER, "version": "0.0.0"}
+        )
+        resolver.assert_called_once_with("pulls/123", ".head.sha")
 
     def test_invalid_or_ambiguous_sources_fail(self):
         for ref, pr in [
@@ -143,9 +113,137 @@ class ReleaseIntent(unittest.TestCase):
             ("$(touch unsafe)", ""),
         ]:
             with self.subTest(ref=ref, pr=pr), self.assertRaises(ValueError):
-                plan("workflow_dispatch", "refs/heads/main", ref, pr, False, SHA, self.resolve)
+                plan("refs/heads/main", ref, pr, SHA, self.resolve)
         with self.assertRaises(ValueError):
-            plan("push", "refs/tags/v1.2.3", "", "", False, SHA, lambda *_: OTHER)
+            plan("refs/heads/main", "topic", "", SHA, lambda *_: "short")
+        self.assertEqual(plan("refs/heads/main", "", "", OTHER, self.resolve)["sha"], OTHER)
+
+    def test_main_only_outputs_validation_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            env = dict(
+                os.environ,
+                GITHUB_REF="refs/tags/v1.2.3",
+                GITHUB_SHA=SHA,
+                GITHUB_REPOSITORY="jjyr/pot",
+                GITHUB_OUTPUT=str(output),
+                SOURCE_REF="",
+                PR_NUMBER="",
+                VALIDATION_VERSION="0.0.1",
+            )
+            with mock.patch.dict(os.environ, env, clear=True):
+                plan.__globals__["main"]()
+            self.assertEqual(output.read_text(), f"sha={SHA}\nversion=0.0.1\n")
+
+    def test_resolver_failure_propagates(self):
+        with self.assertRaises(RuntimeError):
+            plan(
+                "refs/heads/main", "topic", "", SHA, mock.Mock(side_effect=RuntimeError("offline"))
+            )
+
+
+class WorkflowBoundary(unittest.TestCase):
+    def test_validation_has_no_publication_authority(self):
+        text = (ROOT / ".github/workflows/ci.yml").read_text()
+        for forbidden in [
+            "  push:",
+            "      publish:",
+            "publish-release",
+            "contents: write",
+            "packages: write",
+            "secrets.",
+            "outputs.official",
+        ]:
+            self.assertNotIn(forbidden, text)
+        self.assertIn("  workflow_call:", text)
+        self.assertIn("  workflow_dispatch:", text)
+        self.assertIn("retention-days: 7", text)
+        self.assertIn("./.github/workflows/tests.yml", text)
+
+    def test_prepare_finalizes_all_channels_before_ready(self):
+        text = (ROOT / ".github/workflows/release-prepare.yml").read_text()
+        self.assertLess(text.index("scripts/release-preflight"), text.index("  build:"))
+        self.assertIn("    needs: guard", text)
+        self.assertIn("    needs: source", text)
+        ready = text.split("  ready:", 1)[1]
+        self.assertIn("needs: [source, build, seal]", ready)
+        for channel in ["server", "desktop", "container", "macos"]:
+            self.assertLess(ready.index("--channel " + channel), ready.index("id: bundle"))
+        self.assertIn("rm dist/SHA256SUMS", ready)
+        self.assertNotIn("SHA256SUMS*", ready)
+        self.assertLess(
+            ready.index("id: bundle"), ready.index("scripts/release-candidate finalize")
+        )
+        self.assertLess(
+            ready.index("scripts/release-candidate finalize"), ready.index("id: manifest")
+        )
+        self.assertEqual(ready.count("retention-days: 30"), 2)
+        self.assertNotIn("create-tag", text)
+
+    def test_publish_verifies_before_tag_and_copies_in_order(self):
+        text = (ROOT / ".github/workflows/release-publish.yml").read_text()
+        self.assertIn("group: release-publication", text)
+        self.assertIn("ref: " + "$" + "{{ github.sha }}", text)
+        self.assertIn("    needs: guard", text)
+        for forbidden in [
+            "scripts/prepare-release",
+            "scripts/sign-macos-release",
+            "POT_UPDATE_PRIVATE_KEY",
+            "docker build",
+            "secrets.",
+            "continue-on-error:",
+        ]:
+            self.assertNotIn(forbidden, text)
+        sequence = [
+            "scripts/release-candidate fetch",
+            "scripts/release-candidate verify",
+            "sign-release verify",
+            "scripts/release-candidate create-tag",
+            "--channel server",
+            "--channel desktop",
+            "--channel macos",
+            "scripts/publish-container",
+            "scripts/verify-release",
+        ]
+        positions = [text.index(item) for item in sequence]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("--manifest-id", text)
+
+    def test_retired_publication_workflows_are_absent(self):
+        for name in [
+            "release.yml",
+            "release-linux.yml",
+            "release-container.yml",
+            "refresh-release.yml",
+        ]:
+            self.assertFalse((ROOT / ".github/workflows" / name).exists(), name)
+
+    def test_only_intermediate_artifacts_can_be_overwritten_on_rerun(self):
+        def uploads(name):
+            text = (ROOT / ".github/workflows" / name).read_text()
+            return [
+                block
+                for block in text.split("      - ")
+                if "uses: actions/upload-artifact@" in block
+            ]
+
+        ci = uploads("ci.yml")
+        self.assertEqual(len(ci), 5)
+        for step in ci:
+            self.assertIn("          overwrite: true", step)
+            self.assertIn("          retention-days: 7", step)
+        prepare = uploads("release-prepare.yml")
+        self.assertEqual(len(prepare), 3)
+        sealed = [step for step in prepare if "          name: sealed-macos" in step]
+        self.assertEqual(len(sealed), 1)
+        self.assertIn("          overwrite: true", sealed[0])
+        for step in prepare:
+            if step in sealed:
+                continue
+            self.assertIn("          retention-days: 30", step)
+            self.assertNotIn("          overwrite:", step)
+        for prefix in ["release-bundle-", "release-candidate-"]:
+            self.assertEqual(sum(("          name: " + prefix) in step for step in prepare), 1)
 
 
 class AssetsFixture:
@@ -356,13 +454,18 @@ class CompleteDistribution(AssetsFixture, unittest.TestCase):
             }
             with (
                 mock.patch.dict(os.environ, environment, clear=True),
-                mock.patch("subprocess.check_output", return_value=SHA),
+                mock.patch(
+                    "subprocess.check_output", side_effect=AssertionError("unexpected network")
+                ),
                 mock.patch("builtins.print"),
             ):
                 runpy.run_path(str(ROOT / "scripts/release-preflight"))
                 with (
-                    mock.patch("subprocess.check_output", return_value=OTHER),
-                    self.assertRaisesRegex(SystemExit, "tag moved"),
+                    mock.patch.dict(os.environ, RELEASE_SHA="short"),
+                    mock.patch(
+                        "subprocess.run", side_effect=AssertionError("effect before SHA gate")
+                    ),
+                    self.assertRaisesRegex(SystemExit, "full commit hash"),
                 ):
                     runpy.run_path(str(ROOT / "scripts/release-preflight"))
                 with (
@@ -1015,19 +1118,12 @@ class ContainerPublication(AssetsFixture, unittest.TestCase):
             self.exercise(remote=b"different-manifest")
         self.assertFalse(any(call[:2] == ["skopeo", "copy"] for call in self.calls))
 
-    def test_refresh_requires_exact_old_digest_and_only_v001(self):
-        old = b"previous-manifest"
-        self.exercise(
-            remote=old, version="0.0.1", replace_digest="sha256:" + hashlib.sha256(old).hexdigest()
-        )
+    def test_legacy_version_cannot_overwrite_conflicting_image(self):
         with self.assertRaisesRegex(ValueError, "existing image"):
-            self.exercise(remote=old, version="0.0.1", replace_digest="sha256:" + "0" * 64)
-        with self.assertRaisesRegex(ValueError, "version 0.0.1"):
-            self.exercise(remote=old, replace_digest="sha256:" + hashlib.sha256(old).hexdigest())
-        with self.assertRaisesRegex(ValueError, "missing"):
-            self.exercise(version="0.0.1", replace_digest="sha256:" + "0" * 64)
+            self.exercise(remote=b"previous-manifest", version="0.0.1")
+        self.assertFalse(any(call[:2] == ["skopeo", "copy"] for call in self.calls))
 
-    def exercise(self, remote=b"", version="1.2.3", replace_digest=None):
+    def exercise(self, remote=b"", version="1.2.3"):
         publish = runpy.run_path(str(ROOT / "scripts/publish-container"))["publish"]
         self.calls = []
         real_run = subprocess.run
@@ -1069,7 +1165,7 @@ class ContainerPublication(AssetsFixture, unittest.TestCase):
                 mock.patch("subprocess.check_output", side_effect=output),
                 mock.patch("builtins.print"),
             ):
-                publish(version, root, replace_digest)
+                publish(version, root)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,276 @@
+# .github/workflows/release-prepare.yml
+name: Release prepare
+
+run-name: release-prepare [${{ inputs.request-id }}]
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (major.minor.patch)
+        required: true
+        type: string
+      ref:
+        description: Source commit on main (blank uses current default-branch SHA)
+        required: false
+        type: string
+      request-id:
+        description: Opaque request identifier used for correlation
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-prepare-${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  MISE_AUTO_INSTALL: 'false'
+
+jobs:
+  guard:
+    name: Reject non-default-branch invocation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    steps:
+      - name: Fail unless invoked from the default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [ "$REF_TYPE" != "branch" ] || [ "$REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            echo "::error::release-prepare must be dispatched from the default branch (${DEFAULT_BRANCH}); got ${REF_TYPE}:${REF_NAME}"
+            exit 1
+          fi
+
+  source:
+    name: Resolve source and verify release configuration
+    needs: guard
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+      version: ${{ steps.candidate.outputs.version }}
+      mode: ${{ steps.preflight.outputs.mode }}
+      public-key: ${{ vars.POT_UPDATE_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.10.10
+          cache: false
+          install_args: go python
+      - name: Resolve candidate source
+        id: candidate
+        env:
+          VERSION: ${{ inputs.version }}
+          SOURCE_REF: ${{ inputs.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ref="$SOURCE_REF"
+          if [ -z "$ref" ]; then
+            ref="$WORKFLOW_SHA"
+          fi
+          mise exec -- python scripts/release-candidate resolve --version "$VERSION" --ref "$ref"
+      - name: Verify macOS release mode, credentials and update key pair
+        id: preflight
+        env:
+          POT_MACOS_RELEASE_MODE: ${{ vars.POT_MACOS_RELEASE_MODE }}
+          POT_UPDATE_PUBLIC_KEY: ${{ vars.POT_UPDATE_PUBLIC_KEY }}
+          POT_UPDATE_PRIVATE_KEY: ${{ secrets.POT_UPDATE_PRIVATE_KEY }}
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          RELEASE_VERSION: ${{ steps.candidate.outputs.version }}
+          RELEASE_SHA: ${{ steps.candidate.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec -- python scripts/release-preflight
+
+  build:
+    name: Shared CI checks, packaging and smokes
+    needs: source
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      ref: ${{ needs.source.outputs.sha }}
+      version: ${{ needs.source.outputs.version }}
+      public-key: ${{ needs.source.outputs.public-key }}
+
+  seal:
+    name: Seal macOS packages (${{ needs.source.outputs.mode }})
+    needs: [source, build]
+    runs-on: macos-26
+    environment: release
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: distribution-unsigned
+          path: dist
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.10.10
+          cache: false
+          install_args: python
+      - name: Seal validated archives in selected mode
+        env:
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+          POT_MACOS_RELEASE_MODE: ${{ needs.source.outputs.mode }}
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: mise exec -- python scripts/sign-macos-release "$RELEASE_VERSION" dist --mode "$POT_MACOS_RELEASE_MODE"
+      - name: Smoke final macOS packages
+        env:
+          POT_APP_VERSION: ${{ needs.source.outputs.version }}
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+          POT_BUILD_REVISION: ${{ needs.source.outputs.sha }}
+          POT_MACOS_RELEASE_MODE: ${{ needs.source.outputs.mode }}
+        run: |
+          mise exec -- python scripts/tests/macos-package-smoke.py "dist/Pot-${RELEASE_VERSION}-arm64.zip"
+          mise exec -- python scripts/tests/server-package-smoke.py "dist/pot-${RELEASE_VERSION}-darwin-arm64.tar.gz"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sealed-macos
+          path: |
+            dist/Pot-*.zip
+            dist/Pot-*.zip.sha256
+            dist/pot-*-darwin-arm64.tar.gz
+            dist/pot-*-darwin-arm64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+  ready:
+    name: Assemble signed release bundle and candidate manifest
+    needs: [source, build, seal]
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    env:
+      POT_BUILD_REVISION: ${{ needs.source.outputs.sha }}
+      POT_UPDATE_PUBLIC_KEY: ${{ needs.source.outputs.public-key }}
+      GH_TOKEN: ${{ github.token }}
+    outputs:
+      bundle-id: ${{ steps.bundle.outputs.artifact-id }}
+      manifest-id: ${{ steps.manifest.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.10.10
+          cache: false
+          install_args: go python
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: distribution-unsigned
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sealed-macos
+          merge-multiple: true
+          path: dist
+      - name: Validate server channel
+        env:
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+        run: mise exec -- python scripts/prepare-release "$RELEASE_VERSION" dist --channel server
+      - name: Validate desktop channel
+        env:
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+        run: mise exec -- python scripts/prepare-release "$RELEASE_VERSION" dist --channel desktop
+      - name: Validate container channel
+        env:
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+        run: mise exec -- python scripts/prepare-release "$RELEASE_VERSION" dist --channel container
+      - name: Validate and sign macOS channel feed
+        env:
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+          POT_BUILD_REVISION: ${{ needs.source.outputs.sha }}
+          POT_UPDATE_PUBLIC_KEY: ${{ needs.source.outputs.public-key }}
+          POT_UPDATE_PRIVATE_KEY: ${{ secrets.POT_UPDATE_PRIVATE_KEY }}
+          POT_MACOS_RELEASE_MODE: ${{ needs.source.outputs.mode }}
+        run: mise exec -- python scripts/prepare-release "$RELEASE_VERSION" dist --channel macos --sign-feed --macos-mode "$POT_MACOS_RELEASE_MODE"
+      - name: Remove validation-only SHA256SUMS
+        run: |
+          rm dist/SHA256SUMS
+      - name: Upload immutable release bundle
+        id: bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+      - name: Finalize candidate manifest
+        env:
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+          RELEASE_SHA: ${{ needs.source.outputs.sha }}
+          RELEASE_MODE: ${{ needs.source.outputs.mode }}
+          BUNDLE_ID: ${{ steps.bundle.outputs.artifact-id }}
+        run: |
+          mkdir -p candidate-manifest
+          mise exec -- python scripts/release-candidate finalize \
+            --version "$RELEASE_VERSION" \
+            --sha "$RELEASE_SHA" \
+            --mode "$RELEASE_MODE" \
+            --directory dist \
+            --artifact-id "$BUNDLE_ID" \
+            --output candidate-manifest/candidate.json
+      - name: Upload candidate manifest
+        id: manifest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: candidate-manifest/*
+          if-no-files-found: error
+          retention-days: 30
+      - name: Report prepared candidate identity
+        env:
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+          RELEASE_SHA: ${{ needs.source.outputs.sha }}
+          BUNDLE_ID: ${{ steps.bundle.outputs.artifact-id }}
+          MANIFEST_ID: ${{ steps.manifest.outputs.artifact-id }}
+        run: |
+          bundle_expiry=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$BUNDLE_ID" --jq .expires_at)
+          manifest_expiry=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$MANIFEST_ID" --jq .expires_at)
+          {
+            echo "## Ready to publish after this preparation run succeeds"
+            echo "Version: $RELEASE_VERSION; source: $RELEASE_SHA"
+            echo "Prepare run: $GITHUB_RUN_ID; attempt: $GITHUB_RUN_ATTEMPT"
+            echo "Bundle artifact: $BUNDLE_ID; manifest artifact: $MANIFEST_ID"
+            echo "Bundle expires: $bundle_expiry; manifest expires: $manifest_expiry"
+            echo "No release tag or public assets have been created."
+            echo "Publish: mise run release:publish -- $GITHUB_RUN_ID --wait"
+          } >> "$GITHUB_STEP_SUMMARY"

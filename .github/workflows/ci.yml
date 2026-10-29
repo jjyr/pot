@@ -1,12 +1,22 @@
 name: CI
 
 on:
-  push:
-    tags: ["**"]
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      public-key:
+        description: Pinned public update key for release preparation
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       ref:
-        description: Source ref (blank uses selected branch/tag; releases require refs/tags/vMAJOR.MINOR.PATCH)
+        description: Source ref (blank uses selected branch/tag; validation never publishes)
         required: false
         type: string
       pr:
@@ -17,17 +27,12 @@ on:
         description: Optional package version for a nonpublishing candidate (major.minor.patch)
         required: false
         type: string
-      publish:
-        description: Publish an existing stable tag after checks, packaging and release environment gates
-        default: false
-        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}-${{ inputs.ref }}-pr-${{ inputs.pr || 'none' }}
-  # A running official release must finish without another run cancelling it.
   cancel-in-progress: false
 
 env:
@@ -35,7 +40,7 @@ env:
 
 jobs:
   source:
-    name: Resolve source and release intent
+    name: Resolve validation source
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -44,8 +49,7 @@ jobs:
     outputs:
       sha: ${{ steps.source.outputs.sha }}
       version: ${{ steps.source.outputs.version }}
-      official: ${{ steps.source.outputs.official }}
-      public-key: ${{ vars.POT_UPDATE_PUBLIC_KEY }}
+      public-key: ${{ inputs.public-key || vars.POT_UPDATE_PUBLIC_KEY }}
     steps:
       # Resolve using the selected workflow's code before executing any PR code.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -56,8 +60,7 @@ jobs:
         env:
           SOURCE_REF: ${{ inputs.ref }}
           PR_NUMBER: ${{ inputs.pr }}
-          PUBLISH: ${{ inputs.publish || false }}
-          VALIDATION_VERSION: ${{ inputs.validation-version }}
+          VALIDATION_VERSION: ${{ inputs.version || inputs.validation-version }}
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/release-plan
 
@@ -122,6 +125,7 @@ jobs:
           path: dist/*
           if-no-files-found: error
           retention-days: 7
+          overwrite: true
 
   macos:
     needs: [source, product, build-checks]
@@ -165,6 +169,7 @@ jobs:
           path: dist/*
           if-no-files-found: error
           retention-days: 7
+          overwrite: true
 
   desktop:
     needs: [source, product, build-checks]
@@ -196,6 +201,7 @@ jobs:
           path: dist/*
           if-no-files-found: error
           retention-days: 7
+          overwrite: true
 
   docker-smoke:
     needs: [source, product, build-checks]
@@ -258,6 +264,7 @@ jobs:
           path: dist/*
           if-no-files-found: error
           retention-days: 7
+          overwrite: true
 
   distribution:
     needs: [source, server, macos, desktop, container]
@@ -283,51 +290,4 @@ jobs:
           path: dist/*
           if-no-files-found: error
           retention-days: 7
-
-  publish-server:
-    needs: [source, server]
-    if: needs.source.outputs.official == 'true'
-    uses: ./.github/workflows/release-linux.yml
-    permissions:
-      contents: write
-    with:
-      sha: ${{ needs.source.outputs.sha }}
-      version: ${{ needs.source.outputs.version }}
-      channel: server
-
-  publish-desktop:
-    # Serialize GitHub asset writers, but a failed different channel does not
-    # block this channel after its own native package and smoke succeeded.
-    needs: [source, desktop, publish-server]
-    if: ${{ !cancelled() && needs.source.outputs.official == 'true' && needs.desktop.result == 'success' }}
-    uses: ./.github/workflows/release-linux.yml
-    permissions:
-      contents: write
-    with:
-      sha: ${{ needs.source.outputs.sha }}
-      version: ${{ needs.source.outputs.version }}
-      channel: desktop
-
-  publish-macos:
-    needs: [source, server, macos, publish-desktop]
-    if: ${{ !cancelled() && needs.source.outputs.official == 'true' && needs.server.result == 'success' && needs.macos.result == 'success' }}
-    uses: ./.github/workflows/release.yml
-    permissions:
-      contents: write
-      pull-requests: write
-    with:
-      sha: ${{ needs.source.outputs.sha }}
-      version: ${{ needs.source.outputs.version }}
-      public-key: ${{ needs.source.outputs.public-key }}
-    secrets: inherit
-
-  publish-container:
-    needs: [source, container]
-    if: needs.source.outputs.official == 'true'
-    uses: ./.github/workflows/release-container.yml
-    permissions:
-      contents: read
-      packages: write
-    with:
-      sha: ${{ needs.source.outputs.sha }}
-      version: ${{ needs.source.outputs.version }}
+          overwrite: true

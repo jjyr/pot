@@ -1,11 +1,10 @@
 # Releases and installation channels
 
-CI builds and publishes each delivery channel independently after shared product
-checks pass. Docker, Linux server and the experimental Linux desktop do not depend
-on macOS signing. Each channel requires its own build, smoke, checksum and
+Release preparation validates all supported channels before a formal tag exists.
+Publication promotes the exact prepared bytes to GitHub Releases and GHCR without
+rebuilding or signing again. Each channel retains its build, smoke, checksum and
 applicable signing gates. Windows is currently unsupported.
 
-The first public release is 0.0.1; the root `Casks/pot.rb` installs its App.
 Release workflows propose a cask and Formula update PR after successful macOS publication;
 they never push the default branch or change repository/registry visibility.
 
@@ -30,69 +29,134 @@ are separate channels.
 See [Desktop installation](desktop-installation.md) and [Docker](docker.md) for
 platform requirements, installation boundaries and source-build instructions.
 
-## Triggers and source selection
+## Release procedure
 
-The release/build `CI` workflow starts automatically only on tag pushes. The
-separate `Tests` workflow runs one Linux lightweight check on PRs and pushes to
-`main`. Release/build calls and manual `Tests` runs always use the complete
-Linux/macOS normal/static and race matrix, regardless of `publish`; see
-[Development](development.md#ci-and-manual-pr-checks) for both coverage boundaries.
-Every tag runs checks, including Unicode
-names and tags outside the release pattern. Only exact `vMAJOR.MINOR.PATCH` tags
-without leading zeroes select publication. Other tags build validation artifacts
-with version `0.0.0`; they do not push images or create releases. Branch pushes,
-PR events and Release events do not start the release/build workflow.
+Use an authenticated `gh` session and the repository's pinned mise tools:
 
-Ordinary manual runs never publish, including when selecting a stable version tag.
-The optional `ref` and `pr` inputs are mutually exclusive. Leave both empty to
-check the branch/tag selected in Actions, use a source ref, or select a PR head:
+```sh
+mise run release:prepare -- 0.0.9 --wait
+# Optionally select a commit already merged into the remote default branch:
+mise run release:prepare -- 0.0.9 --ref FULL_COMMIT_SHA --wait
+mise run release:status -- PREPARE_RUN_ID
+mise run release:publish -- PREPARE_RUN_ID --wait
+```
+
+Preparation defaults to remote `main`, resolves it once and pins the source SHA.
+It does not upload local files or include uncommitted changes. Complete and merge
+source changes before preparing a release. The workflow must also run from the
+repository's default branch; a PR or arbitrary branch cannot request signing
+credentials through this entry point.
+
+`release:prepare` runs full product checks, builds all distributions, performs
+native smoke checks and final macOS sealing, and generates the signed update feed.
+A successful preparation saves the final packages and a release manifest in
+Actions Artifacts. It creates no release tag, public GitHub Release or GHCR image.
+The summary identifies the version, source SHA, preparation run/attempt and
+artifact expiry. Intermediate build artifacts are retained for seven days; final
+release artifacts and the manifest request 30 days, subject to repository limits.
+
+`release:publish` selects the current successful preparation attempt's manifest artifact ID and
+passes that immutable identity with the run ID to the publication workflow. It
+checks trusted workflow provenance, source ancestry, completion, artifact expiry,
+archive digests and every final file before creating an annotated `vVERSION` tag.
+The tag binds the source and preparation identity. Publication uses the prepared
+packages, signed feed and OCI image without rebuilding, repacking or resigning.
+
+Both commands print the exact run ID and Actions URL. Run identification waits up
+to 120 seconds; `--wait` then polls every ten seconds for up to two hours and
+returns a nonzero status on failure or timeout. A local timeout or interruption
+does not cancel the remote run. Omitting `--wait` returns after dispatch and run
+identification. Each dispatch has a unique request ID, so another concurrent run
+cannot be mistaken for this request. An uncertain dispatch is not automatically
+repeated. Find the original run by its exact reported request marker and inspect
+it with `release:status`; do not redispatch merely because the local call timed out.
+
+`release:status` reports the current attempt's jobs and steps, candidate version
+and source SHA, pinned artifact IDs and the earliest actual artifact expiry. For
+an already completed publication, expired or missing preparation artifacts are
+reported as unavailable evidence; they do not change the recorded Actions result.
+A successful Homebrew proposal job does not establish that its PR was merged.
+
+Publication verifies public downloads with the trusted update key and proposes a
+Homebrew update PR. Review that PR and merge it after its checks pass. Public
+artifacts and Homebrew are separate completion states: a Homebrew failure must
+remain visible even when downloads are already available. Report the release URL,
+actual verification scope and outstanding distribution work. Publishing does not
+upgrade installed machines.
+
+`mise run release -- VERSION` remains local packaging only. The standalone
+`mise run verify:release -- VERSION` checks an already public version; see below
+for its trusted-key requirement.
+
+## Workflows and source selection
+
+`Tests` runs lightweight Linux checks for PRs and pushes to `main`. `CI` is a
+read-only manual/reusable complete product and distribution validator. Neither a
+tag push nor its manual inputs authorize publication. The former `publish=true`
+entry point is removed.
 
 ```sh
 gh workflow run ci.yml --ref main -f pr=123
 gh workflow run ci.yml --ref main -f ref=refs/heads/my-branch
 ```
 
-The selected workflow ref must contain the new workflow and helper scripts. The
-source job resolves the source once, pins its SHA and public update key, and all
-jobs use those values. PR selection checks the current head, including fork
-heads, rather than a merge commit. Review selected source before running it on
-hosted runners. Explicit ref/PR checks skip shared mise and Go caches. Validation
-has read-only repository access, no persisted checkout credentials and no release
-secrets. Only source resolution has pull-request read permission.
+The optional `ref` and `pr` inputs are mutually exclusive. Ordinary validation
+may select reviewed PR code, receives no signing secrets, and always runs the
+full Linux/macOS normal/static and race matrix plus distribution gates. Explicit
+source selections do not use shared build caches. See
+[Development](development.md#ci-and-manual-pr-checks) for coverage boundaries.
 
-Explicit manual publication requires `publish=true`, an existing full
-`refs/tags/vMAJOR.MINOR.PATCH` source ref and no PR input. It follows the same
-checks and channel gates. The release tag's SHA is checked during resolution and
-again immediately before publication. Moving a tag fails the corresponding gate.
-Release workflows can only be called by CI; there is no separate dispatch that
-bypasses checks.
+`Release prepare` reuses that validation pipeline for a fixed merged source and
+explicit version. Credential checks happen before expensive builds; final sealing
+and feed signing happen only after the unprivileged validation gates succeed.
+`Release publish` runs trusted workflow code, verifies the selected preparation
+and consumes its data artifacts. Downloaded artifacts never supply executable
+publication scripts.
 
 ```text
-resolve one source SHA + version + publication intent
-                         |
-              shared Linux/macOS Tests workflow
-                         |
-               headless/cross-platform builds
-                         |
-       +-----------------+----------------+------------------+
-       |                 |                |                  |
-  Linux CLI builds  Linux desktop    macOS App + CLI    native Docker builds
-   + native smoke   + native smoke    + native smoke     + smoke amd64/arm64
-       |                 |                |                  |
-       |                 |       ad-hoc OR Developer ID  multiarch OCI export
-       |                 |           + notary
-       |                 |       signed update feed     digest/arch/version/SHA
-       |                 |                |                  |
-  server GH assets  desktop GH assets  macOS GH assets    GHCR :VERSION
-       +-----------------+----------------+
-             serialized, immutable asset additions
+merged source SHA + intended version
+                  |
+       full product + native build/smoke gates
+                  |
+       final macOS sealing + signed update feed
+                  |
+       complete final bundle + immutable manifest
+                  |  preparation successful; no tag yet
+                  v
+       verify preparation identity and all bytes
+                  |
+       create annotated vVERSION bound to preparation
+                  |
+       GitHub assets + GHCR (same prepared bytes)
+                  |
+       public verification -> Homebrew PR review/merge
 ```
 
-The macOS update feed also needs the Linux CLI build artifacts because it binds
-the existing four supported update installations. It does not need their publish
-jobs to succeed. Docker has no dependency on desktop packaging or macOS signing.
-The aggregate unsigned validation bundle verifies all implemented distributions;
-it is not an additional cross-channel publication gate.
+The manifest records the version, source SHA, workflow/run/attempt identity,
+macOS mode, final bundle artifact ID/digest and file names, sizes and SHA-256
+values. A manifest cannot contain its own upload ID; the publishing request pins
+that separate artifact ID, which is checked through GitHub's artifact metadata.
+
+## Failure and recovery
+
+- A failed preparation creates no tag. Fix and merge source changes, then prepare
+  the same unpublished version again. Do not promote a partially successful run.
+- Publish retries use the same manifest and final bundle. Missing published files
+  can be added; existing bytes must match exactly. No tag is moved and no conflicting
+  asset or container digest is overwritten.
+- A repeated prepare run has a distinct attempt/artifact identity. It cannot
+  replace the preparation already bound to a release tag, even at the same SHA.
+  To recover an earlier publication after preparation was rerun, rerun the original
+  publish task with its pinned inputs. Calling `release:publish` again with only
+  the prepare run ID selects its current attempt, not the earlier candidate.
+- Missing or expired candidate artifacts stop publication. Before any tag exists,
+  prepare again. After publication starts, recover the original verified artifacts
+  or release a new version; do not silently rebuild the existing version.
+- GitHub and GHCR publication is not atomic. Inspect the failed stage and existing
+  public state, then rerun publication with its original pinned inputs. Successful
+  channels are retained and verified on retry.
+- A Homebrew PR failure does not invalidate published bytes. Open the already
+  generated branch's PR or use the documented Homebrew recovery command below.
 
 ## Public verification after publication
 
@@ -142,18 +206,18 @@ transient HTTP retries. Signature and byte conflicts are never retried. Only
 explicit rate limits and transient 502/503/504 responses receive at most three
 attempts, with delays capped at 30 seconds.
 
-Run the command again when needed. There is no Actions acceptance workflow;
-normal lightweight checks run local deterministic fixtures without downloading
-public release artifacts. The verifier never publishes, replaces assets, changes
-a tag or proposes/merges a PR.
+The publish workflow runs this verifier after uploading the prepared artifacts.
+Run the command independently when needed. Normal lightweight checks use local
+deterministic fixtures without downloading public release artifacts. The verifier
+never publishes, replaces assets, changes a tag or proposes/merges a PR.
 
 ## Docker publication contract
 
-A stable tag such as `v1.2.3` automatically builds the production Dockerfile and,
-after checks and the `release` environment allow it, publishes
-`ghcr.io/jjyr/pot:1.2.3`. The only registry tag is `VERSION`: the workflow does not
-move `latest` or minor-version aliases. Normal tags and default manual runs build
-and smoke-test images but never push them.
+Preparation builds and qualifies the production Docker image. Publication creates
+the source tag and, after the `release` environment allows it, copies the prepared
+OCI image to `ghcr.io/jjyr/pot:VERSION`. The only registry tag is `VERSION`: the
+workflow does not move `latest` or minor-version aliases. Ordinary validation and
+release preparation build and smoke-test images but never push them.
 
 Native `ubuntu-24.04` and `ubuntu-24.04-arm` jobs build the default complete
 Dockerfile, load their native image and verify the embedded version/revision.
@@ -181,9 +245,8 @@ command arguments.
 ## GitHub assets and channel checksums
 
 Linux server, Linux desktop and macOS add assets to the same version's GitHub
-Release after their respective gates. GitHub asset writers are serialized;
-a failure in one publication channel does not prevent another qualified channel
-from running. Existing assets must have the same byte size and GitHub SHA-256
+Release after all preparation gates. GitHub asset writers are serialized;
+an interrupted publication may leave some channels publicly available. Existing assets must have the same byte size and GitHub SHA-256
 digest to be reused. Missing assets may be added; different existing bytes are
 never clobbered. The initial release notes explain that availability is per channel
 and the Linux desktop is experimental. The publisher also handles identical asset
@@ -206,34 +269,41 @@ draft becomes public. Recovery never rewrites a tag or replaces different bytes.
 Every archive has a standard `NAME.sha256` sidecar. Each channel owns a distinct
 manifest: `SHA256SUMS-server`, `SHA256SUMS-desktop`, `SHA256SUMS-macos` or
 `SHA256SUMS-container`. One channel cannot replace another channel's checksum
-manifest. The unsigned aggregate validation bundle uses `SHA256SUMS`. Artifacts
-are retained for seven days. `POT_APP_VERSION` and `POT_BUILD_REVISION` set matching
-version/revision metadata across all builds. Versioned CLI filenames retain the
-internal installation directory `pot-PLATFORM`.
+manifest. The unsigned aggregate validation bundle uses `SHA256SUMS` and is
+not the final publishable bundle. Intermediate artifacts are retained for seven
+days; final preparation artifacts request 30 days. `POT_APP_VERSION` and
+`POT_BUILD_REVISION` set matching version/revision metadata across all builds.
+Versioned CLI filenames retain the internal installation directory `pot-PLATFORM`.
 
 Channel publication is intentionally independent, not a transaction across GitHub
 and GHCR. An environment refusal, registry error or platform failure may leave
 other successful channels publicly available. Inspect actual assets and channel
 job results before retrying. Missing update keys or the selected mode's signing
-credentials affect only macOS.
+credentials stop release preparation before any formal tag is created.
 
 ## Environment, permissions and signing setup
 
-Configure the GitHub environment `release` with custom deployment restrictions
-allowing only tags matching `v*`, and no required reviewers for automatic
-publication after tag pushes. GitHub's pattern is intentionally broader than the
-script's exact `vMAJOR.MINOR.PATCH` publication fence; branches are not allowed.
-For manual publication, select the existing stable tag as the workflow ref as well
-as the source ref, so the environment sees an allowed tag. Only official publication
-calls can request writes. Linux/macOS publishers use `contents: write`; the GHCR
-publisher has `contents: read` and `packages: write`. Checks and packaging receive
-no signing secrets. Ordinary macOS packaging also exercises the ad-hoc sealing
-path and checks final extracted signatures before native smoke, so a manual
-validation run can qualify that path without publication or Apple credentials.
-The official macOS workflow subsequently applies its explicitly selected release
-mode to those artifacts. GHCR must permit this repository's Actions token to publish
-`ghcr.io/jjyr/pot`; an existing package may require repository access to be granted.
-No extra registry secret is required for the configured GHCR path.
+Configure the GitHub environment `release` to allow the default branch `main`,
+where both preparation and publication workflows execute. Replace the old `v*`
+tag deployment rule with an exact `main` branch rule before using this flow;
+otherwise old workflow revisions on tags can still request that environment.
+A workflow cannot change the policy itself. Retain any required reviewers and
+other existing environment protections. Do not allow arbitrary source branches
+merely to get a candidate through the gate.
+
+Signing jobs use the `release` environment and read-only repository access.
+Unprivileged product checks and ordinary validation do not receive signing secrets.
+Publication needs `contents: write` for the bound tag and GitHub assets,
+`packages: write` for GHCR, and `actions: read` to verify preparation artifacts.
+Homebrew needs `contents: write` and `pull-requests: write`. Repository Actions
+settings must permit PR creation for automatic Homebrew proposals; otherwise use
+the maintainer recovery path. No command changes repository settings or visibility.
+
+Ordinary macOS validation exercises ad-hoc sealing and native smoke without Apple
+credentials. Release preparation subsequently applies the explicitly selected
+release mode and smoke-tests those final bytes. GHCR must permit this repository's
+Actions token to publish `ghcr.io/jjyr/pot`; an existing package may require
+repository access to be granted. No extra registry secret is required.
 
 macOS requires an explicit mode and update key pair before its channel can publish:
 
@@ -291,53 +361,11 @@ variable `POT_MACOS_RELEASE_MODE=unsigned`. Later provision the Apple settings a
 switch that one variable to `signed` **for a subsequent version**. Do not replace
 an earlier version's ad-hoc downloads with newly signed bytes. The former
 `POT_MACOS_RELEASE_ENABLED` flag is no longer used. Environment configuration alone
-does not install this workflow; the code must be merged before tagging a release.
+does not install this workflow; the code must be merged before preparing a release.
 
 Runner availability, pinned toolchains, package repositories, upstream downloads
 and standard Actions minutes/billing remain execution prerequisites. A job refused
 before startup does not establish a code failure. Paid model tests are not enabled.
-
-## Explicit 0.0.1 naming refresh
-
-The `Refresh reviewed v0.0.1 naming` workflow is a separate, manual operation for
-this same-version naming correction. Ordinary publishers keep all immutable-byte
-checks. It accepts a successful nonpublishing CI run built with
-`validation-version=0.0.1`, its exact reviewed source, the original public release
-snapshot, the exact previous image index digest and `merged-source`, the reviewed
-qualification PR 291 merge SHA. PR280 must remain merged at
-`5225cdf82c0f04fd49b5938c62c43ef3fd7a412d`, and that exact naming merge must be an
-ancestor of the candidate. Only the fixed qualification PR291 in `jjyr/pot`,
-merged into `main`, can supply the final head. The source must match the tag,
-that PR head and a parent of its normal merge, with an identical tree. This fixed merge remains the boundary
-if main later advances; later UI changes cannot enter the selected artifacts. First run it from `main` with
-`lease-tag-only=true` and the exact original annotated tag object. This job has no
-release environment or signing secrets: it validates the successful candidate,
-merged tree and original asset snapshot, then moves `v0.0.1` with an exact
-old-object lease. Its workflow token suppresses recursive tag-push CI; do not push
-the replacement tag separately with a personal token. Then dispatch the same
-workflow from `v0.0.1` with `lease-tag-only=false`. Signing and publication retain
-the existing `release` environment's `v*` tag policy. No additional tag, environment
-policy change or Actions-write permission is needed. If signing fails, the original
-public assets and signed feed are still intact; inspect the saved tag objects and
-partial effects before any recovery.
-
-The workflow checks all distributions, signs the final feed with the existing
-controlled release key, saves every original asset, uploads and verifies the new
-assets under temporary names, and retains the replacement plan and recovery bytes
-as Actions artifacts. It replaces only the specified old image digest, activates
-archives before references, and updates release metadata last. GitHub cannot switch
-multiple same-name assets atomically: existing App downloads can briefly require
-a retry while the ZIP, sidecar and feed switch. Original assets remain available
-under their preserved IDs until final verification and cask synchronization; only
-then remove the exact original IDs and temporary backups. Never delete the entire
-release, bypass immutable-release settings, relax normal publisher checks or
-regenerate the previous signed feed for rollback. Save recovery artifacts beyond
-the seven-day Actions retention if needed.
-
-The refreshed build uses only current service/configuration/browser names and
-rejects earlier root/storage discriminators. It does not convert data or migrate
-running services. Equal-version self-update remains disabled; manual installation
-requires a separate unused root. See [Updates](updates.md).
 
 ## Homebrew generation
 
@@ -394,9 +422,8 @@ validated source SHA -> final macOS sealing/smoke -> immutable Release assets
 The separate `homebrew` job runs only after macOS publication succeeds. It requests
 `contents: write` for a new branch and `pull-requests: write` for its PR, with no
 new PAT. It creates a branch from the current default branch and changes only
-`Casks/pot.rb` and `Formula/pot-cli.rb`. It never moves a release tag. Its source implementation remains
-pinned to the validated release SHA; the distribution pointer commit necessarily
-comes later. First installation becomes available **after the Homebrew PR is merged**.
+`Casks/pot.rb` and `Formula/pot-cli.rb`. It never moves a release tag. The publication workflow uses trusted scripts and the pinned release source SHA;
+the distribution pointer commit necessarily comes later. First installation becomes available **after the Homebrew PR is merged**.
 
 Retries reuse an identical existing branch/open PR. A different branch, closed PR,
 equal/newer conflicting package or unexpected changes stop for manual review; no
