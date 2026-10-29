@@ -1,3 +1,4 @@
+import {translate} from '../locales/messages.mjs';
 import {preparedResourcesCurrent,commitPreparedResources,finishPreparedNative,cancelPreparedNative,currentPreparedRender,withPreparedRender,createPreparedRender,createPreparationBudget,createPreparationSurface,settlePreparedTree,preparedLayoutRect,framePreparedElement,retirePreparedDeadlines,consumePreparationSurrogates,rememberPreparedLayout,freezePreparedLayout,releasePreparedLayout} from './prepared-render.mjs';
 import {moveConversationNode} from './conversation-dom.mjs';
 import {Virtualizer, observeElementRect, defaultRangeExtractor} from '../vendor/tanstack-virtual-core.mjs';
@@ -5,11 +6,11 @@ import {createConversationController} from './conversation-controller.mjs';
 
 // The controller owns intent and compensation; this adapter commits its measured
 // flow ranges. Child adapters share that controller and never write the scroller.
-export function createMessageWindow({scroller, host, render, dispose, requestRender, controller:parentController, active, interact, upward, downward, scrolled, canReadEarlier, earlierBoundary, onEarlierVisible, heights = new Map(), nested = false}) {
+export function createMessageWindow({scroller, host, render, dispose, requestRender, controller:parentController, active, interact, upward, downward, scrolled, canReadEarlier, earlierBoundary, onEarlierVisible, heights = new Map(), locale = () => 'en', nested = false}) {
   let rows = [], mounted = new Map(), closed = false, suspended = false, updating = false, dirty = false;
   let margin = 0, reportRect, reportOffset, owner, controller=parentController, frame=0,inputStarted=()=>{};
   const spacers = [],regionRevisions=new Map(),geometry=new Map(),rowRevisions=new Map(),revealedRows=new Set();
-  let lastReadable=[],lastReadableTop=0;const held=new Map(),layoutHosts=new Set([host]);
+  let loadingIndicator=null;const layoutHosts=new Set([host]);
   let requested=rows,requestedRevision='[]',committedRevision='[]',requestedOptions={},flight=null,layoutEpoch=0,layoutFingerprint='',committing=null,measuredOptions={},layoutReframe=false,queueUpdating=false,preparationError=false;
   const inheritedPreparation=currentPreparedRender();
   const nativePresentations=new Set();
@@ -66,7 +67,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       let idleTimer=0,endFrame=0,inputGeneration=0;
       const deliver=scrolling=>{
         // Capture reader movement before TanStack commits a different DOM range.
-        if(!nested){owner?.nativeScroll();holdReadable();}
+        if(!nested){owner?.nativeScroll();updateLoading();}
         callback(element.scrollTop,scrolling);
         if(!nested&&!scrolling)owner?.idle();
       };
@@ -111,27 +112,20 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
   const geometryObserver=nested?null:new ResizeObserver(invalidate);
   geometryObserver?.observe(scroller);if(host.parentElement)geometryObserver?.observe(host.parentElement);
 
-  function rememberReadable(){
-    if(held.size)return;
+  function updateLoading(){
+    if(nested||closed||suspended)return;
     const viewport=scroller.getBoundingClientRect();
-    lastReadable=[...mounted.values()].filter(record=>{const box=record.row.getBoundingClientRect();return Math.min(box.bottom,viewport.bottom)-Math.max(box.top,viewport.top)>=24;});
-    lastReadableTop=scroller.scrollTop;
-  }
-  function holdReadable(){
-    if(nested||!lastReadable.length)return;
-    const viewport=scroller.getBoundingClientRect();
-    if(!held.size&&[...mounted.values()].some(record=>{const box=record.row.getBoundingClientRect();return Math.min(box.bottom,viewport.bottom)-Math.max(box.top,viewport.top)>=24;}))return;
-    // A jump may leave the previously materialized range before its destination
-    // is ready. Temporarily retain those actual nodes at their last readable
-    // positions. Their native identities do not change and reading APIs exclude
-    // this explicitly marked hold; it never supplies a canvas offset or anchor.
-    for(const record of lastReadable){
-      if(!record.row.isConnected||!host.contains(record.row))continue;
-      if(!held.has(record.row)){held.set(record.row,record.row.style.transform);record.row.dataset.conversationHold='';}
-      record.row.style.transform=`translateY(${scroller.scrollTop-lastReadableTop}px)`;
+    const readable=[...mounted.values()].some(record=>{const box=record.row.getBoundingClientRect();return Math.min(box.bottom,viewport.bottom)-Math.max(box.top,viewport.top)>=24;});
+    if(readable||!rows.length||!scroller.clientHeight){clearLoading();return;}
+    if(!loadingIndicator){
+      loadingIndicator=document.createElement('span');loadingIndicator.className='conversation-range-loading';
+      loadingIndicator.setAttribute('role','status');scroller.append(loadingIndicator);
     }
+    loadingIndicator.setAttribute('aria-label',translate(locale(),'history.loading'));
+    loadingIndicator.style.left=viewport.left+scroller.clientWidth/2+'px';
+    loadingIndicator.style.top=viewport.top+scroller.clientHeight/2+'px';
   }
-  function releaseHold(){for(const [row,transform]of held){row.style.transform=transform;delete row.dataset.conversationHold;}held.clear();}
+  function clearLoading(){loadingIndicator?.remove();loadingIndicator=null;}
   function draw() {
     // Moving flow rows/spacers can briefly shrink the list. Reserve its extent
     // until this DOM commit is complete so native scroll clamping cannot turn
@@ -254,7 +248,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     if(!nativePresentations.size){delete host.dataset.preparedPending;host.removeAttribute('aria-busy');}
   }
   function preparationFailed(reason,current=flight){
-    if(current&&flight===current){preparationError=true;committing=null;discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();delete host.dataset.preparedPending;host.removeAttribute('aria-busy');releaseHold();releaseLayout();layoutReframe=true;cancelAnimationFrame(frame);frame=0;}
+    if(current&&flight===current){preparationError=true;committing=null;discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();delete host.dataset.preparedPending;host.removeAttribute('aria-busy');clearLoading();releaseLayout();layoutReframe=true;cancelAnimationFrame(frame);frame=0;}
   }
   function rejectPreparation(reason,current){
     if(reason.name==='AbortError')return;
@@ -354,7 +348,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       (requestedOptions.regions||[]).every(region=>regionRevisions.get(region.key)===layoutEpoch+':'+region.revision)){
       requestedOptions.beforeCommit?.();updateMeasured(rows,requestedOptions);afterPreparedCommit(requestedOptions);return;
     }
-    if(!requested.length&&!requestedOptions.regions?.length){releaseLayout();releaseHold();discardPreparation();heights.clear();geometry.clear();requestedOptions.beforeCommit?.();updateMeasured(requested,requestedOptions);committedRevision=requestedRevision;layoutReframe=false;afterPreparedCommit(requestedOptions);return;}
+    if(!requested.length&&!requestedOptions.regions?.length){releaseLayout();clearLoading();discardPreparation();heights.clear();geometry.clear();requestedOptions.beforeCommit?.();updateMeasured(requested,requestedOptions);committedRevision=requestedRevision;layoutReframe=false;afterPreparedCommit(requestedOptions);return;}
     if(!flight){
       for(const region of requestedOptions.regions||[])layoutHosts.add(region.host);
       for(const element of layoutHosts)freezePreparedLayout(element);
@@ -367,7 +361,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       if(measurement&&measurement.signature!==stamp){current.measurements.delete(message.viewKey);current.sizes.delete(message.viewKey);}
       if(job&&(job.signature!==stamp||job.measurement&&!preparedResourcesCurrent(job.context))){job.wait.cancel();disposePreparation(job);job.surface.close();current.jobs.delete(message.viewKey);current.measurements.delete(message.viewKey);current.sizes.delete(message.viewKey);geometry.delete(message.viewKey);}
       const cached=geometry.get(message.viewKey);if(cached?.signature===signature(message)){current.sizes.set(message.viewKey,cached.measurement.size);current.measurements.set(message.viewKey,cached);}}
-    holdReadable();
+    updateLoading();
     const indexes=selectedPreparation(current),selected=new Set(indexes.map(index=>current.rows[index].viewKey));let waiting=false;
     if(!refreshRegions(current).valid){invalidate();return;}
     // Reader movement can retire an offscreen candidate while a slow preview
@@ -425,7 +419,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     // known sizes to the engine before the single flow/geometry transaction.
     committing=new Map();
     current.rows.forEach((message,index)=>{const job=current.jobs.get(message.viewKey);if(job?.measurement)committing.set(message.viewKey,job);});
-    current.options.beforeCommit?.();const finalRegions=refreshRegions(current);if(!finalRegions.valid||finalRegions.changed){committing=null;invalidate();return;}owner?.beforeLayout();releaseHold();releaseLayout();
+    current.options.beforeCommit?.();const finalRegions=refreshRegions(current);if(!finalRegions.valid||finalRegions.changed){committing=null;invalidate();return;}owner?.beforeLayout();clearLoading();releaseLayout();
     heights.clear();for(const [key,size]of current.sizes)heights.set(key,size);
     for(const job of current.regions.values()){
       for(const [element,clone]of job.context.frames){const box=clone.getBoundingClientRect();framePreparedElement(element,box.height,element.matches('pot-message-file[data-block="false"]')?box.width:undefined);}
@@ -480,7 +474,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
         // the controller still makes exactly one geometry decision.
         if(owner.reconcile())draw();
         owner.publish();
-        rememberReadable();
+        updateLoading();
       }
     }finally{updating=false;}
   }
@@ -488,14 +482,14 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     const environment=currentPreparedRender();if(!environment)return;measuredOptions.beforeCommit?.();
     for(const message of rows){const record=mounted.get(message.viewKey);if(record){withPreparedRender(environment.context,message.id,()=>record.commit?.());record.preparing=false;}}
     measuredOptions.afterCommit?.();
-  },reset(){committedRevision=null;releaseLayout();releaseHold();lastReadable=[];discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();deadlines.clear();geometry.clear();rowRevisions.clear();revealedRows.clear();requested=[];requestedRevision='[]';requestedOptions={};regionRevisions.clear();controller?.reset();},get prepared(){return prepared();},suspend(){
-    suspended=true;releaseLayout();releaseHold();lastReadable=[];discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();
+  },reset(){committedRevision=null;releaseLayout();clearLoading();discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();deadlines.clear();geometry.clear();rowRevisions.clear();revealedRows.clear();requested=[];requestedRevision='[]';requestedOptions={};regionRevisions.clear();controller?.reset();},get prepared(){return prepared();},suspend(){
+    suspended=true;releaseLayout();clearLoading();discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();
     cancelAnimationFrame(frame);frame=0;
     owner?.suspend();
     suspended=true;virtualizer.cancelScroll();unmount();
     for(const record of mounted.values())record.childrenWindow?.suspend();
   },close(){
-    closed=true;releaseLayout();releaseHold();lastReadable=[];discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();scroller.removeEventListener('click',interaction,true);scroller.removeEventListener('pot:prepare-resize',interaction);host.ownerDocument.fonts?.removeEventListener('loading',fontChanged);host.ownerDocument.fonts?.removeEventListener('loadingdone',fontChanged);cancelAnimationFrame(frame);geometryObserver?.disconnect();owner?.close();virtualizer.cancelScroll();unmount();
+    closed=true;releaseLayout();clearLoading();discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();scroller.removeEventListener('click',interaction,true);scroller.removeEventListener('pot:prepare-resize',interaction);host.ownerDocument.fonts?.removeEventListener('loading',fontChanged);host.ownerDocument.fonts?.removeEventListener('loadingdone',fontChanged);cancelAnimationFrame(frame);geometryObserver?.disconnect();owner?.close();virtualizer.cancelScroll();unmount();
     for(const record of mounted.values())dispose(record);
     mounted.clear();indexesByKey.clear();indexesByID.clear();
     for(const spacer of spacers)spacer.remove();

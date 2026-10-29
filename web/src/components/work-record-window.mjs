@@ -117,7 +117,7 @@ export function createWorkRecordWindow({locale=()=> 'en',actor=()=>undefined,res
     if(record.members){const moving=record.members.some(member=>owners.has(member.viewKey)&&owners.get(member.viewKey)!==record.row.dataset.windowKey);for(const member of record.members)forget(member.viewKey,record.row.dataset.windowKey);if(!moving)record.row.remove();}
     else forget(record.row.dataset.windowKey,record.row.dataset.windowKey);
   }
-  const window=createMessageWindow({...options,render,dispose});
+  const window=createMessageWindow({...options,locale,render,dispose});
   function layout(messages,settings={}){
     const nextScope=typeof scope==='function'?scope():scope;
     if(currentScope!==undefined&&currentScope!==nextScope){owners.clear();projectedOwners.clear();window.setMessages([]);for(const {record}of records.values())options.dispose(record);records.clear();project=createWorkRecordProjection();source=undefined;}

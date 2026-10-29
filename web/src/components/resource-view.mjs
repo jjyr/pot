@@ -59,7 +59,7 @@ function register(){
       if(kind==='image')this.classList.add('is-expanded');
       const head=node('div','resource-heading'),identity=node('div','resource-identity'),badge=node('span','resource-type'),title=node('strong','resource-name',caption||resource.name),details=node('span','resource-details');
       const actions=node('div','resource-actions'),download=node('button','resource-action'),expand=node('button','resource-action'),status=node('p','resource-status'),saveStatus=node('p','resource-status resource-download-error'),body=node('div','resource-body'),notice=node('p','resource-status');
-      download.type=expand.type='button';status.setAttribute('role','status');status.hidden=true;saveStatus.setAttribute('role','alert');saveStatus.hidden=true;identity.append(title,details);head.append(badge,identity,actions);actions.append(expand,download);notice.hidden=!this.noticeKey;this.replaceChildren(head,status,saveStatus,body,notice);
+      download.classList.add('busy-control');download.type=expand.type='button';status.setAttribute('role','status');status.hidden=true;saveStatus.setAttribute('role','alert');saveStatus.hidden=true;identity.append(title,details);head.append(badge,identity,actions);actions.append(expand,download);notice.hidden=!this.noticeKey;this.replaceChildren(head,status,saveStatus,body,notice);
       this.lease=this.acquireResource?.(resource);const lease=this.lease;
       let error=false;
       this.stopRetire=lease?.onRetire?.(()=>{this.retireRendering();body.replaceChildren();error=true;this.dataset.state='error';this.removeAttribute('aria-busy');status.hidden=false;refresh();});
@@ -69,7 +69,7 @@ function register(){
       const fail=()=>{if(!current())return;error=true;this.dataset.state='error';this.removeAttribute('aria-busy');status.hidden=false;refresh();};
       const ready=()=>{if(!current())return;this.dataset.state='ready';this.removeAttribute('aria-busy');status.hidden=true;};
       refresh();window.addEventListener('pot:locale',refresh);this.stopLocale=()=>window.removeEventListener('pot:locale',refresh);
-      download.onclick=async()=>{download.disabled=true;saveStatus.hidden=true;try{await this.downloadResource(resource);}catch{if(current()){saveStatus.textContent=t('downloadFailed');saveStatus.hidden=false;}}finally{if(current())download.disabled=false;}};
+      download.onclick=async()=>{download.disabled=true;download.setAttribute('aria-busy','true');saveStatus.hidden=true;try{await this.downloadResource(resource);}catch{if(current()){saveStatus.textContent=t('downloadFailed');saveStatus.hidden=false;}}finally{if(current()){download.disabled=false;download.removeAttribute('aria-busy');}}};
       expand.onclick=()=>{this.classList.toggle('is-expanded');refresh();this.dispatchEvent(new CustomEvent('pot:prepare-resize',{bubbles:true}));};
       expand.hidden=kind==='audio';
       if(mode==='download'||kind==='file'){body.hidden=expand.hidden=status.hidden=true;this.dataset.state='ready';this.removeAttribute('aria-busy');return;}

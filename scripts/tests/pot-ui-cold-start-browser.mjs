@@ -11,7 +11,7 @@ import {execFileSync} from 'node:child_process';
 import {shellAssets} from './pwa-shell.mjs';
 const root=resolve(process.env.POT_COLD_SOURCE||resolve(import.meta.dirname,'../..'));
 const output=resolve(process.env.POT_COLD_OUTPUT||'.pot-artifacts/cold-start');await mkdir(output,{recursive:true});
-let release='one',hold='',control='synthetic-control',spaceControl='',auth=200,authenticated=true,failAsset='',revoked=false,offlineSpace=false;
+let release='one',hold='',control='synthetic-control',spaceControl='',auth=200,authenticated=true,failAsset='',revoked=false,offlineSpace=false,localOffline=false,directoryRevision=1;
 const held=[];
 const calls=[],streams=new Set(),accepted=new Map();
 const original=await shellAssets(root),updated=await shellAssets(root,(path,body)=>path==='/styles.css'?Buffer.concat([body,Buffer.from('\n/* synthetic next release */\n')]):body);
@@ -34,13 +34,14 @@ const server=createServer(async(req,res)=>{try{
  if(path==='/__fixture'){
   if(url.searchParams.has('hold'))hold=url.searchParams.get('hold');
   if(url.searchParams.has('revoked'))revoked=url.searchParams.get('revoked')==='true';
+  if(url.searchParams.has('localOffline'))localOffline=url.searchParams.get('localOffline')==='true';
   if(url.searchParams.has('offlineSpace'))offlineSpace=url.searchParams.get('offlineSpace')==='true';
   if(url.searchParams.has('releaseHeld')){const group=url.searchParams.get('releaseHeld');for(const entry of held.splice(0)){if(!group||entry.group===group)entry.release();else held.push(entry);}}
   if(url.searchParams.has('auth'))auth=Number(url.searchParams.get('auth'));
   if(url.searchParams.has('authenticated'))authenticated=url.searchParams.get('authenticated')==='true';
   if(url.searchParams.has('control')){control=url.searchParams.get('control');spaceControl='';}
   if(url.searchParams.has('spaceControl'))spaceControl=url.searchParams.get('spaceControl');
-  if(url.searchParams.has('directory'))for(const stream of streams)stream.write('event: changed\ndata: '+JSON.stringify({spaces:2})+'\n\n');
+  if(url.searchParams.has('directory')){const data=JSON.stringify({spaces:++directoryRevision});for(const stream of streams)stream.write('event: changed\ndata: '+data+'\n\n');}
   if(url.searchParams.has('release'))release=url.searchParams.get('release');
   if(url.searchParams.has('failAsset'))failAsset=url.searchParams.get('failAsset');
   if(url.searchParams.has('disconnect'))closeStreams();
@@ -59,7 +60,7 @@ const server=createServer(async(req,res)=>{try{
   }
   if(path==='/api/v1/messages/receipt'){const query=Object.fromEntries(url.searchParams),prior=accepted.get(JSON.stringify([control,url.searchParams.get('space_id')||'local',owner,query.conversation_id,query.request_id]));res.end(JSON.stringify({...query,runtime_id:control,owner_id:owner,state:prior?'accepted':'unconfirmed',...(prior?{message_id:query.request_id}:{})}));return;}
   if(path==='/api/v1/runtime')value={runtime_id:control,boot_id:'synthetic-boot',host:{hostname:'Synthetic Host'}};
-  if(path==='/api/v1/spaces')value={active_space_id:'local',items:[{id:'local',control_id:spaceControl||control,name:'Synthetic Space',kind:'local',connected:true}]};
+  if(path==='/api/v1/spaces')value={active_space_id:'local',items:[{id:'local',control_id:spaceControl||control,name:'Synthetic Space',kind:'local',connected:!localOffline}]};
   if(offlineSpace&&path==='/api/v1/spaces')value.items.push({id:'unavailable',control_id:'unavailable-control',name:'Synthetic unavailable Space',kind:'remote',connected:false});
   if(path==='/api/v1/assistants'&&url.searchParams.get('space_id')==='unavailable'){res.writeHead(503);res.end(JSON.stringify({code:'synthetic_offline'}));return;}
   if(path==='/api/v1/assistants')value=definitions.map(item=>({...item,capabilities:revoked?{version:1,operations:['chat.read','chat.events','chat.history']}:capabilities}));
