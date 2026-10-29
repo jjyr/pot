@@ -74,6 +74,15 @@ RELEASES = [
 
 # Every meaningful template string must have an explicit catalog entry or be a brand.
 BRANDS = {
+    "Pot MCP / Agent Link",
+    "Qwen",
+    "MCP",
+    "GPT",
+    "Gemini",
+    "Google",
+    "GLM",
+    "xAI",
+    "MCP → Agent Link",
     "Pot",
     "Codex",
     "Claude",
@@ -271,6 +280,7 @@ def embedded_assets():
         "github": "github-invertocat-black.svg",
         "google": "google.svg",
         "deepseek": "deepseek.svg",
+        "qwen": "qwen.svg",
         "openrouter": "openrouter.svg",
         "mistral": "mistral.svg",
         "togetherai": "togetherai.svg",
@@ -310,6 +320,7 @@ def preview():
             "github": "github-invertocat-black.svg",
             "google": "google.svg",
             "deepseek": "deepseek.svg",
+            "qwen": "qwen.svg",
             "openrouter": "openrouter.svg",
             "mistral": "mistral.svg",
             "togetherai": "togetherai.svg",
@@ -332,6 +343,14 @@ def preview():
         bundle[code] = {"body": body, "data": config, "title": title, "description": description}
     first = bundle["en"]
     css = (ROOT / "style.css").read_text()
+
+    def inline_css_asset(match):
+        path = ROOT / match[1]
+        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        encoded = base64.b64encode(path.read_bytes()).decode()
+        return f'url("data:{mime};base64,{encoded}")'
+
+    css = re.sub(r'url\("(assets/[^"\)]+)"\)', inline_css_asset, css)
     locale = (ROOT / "locale.js").read_text()
     app = (ROOT / "app.js").read_text()
     result = (

@@ -1,9 +1,11 @@
 # Pot website
 
-The standalone website reads as a short project handbook: why Pot exists, its
-choices around ongoing conversations and background work, with visible product
-examples and an overview of the open-source project. Security, installation and
-release history have their own views. Static HTML, CSS and JavaScript need no product runtime or Node packages.
+The standalone website introduces Pot as an open-source assistant that connects
+other agents. A retro selection screen makes Agent Link the visual focus; short
+sections explain the assistant philosophy, MCP entry points, model connections,
+background work and project status. Security, installation and release history
+have their own views. Static HTML, CSS and JavaScript need no product runtime or
+Node packages.
 
 ## Build and preview
 
@@ -48,15 +50,16 @@ all views, installation choices and language links remain readable.
 - `app.js`: progressive view navigation, browser history, installation selection,
   copying, language switching and the optional GitHub count.
 - `locale.js`: language normalization and preference handling.
-- `style.css`: warm paper palette, readable type, responsive layouts, keyboard
-  focus and reduced-motion behavior. The website intentionally uses one light palette.
+- `style.css`: warm charcoal, cream and amber arcade palette, hard-edged frames,
+  responsive layouts, keyboard focus and reduced-motion behavior. Light content
+  bands alternate with the dark console surface; the site has no theme switch.
 - `install.json`: the existing installation prompt and command source, inserted
   verbatim in all locales. Keep the agent prompt identical to the README and
   installation guide. Copying never executes these commands.
 - `build-site.py`: validation, localized pages, the release summaries and offline preview.
 
-The home view has anchors `#philosophy`, `#assistant`, `#assistants`, `#agent-link`,
-`#models` and `#project`. Other views use `#view-security`, `#view-install` (also
+The home view has anchors `#agent-link`, `#philosophy`, `#workflow`, `#mcp`, `#models`,
+`#assistant` and `#project`. Other views use `#view-security`, `#view-install` (also
 `#start`) and `#view-changelog`. All remain in the HTML for progressive enhancement.
 JavaScript reveals the targeted view, records navigation in history and restores
 it on Back, Forward and refresh. The `install` query parameter retains the selected
@@ -68,59 +71,76 @@ with links on both version and title to the corresponding official release.
 Review availability notes when packages publish; keep full commands and security
 explanations in their existing views and linked documentation.
 
-## Product illustrations
+## Agent selection and content
 
-The homepage pairs the design rationale with a concrete release-preparation
-example: a returned document draft, running installation checks, and a desktop
-check awaiting more context. Separate sections show specialist conversations,
-source disagreements and the flow of follow-up work. Section 03 uses an accessible
-HTML/CSS architecture diagram with live localized text, monospace type and a dark
-sage surface. Solid connections show discussion, parallel execution through
-background tasks or Agent Link, and feedback to the assistant. Independent dashed
-branches send personal GitHub notifications to the assistant and scheduled
-occurrences to background tasks. The mobile layout stacks nodes and keeps those
-trigger branches distinct. Its caption describes the complete flow without
-depending on the drawn connections or JavaScript. Clay and sage surfaces group
-the product illustrations; prose and annotated steps explain what each view means.
+The homepage uses an accessible HTML/CSS 3-by-3 selection screen. Pot sits in
+the center; the eight surrounding choices are Codex, Antigravity, DeepSeek, Claude,
+Gemini, Qwen, Grok and GLM. Each tile explicitly identifies an Agent or a
+model. The selected description explains its role and links to its connection or
+model configuration guide. The robot portraits are illustrative characters;
+separate, unmodified brand marks identify the actual services.
 
-`assets/product-hero.png`, `product-work.png`, `product-assistants.png` and
-`product-link.png` are compositions of real shared product components using
-synthetic records. They are illustrations of behavior, not live business
-execution or an exact full-app screen layout. The website ships static images
-and the live-text architecture diagram, without the product runtime. The retained
-Agent Link raster assets are not used by section 03. `product-work-mobile.png`
-uses the same hero composition in a real 390px viewport. The assistant and Agent
-Link compositions also have 390px sources (`product-assistants-mobile.png` and
-`product-link-mobile.png`). Native `picture` sources keep identities and text
-legible on narrow screens. Raster figures link to a full-resolution image without
-JavaScript. English example records are verbatim;
-localized captions explain the illustrations.
+Selection updates on pointer hover, focus, click or touch. The center Pot swaps
+to a matching directional sprite. Arrow keys move spatially between tiles,
+skipping the center; Home and End select the first and last choices. Enter and
+Space activate the focused choice. A separate guide link opens documentation,
+so tapping a tile does not navigate away. Selection persists until another tile
+is chosen and survives language switches through the `character` query parameter
+(or in-memory state in the offline preview).
 
-The read-only fixture at `scripts/tests/fixtures/website-product.html` composes
-shared replies, resource previews, communication participants, communication
-records and background-task rows. Its layout styles only arrange the components.
-Full addresses resolve profiles and task colors from the synthetic catalogue;
-short Task IDs use exactly the first four characters of the authoritative
-`address.agent_id`. Missing profile photos use the generic person icon. Shared
-Task rows retain left-aligned state and a separate elapsed-time column. A returned
-file is distinct from an active Task completing or being archived.
+With JavaScript enabled the tiles are buttons with pressed state, and only the
+selected description is visible and focusable. All panels share a grid cell to
+reserve the tallest translated description and avoid layout shifts on selection.
+Without JavaScript, tiles remain ordinary anchors to eight visible descriptions.
+There is no continuous animation, sound, connection attempt or inference call.
+Reduced Motion disables transitions; forced colors keep a selection outline.
 
-To refresh only the website illustrations from a locally served checkout:
+The hero explains what Pot is, how background execution and delegation work, and
+how results return to the conversation. Three compact rows introduce ongoing
+conversations, background work and collaboration. The philosophy remains short.
 
-```sh
-node scripts/tests/product-overview-browser.mjs --website-only
-```
+The portraits and their generation prompts are documented in
+[arcade artwork](assets/Arcade-NOTICE.md). `press-start-2p.ttf` is bundled under
+[the SIL Open Font License](assets/PressStart2P-OFL.txt). The offline generator
+inlines local CSS image/font URLs so the stage remains usable without a server.
 
-The capture checks identities, colors, profile fallbacks, state/time alignment and
-absence of mutations or external requests. It never starts agents, schedules,
-connections, approvals or downloads. Full-app documentation screenshots still use
-the separate [product screenshot workflow](../docs/images/README.md).
+The philosophy is two short paragraphs with a link to the author's article.
+Simplified and Traditional Chinese use the Chinese article; the other locales
+use its English version. The task workflow figure follows an example CSV export request through a directing
+assistant, a Codex implementation task and a DeepSeek-backed task for test cases
+and usage documentation. The report collects their outputs and a decision for
+the user. The MCP figure follows a copy-editing request from Codex, addressed directly to a
+Gemini-powered assistant using the Pot plugin's MCP tools and Agent Link. The
+receiving assistant edits the copy and replies to Codex through Agent Link.
+Pot provides the connection and message transport; no intermediary Pot assistant
+interprets the request or creates a second task in this example. Gemini is the
+receiver's model identity, not a separate Agent Link adapter. DeepSeek in the
+preceding example identifies the model used by a Pot task agent. Sending a request does not mean the
+work has completed. Connected agents retain their own execution scope.
 
-Agent Link links to the current Pot, Codex and Antigravity documentation. A model
-provider connection (including xAI) is separate from an Agent adapter; do not
-infer adapter support from a model logo. Connected environments retain their own
-permissions, including the Antigravity headless approval limitation described in
-its guide. The MIT license and author links point to the actual project sources.
+Both figures are explicitly illustrative, not live task monitors or product
+screenshots. Each uses one quiet background surface. The task example reads
+vertically from the goal through Pot, branches into two equal-width workers,
+and rejoins at a short delivery summary. Workers stay side by side on mobile.
+The messaging example aligns Codex and Gemini on one route with Pot's MCP and
+Agent Link as transport labels, then compares original and revised copy below.
+The comparison stacks on narrow screens while endpoints remain aligned.
+
+Connector lines are decorative CSS; content and reading order are semantic HTML.
+All examples remain readable without JavaScript. No inference, task creation or
+message sending takes place on the website. Generous section spacing separates
+the examples; their internal spacing keeps related steps together. The stage
+selector retains its distinct arcade frames.
+
+Models are separate from Agent integrations. The model grid names model families
+and providers, with a link to configuration and a note that availability depends
+on the service and configuration. Do not infer an Agent adapter from a model
+logo or advertise every model in a provider catalog as inference-qualified.
+
+The former product raster illustrations remain available in `assets/` and their
+read-only component fixture remains in `scripts/tests/fixtures/website-product.*`.
+The homepage no longer embeds those synthetic examples. The MIT license, author,
+release, source and contribution links point to their actual project sources.
 
 ## GitHub count and local assets
 
@@ -144,23 +164,27 @@ Serve the checkout root as above. With Playwright available externally:
 
 ```sh
 node scripts/tests/website-browser.mjs
+POT_WEBSITE_BROWSER=webkit node scripts/tests/website-browser.mjs
 node scripts/tests/website-star-browser.mjs
 ```
 
 `POT_WEBSITE_ORIGIN` overrides the origin; `POT_PLAYWRIGHT_MODULE` can point to an
 external Playwright module, and `POT_CHROMIUM_EXECUTABLE` can select Chromium.
+Run the website checks with both Chromium (the default) and WebKit for iOS layout
+coverage. The roster checks require visible portrait bounds and exercise every
+choice by touch after opening directly at mobile width, in all six locales.
 `--install-only` restricts the first script to installation and shared behaviors.
-`--capture` also writes review screenshots under
-`docs/pr-images/redesign-website/`; it expects the previous PR head website sources at
-`output/website-before-r2/website/`. Review captures use matching viewport and locale.
-`--capture-only` refreshes those images without repeating interaction checks.
-`--architecture-only` focuses on section 03: six locales at 1280, 390 and 320px,
-trigger separation, text bounds, direct links, language switching, refresh/history,
-no-JavaScript content and the offline preview. Add `--capture` to save its paired
-1280px and 390px section screenshots; this mode reads the previous PR head from
-`output/website-before-architecture/website/`.
-The checks use synthetic clipboard and API responses, and never run installation
-commands or invoke agents.
+The full check covers six locales at desktop, tablet and narrow mobile widths, centered selection
+geometry, eight directional sprites, stable selection height, workflow reading order,
+visible text bounds, spatial keyboard selection, touch selection and guide links, navigation,
+language switching, no-JavaScript content and the offline preview. API and
+clipboard responses use fixtures; checks never run install commands or agents.
+
+`--capture` also writes review screenshots under `output/pr-images/stage-select/`.
+It expects the prior website sources at `output/website-before-stage-select/website/`.
+`--capture-only` captures matching before/after views without running the suite.
+Promote selected pairs to the branch directory according to
+[PR image conventions](../docs/pr-images/README.md) when preparing a PR.
 
 ## GitHub Pages
 
