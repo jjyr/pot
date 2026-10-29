@@ -13,7 +13,7 @@ try{
   page.on('pageerror',error=>errors.push(error.message));
   try{
    await configure({hold:[],release:'all',failRead:false,failSave:false,revoked:false,configRevision:0,profile_id:'synthetic-provider',providers:{profiles:[{id:'synthetic-provider',name:'Original Provider',revision:1,model:'synthetic-original'},{id:'changed-provider',name:'Changed Provider',revision:1,model:'remote-new-model'}]},task_default:null,model:'synthetic-original',rules:'Cached personality'});
-   const open=async()=>{await page.getByRole('button',{name:translate(locale,'assistantSettings'),exact:true}).click();await page.locator('.editor-form').waitFor();};
+   const open=async()=>{await page.getByRole('button',{name:translate(locale,'assistantSettings'),exact:true}).click();await page.locator('.editor-form').waitFor();await page.locator('[data-model-scope="assistant"] > summary').click();};
    const model=()=>page.getByLabel(translate(locale,'agentLinks.assistantModel'),{exact:true});
    const personality=()=>page.getByLabel(translate(locale,'assistant.personality'),{exact:true});
    const save=()=>page.getByRole('button',{name:locale==='en'?'Save':'保存',exact:true}).click();
@@ -41,7 +41,7 @@ try{
    await save();await page.waitForFunction(()=>!document.querySelector('.editor-form'));
    const post=(await configure()).calls.filter(call=>call.path==='/api/v1/agent'&&call.method==='POST').at(-1);
    assert.equal(post.body.expected_revision,1);assert.equal(post.body.selection.profile_id,'synthetic-provider','A model draft stays bound to its original provider');assert.equal(post.body.selection.model,'my-unsaved-model');
-   assert.deepEqual(post.body.selection.task_default,{profile_id:'synthetic-provider',model:'fresh-task-model'});
+   assert.deepEqual(post.body.selection.task_default,{profile_id:'synthetic-provider',model:'fresh-task-model',context_window:null,max_output_tokens:null,reasoning_effort:null});
    assert.deepEqual(errors,[]);
    console.log(JSON.stringify({locale,cachedBeforeTransport:true,staleSaveBlocked:true,dirtyFocusPreserved:true,cleanFieldsRefreshed:true,freshRevisionUsed:true}));
   }finally{await context.close();}
