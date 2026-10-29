@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+"""Prepare and promote verified immutable release candidates."""
+
+from release_candidate import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,190 @@
+# .github/workflows/release-publish.yml
+name: Release publish
+
+run-name: release-publish [${{ inputs.request-id }}] prepare=${{ inputs.prepare-run-id }} manifest=${{ inputs.manifest-id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      prepare-run-id:
+        description: run_id of the successful release-prepare workflow run
+        required: true
+        type: string
+      manifest-id:
+        description: artifact_id of the release-candidate manifest
+        required: true
+        type: string
+      request-id:
+        description: Opaque request identifier used for correlation
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-publication
+  cancel-in-progress: false
+
+env:
+  MISE_AUTO_INSTALL: 'false'
+
+jobs:
+  guard:
+    name: Reject non-default-branch invocation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    steps:
+      - name: Fail unless invoked from the default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [ "$REF_TYPE" != "branch" ] || [ "$REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            echo "::error::release-publish must be dispatched from the default branch (${DEFAULT_BRANCH}); got ${REF_TYPE}:${REF_NAME}"
+            exit 1
+          fi
+
+  publish:
+    name: Verify candidate, tag and publish all channels
+    needs: guard
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      actions: read
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      POT_UPDATE_PUBLIC_KEY: ${{ vars.POT_UPDATE_PUBLIC_KEY }}
+    outputs:
+      sha: ${{ steps.fetch.outputs.sha }}
+      version: ${{ steps.fetch.outputs.version }}
+      mode: ${{ steps.fetch.outputs.mode }}
+      manifest-id: ${{ steps.fetch.outputs.manifest_id }}
+      manifest-digest: ${{ steps.fetch.outputs.manifest_digest }}
+      bundle-id: ${{ steps.fetch.outputs.bundle_id }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.10.10
+          cache: false
+          install_args: go python
+      - name: Verify trusted update public key is configured
+        env:
+          POT_UPDATE_PUBLIC_KEY: ${{ vars.POT_UPDATE_PUBLIC_KEY }}
+        run: |
+          if [ -z "$POT_UPDATE_PUBLIC_KEY" ]; then
+            echo "::error::vars.POT_UPDATE_PUBLIC_KEY must be configured in the release environment"
+            exit 1
+          fi
+      - name: Fetch exact candidate bundle and manifest
+        id: fetch
+        env:
+          PREPARE_RUN: ${{ inputs.prepare-run-id }}
+          MANIFEST_ID: ${{ inputs.manifest-id }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          mkdir -p dist
+          mise exec -- python scripts/release-candidate fetch \
+            --run-id "$PREPARE_RUN" \
+            --manifest-id "$MANIFEST_ID" \
+            --directory dist
+      - name: Verify fetched candidate contents
+        env:
+          RELEASE_VERSION: ${{ steps.fetch.outputs.version }}
+          RELEASE_SHA: ${{ steps.fetch.outputs.sha }}
+          RELEASE_MODE: ${{ steps.fetch.outputs.mode }}
+        run: mise exec -- python scripts/release-candidate verify --directory dist
+      - name: Verify prepared update feed with trusted public key
+        run: mise exec -- go run ./scripts/sign-release verify < dist/update.json > /dev/null
+      - name: Install skopeo
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+      - name: Create release tag bound to the immutable manifest
+        env:
+          RELEASE_VERSION: ${{ steps.fetch.outputs.version }}
+          RELEASE_SHA: ${{ steps.fetch.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec -- python scripts/release-candidate create-tag --directory dist
+      - name: Publish server channel
+        env:
+          RELEASE_VERSION: ${{ steps.fetch.outputs.version }}
+          RELEASE_SHA: ${{ steps.fetch.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec -- python scripts/publish-release "$RELEASE_VERSION" dist --channel server
+      - name: Publish desktop channel
+        env:
+          RELEASE_VERSION: ${{ steps.fetch.outputs.version }}
+          RELEASE_SHA: ${{ steps.fetch.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec -- python scripts/publish-release "$RELEASE_VERSION" dist --channel desktop
+      - name: Publish macOS channel
+        env:
+          RELEASE_VERSION: ${{ steps.fetch.outputs.version }}
+          RELEASE_SHA: ${{ steps.fetch.outputs.sha }}
+          RELEASE_MODE: ${{ steps.fetch.outputs.mode }}
+          POT_UPDATE_PUBLIC_KEY: ${{ vars.POT_UPDATE_PUBLIC_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec -- python scripts/publish-release "$RELEASE_VERSION" dist --channel macos --macos-mode "$RELEASE_MODE"
+      - name: Publish verified OCI image to GHCR
+        env:
+          POT_BUILD_REVISION: ${{ steps.fetch.outputs.sha }}
+          RELEASE_VERSION: ${{ steps.fetch.outputs.version }}
+          RELEASE_SHA: ${{ steps.fetch.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec -- python scripts/publish-container "$RELEASE_VERSION" dist
+      - name: Verify published release against trusted public key
+        env:
+          RELEASE_VERSION: ${{ steps.fetch.outputs.version }}
+          POT_UPDATE_PUBLIC_KEY: ${{ vars.POT_UPDATE_PUBLIC_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .local/public-verification
+          mise exec -- python scripts/verify-release "$RELEASE_VERSION" --output .local/public-verification --markdown
+      - name: Upload public verification report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: public-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .local/public-verification/*
+          if-no-files-found: warn
+          retention-days: 30
+
+  homebrew:
+    name: Propose Homebrew packages after publication
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify published bytes and propose Homebrew PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.publish.outputs.version }}
+          RELEASE_SHA: ${{ needs.publish.outputs.sha }}
+        run: python3 scripts/sync-homebrew "$RELEASE_VERSION" "$RELEASE_SHA"
+      - name: Report Homebrew synchronization separately from publication
+        if: failure()
+        env:
+          RELEASE_VERSION: ${{ needs.publish.outputs.version }}
+          RELEASE_SHA: ${{ needs.publish.outputs.sha }}
+        run: |
+          echo "::warning::macOS assets are published, but Homebrew synchronization failed. Inspect the sync log and repository Actions PR permissions."
+          echo "Release publication succeeded; Homebrew sync needs attention. No automatic retry or main push was attempted." >> "$GITHUB_STEP_SUMMARY"
+          echo "After resolving permissions or reviewing the existing branch/PR, run: GITHUB_REPOSITORY=${GITHUB_REPOSITORY} python3 scripts/sync-homebrew $RELEASE_VERSION $RELEASE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          exit 1

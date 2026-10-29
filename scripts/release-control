@@ -1,0 +1,518 @@
+#!/usr/bin/env python3
+"""Dispatch and inspect trusted two-stage releases through the existing gh session."""
+
+import argparse
+from datetime import datetime, timezone
+import json
+import re
+import subprocess
+import sys
+import time
+from urllib.parse import urlencode
+import uuid
+
+from release_contract import version_number
+
+REPOSITORY = "jjyr/pot"
+WORKFLOWS = {kind: f"release-{kind}.yml" for kind in ("prepare", "publish")}
+UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+PREPARE_TITLE = re.compile(rf"release-prepare \[({UUID})\]")
+PUBLISH_TITLE = re.compile(
+    rf"release-publish \[({UUID})\] prepare=([1-9][0-9]*) manifest=([1-9][0-9]*)"
+)
+CORRELATION_SECONDS = 120
+WAIT_SECONDS = 7200
+POLL_SECONDS = 10
+GH_SECONDS = 30
+MAX_PAGES = 10
+
+
+class ReleaseError(Exception):
+    """An operation failed or its remote outcome cannot be established."""
+
+
+def positive(value, label):
+    if isinstance(value, bool) or not re.fullmatch(r"[1-9][0-9]*", str(value)):
+        raise ReleaseError(f"{label} must be a positive integer")
+    return int(value)
+
+
+def timestamp(value):
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            raise ValueError("timezone missing")
+        return parsed.timestamp()
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ReleaseError("Invalid artifact expiry timestamp") from exc
+
+
+def manifest_name(run_id, attempt):
+    return f"release-candidate-{run_id}-{attempt}"
+
+
+def run_url(run_id):
+    return f"https://github.com/{REPOSITORY}/actions/runs/{run_id}"
+
+
+class GitHub:
+    """Only gh performs network/authentication; raw failure output is never echoed."""
+
+    def __init__(self, executable="gh"):
+        self.executable = executable
+
+    def command(self, arguments, data=None, timeout=GH_SECONDS):
+        try:
+            result = subprocess.run(
+                [self.executable, *arguments],
+                input=json.dumps(data) if data is not None else None,
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise ReleaseError("gh is unavailable; install GitHub CLI before releasing") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ReleaseError("GitHub CLI request timed out") from exc
+        if result.returncode:
+            raise ReleaseError(f"GitHub CLI request failed (exit {result.returncode})")
+        return result.stdout
+
+    def api(self, path, data=None, timeout=GH_SECONDS):
+        endpoint = f"repos/{REPOSITORY}" + (f"/{path}" if path else "")
+        args = ["api", "--hostname", "github.com", endpoint]
+        if data is not None:
+            args += ["--method", "POST", "--input", "-"]
+        output = self.command(args, data, timeout)
+        if data is not None and not output.strip():
+            return None
+        try:
+            result = json.loads(output)
+            if not isinstance(result, dict):
+                raise ReleaseError("GitHub returned a non-object response")
+            return result
+        except json.JSONDecodeError as exc:
+            raise ReleaseError("GitHub returned invalid JSON") from exc
+
+    def pages(self, path, key, deadline=None, clock=time.monotonic):
+        records = []
+        separator = "&" if "?" in path else "?"
+        for page in range(1, MAX_PAGES + 1):
+            remaining = GH_SECONDS if deadline is None else min(GH_SECONDS, deadline - clock())
+            if remaining <= 0:
+                raise ReleaseError("Run lookup deadline reached")
+            payload = self.api(f"{path}{separator}per_page=100&page={page}", timeout=remaining)
+            batch = payload.get(key) if isinstance(payload, dict) else None
+            if not isinstance(batch, list) or any(not isinstance(row, dict) for row in batch):
+                raise ReleaseError(f"GitHub response is missing valid {key}")
+            records.extend(batch)
+            if len(batch) < 100:
+                return records
+        raise ReleaseError("GitHub pagination limit reached; refusing incomplete results")
+
+
+class Controller:
+    def __init__(
+        self,
+        github,
+        clock=time.monotonic,
+        sleep=time.sleep,
+        now=time.time,
+        new_uuid=None,
+        out=None,
+        inspect=None,
+    ):
+        self.github = github
+        self.clock = clock
+        self.sleep = sleep
+        self.now = now
+        self.new_uuid = new_uuid or (lambda: str(uuid.uuid4()))
+        self.out = out or (lambda line: print(line, flush=True))
+        self.branch = None
+        self.workflows = {}
+        self.inspector = inspect
+
+    def bootstrap(self):
+        if self.branch is not None:
+            return
+        self.github.command(["auth", "status", "--hostname", "github.com"])
+        try:
+            local = json.loads(self.github.command(["repo", "view", "--json", "nameWithOwner,url"]))
+        except json.JSONDecodeError as exc:
+            raise ReleaseError("Cannot resolve current GitHub repository") from exc
+        if (
+            local.get("nameWithOwner") != REPOSITORY
+            or local.get("url") != f"https://github.com/{REPOSITORY}"
+        ):
+            raise ReleaseError(f"Release commands require the github.com/{REPOSITORY} repository")
+        repository = self.github.api("")
+        if repository.get("full_name") != REPOSITORY:
+            raise ReleaseError("GitHub repository identity mismatch")
+        self.branch = repository.get("default_branch")
+        if not isinstance(self.branch, str) or not self.branch:
+            raise ReleaseError("GitHub default branch is unavailable")
+
+    def workflow(self, kind):
+        self.bootstrap()
+        if kind not in self.workflows:
+            workflow = self.github.api(f"actions/workflows/{WORKFLOWS[kind]}")
+            positive(workflow.get("id"), "workflow ID")
+            if (
+                workflow.get("path") != f".github/workflows/{WORKFLOWS[kind]}"
+                or workflow.get("state") != "active"
+            ):
+                raise ReleaseError(
+                    f"Trusted {kind} workflow is missing, disabled, or has a different path"
+                )
+            self.workflows[kind] = workflow
+        return self.workflows[kind]
+
+    def validate_run(self, run, kind, run_id=None):
+        workflow = self.workflow(kind)
+        actual_id = positive(run.get("id"), "run ID")
+        if run_id is not None and actual_id != run_id:
+            raise ReleaseError("Run ID mismatch")
+        if (
+            positive(run.get("workflow_id"), "run workflow ID") != workflow["id"]
+            or run.get("path") != workflow["path"]
+        ):
+            raise ReleaseError("Run does not belong to the trusted release workflow")
+        if any(
+            (run.get(key) or {}).get("full_name") != REPOSITORY
+            for key in ("repository", "head_repository")
+        ):
+            raise ReleaseError("Run repository or head repository is not jjyr/pot")
+        if run.get("event") != "workflow_dispatch" or run.get("head_branch") != self.branch:
+            raise ReleaseError(
+                "Release workflow must have been dispatched on the repository default branch"
+            )
+        if not re.fullmatch(r"[a-f0-9]{40}", run.get("head_sha") or ""):
+            raise ReleaseError("Invalid workflow source SHA")
+        positive(run.get("run_attempt"), "run attempt")
+        title_pattern = PREPARE_TITLE if kind == "prepare" else PUBLISH_TITLE
+        if not title_pattern.fullmatch(run.get("display_title") or ""):
+            raise ReleaseError("Run has no valid release request marker")
+        return run
+
+    def get_run(self, run_id, kind=None):
+        self.bootstrap()
+        run = self.github.api(f"actions/runs/{run_id}")
+        if kind is None:
+            matches = [
+                name
+                for name, filename in WORKFLOWS.items()
+                if run.get("path") == f".github/workflows/{filename}"
+            ]
+            if len(matches) != 1:
+                raise ReleaseError("Run is not a two-stage release workflow")
+            kind = matches[0]
+        return self.validate_run(run, kind, run_id), kind
+
+    def validate_manifest(self, artifact, prepare_id, attempt, fresh=True):
+        positive(artifact.get("id"), "manifest artifact ID")
+        if artifact.get("name") != manifest_name(prepare_id, attempt):
+            raise ReleaseError("Manifest artifact is not from the selected prepare attempt")
+        if (artifact.get("workflow_run") or {}).get("id") != prepare_id:
+            raise ReleaseError("Manifest artifact belongs to a different prepare run")
+        if not re.fullmatch(r"sha256:[a-f0-9]{64}", artifact.get("digest") or ""):
+            raise ReleaseError("Manifest artifact SHA-256 digest is unavailable")
+        if type(artifact.get("expired")) is not bool:
+            raise ReleaseError("Manifest artifact expiry state is unavailable")
+        expired = artifact["expired"] or timestamp(artifact.get("expires_at")) <= self.now()
+        if fresh and expired:
+            raise ReleaseError("Manifest artifact has expired; prepare a new candidate")
+        return expired
+
+    def inspect_candidate(self, run_id, manifest_id, require_fresh=True):
+        if self.inspector is not None:
+            return self.inspector(run_id, manifest_id, require_fresh=require_fresh)
+        from release_candidate import Error as CandidateError, inspect_candidate
+
+        try:
+            return inspect_candidate(run_id, manifest_id, require_fresh=require_fresh)
+        except CandidateError as exc:
+            raise ReleaseError(f"Candidate verification failed: {exc}") from exc
+
+    def describe_candidate(self, details):
+        self.out(
+            f"candidate identity: version={details['version']} source={details['sha']} mode={details['mode']} "
+            f"prepare={details['run_id']} attempt={details['run_attempt']} manifest={details['manifest_id']} bundle={details['bundle_id']} "
+            f"expires_at={details['expires_at']} expired={str(details.get('expired', False)).lower()}"
+        )
+
+    def candidate(self, run, report=False, require_fresh=True):
+        if run.get("status") != "completed" or run.get("conclusion") != "success":
+            raise ReleaseError("Prepare run must be completed successfully before publication")
+        rows = self.github.pages(f"actions/runs/{run['id']}/artifacts", "artifacts")
+        matches = [
+            row for row in rows if row.get("name") == manifest_name(run["id"], run["run_attempt"])
+        ]
+        if len(matches) != 1:
+            raise ReleaseError(
+                f"Expected one manifest for prepare attempt {run['run_attempt']}; found {len(matches)}"
+            )
+        if report:
+            self.out(
+                f"manifest artifact: id={matches[0].get('id')} expired={matches[0].get('expired')} expires_at={matches[0].get('expires_at')}"
+            )
+        self.validate_manifest(matches[0], run["id"], run["run_attempt"], fresh=require_fresh)
+        details = self.inspect_candidate(run["id"], matches[0]["id"], require_fresh=require_fresh)
+        if (
+            details.get("run_id") != run["id"]
+            or details.get("run_attempt") != run["run_attempt"]
+            or details.get("manifest_id") != matches[0]["id"]
+        ):
+            raise ReleaseError("Candidate verifier returned a different prepare/manifest identity")
+        return matches[0], details
+
+    def correlate(self, kind, title, deadline, created_after):
+        workflow = self.workflow(kind)
+        query = urlencode(
+            {"event": "workflow_dispatch", "branch": self.branch, "created": ">=" + created_after}
+        )
+        while self.clock() < deadline:
+            rows = self.github.pages(
+                f"actions/workflows/{workflow['id']}/runs?{query}",
+                "workflow_runs",
+                deadline,
+                self.clock,
+            )
+            matches = [row for row in rows if row.get("display_title") == title]
+            if len(matches) > 1:
+                raise ReleaseError(
+                    "Multiple runs have the same request marker; manual review required"
+                )
+            if matches:
+                return self.validate_run(matches[0], kind)
+            self.sleep(min(POLL_SECONDS, max(0, deadline - self.clock())))
+        raise ReleaseError("Run correlation timed out")
+
+    def dispatch(self, kind, inputs, wait):
+        workflow = self.workflow(kind)
+        request_id = str(uuid.UUID(self.new_uuid()))
+        title = f"release-{kind} [{request_id}]"
+        if kind == "publish":
+            title += f" prepare={inputs['prepare-run-id']} manifest={inputs['manifest-id']}"
+        inputs = {**inputs, "request-id": request_id}
+        url = f"https://github.com/{REPOSITORY}/actions/workflows/{WORKFLOWS[kind]}"
+        # Bound discovery to this dispatch window; UUID still identifies the run.
+        created_after = datetime.fromtimestamp(self.now() - 300, timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        # Emit recovery identity before the one and only mutating request.
+        self.out(f"request-id: {request_id}\ndisplay-title: {title}\nworkflow-url: {url}")
+        try:
+            self.github.api(
+                f"actions/workflows/{workflow['id']}/dispatches",
+                {"ref": self.branch, "inputs": inputs},
+            )
+        except ReleaseError:
+            self.out(
+                "Dispatch outcome uncertain; looking up this request only. Dispatch will not be retried."
+            )
+        try:
+            run = self.correlate(kind, title, self.clock() + CORRELATION_SECONDS, created_after)
+        except ReleaseError as exc:
+            raise ReleaseError(
+                f"{exc}. Request {request_id} may still run. Do not redispatch. "
+                f"Find the exact display-title above at {url}, then use release:status -- RUN_ID."
+            ) from exc
+        self.print_run(run)
+        return self.wait(run["id"], kind) if wait else self.status(run["id"])
+
+    def prepare(self, version, ref="main", wait=False):
+        try:
+            version = version_number(version)
+        except ValueError as exc:
+            raise ReleaseError(str(exc)) from exc
+        if ref != "main" and not re.fullmatch(r"[a-fA-F0-9]{40}", ref):
+            raise ReleaseError("--ref must be main or a full 40-character commit SHA")
+        return self.dispatch("prepare", {"version": version, "ref": ref}, wait)
+
+    def publish(self, prepare_id, wait=False):
+        run, _ = self.get_run(prepare_id, "prepare")
+        artifact, details = self.candidate(run)
+        self.describe_candidate(details)
+        # Recheck that a rerun did not change the selected successful attempt.
+        current, _ = self.get_run(prepare_id, "prepare")
+        if any(
+            current.get(key) != run.get(key)
+            for key in ("run_attempt", "head_sha", "status", "conclusion")
+        ):
+            raise ReleaseError(
+                "Prepare attempt changed during selection; inspect its status before publishing"
+            )
+        self.out(
+            f"Selected prepare={prepare_id} attempt={run['run_attempt']} manifest={artifact['id']} digest={artifact['digest']}"
+        )
+        return self.dispatch(
+            "publish", {"prepare-run-id": str(prepare_id), "manifest-id": str(artifact["id"])}, wait
+        )
+
+    def print_run(self, run):
+        self.out(
+            f"run-id: {run['id']} attempt: {run['run_attempt']}\nstatus: {run.get('status')} conclusion: {run.get('conclusion') or 'pending'}\nurl: {run_url(run['id'])}"
+        )
+
+    def jobs(self, run, kind):
+        rows = self.github.pages(
+            f"actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs", "jobs"
+        )
+        for job in rows:
+            self.out(
+                f"job: {job.get('name')} status={job.get('status')} conclusion={job.get('conclusion') or 'pending'}"
+            )
+            for step in job.get("steps") or []:
+                if step.get("status") == "in_progress" or step.get("conclusion") not in (
+                    None,
+                    "success",
+                    "skipped",
+                ):
+                    self.out(
+                        f"  step: {step.get('name')} status={step.get('status')} conclusion={step.get('conclusion') or 'pending'}"
+                    )
+        if kind == "publish":
+            homebrew = [
+                job
+                for job in rows
+                if job.get("name") == "Propose Homebrew packages after publication"
+            ]
+            if not homebrew:
+                self.out("Homebrew: job not reported yet; package synchronization unconfirmed.")
+            else:
+                job = homebrew[-1]
+                self.out(
+                    f"Homebrew: {job.get('status')}/{job.get('conclusion') or 'pending'}; proposal workflow only; Homebrew PR review/merge pending verification. Workflow success does not confirm Homebrew availability."
+                )
+
+    def status(self, run_id):
+        run, kind = self.get_run(run_id)
+        self.print_run(run)
+        self.jobs(run, kind)
+        if kind == "prepare":
+            if run.get("status") == "completed" and run.get("conclusion") == "success":
+                artifact, details = self.candidate(run, report=True, require_fresh=False)
+                self.describe_candidate(details)
+                expired = (
+                    details.get("expired", False) or timestamp(details["expires_at"]) <= self.now()
+                )
+                readiness = "expired/not publishable" if expired else "ready"
+                self.out(
+                    f"candidate: {readiness} manifest={artifact['id']} digest={artifact['digest']} expires_at={details['expires_at']}"
+                )
+                if expired:
+                    return 1
+            else:
+                artifacts = self.github.pages(f"actions/runs/{run_id}/artifacts", "artifacts")
+                matches = [
+                    a
+                    for a in artifacts
+                    if a.get("name") == manifest_name(run_id, run["run_attempt"])
+                ]
+                for artifact in matches:
+                    self.out(
+                        f"candidate: not ready id={artifact.get('id')} expired={artifact.get('expired')} expires_at={artifact.get('expires_at')}"
+                    )
+                if not matches:
+                    self.out("candidate: missing/pending for this attempt")
+        else:
+            match = PUBLISH_TITLE.fullmatch(run["display_title"])
+            prepare_id, manifest_id = int(match[2]), int(match[3])
+            self.out(f"publish identity: prepare-run-id={prepare_id} manifest-id={manifest_id}")
+            try:
+                artifact = self.github.api(f"actions/artifacts/{manifest_id}")
+            except ReleaseError:
+                self.out(
+                    "candidate evidence: pinned manifest metadata unavailable now; recorded Actions status above is unchanged."
+                )
+                return int(run.get("status") == "completed" and run.get("conclusion") != "success")
+            if artifact.get("id") != manifest_id:
+                raise ReleaseError("Pinned manifest ID mismatch")
+            name = re.fullmatch(
+                rf"release-candidate-{prepare_id}-([1-9][0-9]*)", artifact.get("name") or ""
+            )
+            if not name:
+                raise ReleaseError("Pinned manifest prepare identity mismatch")
+            prepare_attempt = self.github.api(f"actions/runs/{prepare_id}/attempts/{name[1]}")
+            self.validate_run(prepare_attempt, "prepare", prepare_id)
+            if (
+                prepare_attempt.get("run_attempt") != int(name[1])
+                or prepare_attempt.get("status") != "completed"
+                or prepare_attempt.get("conclusion") != "success"
+            ):
+                raise ReleaseError("Pinned manifest prepare attempt was not completed successfully")
+            expired = self.validate_manifest(artifact, prepare_id, int(name[1]), fresh=False)
+            self.out(
+                f"pinned manifest: attempt={name[1]} digest={artifact['digest']} expired={str(expired).lower()} expires_at={artifact['expires_at']}"
+            )
+            if expired:
+                self.out(
+                    "candidate evidence: manifest expired; historical publication status above is unchanged."
+                )
+            else:
+                try:
+                    self.describe_candidate(
+                        self.inspect_candidate(prepare_id, manifest_id, require_fresh=False)
+                    )
+                except ReleaseError:
+                    self.out(
+                        "candidate evidence: unavailable for verification now; historical publication status above is unchanged."
+                    )
+        return int(run.get("status") == "completed" and run.get("conclusion") != "success")
+
+    def wait(self, run_id, kind):
+        deadline = self.clock() + WAIT_SECONDS
+        previous = None
+        while self.clock() < deadline:
+            run, _ = self.get_run(run_id, kind)
+            state = (run.get("status"), run.get("conclusion"), run["run_attempt"])
+            if state != previous:
+                self.print_run(run)
+                previous = state
+            if run.get("status") == "completed":
+                return self.status(run_id)
+            self.sleep(min(POLL_SECONDS, max(0, deadline - self.clock())))
+        raise ReleaseError(
+            f"Wait timed out after {WAIT_SECONDS}s. Run continues remotely: {run_url(run_id)}; use release:status -- {run_id}."
+        )
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="action", required=True)
+    prepare = sub.add_parser("prepare", help="Build a candidate from remote main or a pinned SHA")
+    prepare.add_argument("version")
+    prepare.add_argument("--ref", default="main")
+    prepare.add_argument(
+        "--wait", action="store_true", help="Wait up to two hours; failure/timeout exits nonzero"
+    )
+    publish = sub.add_parser(
+        "publish", help="Promote one successful prepare run's exact manifest artifact"
+    )
+    publish.add_argument("prepare_run_id")
+    publish.add_argument(
+        "--wait", action="store_true", help="Wait up to two hours; failure/timeout exits nonzero"
+    )
+    status = sub.add_parser(
+        "status", help="Read actual Actions phases, manifest expiry, and Homebrew state"
+    )
+    status.add_argument("run_id")
+    args = parser.parse_args(argv)
+    controller = Controller(GitHub())
+    try:
+        if args.action == "prepare":
+            return controller.prepare(args.version, args.ref, args.wait)
+        if args.action == "publish":
+            return controller.publish(positive(args.prepare_run_id, "prepare run ID"), args.wait)
+        return controller.status(positive(args.run_id, "run ID"))
+    except (ReleaseError, KeyboardInterrupt) as exc:
+        print(
+            f"release-control: {exc or 'Interrupted; an already-dispatched run may continue remotely.'}",
+            file=sys.stderr,
+        )
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

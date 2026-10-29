@@ -42,6 +42,9 @@ the original cache and repository module files remain unchanged.
 | `mise run build` | Complete Wails macOS bundle |
 | `mise run build:web-ui` | Embedded shared HTML/CSS/JS frontend |
 | `mise run build:plugins` | Tool manifests and declared sources |
+| `mise run release:prepare -- VERSION --wait` | Validate and save a release candidate from remote main; no tag or publication |
+| `mise run release:status -- RUN_ID` | Inspect the exact preparation/publication run and artifact availability |
+| `mise run release:publish -- PREPARE_RUN_ID --wait` | Publish the pinned prepared artifacts and verify public downloads; [release procedure](releases.md#release-procedure) |
 | `mise run release -- VERSION` | App/CLI archives, checksums, cask and configured signed update feed; publishing is separate |
 | `mise run verify:release -- VERSION` | On-demand public version, signed feed and download verification; requires a trusted pinned key; [arguments and reports](releases.md#public-verification-after-publication) |
 
@@ -660,7 +663,7 @@ native packages or containers.
 
 Manual `Tests` runs and release/build callers use **Full product** checks. A
 reusable call requires the resolved source SHA; it always selects the full matrix,
-including for `publish=false` candidates. Publication intent never selects test
+including nonpublishing candidates. Publication intent never selects test
 coverage. Automatic lightweight runs and full runs use separate concurrency
 families; only superseded automatic lightweight runs are canceled.
 
@@ -692,10 +695,11 @@ only each job's required tools. Module caches are shared independently of build
 caches; normal/race/build cache families include source hashes so changed sources
 can save refreshed build results instead of repeatedly restoring an old exact hit.
 
-The release/build `CI` workflow runs automatically only on tag pushes. All tags
-are checked, while exact stable version tags enter controlled per-channel release
-paths after shared checks and the corresponding native package and smoke gates
-succeed. Ordinary manual runs do not publish.
+The `CI` workflow is a read-only manual/reusable validator; tag pushes do not
+start publication. Release preparation reuses its complete product and native
+distribution gates. A separate publish workflow creates the formal tag only after
+verifying the successful preparation and promotes its exact final artifacts.
+Use the [release commands](releases.md#release-procedure) for these operations.
 
 On an interactive Apple Silicon Mac, `mise run test:macos-update` builds the
 current source twice with versions `0.1.0` and `0.2.0` and an ephemeral update key.
@@ -731,7 +735,7 @@ The optional `ref` and `pr` inputs are mutually exclusive. Leave both blank to
 check the ref selected in Actions. The source job pins one SHA for all subsequent
 jobs; review selected PR code before running it. Read-only validation receives no
 release secrets. See [Releases and installation channels](releases.md) for the
-native build matrix, artifact names, signing requirements, manual release gate,
+native build matrix, artifact names, signing requirements, two-stage release gates,
 Homebrew generation and GHCR permissions.
 
 ## Database changes

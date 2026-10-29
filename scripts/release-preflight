@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Fail before publication when the complete release configuration is unavailable."""
+"""Fail before release builds when the complete release configuration is unavailable."""
 
 import os
+import re
 import subprocess
 
 from release_contract import macos_mode, version_number
@@ -21,18 +22,10 @@ missing = [name for name in required if not os.environ.get(name)]
 if missing:
     raise SystemExit("Incomplete release configuration: " + ", ".join(missing))
 version = version_number(os.environ["RELEASE_VERSION"])
-sha = subprocess.check_output(
-    [
-        "gh",
-        "api",
-        f"repos/{os.environ['GITHUB_REPOSITORY']}/commits/refs/tags/v{version}",
-        "--jq",
-        ".sha",
-    ],
-    text=True,
-).strip()
-if sha != os.environ["RELEASE_SHA"]:
-    raise SystemExit("Release tag moved after validation")
+sha = os.environ["RELEASE_SHA"]
+if not re.fullmatch(r"[0-9a-f]{40}", sha):
+    raise SystemExit("Release SHA is not a full commit hash")
+# Source ancestry and tag absence were checked by release-candidate resolve.
 # Validate the key pair without writing a private key or publishing a feed.
 subprocess.run(
     ["go", "run", "./scripts/sign-release", "sign"],
@@ -43,4 +36,4 @@ subprocess.run(
 if output := os.environ.get("GITHUB_OUTPUT"):
     with open(output, "a") as stream:
         stream.write(f"mode={mode}\n")
-print(f"Stable tag, {mode} mode and Ed25519 key pair verified")
+print(f"{mode} mode and Ed25519 key pair verified for v{version}")

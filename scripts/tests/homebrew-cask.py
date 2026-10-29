@@ -264,10 +264,11 @@ class PublishedBytes(unittest.TestCase):
                 self.assertEqual(run.call_count, 1)
 
     def test_workflow_separates_publication_from_sync_failure(self):
-        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        workflow = (ROOT / ".github/workflows/release-publish.yml").read_text()
         homebrew = workflow.split("  homebrew:\n")[1]
         self.assertIn("needs: publish", homebrew)
-        self.assertIn("continue-on-error: true", homebrew)
+        self.assertNotIn("continue-on-error:", homebrew)
+        self.assertIn("if: failure()", homebrew)
         self.assertIn("pull-requests: write", homebrew)
         self.assertIn("github.token", homebrew)
         self.assertIn("::warning::macOS assets are published", homebrew)

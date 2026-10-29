@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve a CI source once and decide whether publication is authorized by the event."""
+"""Resolve a read-only CI source and its package validation version."""
 
 import json
 import os
@@ -9,7 +9,7 @@ import subprocess
 from release_contract import VERSION, version_number
 
 
-def plan(event, selected_ref, requested_ref, pr, publish, selected_sha, resolve):
+def plan(selected_ref, requested_ref, pr, selected_sha, resolve, validation_version=""):
     if pr and requested_ref:
         raise ValueError("choose either ref or pr")
     if pr and not re.fullmatch(r"[1-9][0-9]*", pr):
@@ -29,19 +29,13 @@ def plan(event, selected_ref, requested_ref, pr, publish, selected_sha, resolve)
         sha = resolve(f"commits/{ref}", ".sha")
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise ValueError("unable to resolve a source commit")
-    match = re.fullmatch(r"refs/tags/v(" + VERSION + r")", ref)
-    official = not pr and bool(match) and (event == "push" or publish)
-    if publish and not official:
-        raise ValueError("publication requires an existing refs/tags/vMAJOR.MINOR.PATCH and no PR")
-    if official:
-        tag_sha = resolve(f"commits/{ref}", ".sha")
-        if tag_sha != sha:
-            raise ValueError("release tag does not identify the selected commit")
-    return {
-        "sha": sha,
-        "version": match.group(1) if match else "0.0.0",
-        "official": str(official).lower(),
-    }
+    match = None if pr else re.fullmatch(r"refs/tags/v(" + VERSION + r")", ref)
+    version = (
+        version_number(validation_version)
+        if validation_version
+        else (match.group(1) if match else "0.0.0")
+    )
+    return {"sha": sha, "version": version}
 
 
 def main():
@@ -53,19 +47,13 @@ def main():
         ).strip()
 
     result = plan(
-        os.environ["GITHUB_EVENT_NAME"],
         os.environ["GITHUB_REF"],
         os.environ.get("SOURCE_REF", ""),
         os.environ.get("PR_NUMBER", ""),
-        os.environ.get("PUBLISH", "false") == "true",
         os.environ["GITHUB_SHA"],
         resolve,
+        os.environ.get("VALIDATION_VERSION", ""),
     )
-    validation_version = os.environ.get("VALIDATION_VERSION", "")
-    if validation_version:
-        if result["official"] == "true":
-            raise ValueError("validation version is only allowed for nonpublishing runs")
-        result["version"] = version_number(validation_version)
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
         for name, value in result.items():
             output.write(f"{name}={value}\n")

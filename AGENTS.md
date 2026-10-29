@@ -35,6 +35,10 @@ in the same change. Follow [Database migrations](docs/database-migrations.md).
 
 Changes to Pot agent prompts require explicit user authorization.
 
+## Releases
+
+Before preparing or publishing a Pot release, read [Releases](docs/releases.md).
+
 ## Backward compatibility
 
 When implementing features or changing schemas, protocols, APIs, or configuration:
