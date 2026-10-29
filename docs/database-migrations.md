@@ -292,3 +292,11 @@ captures the phase at original mailbox admission. It updates saved claim replies
 and receiver journal controls together. Previously admitted inputs are marked
 consumed without executing them again; pending inputs remain pending. Original
 mutation receipts, Task/run identities and retired work tombstones are retained.
+
+`conversation/0004_task_parameters` and `control/0010_task_parameters` initialize
+optional context, output and reasoning overrides inside existing Task defaults.
+Null defaults keep following the assistant; existing explicit parameter values,
+configuration counters, request hashes and prepared Task snapshots are preserved.
+
+`ui-cache/0011_task_parameters` invalidates assistant configuration projections
+that previously omitted Task parameters, leaving drafts and transcripts intact.
