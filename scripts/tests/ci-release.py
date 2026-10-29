@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 import plistlib
 import runpy
+import re
+import tomllib
 import subprocess
 import sys
 import tarfile
@@ -143,6 +145,68 @@ class ReleaseIntent(unittest.TestCase):
 
 
 class WorkflowBoundary(unittest.TestCase):
+    def test_sandbox_has_independent_runners_and_keeps_real_test_coverage(self):
+        tasks = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]
+        self.assertNotIn("test:sandbox", tasks["ci:normal"]["depends"])
+        workflow = (ROOT / ".github/workflows/tests.yml").read_text()
+        sandbox = workflow.split("  sandbox:", 1)[1].split("  macos-lifecycle:", 1)[0]
+        for contract in [
+            "os: [ubuntu-24.04, macos-26]",
+            "mise run test:sandbox",
+            "inputs.ref || github.sha",
+        ]:
+            self.assertIn(contract, sandbox)
+        lifecycle = workflow.split("  macos-lifecycle:", 1)[1]
+        self.assertIn("inputs.ref == ''", lifecycle)
+        self.assertIn("TestTimeoutIdleCancellationAndNoDescendants", lifecycle)
+        for relative in [
+            "pkg/executor/sandbox_integration_test.go",
+            "pkg/sandbox/launcher_test.go",
+        ]:
+            source = (ROOT / relative).read_text()
+            for block in re.split(r"(?m)(?=^func )", source):
+                match = re.match(r"func (Test\w+)\(", block)
+                if match and (
+                    relative.startswith("pkg/executor/") or "POT_SANDBOX_INTEGRATION" in block
+                ):
+                    self.assertTrue(
+                        match[1].startswith("TestReal"),
+                        f"sandbox runner omits {relative}:{match[1]}",
+                    )
+        runner = (ROOT / "scripts/tests/sandbox.py").read_text()
+        self.assertIn('"^TestReal"', runner)
+        self.assertIn('"-count=1"', runner)
+
+    def test_distribution_preflight_reports_policy_without_settings_changes(self):
+        check = runpy.run_path(str(ROOT / "scripts/release-distribution-preflight"))["preflight"]
+        with (
+            mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": "jjyr/pot"}, clear=True),
+            mock.patch("shutil.which", return_value="tool"),
+        ):
+            for code, payload, expected in [
+                (0, {"can_approve_pull_request_reviews": True}, "allowed"),
+                (0, {"can_approve_pull_request_reviews": False}, "disabled"),
+                (1, {}, "unknown"),
+                (0, {}, "unknown"),
+            ]:
+                with mock.patch(
+                    "subprocess.run",
+                    return_value=subprocess.CompletedProcess([], code, json.dumps(payload), ""),
+                ) as command:
+                    self.assertEqual(check(), expected)
+                    self.assertNotIn("--method", command.call_args.args[0])
+            with (
+                mock.patch("shutil.which", return_value=None),
+                mock.patch("subprocess.run") as command,
+            ):
+                with self.assertRaisesRegex(SystemExit, "Missing release tools"):
+                    check()
+                command.assert_not_called()
+        prepare = (ROOT / ".github/workflows/release-prepare.yml").read_text()
+        self.assertLess(
+            prepare.index("scripts/release-distribution-preflight"), prepare.index("  build:")
+        )
+
     def test_validation_has_no_publication_authority(self):
         text = (ROOT / ".github/workflows/ci.yml").read_text()
         for forbidden in [
@@ -675,6 +739,15 @@ class GitHubPublication(AssetsFixture, unittest.TestCase):
     def test_changed_id_in_response_blocks_writes(self):
         self.exercise_draft([1], selected=1, fail="id", rejected="does not match")
 
+    def test_created_id_is_used_while_list_is_stale(self):
+        self.exercise_draft([], fail="stale-list")
+
+    def test_lost_create_response_reconciles_without_second_post(self):
+        self.exercise_draft([], fail="lost-create")
+
+    def test_unresolved_create_stops_without_second_post(self):
+        self.exercise_draft([], fail="create-unresolved", rejected="write outcome unresolved")
+
     def exercise_draft(
         self,
         ids,
@@ -700,6 +773,7 @@ class GitHubPublication(AssetsFixture, unittest.TestCase):
             for value in ids
         ]
         writes = []
+        hidden_reads = []
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self.fixture(root)
@@ -707,6 +781,28 @@ class GitHubPublication(AssetsFixture, unittest.TestCase):
 
             def run(arguments, **options):
                 if arguments[:2] == ["gh", "api"]:
+                    if arguments[2:4] == ["--method", "POST"] and arguments[4].endswith(
+                        "/releases"
+                    ):
+                        self.assertFalse(releases)
+                        body = json.loads(options["input"])
+                        self.assertEqual(body["target_commitish"], SHA)
+                        self.assertTrue(body["draft"])
+                        releases.append(
+                            {
+                                "id": 1,
+                                "tag_name": "v1.2.3",
+                                "target_commitish": SHA,
+                                "draft": True,
+                                "assets": [],
+                            }
+                        )
+                        writes.append(("create", 1))
+                        if fail in {"lost-create", "create-unresolved"}:
+                            raise subprocess.TimeoutExpired(arguments, 30)
+                        return subprocess.CompletedProcess(
+                            arguments, 0, json.dumps(releases[0]), ""
+                        )
                     if "--method" not in arguments:
                         endpoint = arguments[2]
                         if "/releases/tags/" in endpoint:
@@ -726,6 +822,14 @@ class GitHubPublication(AssetsFixture, unittest.TestCase):
                             self.assertIn("--slurp", arguments)
                             if fail == "list":
                                 return subprocess.CompletedProcess(arguments, 1, "", "list failure")
+                            if writes and fail in {"lost-create", "create-unresolved"}:
+                                hidden_reads.append(True)
+                                if fail == "create-unresolved" or len(hidden_reads) == 1:
+                                    return subprocess.CompletedProcess(arguments, 0, "[[]]", "")
+                            if fail == "stale-list":
+                                self.assertFalse(
+                                    writes, "created release must be read by returned ID"
+                                )
                             pages = [[r] for r in releases] if paginated else [releases]
                             return subprocess.CompletedProcess(arguments, 0, json.dumps(pages), "")
                         release = next(
@@ -749,19 +853,6 @@ class GitHubPublication(AssetsFixture, unittest.TestCase):
                         return subprocess.CompletedProcess(arguments, 0, "{}", "")
                     self.assertEqual(method, "POST")
                     path = Path(arguments[-1])
-                elif arguments[:3] == ["gh", "release", "create"]:
-                    self.assertFalse(releases)
-                    releases.append(
-                        {
-                            "id": 1,
-                            "tag_name": "v1.2.3",
-                            "target_commitish": SHA,
-                            "draft": True,
-                            "assets": [],
-                        }
-                    )
-                    writes.append(("create", 1))
-                    return subprocess.CompletedProcess(arguments, 0, "", "")
                 else:
                     self.fail(f"Unexpected command: {arguments}")
                 writes.append(("upload", release["id"]))
@@ -791,6 +882,7 @@ class GitHubPublication(AssetsFixture, unittest.TestCase):
                     return_value=SHA,
                 ),
                 mock.patch("builtins.print"),
+                mock.patch("time.sleep"),
             ):
                 if rejected:
                     with self.assertRaisesRegex((RuntimeError, ValueError), rejected):
@@ -800,8 +892,12 @@ class GitHubPublication(AssetsFixture, unittest.TestCase):
                             "server",
                             **({"release_id": selected} if selected is not None else {}),
                         )
-                    self.assertFalse(any(w[0] in {"publish", "create"} for w in writes))
-                    if fail not in {"upload", "public-race"} and not omit:
+                    if fail == "create-unresolved":
+                        self.assertEqual(writes, [("create", 1)])
+                        self.assertEqual(len(hidden_reads), 3)
+                    else:
+                        self.assertFalse(any(w[0] in {"publish", "create"} for w in writes))
+                    if fail not in {"upload", "public-race", "create-unresolved"} and not omit:
                         self.assertEqual(writes, [])
                 else:
                     publish(

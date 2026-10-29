@@ -80,11 +80,12 @@ if path.startswith("actions/workflows/"):
     wid=path.split("/")[2]
     if path.endswith("/dispatches"):
         if s.get("dispatch_mode")!="error_without_run":
-            kind="prepare" if wid=="1" else "publish"
+            kind={"1":"prepare","2":"publish","3":"homebrew"}[wid]
             created=copy.deepcopy(s["template"])
             created.update(id=900,workflow_id=int(wid),path=".github/workflows/release-"+kind+".yml",head_branch=data["ref"],run_attempt=1,status=s.get("dispatched_status","queued"),conclusion=s.get("dispatched_conclusion"))
             created["display_title"]="release-"+kind+" ["+data["inputs"]["request-id"]+"]"
             if kind=="publish":created["display_title"]+=" prepare="+data["inputs"]["prepare-run-id"]+" manifest="+data["inputs"]["manifest-id"]
+            if kind=="homebrew":created["display_title"]+=" version="+data["inputs"]["version"]
             s["runs"]["900"]=created
             if s.get("duplicate_marker"):
                 duplicate=copy.deepcopy(created);duplicate["id"]=901;s["runs"]["901"]=duplicate
@@ -135,7 +136,7 @@ class ReleaseControl(unittest.TestCase):
                     "path": f".github/workflows/release-{kind}.yml",
                     "state": "active",
                 }
-                for i, kind in enumerate(("prepare", "publish"), 1)
+                for i, kind in enumerate(("prepare", "publish", "homebrew"), 1)
             },
         }
         self.environment = mock.patch.dict(os.environ, FAKE_RELEASE_STATE=str(self.state_path))
@@ -194,6 +195,18 @@ class ReleaseControl(unittest.TestCase):
         )
         self.assertIn("run-id: 900", "\n".join(self.output))
         self.assertNotIn("run-id: 999", "\n".join(self.output))
+
+    def test_homebrew_recovery_dispatches_version_and_source_without_preparation(self):
+        self.state["artifacts"] = []
+        self.save()
+        self.assertEqual(self.controller.homebrew("0.0.9", SHA), 0)
+        self.assertEqual(
+            self.posts()[0]["data"],
+            {"ref": "main", "inputs": {"version": "0.0.9", "revision": SHA, "request-id": REQUEST}},
+        )
+        self.assertIn("proposal workflow only", "\n".join(self.output))
+        with self.assertRaisesRegex(ReleaseError, "full 40-character"):
+            self.controller.homebrew("0.0.9", "main")
 
     def test_publish_pins_exact_current_attempt_manifest(self):
         old = artifact()
@@ -334,11 +347,25 @@ class ReleaseControl(unittest.TestCase):
         self.assertEqual(self.controller.status(20), 0)
         text = "\n".join(self.output)
         self.assertIn("pinned manifest: attempt=2", text)
-        self.assertIn("PR review/merge pending verification", text)
+        self.assertIn("independent workflow", text)
         calls = self.read()["calls"]
         self.assertTrue(
             any("runs/20/attempts/2/jobs" in c["args"][3] for c in calls if c["args"][0] == "api")
         )
+
+    def test_publication_success_reports_failed_independent_homebrew(self):
+        self.state["runs"]["20"] = run(20, "publish")
+        followup = run(21, "homebrew", conclusion="failure")
+        followup.update(
+            workflow_id=3,
+            event="workflow_run",
+            display_title="release-homebrew [20] version=from-publication",
+        )
+        self.state["runs"]["21"] = followup
+        self.save()
+        self.assertEqual(self.controller.status(20), 0)
+        self.assertIn("Homebrew follow-up: completed/failure", "\n".join(self.output))
+        self.assertEqual(self.posts(), [])
 
     def test_expired_successful_prepare_status_displays_actual_expiry(self):
         self.state["artifacts"][0]["expired"] = True

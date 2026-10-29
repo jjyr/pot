@@ -6,8 +6,10 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import tempfile
+import time
 from urllib.parse import quote
+
+from release_transport import diagnostic, run as transport_run, status
 
 from release_contract import (
     checksum,
@@ -51,30 +53,47 @@ def publish(version, output, channel, macos_mode=None, release_id=None):
         if (output / (name + ".sha256")).read_text() != f"{checksum(output / name)}  {name}\n":
             raise ValueError(f"checksum sidecar mismatch: {name}")
 
-    def read_release(selected_id):
-        selected = subprocess.run(
-            ["gh", "api", f"repos/{repository}/releases/{selected_id}"],
-            capture_output=True,
-            text=True,
-        )
-        if selected.returncode:
-            raise RuntimeError("Cannot read selected release: " + selected.stderr)
-        release = json.loads(selected.stdout)
-        if release["id"] != selected_id or release["tag_name"] != tag:
+    def validate_release(release, selected_id):
+        if (
+            type(selected_id) is not int
+            or selected_id <= 0
+            or release["id"] != selected_id
+            or release["tag_name"] != tag
+        ):
             raise ValueError("Selected release ID does not match this tag")
         if release["draft"] and release["target_commitish"] != sha:
             raise ValueError("Selected draft does not target the validated source")
         return release
 
+    def read_release(selected_id):
+        # A just-created ID can briefly be invisible to a subsequent GET.
+        for attempt in range(3):
+            selected = transport_run(
+                ["gh", "api", f"repos/{repository}/releases/{selected_id}"],
+                read_only=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if selected.returncode == 0:
+                return validate_release(json.loads(selected.stdout), selected_id)
+            if status(selected) != 404 or attempt == 2:
+                raise RuntimeError("Cannot read selected release: " + diagnostic(selected))
+            time.sleep(attempt + 1)
+
     def get_tag_release():
-        result = subprocess.run(
-            ["gh", "api", f"repos/{repository}/releases/tags/{tag}"], capture_output=True, text=True
+        result = transport_run(
+            ["gh", "api", f"repos/{repository}/releases/tags/{tag}"],
+            read_only=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if result.returncode == 0:
             return json.loads(result.stdout)
         if result.stdout and json.loads(result.stdout).get("status") in (404, "404"):
             return None
-        raise RuntimeError("Cannot read release metadata: " + result.stderr)
+        raise RuntimeError("Cannot read release metadata: " + diagnostic(result))
 
     def get_release():
         if release_id is not None:
@@ -84,13 +103,15 @@ def publish(version, output, channel, macos_mode=None, release_id=None):
             return read_release(release["id"])
         # The tag endpoint does not expose an unpublished draft. Discover
         # it before creating another release, then read its current assets.
-        listed = subprocess.run(
+        listed = transport_run(
             ["gh", "api", f"repos/{repository}/releases?per_page=100", "--paginate", "--slurp"],
+            read_only=True,
+            timeout=120,
             capture_output=True,
             text=True,
         )
         if listed.returncode:
-            raise RuntimeError("Cannot list releases: " + listed.stderr)
+            raise RuntimeError("Cannot list releases: " + diagnostic(listed))
         matches = [
             release
             for page in json.loads(listed.stdout)
@@ -116,38 +137,48 @@ def publish(version, output, channel, macos_mode=None, release_id=None):
 
     release = get_release()
     if release is None:
-        # Concurrent channels may create the same release. Re-read after the
-        # attempt, then require the same commit before adding any assets.
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".md") as notes:
-            notes.write(
+        # Submit once. Bind a successful response immediately to its ID instead
+        # of relying on the eventually consistent tag/list endpoints.
+        body = {
+            "tag_name": tag,
+            "target_commitish": sha,
+            "draft": True,
+            "generate_release_notes": True,
+            "body": (
                 "Artifacts are added per channel after its checks and applicable signing pass. "
                 "For macOS, read MACOS-RELEASE.txt for the signing/notarization status and first-launch instructions. "
                 "Homebrew preserves quarantine; unsigned mode has no Developer ID or Apple notarization. "
                 "Only listed assets are available. Linux desktop packages are experimental. Windows is unsupported.\n"
-            )
-            notes.flush()
-            result = subprocess.run(
-                [
-                    "gh",
-                    "release",
-                    "create",
-                    tag,
-                    "--repo",
-                    repository,
-                    "--verify-tag",
-                    "--target",
-                    sha,
-                    "--draft",
-                    "--generate-notes",
-                    "--notes-file",
-                    notes.name,
-                ],
+            ),
+        }
+        try:
+            result = transport_run(
+                ["gh", "api", "--method", "POST", f"repos/{repository}/releases", "--input", "-"],
+                input=json.dumps(body),
                 capture_output=True,
                 text=True,
+                timeout=30,
             )
-        release = get_release()
+        except (OSError, subprocess.TimeoutExpired) as error:
+            creation_error = diagnostic(error)
+        else:
+            if result.returncode == 0:
+                created = json.loads(result.stdout)
+                release = validate_release(created, created["id"])
+            creation_error = diagnostic(result)
         if release is None:
-            raise RuntimeError("Unable to create release: " + result.stderr)
+            # A lost response may hide a successful write. Reconcile bounded
+            # reads, never submit a second POST or choose among duplicate IDs.
+            for attempt in range(3):
+                if attempt:
+                    time.sleep(attempt)
+                release = get_release()
+                if release is not None:
+                    break
+            if release is None:
+                raise RuntimeError(
+                    "Unable to create release; write outcome unresolved: " + creation_error
+                )
     # Keep every subsequent read and write on the reviewed release, even if
     # another writer creates or publishes a release with the same tag.
     release_id = release["id"]
@@ -186,7 +217,7 @@ def publish(version, output, channel, macos_mode=None, release_id=None):
             # asset while this one was running. A different digest still fails.
             latest = get_release()
             if latest is None or not identical(path, latest):
-                raise RuntimeError("Unable to upload channel asset: " + result.stderr)
+                raise RuntimeError("Unable to upload channel asset: " + diagnostic(result))
     latest = get_release()
     if latest is None:
         raise RuntimeError("Release disappeared before channel completion")

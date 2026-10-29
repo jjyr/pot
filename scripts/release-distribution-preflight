@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Check local release tools and report Homebrew automation policy without writes."""
+
+import json
+import os
+import shutil
+import subprocess
+
+
+def preflight():
+    missing = [tool for tool in ("go", "python", "gh") if shutil.which(tool) is None]
+    if missing:
+        raise SystemExit("Missing release tools: " + ", ".join(missing))
+    repository = os.environ.get("GITHUB_REPOSITORY")
+    if repository != "jjyr/pot":
+        raise SystemExit("Release preflight requires jjyr/pot")
+    state = "unknown"
+    try:
+        result = subprocess.run(
+            [
+                "gh",
+                "api",
+                "--hostname",
+                "github.com",
+                f"repos/{repository}/actions/permissions/workflow",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if result.returncode == 0:
+            allowed = json.loads(result.stdout).get("can_approve_pull_request_reviews")
+            if type(allowed) is bool:
+                state = "allowed" if allowed else "disabled"
+    except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError):
+        pass
+    detail = {
+        "allowed": "repository policy allows Actions PR creation; effective token permissions are checked during proposal",
+        "disabled": "repository policy disables Actions PR creation; a maintainer must open the generated Homebrew branch's PR",
+        "unknown": "Actions PR policy could not be read (admin access may be required); Homebrew automation is not preverified",
+    }[state]
+    line = f"Homebrew permission preflight: {state}; {detail}."
+    print(("::warning::" if state != "allowed" else "") + line)
+    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(summary, "a") as stream:
+            stream.write(line + "\n")
+    if output := os.environ.get("GITHUB_OUTPUT"):
+        with open(output, "a") as stream:
+            stream.write(f"homebrew-permission={state}\n")
+    return state
+
+
+if __name__ == "__main__":
+    preflight()

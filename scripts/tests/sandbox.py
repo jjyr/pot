@@ -13,7 +13,17 @@ from pot_packaging import prepare_sandbox  # noqa: E402
 sdk = ROOT / ".local/pot/sandbox-tests"
 prepare_sandbox(sdk)
 subprocess.run(
-    ["go", "test", "-race", "-v", "./pkg/sandbox", "./pkg/executor", "./pkg/processscope"],
+    [
+        "go",
+        "test",
+        "-race",
+        "-count=1",
+        "-v",
+        "./pkg/sandbox",
+        "./pkg/executor",
+        "-run",
+        "^TestReal",
+    ],
     cwd=ROOT,
     env={**os.environ, "POT_SANDBOX_INTEGRATION": "1", "POT_SANDBOX_SDK": str(sdk)},
     check=True,
@@ -23,6 +33,7 @@ subprocess.run(
         "go",
         "test",
         "-race",
+        "-count=1",
         "-v",
         "./internal/control",
         "-run",

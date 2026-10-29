@@ -36,12 +36,12 @@ run = ["python scripts/tests/go-test-plan.py", "python scripts/test_go.py core -
 
 [tasks."ci:normal"]
 description = "Run normal tests and ancillary CI gates concurrently on one runner"
-depends = ["test:go:ci", "check:ci", "test:contracts", "test:release", "test:sandbox"]
+depends = ["test:go:ci", "check:ci", "test:contracts", "test:release"]
 
 [tasks."ci:light"]
 description = "Run automatic PR/main core and static contracts on one Linux runner"
 depends = ["lint", "test:i18n", "test:core", "test:ui", "test:packaging"]
-run = ["go run ./scripts/check-go", "go test ./scripts/check-go", "python scripts/tests/ci-release.py", "python scripts/tests/public-release-verification.py", "python scripts/tests/release-control.py", "python scripts/tests/release-candidate.py", "python scripts/tests/homebrew-cask.py", "python scripts/tests/docker-entrypoint.py"]
+run = ["go run ./scripts/check-go", "go test ./scripts/check-go", "python scripts/tests/ci-release.py", "python scripts/tests/public-release-verification.py", "python scripts/tests/release-control.py", "python scripts/tests/release-candidate.py", "python scripts/tests/release-transport.py", "python scripts/tests/homebrew-cask.py", "python scripts/tests/docker-entrypoint.py"]
 
 [tasks."test:go:ci"]
 description = "Run complete normal Go coverage without test-result caching"
@@ -99,6 +99,10 @@ run = "python scripts/release-control prepare"
 description = "Publish the exact manifest from one successful remote prepare run"
 run = "python scripts/release-control publish"
 
+[tasks."release:homebrew"]
+description = "Retry Homebrew proposal for an already published version"
+run = "python scripts/release-control homebrew"
+
 [tasks."release:status"]
 description = "Show release Actions phases, candidate expiry and Homebrew state"
 run = "python scripts/release-control status"
@@ -109,7 +113,7 @@ run = "python scripts/verify-release"
 
 [tasks."test:release"]
 description = "Verify release packaging, candidate provenance, promotion and public verification protocols"
-run = ["python scripts/tests/release-packaging.py", "python scripts/tests/public-release-verification.py", "python scripts/tests/release-control.py", "python scripts/tests/release-candidate.py"]
+run = ["python scripts/tests/release-packaging.py", "python scripts/tests/public-release-verification.py", "python scripts/tests/release-control.py", "python scripts/tests/release-candidate.py", "python scripts/tests/release-transport.py"]
 
 [tasks."test:macos-update"]
 description = "Build two disposable App versions and simulate native upgrade/recovery"

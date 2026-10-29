@@ -19,6 +19,29 @@ func cancelOriginal(observer *nativeObserver, original *os.Process, done <-chan 
 	defer deadline.Stop()
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
+	return cancelDarwinTree(observer.root, func() ([]nativeMember, error) {
+		observer.mu.Lock()
+		defer observer.mu.Unlock()
+		members, err := observer.members()
+		return members, errors.Join(err, observer.err)
+	}, func() error { return stopOriginal(original, done) }, func(member nativeMember) error {
+		// A snapshot is not authority to signal a subsequently reused PID.
+		id, _, ok := identity(member.pid)
+		if !ok || id != member.id {
+			return nil
+		}
+		err := unix.Kill(member.pid, unix.SIGKILL)
+		if errors.Is(err, unix.ESRCH) {
+			return nil
+		}
+		return err
+	}, done, deadline.C, tick.C)
+}
+
+// The scan and signals remain native; explicit timer channels let the grace
+// decisions be tested independently of runner scheduling and process-scan cost.
+func cancelDarwinTree(root uint64, scan func() ([]nativeMember, error), stopRoot func() error,
+	stopMember func(nativeMember) error, done <-chan error, deadline, tick <-chan time.Time) error {
 	firstScan := true
 	// A parent becoming childless does not mean its exit handler has completed.
 	// Retain parent identities across scans for the entire shared grace window.
@@ -27,52 +50,44 @@ func cancelOriginal(observer *nativeObserver, original *os.Process, done <-chan 
 		select {
 		case <-done:
 			return nil
-		case <-deadline.C:
-			return stopOriginal(original, done)
+		case <-deadline:
+			return stopRoot()
 		default:
 		}
-		observer.mu.Lock()
-		members, err := observer.members()
-		err = errors.Join(err, observer.err)
-		observer.mu.Unlock()
+		members, err := scan()
 		if err != nil {
-			return errors.Join(err, stopOriginal(original, done))
+			return errors.Join(err, stopRoot())
 		}
 		hasDescendants := false
 		for _, member := range members {
 			parents[member.parent] = true
-			hasDescendants = hasDescendants || member.id != observer.root
+			hasDescendants = hasDescendants || member.id != root
 		}
 		// Only skip grace for an initially childless workload. Once descendants
 		// have exited, their parent may still be handling the exit notification.
 		if firstScan && !hasDescendants {
-			return stopOriginal(original, done)
+			return stopRoot()
 		}
 		firstScan = false
 		for _, member := range members {
 			select {
-			case <-deadline.C:
-				return stopOriginal(original, done)
+			case <-deadline:
+				return stopRoot()
 			default:
 			}
-			if member.id == observer.root || parents[member.id] {
+			if member.id == root || parents[member.id] {
 				continue
 			}
-			// A snapshot is not authority to signal a subsequently reused PID.
-			id, _, ok := identity(member.pid)
-			if !ok || id != member.id {
-				continue
-			}
-			if err := unix.Kill(member.pid, unix.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
-				return errors.Join(err, stopOriginal(original, done))
+			if err := stopMember(member); err != nil {
+				return errors.Join(err, stopRoot())
 			}
 		}
 		select {
 		case <-done:
 			return nil
-		case <-deadline.C:
-			return stopOriginal(original, done)
-		case <-tick.C:
+		case <-deadline:
+			return stopRoot()
+		case <-tick:
 		}
 	}
 }

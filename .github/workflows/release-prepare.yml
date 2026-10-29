@@ -71,6 +71,10 @@ jobs:
           version: 2026.10.10
           cache: false
           install_args: go python
+      - name: Verify release tools and report Homebrew permission policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec -- python scripts/release-distribution-preflight
       - name: Resolve candidate source
         id: candidate
         env:

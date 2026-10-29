@@ -157,8 +157,14 @@ class PublishedBytes(unittest.TestCase):
         proposed = mock.Mock(return_value="PR")
 
         def call(repository, endpoint):
-            if endpoint.startswith("commits/"):
-                return {"sha": "b" * 40 if moved else SHA}
+            if endpoint.startswith("git/ref/tags/"):
+                return {"object": {"type": "tag", "sha": "c" * 40}}
+            if endpoint.startswith("git/tags/"):
+                return {
+                    "tag": "v1.2.3",
+                    "object": {"type": "commit", "sha": "b" * 40 if moved else SHA},
+                    "message": json.dumps({"format": 1, "version": "1.2.3", "sha": SHA}),
+                }
             return {"draft": draft, "prerelease": False, "assets": assets}
 
         def download(command, **kwargs):
@@ -216,6 +222,50 @@ class PublishedBytes(unittest.TestCase):
                 self.assertIn(assets[1]["digest"].split(":")[1], formula)
                 self.assertIn("pot-1.2.3-darwin-arm64.tar.gz", formula)
 
+    def test_recovery_requires_annotated_source_and_version_binding(self):
+        verify = namespace["verify_tag"]
+        good = {
+            "tag": "v1.2.3",
+            "object": {"type": "commit", "sha": SHA},
+            "message": json.dumps({"format": 1, "version": "1.2.3", "sha": SHA}),
+        }
+        for changed in [
+            {"tag": "v9.9.9"},
+            {"object": {"type": "commit", "sha": "b" * 40}},
+            {"message": "not-json"},
+            {"message": json.dumps({"format": 1, "version": "1.2.4", "sha": SHA})},
+        ]:
+            with mock.patch.dict(
+                verify.__globals__,
+                api=mock.Mock(
+                    side_effect=[{"object": {"type": "tag", "sha": "c" * 40}}, {**good, **changed}]
+                ),
+            ):
+                with self.assertRaises(ValueError):
+                    verify(REPO, "1.2.3", SHA)
+        with mock.patch.dict(
+            verify.__globals__,
+            api=mock.Mock(return_value={"object": {"type": "commit", "sha": SHA}}),
+        ):
+            with self.assertRaisesRegex(ValueError, "annotated"):
+                verify(REPO, "1.2.3", SHA)
+
+    def test_api_retries_transient_reads_but_never_writes(self):
+        error = subprocess.CompletedProcess(
+            [], 1, '{"status":502,"message":"unavailable"}', "HTTP 502"
+        )
+        success = subprocess.CompletedProcess([], 0, '{"id":7}', "")
+        with (
+            mock.patch("subprocess.run", side_effect=[error, success]) as run,
+            mock.patch("release_transport.time.sleep"),
+        ):
+            self.assertEqual(api(REPO, "releases/7"), {"id": 7})
+            self.assertEqual(run.call_count, 2)
+        with mock.patch("subprocess.run", return_value=error) as run:
+            with self.assertRaisesRegex(RuntimeError, "HTTP=502"):
+                api(REPO, "pulls", {"title": "fixture"})
+            self.assertEqual(run.call_count, 1)
+
     def test_final_published_bytes_determine_installable_cask(self):
         self.exercise()
 
@@ -264,16 +314,83 @@ class PublishedBytes(unittest.TestCase):
                 self.assertEqual(run.call_count, 1)
 
     def test_workflow_separates_publication_from_sync_failure(self):
-        workflow = (ROOT / ".github/workflows/release-publish.yml").read_text()
-        homebrew = workflow.split("  homebrew:\n")[1]
-        self.assertIn("needs: publish", homebrew)
-        self.assertNotIn("continue-on-error:", homebrew)
-        self.assertIn("if: failure()", homebrew)
-        self.assertIn("pull-requests: write", homebrew)
-        self.assertIn("github.token", homebrew)
-        self.assertIn("::warning::macOS assets are published", homebrew)
-        self.assertNotIn("secrets.", homebrew)
-        self.assertNotIn("git push", homebrew)
+        publication = (ROOT / ".github/workflows/release-publish.yml").read_text()
+        homebrew = (ROOT / ".github/workflows/release-homebrew.yml").read_text()
+        self.assertNotIn("  homebrew:", publication)
+        for contract in [
+            "workflow_run:",
+            "workflows: [Release publish]",
+            "workflow_dispatch:",
+            "--publish-run-id",
+            "github.event.repository.default_branch",
+            "pull-requests: write",
+            "github.token",
+            "if: always()",
+        ]:
+            self.assertIn(contract, homebrew)
+        for forbidden in [
+            "continue-on-error:",
+            "secrets.",
+            "git push",
+            "gh pr merge",
+            "workflow_run.head_sha",
+        ]:
+            self.assertNotIn(forbidden, homebrew)
+
+    def test_published_source_rejects_untrusted_events_before_candidate_access(self):
+        select = namespace["source_from_publish"]
+        valid = {
+            "id": 20,
+            "workflow_id": 5,
+            "path": ".github/workflows/release-publish.yml",
+            "event": "workflow_dispatch",
+            "head_branch": "main",
+            "head_sha": SHA,
+            "status": "completed",
+            "conclusion": "success",
+            "run_attempt": 1,
+            "repository": {"full_name": REPO},
+            "head_repository": {"full_name": REPO},
+            "display_title": "release-publish [11111111-2222-4333-8444-555555555555] prepare=10 manifest=70",
+        }
+
+        def fake_api(repository, endpoint):
+            if endpoint == "":
+                return {"default_branch": "main"}
+            if endpoint == "actions/workflows/release-publish.yml":
+                return {"id": 5, "path": ".github/workflows/release-publish.yml", "state": "active"}
+            return current
+
+        with (
+            mock.patch.dict(select.__globals__, api=fake_api),
+            mock.patch(
+                "release_candidate.inspect_candidate",
+                return_value={"run_id": 10, "manifest_id": 70, "version": "1.2.3", "sha": SHA},
+            ) as inspect,
+        ):
+            current = valid
+            self.assertEqual(select(20, REPO), ("1.2.3", SHA))
+            inspect.assert_called_once_with(10, 70)
+            for change in [
+                {"head_branch": "untrusted"},
+                {"event": "pull_request"},
+                {"head_repository": {"full_name": "attacker/fork"}},
+                {"conclusion": "failure"},
+                {"workflow_id": 9},
+                {"path": "wrong.yml"},
+                {"run_attempt": 0},
+                {"display_title": "untrusted"},
+                {"id": 21},
+            ]:
+                current = {**valid, **change}
+                inspect.reset_mock()
+                with self.assertRaises(ValueError):
+                    select(20, REPO)
+                inspect.assert_not_called()
+            current = valid
+            inspect.return_value = {"run_id": 11, "manifest_id": 70}
+            with self.assertRaisesRegex(ValueError, "identity mismatch"):
+                select(20, REPO)
 
 
 if __name__ == "__main__":
