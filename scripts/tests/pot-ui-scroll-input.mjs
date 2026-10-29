@@ -64,6 +64,13 @@ try{
    const states=[],off=c.api.subscribeReading(state=>states.push(state));
    const commit=()=>{c.beforeLayout();v.getMeasurements();c.reconcile();c.publish();};
    c.api.restore({mode:'reading',position:{top:1000,anchors:[{key:'message:m',offset:0}],anchor:{id:'m',offset:0,sequence:'11'}}});commit();f.writes.length=0;
+   // A compositor can reach Latest and reverse before the next prepared
+   // layout publishes its reading position. Keep both input deltas exactly once.
+   for(const [delta,top]of [[8400,9400],[-8400,1000]]){
+    const wheel=new Event('wheel');Object.assign(wheel,{deltaY:delta,deltaX:0});f.history.dispatchEvent(wheel);f.scroll(top);
+   }
+   commit();assert.equal(f.history.scrollTop,1000,'Rapid reversal retains the native destination');
+   assert.deepEqual(f.writes,[],'Reaching Latest before publication must not reuse a stale reading anchor');
    const trace=[];
    if(order==='measure-first')v.resizeItem(0,160);
    actualTop+=60;commit();trace.push({reason:'height +60',top:f.history.scrollTop,offset:row.getBoundingClientRect().top});

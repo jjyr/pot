@@ -469,6 +469,9 @@ it does not recapture an unreported DOM height change as new reading intent.
 Programmatic write echoes do not become input. Geometry that happens to reach
 the bottom does not enable following; downward user movement to the bottom or
 an explicit Latest command does.
+Reaching Latest retains the accumulated native input anchor until publication,
+so a rapid direction reversal before layout settles does not reuse an older
+reading position or count a scroll delta twice.
 
 The same reconciliation handles prepend, trimming, reorder, width reflow,
 external header/composer layout and asynchronous image or disclosure sizes.
