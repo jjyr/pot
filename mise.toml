@@ -280,7 +280,7 @@ run = "python scripts/tests/ui-http-suite.py"
 
 [tasks."test:public-api"]
 description = "Verify reusable Go libraries from an independent external module"
-run = "python scripts/tests/go-public-api.py"
+run = ["python scripts/tests/go-public-api-harness.py", "python scripts/tests/go-public-api.py"]
 
 [tasks."test:sandbox"]
 description = "Qualify real SRT file, network, socket, PTY and cleanup boundaries"
