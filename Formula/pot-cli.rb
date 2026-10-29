@@ -1,9 +1,9 @@
 class PotCli < Formula
   desc "Pot headless CLI, Runtime and Web UI"
   homepage "https://github.com/jjyr/pot"
-  url "https://github.com/jjyr/pot/releases/download/v0.0.5/pot-0.0.5-darwin-arm64.tar.gz"
-  version "0.0.5"
-  sha256 "29c578b65f9cdc0136910221180f20c236b6af8cc0b53b2d608353749ce57b53"
+  url "https://github.com/jjyr/pot/releases/download/v0.0.8/pot-0.0.8-darwin-arm64.tar.gz"
+  version "0.0.8"
+  sha256 "73219a46cf5009176d4ba5796e06cf773812661d9fb5e5d6d74f26e33150ed1a"
   license "MIT"
 
   depends_on macos: :tahoe
