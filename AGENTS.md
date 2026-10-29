@@ -3,6 +3,8 @@
 Start with the [documentation index](docs/README.md) and read the pages relevant to your task.
 
 Keep documentation focused on lasting design, behavior and operating instructions.
+Update documentation only to correct inconsistencies with existing records.
+Do not add redundant content.
 Do not add validation reports, test-run reports or development checklists to the
 repository, including under `docs/`. Report checks, results and limitations in the
 task response instead.
@@ -38,6 +40,7 @@ Changes to Pot agent prompts require explicit user authorization.
 ## Releases
 
 Before preparing or publishing a Pot release, read [Releases](docs/releases.md).
+Do not add or maintain tests for release workflows.
 
 ## Backward compatibility
 
@@ -49,6 +52,3 @@ When implementing features or changing schemas, protocols, APIs, or configuratio
 
 - Keep PR titles and descriptions concise; explain the problem and resulting behavior.
 - Illustrate architecture changes with an ASCII diagram.
-- Include labeled before/after screenshots for UI changes.
-- Store PR screenshots in `docs/pr-images/<normalized-branch>/`, following the
-  [PR image conventions](docs/pr-images/README.md).

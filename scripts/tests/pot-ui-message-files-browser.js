@@ -34,7 +34,7 @@ async page=>{
   });assert(stable.htmlLineInert&&stable.silentPending&&stable.noStreamingRead&&stable.sameBlock&&stable.sameRef&&stable.selection==='selection'&&stable.ready,'Stream finalization and async resolution preserve DOM and selection');
   for(const locale of ['en','zh-CN']){await page.evaluate(locale=>{document.documentElement.lang=locale;window.dispatchEvent(new Event('pot:locale'));},locale);assert(!(await page.locator('pot-resource').first().textContent()).includes('resource.'),'Localized resource labels');}
   console.log('stream DOM and selection passed');
-  const directory='docs/pr-images/feature-message-file-previews';
+  const directory='output/pr-images/feature-message-file-previews';
   for(const scenario of [{name:'chat-desktop-light',width:1280,height:800,theme:'light',locale:'en'},{name:'chat-mobile-dark',width:390,height:844,theme:'dark',locale:'zh-CN'}]){
     await page.setViewportSize({width:scenario.width,height:scenario.height});
     console.log('capturing '+scenario.name);

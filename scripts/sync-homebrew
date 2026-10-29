@@ -12,24 +12,30 @@ import tempfile
 from urllib.parse import quote
 
 from release_contract import checksum, generate_cask, generate_formula, version_number
+from release_transport import diagnostic, run as github_run
 
 
 def api(repository, endpoint, data=None, missing=False):
     command = ["gh", "api", f"repos/{repository}/{endpoint}".rstrip("/")]
     if data is not None:
         command += ["--method", "POST", "--input", "-"]
-    result = subprocess.run(
-        command,
-        input=json.dumps(data) if data is not None else None,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = github_run(
+            command,
+            read_only=data is None,
+            timeout=30,
+            input=json.dumps(data) if data is not None else None,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError(f"GitHub {endpoint}: {diagnostic(error)}") from error
     if result.returncode:
         if missing and result.stdout:
             error = json.loads(result.stdout)
             if str(error.get("status")) == "404":
                 return None
-        raise RuntimeError(f"GitHub {endpoint}: {result.stderr.strip()}")
+        raise RuntimeError(f"GitHub {endpoint}: {diagnostic(result)}")
     return json.loads(result.stdout)
 
 
@@ -117,13 +123,40 @@ def propose(repository, version, cask, formula):
     return "Created Homebrew PR: " + pr["html_url"]
 
 
+def verify_tag(repository, version, revision):
+    """Check the immutable annotated source binding without preparation artifacts."""
+    tag = "v" + version
+    ref = api(repository, f"git/ref/tags/{tag}")
+    target = ref.get("object") or {}
+    if target.get("type") != "tag" or not re.fullmatch(r"[a-f0-9]{40}", target.get("sha") or ""):
+        raise ValueError("Homebrew requires an annotated release tag")
+    annotated = api(repository, "git/tags/" + target["sha"])
+    if (
+        annotated.get("tag") != tag
+        or (annotated.get("object") or {}).get("type") != "commit"
+        or annotated["object"].get("sha") != revision
+    ):
+        raise ValueError("Release tag moved after validation")
+    try:
+        binding = json.loads(annotated.get("message", ""))
+    except ValueError as error:
+        raise ValueError("Release tag has no candidate binding") from error
+    if (
+        not isinstance(binding, dict)
+        or binding.get("format") != 1
+        or binding.get("version") != version
+        or binding.get("sha") != revision
+    ):
+        raise ValueError("Release tag candidate binding differs")
+    return target["sha"]
+
+
 def sync(version, revision, repository):
     version = version_number(version)
     if repository != "jjyr/pot" or not re.fullmatch(r"[a-f0-9]{40}", revision):
         raise ValueError("Expected jjyr/pot and a validated full release SHA")
     tag = "v" + version
-    if api(repository, f"commits/refs/tags/{tag}")["sha"] != revision:
-        raise ValueError("Release tag moved after validation")
+    tag_object = verify_tag(repository, version, revision)
     release = api(repository, f"releases/tags/{tag}")
     if release["draft"] or release["prerelease"]:
         raise ValueError("Homebrew sync requires a published stable release")
@@ -160,7 +193,7 @@ def sync(version, revision, repository):
                 raise ValueError("Downloaded archive does not match published asset digest/size")
         generate_cask(version, output)
         generate_formula(version, output)
-        if api(repository, f"commits/refs/tags/{tag}")["sha"] != revision:
+        if verify_tag(repository, version, revision) != tag_object:
             raise ValueError("Release tag moved before Homebrew proposal")
         return propose(
             repository,
@@ -170,12 +203,63 @@ def sync(version, revision, repository):
         )
 
 
-def main():
+def source_from_publish(run_id, repository):
+    """Resolve data from a successful trusted publisher, never execute its source."""
+    from release_candidate import inspect_candidate
+
+    if repository != "jjyr/pot" or type(run_id) is not int or run_id <= 0:
+        raise ValueError("Expected jjyr/pot and a positive publication run ID")
+    run = api(repository, f"actions/runs/{run_id}")
+    workflow = api(repository, "actions/workflows/release-publish.yml")
+    default = api(repository, "")["default_branch"]
+    if (
+        run.get("id") != run_id
+        or run.get("workflow_id") != workflow.get("id")
+        or workflow.get("state") != "active"
+        or workflow.get("path") != ".github/workflows/release-publish.yml"
+        or run.get("path") != workflow["path"]
+        or run.get("event") != "workflow_dispatch"
+        or run.get("head_branch") != default
+        or run.get("status") != "completed"
+        or run.get("conclusion") != "success"
+        or not re.fullmatch(r"[a-f0-9]{40}", run.get("head_sha") or "")
+        or type(run.get("run_attempt")) is not int
+        or run["run_attempt"] <= 0
+        or any(
+            (run.get(key) or {}).get("full_name") != repository
+            for key in ("repository", "head_repository")
+        )
+    ):
+        raise ValueError("Homebrew requires a successful trusted default-branch publication")
+    marker = re.fullmatch(
+        r"release-publish \[([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\] prepare=([1-9][0-9]*) manifest=([1-9][0-9]*)",
+        run.get("display_title") or "",
+    )
+    if marker is None:
+        raise ValueError("Publication has no valid pinned candidate identity")
+    prepare_id, manifest_id = int(marker[2]), int(marker[3])
+    candidate = inspect_candidate(prepare_id, manifest_id)
+    if candidate.get("run_id") != prepare_id or candidate.get("manifest_id") != manifest_id:
+        raise ValueError("Publication candidate identity mismatch")
+    return candidate["version"], candidate["sha"]
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("version")
-    parser.add_argument("revision")
-    args = parser.parse_args()
-    print(sync(args.version, args.revision, os.environ["GITHUB_REPOSITORY"]))
+    parser.add_argument("version", nargs="?")
+    parser.add_argument("revision", nargs="?")
+    parser.add_argument("--publish-run-id", type=int)
+    args = parser.parse_args(argv)
+    repository = os.environ["GITHUB_REPOSITORY"]
+    if args.publish_run_id is not None:
+        if args.version is not None or args.revision is not None or args.publish_run_id <= 0:
+            parser.error("Use either VERSION REVISION or a positive --publish-run-id")
+        version, revision = source_from_publish(args.publish_run_id, repository)
+    else:
+        if args.version is None or args.revision is None:
+            parser.error("VERSION and REVISION are required without --publish-run-id")
+        version, revision = args.version, args.revision
+    print(sync(version, revision, repository))
 
 
 if __name__ == "__main__":

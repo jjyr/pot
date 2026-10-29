@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/jjyr/pot/internal/testutil"
 )
 
 func TestDarwinCancellationLetsParentReapDetachedChild(t *testing.T) {
@@ -25,9 +27,9 @@ func TestDarwinCancellationEscalatesUncooperativeParent(t *testing.T) {
 func TestDarwinCancellationWithNoDescendants(t *testing.T) {
 	_, elapsed := testDarwinCancellation(t, `ready(process.pid);`, false)
 	t.Logf("childless cancellation: %.3f ms", float64(elapsed.Microseconds())/1000)
-	if elapsed >= darwinReapGrace {
-		t.Fatalf("childless workload waited for the reaping grace: %v", elapsed)
-	}
+	// The deterministic tree test checks that grace is skipped. This real
+	// process test checks bounded cancellation and confirmed disappearance;
+	// elapsed time also includes native scans and runner scheduling.
 }
 
 func TestDarwinCancellationPreservesParentExitHandling(t *testing.T) {
@@ -144,4 +146,90 @@ func assertReapedWithinGrace(t *testing.T, path string, elapsed time.Duration) {
 		return
 	}
 	t.Fatalf("parent was stopped before its reaping grace: %q, %v", body, err)
+}
+
+func TestDarwinCancellationGraceDecisions(t *testing.T) {
+	for _, initiallyChildless := range []bool{true, false} {
+		t.Run(strconv.FormatBool(initiallyChildless), func(t *testing.T) {
+			done := make(chan error)
+			defer close(done)
+			deadline := make(chan time.Time)
+			tick := make(chan time.Time)
+			scans := make(chan int)
+			result := make(chan error, 1)
+			leaves := make(chan nativeMember, 1)
+			rootStopped := errors.New("root stopped")
+			go func() {
+				count := 0
+				result <- cancelDarwinTree(1, func() ([]nativeMember, error) {
+					count++
+					select {
+					case scans <- count:
+					case <-done:
+					}
+					members := []nativeMember{{id: 1}}
+					if !initiallyChildless && count == 1 {
+						members = append(members, nativeMember{id: 2, parent: 1})
+					}
+					return members, nil
+				}, func() error { return rootStopped }, func(member nativeMember) error {
+					select {
+					case leaves <- member:
+					case <-done:
+					}
+					return nil
+				}, done, deadline, tick)
+			}()
+			budget := time.NewTimer(testutil.Timeout(t, 5*time.Second))
+			defer budget.Stop()
+			awaitScan := func(want int) {
+				t.Helper()
+				select {
+				case got := <-scans:
+					if got != want {
+						t.Fatalf("scan = %d, want %d", got, want)
+					}
+				case err := <-result:
+					t.Fatalf("stopped parent before grace expired: %v", err)
+				case <-budget.C:
+					t.Fatal("tree scan did not run")
+				}
+			}
+			awaitScan(1)
+			if !initiallyChildless {
+				select {
+				case member := <-leaves:
+					if member.id != 2 {
+						t.Fatalf("stopped non-leaf: %+v", member)
+					}
+				case <-budget.C:
+					t.Fatal("leaf was not stopped")
+				}
+				for scan := 2; scan <= 3; scan++ {
+					select {
+					case tick <- time.Time{}:
+					case err := <-result:
+						t.Fatalf("stopped parent before grace expired: %v", err)
+					case <-budget.C:
+						t.Fatal("tree did not wait for another scan")
+					}
+					awaitScan(scan)
+				}
+				close(deadline)
+			}
+			select {
+			case err := <-result:
+				if !errors.Is(err, rootStopped) {
+					t.Fatalf("root stop result was lost: %v", err)
+				}
+			case <-budget.C:
+				t.Fatal("tree did not stop at its decision boundary")
+			}
+			select {
+			case member := <-leaves:
+				t.Fatalf("unexpected leaf signal: %+v", member)
+			default:
+			}
+		})
+	}
 }

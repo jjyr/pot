@@ -82,7 +82,7 @@ async page=>{
   await page.emulateMedia({colorScheme:'light'});
   assert(dark!==await md.locator('.resource-markdown').evaluate(element=>getComputedStyle(element).color),'Reader follows system appearance live');
   // Capture the real old and new modules against the identical registered file.
-  const directory='docs/pr-images/feat-markdown-resource-preview';
+  const directory='output/pr-images/feat-markdown-resource-preview';
   for(const scenario of [{name:'markdown-desktop',width:1100,height:900,theme:'light',locale:'en'},{name:'markdown-mobile-dark',width:390,height:844,theme:'dark',locale:'zh-CN'}]){
     await page.setViewportSize({width:scenario.width,height:scenario.height});
     for(const version of ['before','after']){

@@ -45,6 +45,7 @@ the original cache and repository module files remain unchanged.
 | `mise run release:prepare -- VERSION --wait` | Validate and save a release candidate from remote main; no tag or publication |
 | `mise run release:status -- RUN_ID` | Inspect the exact preparation/publication run and artifact availability |
 | `mise run release:publish -- PREPARE_RUN_ID --wait` | Publish the pinned prepared artifacts and verify public downloads; [release procedure](releases.md#release-procedure) |
+| `mise run release:homebrew -- VERSION --ref SOURCE_SHA --wait` | Independently propose Homebrew packages for an already published version; PR review/merge remains separate |
 | `mise run release -- VERSION` | App/CLI archives, checksums, cask and configured signed update feed; publishing is separate |
 | `mise run verify:release -- VERSION` | On-demand public version, signed feed and download verification; requires a trusted pinned key; [arguments and reports](releases.md#public-verification-after-publication) |
 
@@ -142,7 +143,7 @@ ordered `{parameter}` markers. It does not scan for hardcoded UI text or verify
 runtime language changes; follow the [i18n rules](internationalization.md) for
 those checks.
 
-`test:sandbox` runs real file, socket, network, terminal, plugin and cleanup tests with the pinned SDK. `test:sandbox-linux` uses a disposable non-root Docker host with namespace restrictions relaxed only on the outer test container; only test assets are mounted read-only.
+`test:sandbox` runs the `TestReal*` file, socket, network, terminal, plugin and cleanup tests with the pinned SDK and race instrumentation. Complete normal/race suites retain the other executor and process-scope tests. Full CI runs sandbox qualification in independent Linux/macOS jobs rather than competing with normal/static checks on the same runner. `test:sandbox-linux` uses a disposable non-root Docker host with namespace restrictions relaxed only on the outer test container; only test assets are mounted read-only.
 
 `check:go` verifies formatting, vet and architectural imports. `test:go` runs all
 Go tests without race instrumentation. `test` runs the normal and focused race
@@ -207,6 +208,12 @@ normal-only exception requires an explicit rationale in the reviewed manifest.
 The standalone `test:executor` remains available for local diagnosis; CI gets
 that full package coverage through `test:race` and does not run it twice.
 Any nonzero exit fails the check; no failing tests are retried.
+Automatic PR/main checks also run a narrow macOS process-lifecycle race job,
+covering cancellation, idle expiry, supervisor readiness and descendant cleanup.
+Idle-expiry fixtures await completion without polling a running session (which
+would refresh its deadline). Darwin grace decisions use controlled scan/signal
+and timer inputs; real-process tests retain bounded cleanup and disappearance
+checks without treating total wall time as proof of the selected grace path.
 Finished-session output tests release a fixture through stdin and await its actual
 completion before reading retained output; a yield interval does not promise exit.
 UI tests cover owner-scoped state, drafts, IME, navigation and
@@ -554,8 +561,7 @@ Chromium executable without downloading another browser. It uses independent fre
 theme and dimensions for each pair: 1280×1000 collapsed/send/receive/dark, 1280×1400 expanded
 details, and 390×1000 phone receive in light and dark themes, all at device scale 1. It checks safe Markdown,
 send/receive direction, native disclosure state, loaded images and horizontal fit.
-Draft PNGs go to `output/pr-images/communication-review/`; copy only reviewed
-captures into the source branch's [PR image directory](pr-images/README.md).
+PNG captures go to `output/pr-images/communication-review/`.
 Stop the fixture server with Ctrl-C. This export route is separate from the
 computer-use API's inline observations and uses no tool browser session/profile.
 
@@ -618,8 +624,7 @@ tool and process-session integration checks. Use the `POT_PLAYWRIGHT_MODULE` and
 
 Use private temporary data roots for service integration tests. Never open the
 same root in App and standalone Runtime concurrently. Report checks and limitations
-in the task/PR, not repository validation reports. Store only reviewed UI comparison
-screenshots under [PR image conventions](pr-images/README.md).
+in the task/PR, not repository validation reports.
 
 `hk.pkl` owns pre-commit and pre-push checks. Run commands through `mise`; do not
 bypass failed hooks. `mise run check:push` runs the same local gate without

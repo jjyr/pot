@@ -4,7 +4,7 @@ import {resolve} from 'node:path';
 import {launchBrowser} from './browser-harness.mjs';
 
 const origin=(await readFile(process.env.POT_DIRECTORY_FREQUENCY_URL_FILE,'utf8')).trim();
-const baseline=process.argv.includes('--baseline'),imageOutput=resolve('docs/pr-images/fix-task-output-refresh');await mkdir(imageOutput,{recursive:true});
+const baseline=process.argv.includes('--baseline'),imageOutput=resolve('output/pr-images/fix-task-output-refresh');await mkdir(imageOutput,{recursive:true});
 const output=resolve(process.env.POT_DIRECTORY_FREQUENCY_OUTPUT||'.pot-artifacts/frequency');await mkdir(output,{recursive:true});
 const browser=await launchBrowser(),results=[];
 try{

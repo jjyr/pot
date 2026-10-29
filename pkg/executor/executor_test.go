@@ -273,7 +273,19 @@ func TestTimeoutIdleCancellationAndNoDescendants(t *testing.T) {
 	defer e2.Close()
 	result := call(t, e2, r, "exec_command", map[string]any{"cmd": "sleep 60", "yield_time_ms": 10})
 	id := result["session_id"].(string)
-	time.Sleep(180 * time.Millisecond)
+	// Reading a running session refreshes its idle deadline. Observe completion
+	// directly so a slow cancellation cannot be mistaken for a live session.
+	e2.mu.Lock()
+	idleProcess := e2.sessions[id]
+	e2.mu.Unlock()
+	if idleProcess == nil {
+		t.Fatal("idle fixture session was not retained")
+	}
+	select {
+	case <-idleProcess.done:
+	case <-time.After(testutil.Timeout(t, 5*time.Second)):
+		t.Fatal("idle cancellation did not finish")
+	}
 	result = call(t, e2, r, "write_stdin", map[string]any{"session_id": id, "yield_time_ms": 30})
 	if result["reason"] != "idle_timeout" || result["session_id"] != nil {
 		t.Fatal(result)

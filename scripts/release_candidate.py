@@ -16,6 +16,8 @@ import tempfile
 from urllib.parse import quote
 import zipfile
 
+from release_transport import diagnostic, run as transport_run
+
 from release_contract import (
     checksum,
     checksum_name,
@@ -94,8 +96,9 @@ def api(endpoint, method="GET", data=None, missing=False):
     if data is not None:
         command += ["--input", "-"]
     try:
-        result = subprocess.run(
+        result = transport_run(
             command,
+            read_only=method == "GET",
             input=canonical(data) if data is not None else None,
             capture_output=True,
             text=True,
@@ -103,7 +106,7 @@ def api(endpoint, method="GET", data=None, missing=False):
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
-        raise Error("GitHub API unavailable") from error
+        raise Error(f"GitHub API {method} {endpoint}: {diagnostic(error)}") from error
     if result.returncode:
         try:
             body = decode(result.stdout)
@@ -111,7 +114,7 @@ def api(endpoint, method="GET", data=None, missing=False):
             body = {}
         if missing and isinstance(body, dict) and body.get("status") in (404, "404"):
             return None
-        raise Error("GitHub API request failed: " + endpoint)
+        raise Error(f"GitHub API {method} {endpoint}: {diagnostic(result)}")
     return decode(result.stdout)
 
 
@@ -119,7 +122,7 @@ def download(artifact, path, timeout=900):
     # gh follows GitHub's signed artifact redirect; downloaded contents are data.
     try:
         with Path(path).open("xb") as output:
-            result = subprocess.run(
+            result = transport_run(
                 [
                     "gh",
                     "api",
@@ -127,14 +130,15 @@ def download(artifact, path, timeout=900):
                     "github.com",
                     f"repos/{REPOSITORY}/actions/artifacts/{artifact['id']}/zip",
                 ],
+                read_only=True,
                 stdout=output,
                 stderr=subprocess.PIPE,
                 timeout=timeout,
                 check=False,
             )
     except (OSError, subprocess.TimeoutExpired) as error:
-        raise Error("artifact download unavailable") from error
-    require(result.returncode == 0, "artifact download failed")
+        raise Error(f"artifact {artifact['id']} download: {diagnostic(error)}") from error
+    require(result.returncode == 0, f"artifact {artifact['id']} download: {diagnostic(result)}")
     require(
         Path(path).stat().st_size == artifact["size_in_bytes"], "artifact archive size mismatch"
     )

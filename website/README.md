@@ -183,8 +183,6 @@ clipboard responses use fixtures; checks never run install commands or agents.
 `--capture` also writes review screenshots under `output/pr-images/stage-select/`.
 It expects the prior website sources at `output/website-before-stage-select/website/`.
 `--capture-only` captures matching before/after views without running the suite.
-Promote selected pairs to the branch directory according to
-[PR image conventions](../docs/pr-images/README.md) when preparing a PR.
 
 ## GitHub Pages
 

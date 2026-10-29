@@ -12,13 +12,17 @@ from urllib.parse import urlencode
 import uuid
 
 from release_contract import version_number
+from release_transport import diagnostic, run as github_run
 
 REPOSITORY = "jjyr/pot"
-WORKFLOWS = {kind: f"release-{kind}.yml" for kind in ("prepare", "publish")}
+WORKFLOWS = {kind: f"release-{kind}.yml" for kind in ("prepare", "publish", "homebrew")}
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 PREPARE_TITLE = re.compile(rf"release-prepare \[({UUID})\]")
 PUBLISH_TITLE = re.compile(
     rf"release-publish \[({UUID})\] prepare=([1-9][0-9]*) manifest=([1-9][0-9]*)"
+)
+HOMEBREW_TITLE = re.compile(
+    rf"release-homebrew \[({UUID}|[1-9][0-9]*)\] version=(from-publication|[0-9]+\.[0-9]+\.[0-9]+)"
 )
 CORRELATION_SECONDS = 120
 WAIT_SECONDS = 7200
@@ -61,10 +65,11 @@ class GitHub:
     def __init__(self, executable="gh"):
         self.executable = executable
 
-    def command(self, arguments, data=None, timeout=GH_SECONDS):
+    def command(self, arguments, data=None, timeout=GH_SECONDS, read_only=False):
         try:
-            result = subprocess.run(
+            result = github_run(
                 [self.executable, *arguments],
+                read_only=read_only,
                 input=json.dumps(data) if data is not None else None,
                 text=True,
                 capture_output=True,
@@ -76,7 +81,7 @@ class GitHub:
         except subprocess.TimeoutExpired as exc:
             raise ReleaseError("GitHub CLI request timed out") from exc
         if result.returncode:
-            raise ReleaseError(f"GitHub CLI request failed (exit {result.returncode})")
+            raise ReleaseError(f"GitHub CLI request failed: {diagnostic(result)}")
         return result.stdout
 
     def api(self, path, data=None, timeout=GH_SECONDS):
@@ -84,7 +89,7 @@ class GitHub:
         args = ["api", "--hostname", "github.com", endpoint]
         if data is not None:
             args += ["--method", "POST", "--input", "-"]
-        output = self.command(args, data, timeout)
+        output = self.command(args, data, timeout, read_only=data is None)
         if data is not None and not output.strip():
             return None
         try:
@@ -183,14 +188,26 @@ class Controller:
             for key in ("repository", "head_repository")
         ):
             raise ReleaseError("Run repository or head repository is not jjyr/pot")
-        if run.get("event") != "workflow_dispatch" or run.get("head_branch") != self.branch:
+        if (
+            run.get("event")
+            not in (
+                ("workflow_dispatch", "workflow_run")
+                if kind == "homebrew"
+                else ("workflow_dispatch",)
+            )
+            or run.get("head_branch") != self.branch
+        ):
             raise ReleaseError(
                 "Release workflow must have been dispatched on the repository default branch"
             )
         if not re.fullmatch(r"[a-f0-9]{40}", run.get("head_sha") or ""):
             raise ReleaseError("Invalid workflow source SHA")
         positive(run.get("run_attempt"), "run attempt")
-        title_pattern = PREPARE_TITLE if kind == "prepare" else PUBLISH_TITLE
+        title_pattern = {
+            "prepare": PREPARE_TITLE,
+            "publish": PUBLISH_TITLE,
+            "homebrew": HOMEBREW_TITLE,
+        }[kind]
         if not title_pattern.fullmatch(run.get("display_title") or ""):
             raise ReleaseError("Run has no valid release request marker")
         return run
@@ -294,6 +311,8 @@ class Controller:
         title = f"release-{kind} [{request_id}]"
         if kind == "publish":
             title += f" prepare={inputs['prepare-run-id']} manifest={inputs['manifest-id']}"
+        if kind == "homebrew":
+            title += f" version={inputs['version']}"
         inputs = {**inputs, "request-id": request_id}
         url = f"https://github.com/{REPOSITORY}/actions/workflows/{WORKFLOWS[kind]}"
         # Bound discovery to this dispatch window; UUID still identifies the run.
@@ -350,10 +369,46 @@ class Controller:
             "publish", {"prepare-run-id": str(prepare_id), "manifest-id": str(artifact["id"])}, wait
         )
 
+    def homebrew(self, version, revision, wait=False):
+        try:
+            version = version_number(version)
+        except ValueError as exc:
+            raise ReleaseError(str(exc)) from exc
+        if not re.fullmatch(r"[a-f0-9]{40}", revision):
+            raise ReleaseError("--ref must be a full 40-character release source SHA")
+        return self.dispatch("homebrew", {"version": version, "revision": revision}, wait)
+
     def print_run(self, run):
         self.out(
             f"run-id: {run['id']} attempt: {run['run_attempt']}\nstatus: {run.get('status')} conclusion: {run.get('conclusion') or 'pending'}\nurl: {run_url(run['id'])}"
         )
+
+    def homebrew_status(self, publication):
+        self.out(
+            "Homebrew: independent workflow; proposal and PR merge are not established by publication success."
+        )
+        self.out(
+            f"Homebrew status/recovery: https://github.com/{REPOSITORY}/actions/workflows/release-homebrew.yml"
+        )
+        try:
+            workflow = self.workflow("homebrew")
+            query = urlencode({"event": "workflow_run", "branch": self.branch})
+            rows = self.github.pages(
+                f"actions/workflows/{workflow['id']}/runs?{query}", "workflow_runs"
+            )
+            expected = f"release-homebrew [{publication['id']}] version=from-publication"
+            matches = [row for row in rows if row.get("display_title") == expected]
+            if not matches:
+                self.out("Homebrew follow-up: pending/not observed; no proposal result confirmed.")
+                return
+            followup = self.validate_run(
+                max(matches, key=lambda row: positive(row.get("id"), "run ID")), "homebrew"
+            )
+            self.out(
+                f"Homebrew follow-up: {followup['status']}/{followup.get('conclusion') or 'pending'} {run_url(followup['id'])}; PR merge remains unverified."
+            )
+        except ReleaseError as error:
+            self.out(f"Homebrew follow-up: unavailable ({error}); publication status is unchanged.")
 
     def jobs(self, run, kind):
         rows = self.github.pages(
@@ -373,18 +428,11 @@ class Controller:
                         f"  step: {step.get('name')} status={step.get('status')} conclusion={step.get('conclusion') or 'pending'}"
                     )
         if kind == "publish":
-            homebrew = [
-                job
-                for job in rows
-                if job.get("name") == "Propose Homebrew packages after publication"
-            ]
-            if not homebrew:
-                self.out("Homebrew: job not reported yet; package synchronization unconfirmed.")
-            else:
-                job = homebrew[-1]
-                self.out(
-                    f"Homebrew: {job.get('status')}/{job.get('conclusion') or 'pending'}; proposal workflow only; Homebrew PR review/merge pending verification. Workflow success does not confirm Homebrew availability."
-                )
+            self.homebrew_status(run)
+        if kind == "homebrew":
+            self.out(
+                "Homebrew: proposal workflow only; success does not confirm PR merge or installation availability."
+            )
 
     def status(self, run_id):
         run, kind = self.get_run(run_id)
@@ -416,7 +464,7 @@ class Controller:
                     )
                 if not matches:
                     self.out("candidate: missing/pending for this attempt")
-        else:
+        elif kind == "publish":
             match = PUBLISH_TITLE.fullmatch(run["display_title"])
             prepare_id, manifest_id = int(match[2]), int(match[3])
             self.out(f"publish identity: prepare-run-id={prepare_id} manifest-id={manifest_id}")
@@ -494,6 +542,10 @@ def main(argv=None):
     publish.add_argument(
         "--wait", action="store_true", help="Wait up to two hours; failure/timeout exits nonzero"
     )
+    homebrew = sub.add_parser("homebrew", help="Retry Homebrew proposal for a published version")
+    homebrew.add_argument("version")
+    homebrew.add_argument("--ref", required=True, help="Full source SHA of the published tag")
+    homebrew.add_argument("--wait", action="store_true")
     status = sub.add_parser(
         "status", help="Read actual Actions phases, manifest expiry, and Homebrew state"
     )
@@ -505,6 +557,8 @@ def main(argv=None):
             return controller.prepare(args.version, args.ref, args.wait)
         if args.action == "publish":
             return controller.publish(positive(args.prepare_run_id, "prepare run ID"), args.wait)
+        if args.action == "homebrew":
+            return controller.homebrew(args.version, args.ref, args.wait)
         return controller.status(positive(args.run_id, "run ID"))
     except (ReleaseError, KeyboardInterrupt) as exc:
         print(

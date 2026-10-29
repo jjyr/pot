@@ -72,12 +72,7 @@ jobs:
           scope: ${{ matrix.plan.mode }}
           tools: ${{ matrix.plan.mode == 'normal' && 'go python node ruff shfmt shellcheck swiftformat' || 'go python node' }}
           cache: ${{ inputs.ref == '' || inputs.use-cache }}
-      - if: matrix.plan.mode == 'normal' && runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap ripgrep socat
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: Normal tests, static checks, contracts and sandbox in parallel
+      - name: Normal tests, static checks and contracts in parallel
         if: matrix.plan.mode == 'normal'
         run: mise run ci:normal
       - name: Complete race coverage for this shard
@@ -85,3 +80,46 @@ jobs:
         run: mise exec -- python scripts/test_go.py race --shard ${{ matrix.plan.shard }} --count=1
       - if: matrix.plan.mode == 'normal' && runner.os == 'Linux'
         run: mise exec -- go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
+
+  sandbox:
+    name: Real sandbox (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch' || inputs.ref != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/test-setup
+        with:
+          scope: race
+          tools: go python node
+          cache: ${{ inputs.ref == '' || inputs.use-cache }}
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap ripgrep socat
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Qualify real sandbox isolation and cleanup
+        run: mise run test:sandbox
+
+  macos-lifecycle:
+    name: Process lifecycle (macOS)
+    if: github.event_name != 'workflow_dispatch' && inputs.ref == ''
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/test-setup
+        with:
+          scope: race
+          tools: go node
+      - name: Check cancellation, idle expiry and process cleanup
+        run: mise exec -- go test -race -count=1 -timeout=5m ./pkg/processscope ./pkg/executor -run '^(TestDarwinCancellation.*|TestTimeoutIdleCancellationAndNoDescendants|TestSupervisorReadinessPrecedesImmediateCancellation|TestSupervisorCancellationBeforeReadinessDoesNotLaunch|TestDetachedDescendantIsStoppedBeforeReceipt)$'

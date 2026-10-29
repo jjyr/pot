@@ -5,7 +5,7 @@ Publication promotes the exact prepared bytes to GitHub Releases and GHCR withou
 rebuilding or signing again. Each channel retains its build, smoke, checksum and
 applicable signing gates. Windows is currently unsupported.
 
-Release workflows propose a cask and Formula update PR after successful macOS publication;
+An independent Homebrew workflow proposes a cask and Formula update PR after successful publication;
 they never push the default branch or change repository/registry visibility.
 
 CLI builds use `pot-VERSION-PLATFORM.tar.gz`, containing `pot-PLATFORM/bin/pot`
@@ -71,14 +71,17 @@ cannot be mistaken for this request. An uncertain dispatch is not automatically
 repeated. Find the original run by its exact reported request marker and inspect
 it with `release:status`; do not redispatch merely because the local call timed out.
 
-`release:status` reports the current attempt's jobs and steps, candidate version
+`release:status` accepts preparation, publication and Homebrew run IDs. It reports
+the current attempt's jobs and steps, candidate version
 and source SHA, pinned artifact IDs and the earliest actual artifact expiry. For
 an already completed publication, expired or missing preparation artifacts are
 reported as unavailable evidence; they do not change the recorded Actions result.
-A successful Homebrew proposal job does not establish that its PR was merged.
+A successful Homebrew proposal run does not establish that its PR was merged.
+The publication status links the independent Homebrew workflow; inspect that run
+and its PR separately.
 
-Publication verifies public downloads with the trusted update key and proposes a
-Homebrew update PR. Review that PR and merge it after its checks pass. Public
+Publication verifies public downloads with the trusted update key. A separate
+`Release Homebrew` workflow then proposes a Homebrew update PR. Review that PR and merge it after its checks pass. Public
 artifacts and Homebrew are separate completion states: a Homebrew failure must
 remain visible even when downloads are already available. Report the release URL,
 actual verification scope and outstanding distribution work. Publishing does not
@@ -90,7 +93,8 @@ for its trusted-key requirement.
 
 ## Workflows and source selection
 
-`Tests` runs lightweight Linux checks for PRs and pushes to `main`. `CI` is a
+`Tests` runs lightweight Linux checks and targeted macOS process-lifecycle checks
+for PRs and pushes to `main`. `CI` is a
 read-only manual/reusable complete product and distribution validator. Neither a
 tag push nor its manual inputs authorize publication. The former `publish=true`
 entry point is removed.
@@ -107,7 +111,11 @@ source selections do not use shared build caches. See
 [Development](development.md#ci-and-manual-pr-checks) for coverage boundaries.
 
 `Release prepare` reuses that validation pipeline for a fixed merged source and
-explicit version. Credential checks happen before expensive builds; final sealing
+explicit version. Tool and credential checks happen before expensive builds;
+Homebrew policy is reported as allowed, disabled or unknown. Reading repository
+Actions policy can require administrative access, so unknown is not proof of
+permission and does not block package preparation. The final macOS sealing job
+explicitly installs its own Go/Python smoke dependencies. Final sealing
 and feed signing happen only after the unprivileged validation gates succeed.
 `Release publish` runs trusted workflow code, verifies the selected preparation
 and consumes its data artifacts. Downloaded artifacts never supply executable
@@ -155,8 +163,20 @@ that separate artifact ID, which is checked through GitHub's artifact metadata.
 - GitHub and GHCR publication is not atomic. Inspect the failed stage and existing
   public state, then rerun publication with its original pinned inputs. Successful
   channels are retained and verified on retry.
-- A Homebrew PR failure does not invalidate published bytes. Open the already
-  generated branch's PR or use the documented Homebrew recovery command below.
+- A Homebrew PR failure does not invalidate published bytes or change the
+  publication workflow result. Inspect the separate `Release Homebrew` run, open
+  the already generated branch's PR, or use the recovery command below.
+
+Release transport retries only transient read/download failures, with a bounded
+attempt count and delay. Authentication/permission errors and content or signature
+mismatches remain failures. A download retry replaces partial bytes and must pass
+the same archive size/digest checks. Errors include operation and sanitized HTTP
+or transport details without credentials or signed download URLs.
+
+Release creation submits one request and binds subsequent operations to the
+returned release ID. If the response is lost, bounded reads reconcile the remote
+state instead of blindly issuing another creation request. Ambiguous matching
+releases, a different source, or different asset bytes stop recovery.
 
 ## Public verification after publication
 
@@ -419,7 +439,11 @@ validated source SHA -> final macOS sealing/smoke -> immutable Release assets
                                                 brew install / upgrade
 ```
 
-The separate `homebrew` job runs only after macOS publication succeeds. It requests
+The independent `Release Homebrew` workflow runs after successful `Release publish`.
+It also supports manual recovery on the default branch for an already published
+version and its exact source SHA. Automatic invocation validates the originating
+publication before deriving the version/source; it never executes code from an
+untrusted event branch. It requests
 `contents: write` for a new branch and `pull-requests: write` for its PR, with no
 new PAT. It creates a branch from the current default branch and changes only
 `Casks/pot.rb` and `Formula/pot-cli.rb`. It never moves a release tag. The publication workflow uses trusted scripts and the pinned release source SHA;
@@ -432,18 +456,25 @@ release cannot downgrade the default-branch packages. Protected branch policies 
 apply when reviewing/merging the PR.
 
 A Homebrew synchronization error does not undo or relabel successful asset publication.
-The job logs the actual error and emits a warning and Actions summary with a
-recovery command. If repository settings prohibit Actions PR creation, the branch
+The independent workflow retains its failed result and recovery guidance in its
+Actions summary. If repository settings prohibit Actions PR creation, the branch
 may exist without a PR; a maintainer can open its PR manually. To retry after
 resolving permissions or reviewing the branch/PR, use an authorized `gh` session
-from the released source revision (substitute its exact version and SHA):
+using the trusted default-branch tools (substitute the published version and its
+exact source SHA):
 
 ```sh
+mise run release:homebrew -- 1.2.3 --ref VALIDATED_40_CHARACTER_SHA --wait
+# Or use an authenticated maintainer session directly:
 GITHUB_REPOSITORY=jjyr/pot python3 scripts/sync-homebrew 1.2.3 VALIDATED_40_CHARACTER_SHA
 ```
 
-This recovery command only reads published assets and proposes the Homebrew PR; it
-never publishes assets. It fails visibly if branch creation or PR permission is
+Explicit version/SHA recovery validates the annotated release tag and published
+assets without requiring unexpired preparation artifacts. The automatic path
+also verifies the publication's pinned candidate while its artifacts remain available.
+
+These recovery commands only read published assets and propose the Homebrew PR; they
+never publish assets. They fail visibly if branch creation or PR permission is
 missing. A maintainer must explicitly allow Actions to create PRs in repository
 Actions settings for automatic PR creation, or open the generated branch's PR
 manually. No workflow changes repository settings or substitutes personal
