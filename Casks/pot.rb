@@ -1,6 +1,6 @@
 cask "pot" do
-  version "0.0.5"
-  sha256 "072ae6742d4e41206ce983d254b9c519b6d0d5e645a7f4e1c2263376d90cb0fe"
+  version "0.0.8"
+  sha256 "e615926838c98e1d670402af8fdcdfd2d55efdd22aa343fa66260dec29053a83"
 
   url "https://github.com/jjyr/pot/releases/download/v#{version}/Pot-#{version}-arm64.zip"
   name "Pot"
