@@ -26,11 +26,17 @@ try{
    for(const id of ['saved/opaque','public-only','cached/picked','discovered-only'])assert(options.includes(id),id);
    assert(!options.includes('embedding-only'));assert(!options.includes('other-default'));
    await input.evaluate(node=>window.retainedModelInput=node);
+   const browse=page.getByRole('combobox',{name:translate(locale,'assistant.browseModels'),exact:true}).first();
+   assert.deepEqual(await browse.locator('option').evaluateAll(nodes=>nodes.map(node=>node.value).filter(Boolean)),options,'Full picker is not filtered by the saved model ID');
+   await browse.selectOption('public-only');assert.equal(await input.inputValue(),'public-only');
+   assert.equal(await browse.inputValue(),'','Picker returns to its browse prompt');
+   assert(await page.getByRole('combobox',{name:translate(locale,'assistant.browseModels'),exact:true}).nth(1).isDisabled(),'Task picker follows its disabled model input');
    await page.screenshot({path:`${output}/model-input-${width}-${locale}-after.png`});
    // Native text editing accepts both a catalog ID and an unlisted opaque ID.
    await input.fill('cached/picked');assert.equal(await input.inputValue(),'cached/picked');
    const provider=page.getByLabel(locale==='en'?'Provider':'提供商',{exact:true});await provider.selectOption('second');
    assert.equal(await input.inputValue(),'other-default');assert.deepEqual(await input.evaluate(node=>[...node.list.options].map(option=>option.value)),['other-default']);
+   assert.deepEqual(await browse.locator('option').evaluateAll(nodes=>nodes.map(node=>node.value)),['','other-default']);
    await provider.selectOption('synthetic-provider');await input.fill('my-route/new-model');
    assert(await input.evaluate(node=>node===window.retainedModelInput),'Switching providers preserves the editable input');
    await page.getByRole('button',{name:locale==='en'?'Save':'保存',exact:true}).click();

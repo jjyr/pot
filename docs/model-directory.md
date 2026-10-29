@@ -79,7 +79,9 @@ the replacement route. Authorization or permission failures invalidate the affec
 saved snapshot. A quota permission failure does not disable inference.
 
 Assistant creation and settings use one editable model input with native cached
-suggestions. The connection type's directory binding selects the public catalog,
+suggestions and a full-model picker that remains unfiltered by the current input.
+The default Task model uses the same controls.
+The connection type's directory binding selects the public catalog,
 falling back to the profile's explicit directory binding. Unbound Custom API
 connections can suggest IDs across the public directory. Cached connection facts
 take precedence for duplicate IDs; known non-conversation models are omitted,
@@ -157,7 +159,11 @@ input and compaction. Missing/zero metadata is unknown, not a zero-token budget.
 
 Context/output inputs remain empty when inherited and show effective placeholders;
 clearing restores inheritance. Presets use decimal K/M units and only edit the
-field. Reasoning effort is optional free text: saving trims it, blank clears it,
+field. Switching models in the connection editor fills context and output with
+the selected model's defaults. Late discovery updates these automatic values,
+but preserves any limits manually edited for that model. Opening an existing
+connection preserves its saved overrides.
+Reasoning effort is optional free text: saving trims it, blank clears it,
 and each protocol encodes it in its own field. Pot does not infer effort choices
 from models.dev or restrict the provider's vocabulary.
 

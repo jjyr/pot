@@ -44,6 +44,7 @@ export const messages = {
 
     "outbox.title": "Saved messages",
     "assistant.modelInput": "Select or enter a model ID",
+    "assistant.browseModels": "Browse all models",
     "assistant.taskProvider": "Default Task provider",
     "assistant.taskModel": "Default Task model",
     "assistant.taskFollow": "Follow assistant",
@@ -1303,6 +1304,7 @@ export const messages = {
 
     "outbox.title": "已保存的消息",
     "assistant.modelInput": "选择或输入模型 ID",
+    "assistant.browseModels": "浏览全部模型",
     "assistant.taskProvider": "默认 Task 提供商",
     "assistant.taskModel": "默认 Task 模型",
     "assistant.taskFollow": "跟随助手",

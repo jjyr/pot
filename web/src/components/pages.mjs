@@ -373,7 +373,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       const loadingStatus=n('p','hint'),rulesStatus=n('p','hint');
       let pendingHint;
       controls.get('profile_id').closest('.form-row').before(loadingStatus);instructions.append(rulesStatus);
-      const controller=new AbortController(),dispose=form.lifecycle.dispose;form.lifecycle.dispose=()=>{controller.abort();dispose?.();};
+      const controller=new AbortController(),dispose=form.lifecycle.dispose;form.lifecycle.dispose=()=>{controller.abort();modelInput.dispose();taskModelInput.dispose();dispose?.();};
       const current=()=>editor?.session===session&&!disposed&&!controller.signal.aborted;
       const touched=new Set();
       for(const key of [...configurationFields,'text'])controls.get(key).addEventListener('input',()=>{const group=key==='text'?['text']:key.startsWith('task_')?['task_profile_id','task_model']:configurationFields.filter(name=>!name.startsWith('task_'));for(const name of group)touched.add(name);});
@@ -580,7 +580,14 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     form.lifecycle.cancel=()=>back({skipPicker:true});form.lifecycle.afterSave=async saved=>{await back({skipPicker:true});await editor?.lifecycle.providersChanged?.(saved);if(onboarding){await leave();await localAssistantEditor();}};
     const set=(name,value)=>{controls.get(name).value=value??'';session.set(name,value);},showModel=()=>{controls.get('model').closest('.form-row').hidden=!!controls.get('model_selection').value;};
     function limitsFor(modelID){const entry=discovered.find(value=>value.id===modelID),base=modelDefaults(snapshot,providerID,modelID);return entry?{context:entry.context_window||base.context,input:entry.max_input||base.input,output:Math.min(entry.max_output||base.output,(entry.context_window||base.context)-1)}:base;}
-    const inherit=()=>{const limits=limitsFor(session.values.model);controls.get('context_window').placeholder=String(limits.context);controls.get('max_output_tokens').placeholder=String(limits.output);};
+    let limitsModel=initial.model;
+    const automaticLimits=new Set(),limitFields=[['context_window','context'],['max_output_tokens','output']];
+    for(const [name]of limitFields)controls.get(name).addEventListener('input',()=>automaticLimits.delete(name));
+    const inherit=()=>{
+      if(session.values.model!==limitsModel){limitsModel=session.values.model;for(const [name]of limitFields)automaticLimits.add(name);}
+      const limits=limitsFor(session.values.model);
+      for(const [name,key]of limitFields){controls.get(name).placeholder=String(limits[key]);if(automaticLimits.has(name))set(name,limits[key]);}
+    };
     const models=(entries,selected='')=>{entries=providerConversationModels(entries,selected);const input=controls.get('model_selection');input.replaceChildren();for(const [value,label]of [['',t('enterModel')],...entries.map(model=>[typeof model==='string'?model:model.id,typeof model==='string'?model:model.name||model.id])]){const option=n('option','',label);option.value=value;input.append(option);}set('model_selection',entries.some(model=>(typeof model==='string'?model:model.id)===selected)?selected:'');session.acknowledge({model_selection:session.values.model_selection});showModel();};
     models([...new Map([...(selectedEntry?.models||[]),...configuredModels,...(profile?.model?[profile.model]:[]),...discovered].map(model=>[typeof model==='string'?model:model.id,model])).values()],initial.model);
     const keyURL={openai:'https://platform.openai.com/api-keys',anthropic:'https://platform.claude.com/settings/keys',google:'https://aistudio.google.com/api-keys',deepseek:'https://platform.deepseek.com/api_keys',xai:'https://console.x.ai/',opencode:'https://opencode.ai/auth','opencode-go':'https://opencode.ai/auth'}[providerID];
@@ -1001,6 +1008,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     form.lifecycle.settled=()=>{if(uncertain){for(const control of form.controls.values())control.disabled=true;form.root.querySelector('.assistant-runtime-summary button').disabled=true;form.root.querySelector('.editor-actions .primary').textContent=translate(locale(),'retry');}};
     form.lifecycle.locale=()=>{modelInput.refreshLocale();refreshSummary();form.lifecycle.setTitle?.(t('assistantCreate'));for(const [name,key]of [['name','agentLinks.assistantName'],['profile_id','assistantStart.provider'],['model','agentLinks.assistantModel'],['text','assistantStart.instructions']]){const input=form.controls.get(name);input.setAttribute('aria-label',translate(locale(),key));input.closest('.form-row').querySelector('.form-label').textContent=translate(locale(),key);}form.root.querySelector('.assistant-runtime-summary>span:not(.connection-brand)').textContent=translate(locale(),'assistantStart.localTitle');form.root.querySelector('.editor-actions .primary').textContent=form.session.pending?translate(locale(),'assistant.creating'):uncertain?translate(locale(),'retry'):t('assistantCreate');form.root.querySelector('.editor-actions button:not(.primary)').textContent=translate(locale(),'integrations.cancel');};
     createdChatLifetime(form,captured);
+    const disposeModelForm=form.lifecycle.dispose;form.lifecycle.dispose=()=>{modelInput.dispose();disposeModelForm?.();};
     form.lifecycle.afterSave=async saved=>{await leave();await openChat({space:captured.space,owner:saved.created_assistant.id,assistant:saved.created_assistant,created:true});};
   }
   async function linkedAssistantEditor(connectionID,space,assistantID='',runtimeName='',kind='pot',valid=()=>true) {
