@@ -16,7 +16,7 @@ export async function preparedResourceMatrix(page){
    const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
    const resource=(kind)=>{const mime={image:'image/png',pdf:'application/pdf',html:'text/html',markdown:'text/markdown',binding:'text/plain'}[kind],path=kind+'.'+({image:'png',pdf:'pdf',html:'html',markdown:'md',binding:'txt'}[kind]);return {id:'matrix-'+kind,name:path,entry:path,mime_type:mime,size:1,files:[{path,mime_type:mime,size:1,digest:'matrix'}]};};
    const options={downloadResource:async()=>{},messageFiles:()=>bindingGate,acquireResource:value=>{
-    acquired++;let done=false;return {release(){if(!done){done=true;released++;}},read:async()=>new Blob([value.mime_type==='text/markdown'?'# Nested ready\n\n```mermaid\ngraph TD\n A --> B\n```':'Bound resource'],{type:value.mime_type}),url:()=>{
+    acquired++;let done=false;return {release(){if(!done){done=true;released++;}},read:async()=>value.mime_type==='image/png'?new Blob([Uint8Array.from(atob(png.split(',')[1]),char=>char.charCodeAt(0))],{type:'image/png'}):new Blob([value.mime_type==='text/markdown'?'# Nested ready\n\n```mermaid\ngraph TD\n A --> B\n```':'Bound resource'],{type:value.mime_type}),url:()=>{
      if(value.mime_type==='image/png')return png;
      const url=URL.createObjectURL(new Blob(['%PDF-1.4\n1 0 obj <</Type /Catalog /Pages 2 0 R>> endobj\n2 0 obj <</Type /Pages /Kids [] /Count 0>> endobj\ntrailer <</Root 1 0 R>>\n%%EOF'],{type:'application/pdf'}));urls.push(url);return url;
     },renderURL:token=>{

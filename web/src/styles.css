@@ -1114,6 +1114,8 @@ button.communication-task-endpoint:focus-visible{outline:2px solid var(--primary
 .image-viewer-controls button { width: 36px; border: 1px solid var(--divider); background: var(--surface); color: var(--text); font-size: 20px !important; }
 .image-viewer-controls output { min-width: 5ch; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; }
 .image-viewer-viewport { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; touch-action: pan-x pan-y; cursor: grab; background: var(--navigation); border-top: 1px solid var(--divider); }
+.image-viewer:has(.image-viewer-viewport[aria-busy="true"])::after { content: ''; position: absolute; top: 50%; left: 50%; width: 18px; height: 18px; margin: -9px; border: 2px solid var(--divider); border-top-color: var(--muted); border-radius: 50%; pointer-events: none; animation: conversation-loading-spin 900ms linear infinite; }
+@media (prefers-reduced-motion: reduce) { .image-viewer:has(.image-viewer-viewport[aria-busy="true"])::after { animation: none; } }
 .image-viewer-viewport.is-dragging { cursor: grabbing; user-select: none; }
 .image-viewer-plane { position: relative; }
 .image-viewer-plane img { position: absolute; top: 0; max-width: none; max-height: none; user-select: none; pointer-events: none; }

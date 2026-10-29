@@ -1,3 +1,4 @@
+import {readResourceChunks} from './resource-chunks.mjs';
 import {createResourceCopies,digestBlob,messageRevision,resourceScope} from './resource-bytes.mjs';
 // This adapter only saves successful authorized display reads. It does not
 // consume draft/outbox originals or provide request/download authorization.
@@ -53,14 +54,10 @@ export function createResourceReader(client,request,{base='',desktop=false,copie
       const saved=expected.retired?null:await copies.read(source,'attachment',revision);if(!expected.retired)check(source);
       if(saved){if(!(saved.value instanceof Blob)||saved.value.size!==attachment.size||await digestBlob(saved.value)!==saved.digest)throw Error('Invalid saved attachment');check(source);return saved.value;}
       if(!Number.isSafeInteger(attachment.size)||attachment.size<=0||attachment.size>8*1024*1024)throw Error('Attachment preview limit');
-      const parts=[];let offset=0;
-      while(offset<attachment.size){
-        const chunk=await authorized(`/api/v1/attachments/${encodeURIComponent(attachment.id)}?offset=${offset}`,options,source,expected.retired);
-        if(chunk.offset!==offset||chunk.size!==attachment.size||chunk.revision!==attachment.id||typeof chunk.data!=='string'||chunk.data.length>4*Math.ceil(192*1024/3))throw Error('Attachment read changed');
-        const bytes=Uint8Array.from(atob(chunk.data),c=>c.charCodeAt(0));
-        if(!bytes.length||bytes.length>192*1024||offset+bytes.length>attachment.size)throw Error('Invalid attachment chunk');parts.push(bytes);offset+=bytes.length;
-      }
-      const blob=new Blob(parts,{type:attachment.mime_type});if(expected.retired){await copies.authorize(source,expected.generation);retired.delete(resourceScope(source));}check(source);await copies.commit(source,'attachment',revision,blob,expected.generation);check(source);return blob;
+      const blob=await readResourceChunks({size:attachment.size,revision:attachment.id,type:attachment.mime_type,signal:options.signal,
+        check:()=>{if(expected.retired?!sameSource(source):!current(source))throw new DOMException('Resource source changed','NotAllowedError');},
+        read:(offset,signal)=>authorized(`/api/v1/attachments/${encodeURIComponent(attachment.id)}?offset=${offset}`,{...options,signal},source,expected.retired)});
+      if(expected.retired){await copies.authorize(source,expected.generation);retired.delete(resourceScope(source));}check(source);await copies.commit(source,'attachment',revision,blob,expected.generation);check(source);return blob;
     },
   };
 }

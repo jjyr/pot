@@ -2,7 +2,14 @@ import {createIndexedStore,idbRequest,indexedRows} from './indexed-store.mjs';
 import {bindCacheLifecycle} from './cache-lifecycle.mjs';
 export const resourceScope=identity=>JSON.stringify([identity.host,identity.control,identity.space,identity.owner]);
 export const copyKey=(identity,kind,revision)=>JSON.stringify([resourceScope(identity),kind,revision]);
-export async function digestBlob(blob){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer())),v=>v.toString(16).padStart(2,'0')).join('');}
+// Blob bytes are immutable. Reuse verification for the same live Blob when its
+// verified read is immediately committed; the weak key never retains a payload.
+const digests=new WeakMap();
+export function digestBlob(blob){
+  let pending=digests.get(blob);
+  if(!pending){pending=blob.arrayBuffer().then(bytes=>crypto.subtle.digest('SHA-256',bytes)).then(hash=>Array.from(new Uint8Array(hash),v=>v.toString(16).padStart(2,'0')).join(''));digests.set(blob,pending);pending.catch(()=>digests.delete(blob));}
+  return pending;
+}
 export async function messageRevision(text){return digestBlob(new Blob([JSON.stringify(text).replace(/[<>&\u2028\u2029]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'))]));}
 const storageError=error=>Object.assign(error,{storage:true,uiKey:'storage.failed'});
 // Immutable display copies only. A readonly hit has no write dependency. Every

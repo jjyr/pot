@@ -1,3 +1,4 @@
+import {createRenderSnapshots,renderSnapshot} from './render-snapshot.mjs';
 import {translate} from '../locales/messages.mjs';
 import {preparedResourcesCurrent,commitPreparedResources,finishPreparedNative,cancelPreparedNative,currentPreparedRender,withPreparedRender,createPreparedRender,createPreparationBudget,createPreparationSurface,settlePreparedTree,preparedLayoutRect,framePreparedElement,retirePreparedDeadlines,consumePreparationSurrogates,rememberPreparedLayout,freezePreparedLayout,releasePreparedLayout} from './prepared-render.mjs';
 import {moveConversationNode} from './conversation-dom.mjs';
@@ -11,7 +12,8 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
   let margin = 0, reportRect, reportOffset, owner, controller=parentController, frame=0,inputStarted=()=>{};
   const spacers = [],regionRevisions=new Map(),geometry=new Map(),rowRevisions=new Map(),revealedRows=new Set();
   let loadingIndicator=null;const layoutHosts=new Set([host]);
-  let requested=rows,requestedRevision='[]',committedRevision='[]',requestedOptions={},flight=null,layoutEpoch=0,layoutFingerprint='',committing=null,measuredOptions={},layoutReframe=false,queueUpdating=false,preparationError=false;
+  const snapshots=createRenderSnapshots();let renderContextSnapshot,presentationSerial=0,presentationKeys=new Map();
+  let requested=rows,requestedRevision=0,committedRevision=0,requestedOptions={},flight=null,layoutEpoch=0,layoutFingerprint='',committing=null,measuredOptions={},layoutReframe=false,queueUpdating=false,preparationError=false;
   const inheritedPreparation=currentPreparedRender();
   const nativePresentations=new Set();
   function prepared(){return !closed&&!suspended&&!preparationError&&!nativePresentations.size&&!layoutReframe&&!flight&&requestedRevision===committedRevision&&(nested||[...mounted.values()].every(record=>record.preparedSignature===signature(sources.get(record))))&&(requestedOptions.regions||[]).every(region=>regionRevisions.get(region.key)===layoutEpoch+':'+region.revision);}
@@ -303,7 +305,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     const path=controller?.visibilityPath,destination=controller?.destination;
     const reveal=!!controller?.revealing&&(path?.has(message.id)||destination?.expand&&destination.id===message.id||message.members?.some(member=>path?.has(member.id)||destination?.expand&&destination.id===member.id));
     if(reveal)revealedRows.add(message.viewKey);
-    return layoutEpoch+':'+(rowRevisions.get(message.viewKey)||0)+':'+Number(revealedRows.has(message.viewKey))+':'+JSON.stringify([message,requestedOptions.presentationKey?.(message)]);
+    return layoutEpoch+':'+(rowRevisions.get(message.viewKey)||0)+':'+Number(revealedRows.has(message.viewKey))+':'+snapshots.token(message)+':'+(presentationKeys.get(message.viewKey)?.revision||0);
   }
   function measuredStart(current,index){
     let offset=0;for(let i=0;i<index;i++){const size=current.sizes.get(current.rows[i].viewKey);if(size===undefined)return;offset+=size;}
@@ -319,7 +321,15 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       if(inherited.context.phase==='commit'){measuredOptions.beforeCommit?.();updateMeasured(rows,measuredOptions);measuredOptions.afterCommit?.();return;}
       options={...options,renderContext:inherited.context.renderContext};
     }
-    if(next!==undefined){const revision=JSON.stringify(next);if(revision!==requestedRevision){requested=next;requestedRevision=revision;}requestedOptions=options||requestedOptions;suspended=false;}
+    if(next!==undefined){
+      requestedOptions=options||requestedOptions;
+      const captured=snapshots.capture(next,requestedOptions.renderContext);
+      requested=captured.rows;requestedRevision=captured.revision;renderContextSnapshot=captured.context;
+      const keys=new Map();for(const message of requested){const prior=presentationKeys.get(message.viewKey),value=renderSnapshot(requestedOptions.presentationKey?.(message),prior?.value);keys.set(message.viewKey,prior&&Object.is(value,prior.value)?prior:{value,revision:++presentationSerial});}presentationKeys=keys;
+      for(const key of rowRevisions.keys())if(!keys.has(key))rowRevisions.delete(key);
+      for(const key of revealedRows)if(!keys.has(key))revealedRows.delete(key);
+      suspended=false;
+    }
     if(queueUpdating)return;queueUpdating=true;
     try{
     if(!host.isConnected||!host.clientWidth||!scroller.clientWidth||!scroller.clientHeight){discardPreparation();return;}
@@ -332,8 +342,8 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       const current=flight,keys=new Set(requested.map(message=>message.viewKey));
       for(const [key,job]of current.jobs)if(!keys.has(key)){job.wait.cancel();disposePreparation(job);job.surface.close();current.jobs.delete(key);}
       for(const key of current.sizes.keys())if(!keys.has(key)){current.sizes.delete(key);current.measurements.delete(key);}
-      const renderContext=requestedOptions.renderContext&&Object.fromEntries(Object.entries(requestedOptions.renderContext).map(([key,value])=>[key,typeof value==='function'?value:structuredClone(value)]));
-      current.rows=structuredClone(requested);current.revision=requestedRevision;current.presentationRevision=presentationRevision;current.options={...requestedOptions,regions:current.options.regions,renderContext};
+      const renderContext=renderContextSnapshot;
+      current.rows=requested;current.revision=requestedRevision;current.presentationRevision=presentationRevision;current.options={...requestedOptions,regions:current.options.regions,renderContext};
     }
     // Measured overscan may prepare one more row than the measured live range
     // ultimately needs. That candidate is retired after commit. A later layout
@@ -352,8 +362,8 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     if(!flight){
       for(const region of requestedOptions.regions||[])layoutHosts.add(region.host);
       for(const element of layoutHosts)freezePreparedLayout(element);
-      const renderContext=requestedOptions.renderContext&&Object.fromEntries(Object.entries(requestedOptions.renderContext).map(([key,value])=>[key,typeof value==='function'?value:structuredClone(value)]));
-      flight={rows:structuredClone(requested),revision:requestedRevision,presentationRevision,options:{...requestedOptions,renderContext},jobs:new Map(),sizes:new Map(),measurements:new Map(),regions:new Map(),epoch:layoutEpoch,reframe:layoutReframe};
+      const renderContext=renderContextSnapshot;
+      flight={rows:requested,revision:requestedRevision,presentationRevision,options:{...requestedOptions,renderContext},jobs:new Map(),sizes:new Map(),measurements:new Map(),regions:new Map(),epoch:layoutEpoch,reframe:layoutReframe};
     }
     const current=flight;
     for(const message of current.rows){
@@ -482,7 +492,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     const environment=currentPreparedRender();if(!environment)return;measuredOptions.beforeCommit?.();
     for(const message of rows){const record=mounted.get(message.viewKey);if(record){withPreparedRender(environment.context,message.id,()=>record.commit?.());record.preparing=false;}}
     measuredOptions.afterCommit?.();
-  },reset(){committedRevision=null;releaseLayout();clearLoading();discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();deadlines.clear();geometry.clear();rowRevisions.clear();revealedRows.clear();requested=[];requestedRevision='[]';requestedOptions={};regionRevisions.clear();controller?.reset();},get prepared(){return prepared();},suspend(){
+  },reset(){committedRevision=null;releaseLayout();clearLoading();discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();deadlines.clear();geometry.clear();rowRevisions.clear();revealedRows.clear();snapshots.clear();renderContextSnapshot=undefined;presentationKeys.clear();requested=[];requestedRevision=-1;requestedOptions={};regionRevisions.clear();controller?.reset();},get prepared(){return prepared();},suspend(){
     suspended=true;releaseLayout();clearLoading();discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();
     cancelAnimationFrame(frame);frame=0;
     owner?.suspend();
@@ -491,7 +501,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
   },close(){
     closed=true;releaseLayout();clearLoading();discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();scroller.removeEventListener('click',interaction,true);scroller.removeEventListener('pot:prepare-resize',interaction);host.ownerDocument.fonts?.removeEventListener('loading',fontChanged);host.ownerDocument.fonts?.removeEventListener('loadingdone',fontChanged);cancelAnimationFrame(frame);geometryObserver?.disconnect();owner?.close();virtualizer.cancelScroll();unmount();
     for(const record of mounted.values())dispose(record);
-    mounted.clear();indexesByKey.clear();indexesByID.clear();
+    mounted.clear();layoutHosts.clear();indexesByKey.clear();indexesByID.clear();snapshots.clear();renderContextSnapshot=undefined;presentationKeys.clear();geometry.clear();rowRevisions.clear();revealedRows.clear();rows=[];requested=[];requestedOptions={};measuredOptions={};
     for(const spacer of spacers)spacer.remove();
   }}));
 }

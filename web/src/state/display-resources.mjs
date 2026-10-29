@@ -1,3 +1,4 @@
+import {readResourceChunks} from './resource-chunks.mjs';
 import {copyKey,digestBlob,resourceScope} from './resource-bytes.mjs';
 // A lease captures immutable manifest + complete source identity. Shared URLs
 // belong to the last connected reader; persistence never owns browser URLs.
@@ -20,15 +21,8 @@ export function createDisplayResources(request,getScope,contentURL,persistence={
           const saved=await copies?.read(source,'bytes',fileRevision);check();
           if(saved){if(saved.value instanceof Blob&&saved.value.size===file.size&&await digestBlob(saved.value)===file.digest){check();return saved.value;}throw Error('Invalid saved resource bytes');}
           const expected=await copies?.token(source);check();
-          const parts=[];let offset=0;
-          do{
-            const chunk=await request(`/api/v1/resources/${encodeURIComponent(resource.id)}/chunk?${new URLSearchParams({path,offset:String(offset)})}`,{...scope,expectedControl:source.control,signal:entry.abort.signal});
-            check();if(chunk.size!==file.size||chunk.offset!==offset||chunk.revision!==file.digest||typeof chunk.data!=='string'||chunk.data.length>4*Math.ceil(192*1024/3))throw Error('Invalid resource chunk');
-            const data=Uint8Array.from(atob(chunk.data),value=>value.charCodeAt(0));
-            if(data.length>192*1024||offset+data.length>file.size||(!data.length&&offset<file.size))throw Error('Invalid resource bytes');
-            parts.push(data);offset+=data.length;
-          }while(offset<file.size);
-          const blob=new Blob(parts,{type:file.mime_type});check();
+          const blob=await readResourceChunks({size:file.size,revision:file.digest,type:file.mime_type,signal:entry.abort.signal,check,
+            read:(offset,signal)=>request(`/api/v1/resources/${encodeURIComponent(resource.id)}/chunk?${new URLSearchParams({path,offset:String(offset)})}`,{...scope,expectedControl:source.control,signal})});
           if(copies){if(await digestBlob(blob)!==file.digest)throw Error('Resource digest mismatch');check();await copies.commit(source,'bytes',fileRevision,blob,expected.generation);check();}
           return blob;
         })();

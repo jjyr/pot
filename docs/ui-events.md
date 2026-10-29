@@ -487,6 +487,14 @@ component recursively reaches readiness or receives its five-second component
 frame before its parent is measured. Preparation uses batches of at most 96
 rows and admits at most 32 concurrent resource loads. It covers the entire
 loaded collection, while preserving the existing backend page boundaries.
+Render input snapshots detach caller-owned data before asynchronous preparation.
+Unchanged message subtrees and shared context records reuse their owned snapshot;
+in-place caller updates still produce a new revision. Geometry signatures contain
+compact per-row revision tokens, never serialized message bodies. Only the active
+window retains comparison snapshots; removed identities cannot reuse an obsolete
+revision when they return. Closing the window releases its snapshot and geometry
+references. IndexedDB remains the repository for historical message bodies.
+
 Only a complete measured index is installed into the engine. The prepared real
 nodes then move into the live tree in the same geometry transaction. Row and
 region containers retain natural flow; only bounded component frames isolate

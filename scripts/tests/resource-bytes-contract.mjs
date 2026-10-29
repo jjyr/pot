@@ -9,7 +9,11 @@ export async function resourceBytesContract(report=()=>{}){
  let first=createResourceCopies({name}),second=createResourceCopies({name}),events=[];first.subscribe(event=>events.push(event));
  const initial=(await first.token(source)).generation;
  try{
+  let reads=0;const originalArrayBuffer=blob.arrayBuffer.bind(blob);blob.arrayBuffer=()=>{reads++;return originalArrayBuffer();};
+  await digestBlob(blob);
   await first.commit(source,'bytes','rev',blob,initial);check((await first.read(source,'bytes','rev')).value.size===5&&events.length===1,'new bytes announced after real transactioncomplete');
+  check(reads===1,'preverified immutable Blob commits without another full byte read or hash');
+  const reread=(await first.read(source,'bytes','rev')).value;check(reread!==blob&&await digestBlob(reread)===await digestBlob(blob),'reopened IndexedDB Blob remains independently verified');
   const put=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(...args){const op=put.apply(this,args);if(this.name==='resourceCopies')op.addEventListener('success',()=>this.transaction.abort());return op;};
   let failed=false;try{await first.commit(source,'bytes','rev',new Blob(['uncommitted']),initial);}catch{failed=true;}finally{IDBObjectStore.prototype.put=put;}
   check(failed&&(await first.read(source,'bytes','rev')).value.size===5&&events.length===1,'request success followed by abort preserves old bytes and suppresses readiness notification');

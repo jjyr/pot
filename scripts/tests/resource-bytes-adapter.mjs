@@ -20,3 +20,4 @@ await reader.retire(reader.identity(client.scope()));copies.compact();await read
 // A request started before revoke cannot publish after a later explicit live recovery.
 const raceCopies=memory(),race=createResourceReader(client,request,{copies:raceCopies});gate=deferred();entered=deferred();const late=race.bindings('message',{sourceText:'source'});await entered.promise;await race.retire(race.identity(client.scope()));gate.resolve();gate=null;await assert.rejects(late);
 console.log('Resource adapter: cold cache without network await, immutable identity, shared lease, source revision isolation, retirement, live recovery and late response fencing passed');
+await import('./resource-chunks.mjs');
