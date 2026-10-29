@@ -160,6 +160,19 @@ class WorkflowBoundary(unittest.TestCase):
         self.assertIn("retention-days: 7", text)
         self.assertIn("./.github/workflows/tests.yml", text)
 
+    def test_seal_job_installs_go_and_python_before_smoke(self):
+        text = (ROOT / ".github/workflows/release-prepare.yml").read_text()
+        seal = text.split("  seal:", 1)[1].split("  ready:", 1)[0]
+        self.assertIn("          install_args: go python", seal)
+        install = seal.index("          install_args: go python")
+        macos_smoke = seal.index("scripts/tests/macos-package-smoke.py")
+        server_smoke = seal.index("scripts/tests/server-package-smoke.py")
+        upload = seal.index("uses: actions/upload-artifact@")
+        self.assertLess(install, macos_smoke)
+        self.assertLess(install, server_smoke)
+        self.assertLess(macos_smoke, upload)
+        self.assertLess(server_smoke, upload)
+
     def test_prepare_finalizes_all_channels_before_ready(self):
         text = (ROOT / ".github/workflows/release-prepare.yml").read_text()
         self.assertLess(text.index("scripts/release-preflight"), text.index("  build:"))

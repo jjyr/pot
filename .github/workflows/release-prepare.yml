@@ -134,7 +134,7 @@ jobs:
         with:
           version: 2026.10.10
           cache: false
-          install_args: python
+          install_args: go python
       - name: Seal validated archives in selected mode
         env:
           RELEASE_VERSION: ${{ needs.source.outputs.version }}
