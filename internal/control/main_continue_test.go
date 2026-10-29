@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,7 +29,32 @@ func TestContinueMainReconcilesCrashAndResumesOriginalProgress(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		body, _ := io.ReadAll(r.Body)
-		if !strings.Contains(string(body), "original known result") || strings.Count(string(body), "original goal") != 1 {
+		var request struct {
+			Messages []struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.Unmarshal(body, &request); err != nil {
+			t.Error("continuation request not JSON", err)
+			return
+		}
+		var userGoals int
+		var toolHasResult bool
+		for _, message := range request.Messages {
+			switch message.Role {
+			case "user":
+				var content string
+				if json.Unmarshal(message.Content, &content) == nil && content == "original goal" {
+					userGoals++
+				}
+			case "tool":
+				if strings.Contains(string(message.Content), "original known result") {
+					toolHasResult = true
+				}
+			}
+		}
+		if userGoals != 1 || !toolHasResult {
 			t.Error("continuation lost saved progress", string(body))
 		}
 		w.Header().Set("Content-Type", "text/event-stream")

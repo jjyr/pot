@@ -87,7 +87,7 @@ func TestTaskArchiveBatchAndContinuedWorkspace(t *testing.T) {
 			return
 		}
 		last := body.Messages[len(body.Messages)-1]
-		if strings.Contains(body.Messages[0].Content, "Process background updates") {
+		if requestIsNotification(raw) {
 			if last.Role == "tool" {
 				batchReply(w, "")
 				return

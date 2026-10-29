@@ -25,7 +25,7 @@ import (
 type backgroundLiveServices struct{ recoveryLiveServices }
 
 func (s backgroundLiveServices) Model(ctx context.Context, request core.ModelRequest) (io.ReadCloser, error) {
-	if !strings.Contains(string(request.Body), "Process background updates") || !strings.Contains(string(request.Body), "otherwise end the turn with empty text") {
+	if !requestIsNotification(request.Body) || !strings.Contains(string(request.Body), "For routine or unchanged updates, return empty text with no visible characters") {
 		return nil, fmt.Errorf("background qualification did not receive the production quiet-update policy")
 	}
 	var body struct {

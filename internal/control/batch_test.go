@@ -74,7 +74,7 @@ func TestQueuedUserAndTaskOutcomesUseSeparateAggregatedModelTurns(t *testing.T) 
 	s, _ := batchService(t, func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		body := string(raw)
-		if strings.Contains(body, "Process background updates") {
+		if requestIsNotification(raw) {
 			summaries.Add(1)
 			if !strings.Contains(body, "Task A") || !strings.Contains(body, "Task B") || !strings.Contains(body, "HTTP 400") {
 				t.Error("summary omitted a success or failure", body)

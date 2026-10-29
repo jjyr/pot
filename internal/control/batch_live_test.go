@@ -443,7 +443,7 @@ func batchRequestCategory(body []byte) (string, string) {
 			last = m.Content
 		}
 	}
-	if strings.Contains(fields.Messages[0].Content, "Process background updates") {
+	if requestIsNotification(body) {
 		if strings.Contains(last, `"kind":"message"`) {
 			if strings.Contains(last, "PEER_ALPHA") {
 				return "peer-alpha", last

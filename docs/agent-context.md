@@ -7,13 +7,31 @@ chat, using available tools to verify current information. Tool use, multiple
 lookups, reasoning steps and diagrams alone do not require a Task. Main delegates
 explicit background requests, prolonged execution, extensive investigation,
 substantial file/report creation and code changes to Tasks.
+Route background work by goal, sending additions or fixes to matching Tasks and
+creating new Tasks for goals that do not overlap; see
+[Task routing](task-coordination.md#coherent-objectives-and-routing).
 
-Main arranges all requested background work, then ends its turn without polling,
-waiting or a routine confirmation. Task cards provide acceptance feedback. Creation
-errors go back to the model for diagnosis and repair; only an unresolved blocker
-or required user decision warrants an interruption. Successful schedule creation
-also needs no chat recap. Runtime completion events use the shared Agent inbox;
-see [Agent messages](assistant-messages.md).
+Main handles user requests and background results with the same prompt. Summary
+selects notification input classification and Runtime capabilities, not a separate
+system prompt. Both use `MainPrompt`, the same configured system-prompt and model
+template override precedence, and common system suffixes. Worker execution retains
+its separate role instructions. Notification content remains reference data and
+grants no authority.
+
+Main arranges background work or continues an existing Task without polling,
+waiting or a routine confirmation. A completed run whose result fails the original
+acceptance requirements continues through `send_message`; substantial repairs
+stay with the Task. An eligible failed run uses `retry_task` within its original
+authorization. `retry_allowed` controls that recovery tool, not ordinary completed
+Task continuation. When processing a failed background result, do not substitute
+`send_message` or `create_task` for unavailable `retry_task`; this does not limit
+explicit user-requested continuation in ordinary chat. Neither path bypasses
+refusals, cancellation, interruption or uncertain effects. Accepted continuation queues guidance and unarchives the Task;
+do not archive it using the previous run. Archive only fully delivered work, and
+handle artifact delivery errors without rerunning completed execution. Accepted
+creation, continuation or retry stays silent unless another outcome needs reporting.
+Runtime completion events use the shared Agent inbox; see
+[Agent messages](assistant-messages.md).
 
 Main replies describe background work with task titles and concrete progress in
 the user's language. Task IDs remain in tool arguments and artifact download URLs;
@@ -21,6 +39,14 @@ prose includes them only when requested or needed for troubleshooting. When a
 reply is needed, it reflects the reported state, including queues and approval
 waits, without claiming that execution has started. Empty successful replies
 produce neither a completed chat bubble nor a reply notification.
+
+Main, Worker and Summary executions through `pkg/agent` share goal-completion
+guidance: repair failed acceptance or deviations within the existing goal and
+authorization, handle routine decisions, and report only goal completion, a blocker
+that cannot be resolved autonomously, or a needed user decision. Repairable issues
+continue without premature reports. This guidance grants no additional permission
+or goal scope; existing refusal and recovery constraints still apply. Native Codex
+and Antigravity runtimes use their own prompts.
 
 ## Sources and scope
 
