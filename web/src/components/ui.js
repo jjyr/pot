@@ -499,23 +499,30 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const visibleConnection=selectedAssistant?.offline?'offline':connection;
     const projection=el('div','connection-status');
     projection.setAttribute('role','status');
-    const label=text=>{const value=el('span','',text);value.title=text;return value;};
+    const label=(text,busy=false,key='connection')=>{
+      const value=el('button','icon-button connection-indicator');value.type='button';
+      value.dataset.viewKey=key;value.setAttribute('aria-label',text);value.title=text;
+      value.classList.toggle('is-loading',busy);value.append(icon(busy?'refresh':'alert'));
+      const detail=el('span','connection-detail',text);detail.setAttribute('aria-hidden','true');value.append(detail);
+      value.onclick=event=>event.currentTarget.focus();
+      return value;
+    };
+    const retryButton=text=>{const value=el('button','icon-button connection-retry');value.type='button';value.dataset.viewKey='retry-'+text;value.title=text;value.setAttribute('aria-label',text);value.append(icon('refresh'));return value;};
     projection.classList.toggle('has-error', Boolean(error || connectionError || cacheFailures.length) || visibleConnection === 'offline');
     projection.classList.toggle('is-connected',!pending&&!error&&!connectionError&&!cacheFailures.length&&visibleConnection==='connected');
     if(pending){
-      projection.append(label(t(pending.phase==='preparing'?'drafts.saving':pending.phase==='uncertain'?'send.unknown':'send.confirming')));
-      if(pending.recoverable){const retry=el('button','text-button',t('send.checkRetry'));retry.type='button';if(pending.restored)retry.title=t('drafts.retrySubmissionHelp');retry.disabled=visibleConnection!=='connected'||!can('chat.send');retry.onclick=()=>confirmations.recover(pending);projection.append(retry);}
+      projection.append(label(t(pending.phase==='preparing'?'drafts.saving':pending.phase==='uncertain'?'send.unknown':'send.confirming'),pending.phase!=='uncertain','pending'));
+      if(pending.recoverable){const retry=retryButton(t('send.checkRetry'));retry.type='button';if(pending.restored)retry.title=t('drafts.retrySubmissionHelp');retry.disabled=visibleConnection!=='connected'||!can('chat.send');retry.onclick=()=>confirmations.recover(pending);projection.append(retry);}
     }
-    projection.append(label(error || (connectionError?.uiKey?t(connectionError.uiKey):connectionError) || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
+    if(error||connectionError||visibleConnection!=='connected')projection.append(label(error || (connectionError?.uiKey?t(connectionError.uiKey):connectionError) || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection)),!error&&!connectionError&&visibleConnection==='connecting'));
     if(cacheFailures.length){
-      projection.append(label(t('storage.commandAccepted')));
-      const retry=el('button','text-button',t('retry'));retry.type='button';
-      retry.onclick=async()=>{retry.disabled=true;await Promise.allSettled(cacheFailures.map(async([receipt,save])=>{await save();if(sendCacheFailures.get(receipt)===save)sendCacheFailures.delete(receipt);}));if(!disposed)updateControls();};
+      projection.append(label(t('storage.commandAccepted'),false,'cache'));
+      const retry=retryButton(t('retry'));
+      retry.onclick=async event=>{event.currentTarget.disabled=true;await Promise.allSettled(cacheFailures.map(async([receipt,save])=>{await save();if(sendCacheFailures.get(receipt)===save)sendCacheFailures.delete(receipt);}));if(!disposed)updateControls();};
       projection.append(retry);
     }
     if (directoryStorageFailed||visibleConnection === 'offline'||chatCacheFailed) {
-      const retry = el('button', 'text-button', t('retry'));
-      retry.type = 'button';
+      const retry = retryButton(t('retry'));
       retry.onclick = () => directoryStorageFailed?domains.directory.refresh().catch(reason=>{error=reason.storage?t('storage.failed'):reason.message;updateControls();}):loadSnapshot(true);
       projection.append(retry);
     }
@@ -1206,7 +1213,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if(selectedAssistant&&!directoryLoading&&!pages.editing&&!assistants.some(item=>item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id)){
         const missing=selectedAssistant;try{const confirmed=await domains.directory.confirm(missing);if(ticket!==directoryEpoch||disposed)return;if(confirmed){assistants=[...assistants,confirmed];client.assistants=assistants;}else clearSelectedAssistant();}catch(reason){if(reason.storage){directoryStorageFailed=true;error=t('storage.failed');}else error=t('partialOffline');}
       }
-      if (selectedAssistant){const watchingTasks=!!backgroundTasks;selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;if(selectedAssistant.offline)connection='offline';if(watchingTasks!==can('task.list'))refreshBackgroundTasks();}
+      if (selectedAssistant){const watchingTasks=!!backgroundTasks;selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;if(watchingTasks!==can('task.list'))refreshBackgroundTasks();}
       renderShell();renderMessages();
       if(!assistants.length&&!directoryLoading&&route==='chat'&&!pages.editing){
         const available=!directory.partial&&spaces.some(space=>space.connected!==false);

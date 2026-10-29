@@ -122,7 +122,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
   function connectDomain(root,token,watch,refresh,render){
     const status=n('p','hint page-refresh-status');status.hidden=true;root.prepend(status);
     let stop,settled=false;const ready=new Promise(resolve=>{
-      stop=watch(snapshot=>{if(disposed||!gate.current(token))return;root.setAttribute('aria-busy',String(snapshot.status==='loading'));status.hidden=!snapshot.error;status.setAttribute('role',snapshot.error?'alert':'status');status.classList.toggle('inline-error',!!snapshot.error);
+      stop=watch(snapshot=>{if(disposed||!gate.current(token))return;root.setAttribute('aria-busy',String(snapshot.status==='loading'));root.toggleAttribute('data-initial-loading',snapshot.status==='loading'&&!settled&&snapshot.data===undefined);status.hidden=!snapshot.error;status.setAttribute('role',snapshot.error?'alert':'status');status.classList.toggle('inline-error',!!snapshot.error);
         if(snapshot.error){status.replaceChildren(n('span','',translate(locale(),'loading.stale')),action(translate(locale(),'retry'),refresh));}
         if(snapshot.data!==undefined)render(snapshot.data,snapshot);
         if(!settled&&(snapshot.data!==undefined||snapshot.status==='error')){settled=true;resolve();}
@@ -131,21 +131,21 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
   }
   function connectView(root,token,read,update,{topics=[],space='',invalidate}={}) {
     const status=n('div','hint page-refresh-status');status.hidden=true;status.setAttribute('role','status');root.prepend(status);
-    const view={root,token,topics,space,invalidate};pageView=view;
+    let displayed=false;const view={root,token,topics,space,invalidate};pageView=view;
     const active=()=>!disposed&&pageView===view&&gate.current(token);
     view.queue=createRefreshQueue(async()=>{
-      root.setAttribute('aria-busy','true');
-      try{const value=await read();if(!active())return;await update(value);if(active()){status.hidden=true;status.replaceChildren();}}
-      finally{if(active())root.setAttribute('aria-busy','false');}
+      root.setAttribute('aria-busy','true');root.toggleAttribute('data-initial-loading',!displayed);
+      try{const value=await read();if(!active())return;await update(value);displayed=true;if(active()){status.hidden=true;status.replaceChildren();}}
+      finally{if(active()){root.setAttribute('aria-busy','false');root.removeAttribute('data-initial-loading');}}
     },{active,onError:reason=>{status.hidden=false;status.replaceChildren(n('span','',reason.message||String(reason)),action(tr('Retry','重试'),()=>view.queue.run()));status.className='inline-error page-refresh-status';}});
     return view.queue.run();
   }
   async function load(work) {
     captureView();viewReady=false;
-    const token=gate.next(), root=body();root.setAttribute('aria-busy','true');
+    const token=gate.next(), root=body();root.setAttribute('aria-busy','true');root.setAttribute('data-initial-loading','');
     try {const value=await work(token);if(gate.current(token)&&!disposed) {root.replaceChildren();return {root,value,token};}}
     catch(reason) {if(gate.current(token)&&!disposed) {root.replaceChildren();errorView(reason,root);}}
-    finally{root.removeAttribute('aria-busy');}
+    finally{root.removeAttribute('aria-busy');root.removeAttribute('data-initial-loading');}
   }
   function empty(root, text) {root.append(n('p','page-empty',text));}
   async function confirmDiscard() {
@@ -197,7 +197,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       item.input.addEventListener('input',()=>session.set(name,parse?parse(item.input.value):options.kind==='checkbox'?item.input.checked:item.input.value));fields.append(item.row);
     }
     const cancel=action(tr('Cancel','取消'),()=>lifecycle.cancel?lifecycle.cancel():back());const submit=action(submitLabel,()=>form.requestSubmit(),{primary:true});
-    footer.append(cancel,submit);form.append(fields,status,footer);root.append(form);
+    submit.classList.add('busy-control');footer.append(cancel,submit);form.append(fields,status,footer);root.append(form);
     editor={session,caller,returnChat,capability,root,form,controls,lifecycle,label,returnUsageOwner:usageOwner?{...usageOwner}:null,id:uid()};
     // All configuration steps share the Add assistant navigation entry.
     history[caller==='add-assistant'?'replaceState':'pushState']({...history.state,potEditor:editor.id},'',location.href);heading(label);
@@ -208,7 +208,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       const disabled=new Map([...controls.values()].map(control=>[control,control.disabled]));
       if(!editableWhilePending)for(const control of controls.values())control.disabled=true;
       status.textContent='';status.className='inline-error';status.setAttribute('role','alert');delete status.dataset.errorKey;cancel.disabled=submit.disabled=true;
-      if(lifecycle.opensCreatedChat){submit.setAttribute('aria-busy','true');submit.textContent=translate(locale(),'assistant.creating');}
+      submit.setAttribute('aria-busy','true');
       try {
         if(lifecycle.opensCreatedChat&&!lifecycle.creationCurrent()){lifecycle.creationRetired=true;throw Object.assign(Error('Creation identity changed'),{uiKey:'identityChanged'});}
         if(client.runtime.boot_id!==session.context.boot)throw Object.assign(Error('Configuration boot changed'),{uiKey:'identityChanged'});
@@ -227,7 +227,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
         if(lifecycle.opensCreatedChat){if(!lifecycle.creationCurrent()){lifecycle.creationRetired=true;throw Object.assign(Error('Creation identity changed'),{uiKey:'identityChanged'});}await lifecycle.afterSave(saved);Promise.resolve().then(()=>changed(saved)).catch(()=>{});}
         else{try{await changed(saved);}catch{}if(session.dirty){status.className='hint';status.setAttribute('role','status');status.dataset.errorKey='settings.savedDraftRemaining';status.replaceChildren(n('span','',translate(locale(),'settings.savedDraftRemaining')));}else if(lifecycle.afterSave)await lifecycle.afterSave(saved);else await back();}
       } catch(reason) {if(lifecycle.opensCreatedChat&&!lifecycle.creationCurrent())lifecycle.creationRetired=true;session.settle(false);const key=reason.uiKey||'settings.saveFailed';status.dataset.errorKey=key;status.replaceChildren(n('span','',translate(locale(),key)));const diagnostic=reason.diagnostic||(!reason.uiKey&&reason.message);if(diagnostic){const details=n('details','detail-disclosure');details.append(n('summary','',translate(locale(),'agentLinks.diagnostics')),n('pre','',diagnostic));status.append(details);}}
-      finally {if(!editableWhilePending)for(const [control,value]of disabled)control.disabled=value||!!lifecycle.creationRetired;cancel.disabled=false;submit.disabled=!!lifecycle.creationRetired;if(lifecycle.opensCreatedChat){submit.removeAttribute('aria-busy');lifecycle.locale?.();if(lifecycle.creationRetired)form.querySelector('.assistant-runtime-summary button').disabled=true;}lifecycle.settled?.();lifecycle.refreshDelete?.();}
+      finally {submit.removeAttribute('aria-busy');if(!editableWhilePending)for(const [control,value]of disabled)control.disabled=value||!!lifecycle.creationRetired;cancel.disabled=false;submit.disabled=!!lifecycle.creationRetired;if(lifecycle.opensCreatedChat){lifecycle.locale?.();if(lifecycle.creationRetired)form.querySelector('.assistant-runtime-summary button').disabled=true;}lifecycle.settled?.();lifecycle.refreshDelete?.();}
     };
     return {session,root,form,controls,lifecycle};
   }
@@ -275,7 +275,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
   function renderAssistantLoad() {
     const view=assistantLoad;if(!view)return;
     const t=key=>translate(locale(),key);
-    heading(t('assistantSettings'));view.root.setAttribute('aria-busy',String(!view.error));
+    heading(t('assistantSettings'));view.root.setAttribute('aria-busy',String(!view.error));view.root.toggleAttribute('data-initial-loading',!view.error);
     if(!view.error){view.root.replaceChildren();return;}
     const box=n('div','inline-error');box.setAttribute('role','alert');
     const diagnostic=n('details','detail-disclosure');diagnostic.append(n('summary','',t('agentLinks.diagnostics')),n('pre','',view.error.message||String(view.error)));
@@ -373,7 +373,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       const loadingStatus=n('p','hint'),rulesStatus=n('p','hint');
       let pendingHint;
       controls.get('profile_id').closest('.form-row').before(loadingStatus);instructions.append(rulesStatus);
-      const controller=new AbortController(),dispose=form.lifecycle.dispose;form.lifecycle.dispose=()=>{controller.abort();dispose?.();};
+      const controller=new AbortController(),dispose=form.lifecycle.dispose;form.lifecycle.dispose=()=>{controller.abort();modelInput.dispose();taskModelInput.dispose();dispose?.();};
       const current=()=>editor?.session===session&&!disposed&&!controller.signal.aborted;
       const touched=new Set();
       for(const key of [...configurationFields,'text'])controls.get(key).addEventListener('input',()=>{const group=key==='text'?['text']:key.startsWith('task_')?['task_profile_id','task_model']:configurationFields.filter(name=>!name.startsWith('task_'));for(const name of group)touched.add(name);});
@@ -580,7 +580,14 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     form.lifecycle.cancel=()=>back({skipPicker:true});form.lifecycle.afterSave=async saved=>{await back({skipPicker:true});await editor?.lifecycle.providersChanged?.(saved);if(onboarding){await leave();await localAssistantEditor();}};
     const set=(name,value)=>{controls.get(name).value=value??'';session.set(name,value);},showModel=()=>{controls.get('model').closest('.form-row').hidden=!!controls.get('model_selection').value;};
     function limitsFor(modelID){const entry=discovered.find(value=>value.id===modelID),base=modelDefaults(snapshot,providerID,modelID);return entry?{context:entry.context_window||base.context,input:entry.max_input||base.input,output:Math.min(entry.max_output||base.output,(entry.context_window||base.context)-1)}:base;}
-    const inherit=()=>{const limits=limitsFor(session.values.model);controls.get('context_window').placeholder=String(limits.context);controls.get('max_output_tokens').placeholder=String(limits.output);};
+    let limitsModel=initial.model;
+    const automaticLimits=new Set(),limitFields=[['context_window','context'],['max_output_tokens','output']];
+    for(const [name]of limitFields)controls.get(name).addEventListener('input',()=>automaticLimits.delete(name));
+    const inherit=()=>{
+      if(session.values.model!==limitsModel){limitsModel=session.values.model;for(const [name]of limitFields)automaticLimits.add(name);}
+      const limits=limitsFor(session.values.model);
+      for(const [name,key]of limitFields){controls.get(name).placeholder=String(limits[key]);if(automaticLimits.has(name))set(name,limits[key]);}
+    };
     const models=(entries,selected='')=>{entries=providerConversationModels(entries,selected);const input=controls.get('model_selection');input.replaceChildren();for(const [value,label]of [['',t('enterModel')],...entries.map(model=>[typeof model==='string'?model:model.id,typeof model==='string'?model:model.name||model.id])]){const option=n('option','',label);option.value=value;input.append(option);}set('model_selection',entries.some(model=>(typeof model==='string'?model:model.id)===selected)?selected:'');session.acknowledge({model_selection:session.values.model_selection});showModel();};
     models([...new Map([...(selectedEntry?.models||[]),...configuredModels,...(profile?.model?[profile.model]:[]),...discovered].map(model=>[typeof model==='string'?model:model.id,model])).values()],initial.model);
     const keyURL={openai:'https://platform.openai.com/api-keys',anthropic:'https://platform.claude.com/settings/keys',google:'https://aistudio.google.com/api-keys',deepseek:'https://platform.deepseek.com/api_keys',xai:'https://console.x.ai/',opencode:'https://opencode.ai/auth','opencode-go':'https://opencode.ai/auth'}[providerID];
@@ -999,8 +1006,9 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     form.controls.get('profile_id').addEventListener('change',()=>{const value=profiles.find(item=>item.id===form.controls.get('profile_id').value)?.model||'';form.controls.get('model').value=value;form.session.set('model',value);refreshModels();});refreshModels();
     const refreshSummary=runtimeSummary(form,translate(locale(),'assistantStart.localTitle'),'pot',()=>show('add-assistant'));
     form.lifecycle.settled=()=>{if(uncertain){for(const control of form.controls.values())control.disabled=true;form.root.querySelector('.assistant-runtime-summary button').disabled=true;form.root.querySelector('.editor-actions .primary').textContent=translate(locale(),'retry');}};
-    form.lifecycle.locale=()=>{modelInput.refreshLocale();refreshSummary();form.lifecycle.setTitle?.(t('assistantCreate'));for(const [name,key]of [['name','agentLinks.assistantName'],['profile_id','assistantStart.provider'],['model','agentLinks.assistantModel'],['text','assistantStart.instructions']]){const input=form.controls.get(name);input.setAttribute('aria-label',translate(locale(),key));input.closest('.form-row').querySelector('.form-label').textContent=translate(locale(),key);}form.root.querySelector('.assistant-runtime-summary>span:not(.connection-brand)').textContent=translate(locale(),'assistantStart.localTitle');form.root.querySelector('.editor-actions .primary').textContent=form.session.pending?translate(locale(),'assistant.creating'):uncertain?translate(locale(),'retry'):t('assistantCreate');form.root.querySelector('.editor-actions button:not(.primary)').textContent=translate(locale(),'integrations.cancel');};
+    form.lifecycle.locale=()=>{modelInput.refreshLocale();refreshSummary();form.lifecycle.setTitle?.(t('assistantCreate'));for(const [name,key]of [['name','agentLinks.assistantName'],['profile_id','assistantStart.provider'],['model','agentLinks.assistantModel'],['text','assistantStart.instructions']]){const input=form.controls.get(name);input.setAttribute('aria-label',translate(locale(),key));input.closest('.form-row').querySelector('.form-label').textContent=translate(locale(),key);}form.root.querySelector('.assistant-runtime-summary>span:not(.connection-brand)').textContent=translate(locale(),'assistantStart.localTitle');form.root.querySelector('.editor-actions .primary').textContent=uncertain?translate(locale(),'retry'):t('assistantCreate');form.root.querySelector('.editor-actions button:not(.primary)').textContent=translate(locale(),'integrations.cancel');};
     createdChatLifetime(form,captured);
+    const disposeModelForm=form.lifecycle.dispose;form.lifecycle.dispose=()=>{modelInput.dispose();disposeModelForm?.();};
     form.lifecycle.afterSave=async saved=>{await leave();await openChat({space:captured.space,owner:saved.created_assistant.id,assistant:saved.created_assistant,created:true});};
   }
   async function linkedAssistantEditor(connectionID,space,assistantID='',runtimeName='',kind='pot',valid=()=>true) {
@@ -1048,7 +1056,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       await leave();await openChat({space,owner,assistant,created:!existing});
     };
     if(!existing)createdChatLifetime(form,captured);
-    form.lifecycle.locale=()=>{if(executionHint)executionHint.textContent=translate(locale(),'settings.nextExecution');refreshSummary();const effort=form.controls.get('effort');if(effort)for(const option of effort.options)option.textContent=t(option.value?'effort.'+option.value:'effortDefault');const workspace=form.controls.get('workspace');if(workspace)for(const option of workspace.options){const item=catalog.workspaces.find(item=>item.id===option.value);option.textContent=workspaceLabel(item);}form.lifecycle.setTitle?.(t(existing?'assistantUpdate':'assistantCreate'));for(const definition of definitions){const input=form.controls.get(definition.name),label=input?.closest('.form-row')?.querySelector('.form-label');if(label)label.textContent=t(definition.key);input?.setAttribute('aria-label',t(definition.key));}const submit=form.root.querySelector('.editor-actions .primary'),cancel=form.root.querySelector('.editor-actions button:not(.primary)');if(submit)submit.textContent=form.session.pending?translate(locale(),'assistant.creating'):uncertain?translate(locale(),'retry'):t(existing?'assistantUpdate':'assistantCreate');if(cancel)cancel.textContent=translate(locale(),'integrations.cancel');};
+    form.lifecycle.locale=()=>{if(executionHint)executionHint.textContent=translate(locale(),'settings.nextExecution');refreshSummary();const effort=form.controls.get('effort');if(effort)for(const option of effort.options)option.textContent=t(option.value?'effort.'+option.value:'effortDefault');const workspace=form.controls.get('workspace');if(workspace)for(const option of workspace.options){const item=catalog.workspaces.find(item=>item.id===option.value);option.textContent=workspaceLabel(item);}form.lifecycle.setTitle?.(t(existing?'assistantUpdate':'assistantCreate'));for(const definition of definitions){const input=form.controls.get(definition.name),label=input?.closest('.form-row')?.querySelector('.form-label');if(label)label.textContent=t(definition.key);input?.setAttribute('aria-label',t(definition.key));}const submit=form.root.querySelector('.editor-actions .primary'),cancel=form.root.querySelector('.editor-actions button:not(.primary)');if(submit)submit.textContent=uncertain?translate(locale(),'retry'):t(existing?'assistantUpdate':'assistantCreate');if(cancel)cancel.textContent=translate(locale(),'integrations.cancel');};
   }
   async function addAssistantPage(root,token) {
     assistantStartRefresh=null;

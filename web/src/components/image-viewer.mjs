@@ -3,26 +3,27 @@ import {translate} from '../locales/messages.mjs';
 const node=(tag,cls='')=>{const element=document.createElement(tag);element.className=cls;return element;};
 
 // The caller owns the authorized original and its lease for the whole dialog lifetime.
-export function openImageViewer({image,label,trigger,download,onClose=()=>{}}) {
+export function openImageViewer({image,source,label,trigger,download,onClose=()=>{}}) {
   const dialog=node('dialog','attachment-viewer image-viewer'),header=node('div','image-viewer-header'),title=node('strong','attachment-name'),toolbar=node('div','image-viewer-controls');
   const viewport=node('div','image-viewer-viewport'),plane=node('div','image-viewer-plane'),full=node('img'),zoom=node('output'),mode=node('select','control'),error=node('p','image-viewer-error');
   const t=key=>translate(document.documentElement.lang,`imageViewer.${key}`);
   const button=(cls,text,run)=>{const element=node('button',`${cls} control`);element.type='button';element.textContent=text;element.onclick=run;return element;};
   const close=button('file-image-close','×',()=>dispose()),out=button('image-viewer-zoom-out','−',()=>zoomBy(1/1.25)),inside=button('image-viewer-zoom-in','+',()=>zoomBy(1.25));
-  const save=button('file-image-download','',async()=>{save.disabled=true;error.hidden=true;try{await download();}catch{if(!disposed){error.textContent=t('downloadFailed');error.hidden=false;}}finally{save.disabled=false;}});
+  const save=button('file-image-download','',async()=>{save.disabled=true;imageFailed=false;error.hidden=true;try{await download();}catch{if(!disposed){error.textContent=t('downloadFailed');error.hidden=false;}}finally{save.disabled=false;}});
   for(const value of ['width','window','original']){const option=node('option');option.value=value;mode.append(option);}
   const custom=node('option');custom.value='custom';custom.hidden=custom.disabled=true;mode.append(custom);
   title.id=`image-viewer-${crypto.randomUUID()}`;title.textContent=label;dialog.setAttribute('aria-labelledby',title.id);
   header.append(title,save,close);toolbar.append(mode,out,zoom,inside);dialog.append(header,toolbar,viewport,error);viewport.append(plane);plane.append(full);
-  viewport.tabIndex=0;full.alt=label;full.draggable=false;full.src=image.currentSrc||image.src;error.setAttribute('role','alert');error.hidden=true;
-  let scale=1,selection='width',disposed=false,drag=null;
-  const width=image.naturalWidth,height=image.naturalHeight,minScale=.01,maxScale=Math.max(8,window.innerWidth/width);
+  viewport.tabIndex=0;full.alt=label;full.draggable=false;full.src=source?.url||image.currentSrc||image.src;error.setAttribute('role','alert');error.hidden=true;
+  let scale=1,selection='width',disposed=false,drag=null,imageFailed=false;
+  if(source){viewport.setAttribute('aria-busy','true');full.onload=()=>viewport.removeAttribute('aria-busy');full.onerror=()=>{viewport.removeAttribute('aria-busy');imageFailed=true;error.hidden=false;error.textContent=translate(document.documentElement.lang,'resource.unavailable');};}
+  const width=source?.width||image.naturalWidth,height=source?.height||image.naturalHeight,minScale=.01,maxScale=Math.max(8,window.innerWidth/width);
   const oldOverflow=document.documentElement.style.overflow;
   function refresh(){
     close.setAttribute('aria-label',t('close'));save.textContent=t('download');out.setAttribute('aria-label',t('zoomOut'));inside.setAttribute('aria-label',t('zoomIn'));mode.setAttribute('aria-label',t('size'));zoom.setAttribute('aria-label',t('zoom'));
     for(const option of mode.options)option.textContent=t(option.value);
     viewport.setAttribute('aria-label',t('instructions'));viewport.title=t('instructions');
-    if(!error.hidden)error.textContent=t('downloadFailed');
+    if(!error.hidden)error.textContent=imageFailed?translate(document.documentElement.lang,'resource.unavailable'):t('downloadFailed');
   }
   function layout(){
     plane.style.width=`${Math.max(viewport.clientWidth,width*scale)}px`;plane.style.height=`${Math.max(viewport.clientHeight,height*scale)}px`;
@@ -71,7 +72,7 @@ export function openImageViewer({image,label,trigger,download,onClose=()=>{}}) {
   const resize=new ResizeObserver(()=>{if(selection==='custom')layout();else applyMode(false);});
   function dispose(){
     if(disposed)return;disposed=true;endDrag();events.abort();resize.disconnect();
-    if(dialog.open)dialog.close();full.removeAttribute('src');dialog.remove();document.documentElement.style.overflow=oldOverflow;
+    if(dialog.open)dialog.close();full.onload=full.onerror=null;full.removeAttribute('src');dialog.remove();document.documentElement.style.overflow=oldOverflow;
     if(trigger?.isConnected)trigger.focus({preventScroll:true});onClose();
   }
   refresh();document.body.append(dialog);document.documentElement.style.overflow='hidden';dialog.showModal();applyMode();resize.observe(viewport);close.focus({preventScroll:true});

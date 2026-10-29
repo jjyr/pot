@@ -53,3 +53,4 @@ try{
   client.releaseAttachments();
 }finally{globalThis.fetch=oldFetch;}
 console.log('Attachment-only drafts, capability changes, retry identity and remote byte routing passed');
+await import('./attachment-read-lifetime.mjs');

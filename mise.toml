@@ -157,7 +157,7 @@ run = "node scripts/tests/pot-ui-assistant-creation.mjs"
 
 [tasks."test:ui-prepared-layout"]
 description = "Verify prepared conversation output, native aliases and touch geometry with isolated browser fixtures"
-run = ["node scripts/tests/prepared-group-intent-browser.mjs", "node scripts/tests/prepared-communication-context-browser.mjs", "node scripts/tests/prepared-controller-browser.mjs", "node scripts/tests/prepared-resources-browser.mjs", "node scripts/tests/prepared-chat-browser.mjs", "node scripts/tests/prepared-history-resources-browser.mjs", "node scripts/tests/prepared-group-alias-browser.mjs", "node scripts/tests/prepared-touch-browser.mjs", "node scripts/tests/chat-stability-browser.mjs", "node scripts/tests/chat-composer-focus-browser.mjs", "node scripts/tests/chat-layout-regression-browser.mjs", "node scripts/tests/resource-silent-loading-browser.mjs", "node scripts/tests/assistant-model-input-browser.mjs", "node scripts/tests/assistant-task-default-browser.mjs", "node scripts/tests/page-loading-browser.mjs"]
+run = ["node scripts/tests/render-snapshot.mjs", "node scripts/tests/prepared-group-intent-browser.mjs", "node scripts/tests/prepared-communication-context-browser.mjs", "node scripts/tests/prepared-controller-browser.mjs", "node scripts/tests/prepared-resources-browser.mjs", "node scripts/tests/prepared-chat-browser.mjs", "node scripts/tests/prepared-history-resources-browser.mjs", "node scripts/tests/prepared-group-alias-browser.mjs", "node scripts/tests/prepared-touch-browser.mjs", "node scripts/tests/chat-stability-browser.mjs", "node scripts/tests/chat-composer-focus-browser.mjs", "node scripts/tests/chat-layout-regression-browser.mjs", "node scripts/tests/resource-silent-loading-browser.mjs", "node scripts/tests/assistant-model-input-browser.mjs", "node scripts/tests/assistant-task-default-browser.mjs", "node scripts/tests/page-loading-browser.mjs", "node scripts/tests/loading-feedback-browser.mjs", "node scripts/tests/image-preview-browser.mjs"]
 
 [tasks."test:settings-browser"]
 description = "Verify settings reads, drafts and writes independently of assistant activity with synthetic HTTP/SSE"
@@ -193,7 +193,7 @@ run = ["node --test plugins/github/*.test.mjs", "go test -race ./internal/assist
 
 [tasks."test:pwa-cold-start"]
 description = "Verify local-first browser startup using isolated HTTP/SSE, IndexedDB and a real Service Worker"
-run = ["node scripts/tests/pot-ui-cold-start-browser.mjs", "node scripts/tests/pot-ui-reconnect-authority-browser.mjs"]
+run = ["node scripts/tests/pot-ui-cold-start-browser.mjs", "node scripts/tests/pot-ui-reconnect-authority-browser.mjs", "node scripts/tests/directory-status-recovery-browser.mjs"]
 
 [tasks."test:pwa"]
 description = "Verify isolated system notification, Web Push and browser lifecycle contracts"
@@ -337,3 +337,7 @@ run = "node scripts/tests/ui-regressions.mjs --group storage"
 [tasks."test:ui-regressions"]
 description = "All deterministic browser regression groups; HTTP/SSE qualification is separate"
 run = "node scripts/tests/ui-regressions.mjs"
+
+[tasks."test:ui-memory"]
+description = "Bounded long-history JS heap and release after closing (isolated Chromium)"
+run = "node scripts/tests/scroll-memory-browser.mjs"

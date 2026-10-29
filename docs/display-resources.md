@@ -46,9 +46,23 @@ resize and recenter the dialog.
 Saved resource images and uploaded chat image attachments start in the expanded
 inline presentation. Clicking the image or its Enlarge image action opens the
 shared native modal preview. Raster Markdown file references use the same modal.
-The preview uses the caller's authorized original URL and existing lease, with
-the same original-file download operation; it does not fetch a thumbnail or add
-another resource API.
+Static inline images use a client-generated raster with a maximum 1600-pixel
+long edge. At most two preview decoders run together, and their full-resolution
+bitmap/canvas stores are released after preparation. GIF, APNG and animated WebP
+retain their animation rather than becoming a still thumbnail. URL-only adapters
+that cannot inspect animation bytes preserve the original PNG/WebP presentation.
+The modal loads the authorized original through the existing lease and uses its
+original dimensions; downloads always save the original file. This reduces inline
+decoded memory, but a first visit still transfers the original bytes.
+
+Original display bytes remain in the shared bounded IndexedDB repository. Chunk
+reads retain the same scoped transport and content verification, with at most four
+requests per file and six across active files. Completed chunks become Blob parts
+instead of an image-sized collection of JS byte arrays. Verification and cache
+commit share a digest for the same immutable Blob; a Blob read back from storage
+is independently verified. Leaving the last owning view cancels unfinished reads
+and releases its URLs. Reopening cached resources needs no original-byte network
+read while their identity and cache entry remain valid.
 
 Each opening fits the available width and starts at the top of a long image.
 The size selector also offers Fit window and Original size. Zoom buttons, `+` /

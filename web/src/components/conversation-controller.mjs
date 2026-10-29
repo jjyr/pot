@@ -7,7 +7,7 @@ import {bindConversationInput} from './conversation-input.mjs';
 export function createConversationController({scroller,virtualizer,requestLayout,syncOffset=()=>{},inputStarted=()=>{},intentChanged=()=>{},active=()=>true,interact=()=>{},upward=()=>{},downward=()=>{},scrolled=()=>{},canReadEarlier=()=>false,earlierBoundary,onEarlierVisible}) {
   let intent={mode:'latest'},published=intent,settledPosition,parents=new Map(),closed=false,restoring=false;
   let appliedTop=scroller.scrollTop,echo=null,inputPending=false,pointer=false,touchMoved=false,motion=false,up=false,commandTop=null,deferred=0;
-  let inputDelta=0,boundaryDirection=null,touching=false,landing=null;
+  let inputDelta=0,boundaryDirection=null,touching=false,landing=null,latestInputPosition=null;
   const subscribers=new Set();
   function earlierVisible(){if(closed||!active()||!scroller.clientHeight||!earlierBoundary)return;const box=earlierBoundary.getBoundingClientRect(),viewport=scroller.getBoundingClientRect();if(box.bottom>=viewport.top&&box.top<=viewport.bottom)onEarlierVisible?.();}
   const boundaryObserver=earlierBoundary?new IntersectionObserver(earlierVisible,{root:scroller}):null;
@@ -20,7 +20,7 @@ export function createConversationController({scroller,virtualizer,requestLayout
   }
   function cancel(){landing=null;virtualizer.cancelScroll();commandTop=null;restoring=false;}
   function reading(options){
-    const position=structuredClone(intent.position||settledPosition||capture(options));
+    const position=structuredClone(intent.position||latestInputPosition||settledPosition||capture(options));
     if(options?.ignoreToggle)position.anchors=position.anchors.filter(item=>item.key!=='background-tasks-toggle');
     intent={mode:'reading',position};
   }
@@ -30,16 +30,16 @@ export function createConversationController({scroller,virtualizer,requestLayout
     const owned=inputPending||pointer||touchMoved&&virtualizer.isTouchScrolling||motion&&virtualizer.isScrolling;
     if(!force&&(!owned||echo!==null&&Math.abs(top-echo)<.5)||Math.abs(top-appliedTop)<.5)return false;
     landing=null;const delta=top-appliedTop;appliedTop=top;echo=null;inputPending=false;
-    if(delta>0&&!up&&scroller.scrollHeight-scroller.clientHeight-top<=1)intent={mode:'latest'};
-    else{
-      reading();
-      // The native delta is input; a DOM height change awaiting measurement is
-      // not. Translate the last committed anchor by that delta before handling
-      // geometry, rather than recapturing the already shifted DOM as intent.
-      const position=intent.position;position.top=top;
-      for(const anchor of position.anchors)anchor.offset-=delta;
-      if(position.anchor)position.anchor.offset-=delta;
-    }
+    reading();
+    // Translate the committed anchor; recapturing live DOM here would adopt
+    // unmeasured height changes as user input.
+    // Keep the accumulated input anchor even when this frame reaches Latest.
+    // A fast reversal may arrive before publish captures the bottom position.
+    const position=intent.position;position.top=top;
+    for(const anchor of position.anchors)anchor.offset-=delta;
+    if(position.anchor)position.anchor.offset-=delta;
+    latestInputPosition=null;
+    if(delta>0&&!up&&scroller.scrollHeight-scroller.clientHeight-top<=1){latestInputPosition=position;intent={mode:'latest'};}
     inputDelta+=delta;return true;
   }
   function engage({event,kind,up:direction}){
@@ -56,7 +56,7 @@ export function createConversationController({scroller,virtualizer,requestLayout
     requestLayout();return true;
   }
   const input=bindConversationInput(scroller,{engage,endPointer:()=>{pointer=false;},endTouch:()=>{touching=false;requestLayout();},endMotion:()=>{if(!inputPending&&(motion!=='key'||!virtualizer.isScrolling))motion=false;}});
-  function set(next){cancel();inputPending=false;pointer=false;touchMoved=false;motion=false;echo=null;inputDelta=0;boundaryDirection=null;restoring=true;intent=structuredClone(next||{mode:'latest'});intentChanged();requestLayout();}
+  function set(next){cancel();latestInputPosition=null;inputPending=false;pointer=false;touchMoved=false;motion=false;echo=null;inputDelta=0;boundaryDirection=null;restoring=true;intent=structuredClone(next||{mode:'latest'});intentChanged();requestLayout();}
   function desired(){
     if(intent.mode==='latest')return scroller.scrollHeight-scroller.clientHeight;
     if(intent.mode==='target'){
@@ -101,7 +101,7 @@ export function createConversationController({scroller,virtualizer,requestLayout
     restoring=false;commandTop=null;
     const residual=Math.max(0,Math.min(top,Math.max(0,scroller.scrollHeight-scroller.clientHeight)))-scroller.scrollTop;
     if(Math.abs(residual)>1e-7&&(!landing||Math.abs(landing.requested-scroller.scrollTop-residual)>1e-7||landing.actual!==scroller.scrollTop))return;
-    settledPosition=capture();
+    settledPosition=capture();latestInputPosition=null;
     // A native integer landing cannot satisfy every CSS-pixel destination. Keep
     // that residual in the sole controller's intended offsets when adopting a
     // newly visible native anchor; publication must not erase it.
@@ -123,7 +123,7 @@ export function createConversationController({scroller,virtualizer,requestLayout
     // Context/cache consumers need the newest reader command even while a
     // candidate body is waiting. Subscribers still receive measured commits.
     snapshot:()=>structuredClone(intent),
-    reset(){cancel();virtualizer.cleanup();intent={mode:'latest'};published=structuredClone(intent);settledPosition=undefined;parents=new Map();inputPending=false;pointer=false;touchMoved=false;touching=false;motion=false;echo=null;deferred=0;inputDelta=0;boundaryDirection=null;appliedTop=scroller.scrollTop;for(const listener of subscribers)listener(structuredClone(published));requestLayout();},
+    reset(){cancel();virtualizer.cleanup();intent={mode:'latest'};published=structuredClone(intent);settledPosition=undefined;latestInputPosition=null;parents=new Map();inputPending=false;pointer=false;touchMoved=false;touching=false;motion=false;echo=null;deferred=0;inputDelta=0;boundaryDirection=null;appliedTop=scroller.scrollTop;for(const listener of subscribers)listener(structuredClone(published));requestLayout();},
     restore:set,
     scrollToLatest:()=>set({mode:'latest'}),
     locate:target=>set({mode:'target',...target}),
@@ -144,7 +144,7 @@ export function createConversationController({scroller,virtualizer,requestLayout
     nativeScroll(){if(acceptInput())requestLayout();},
     idle(){if(!inputPending)motion=false;},
     wrote(top,requested=top){landing={requested,actual:top};appliedTop=top;echo=top;deferred=0;if(Math.abs(requested-top)>1e-7)syncOffset(top);},
-    suspend(){landing=null;deferred=0;inputPending=false;pointer=false;touchMoved=false;touching=false;motion=false;echo=null;inputDelta=0;boundaryDirection=null;},
+    suspend(){latestInputPosition=null;landing=null;deferred=0;inputPending=false;pointer=false;touchMoved=false;touching=false;motion=false;echo=null;inputDelta=0;boundaryDirection=null;},
     close(){closed=true;boundaryObserver?.disconnect();input.close();subscribers.clear();},
   };
 }

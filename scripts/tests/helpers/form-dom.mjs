@@ -6,6 +6,7 @@ export class Element extends EventTarget {
  get childNodes(){return this.children;}get firstChild(){return this.children[0];}get lastChild(){return this.children.at(-1);}get options(){return this.children;}
  set textContent(value){this.replaceChildren();if(String(value))this.append(new Text(String(value)));}get textContent(){return this.children.map(c=>c.textContent).join('');}
  setAttribute(key,value){if(key==='class')this.className=String(value);else if(key==='id')this.id=String(value);else if(key.startsWith('data-'))this.dataset[key.slice(5).replace(/-([a-z])/g,(_,c)=>c.toUpperCase())]=String(value);else this.attrs.set(key,String(value));}
+ toggleAttribute(key,force){const present=force===undefined?!this.hasAttribute(key):!!force;if(present)this.setAttribute(key,'');else this.removeAttribute(key);return present;}
  getAttribute(key){return this.attributes.find(attr=>attr.name===key)?.value??null;}hasAttribute(key){return this.getAttribute(key)!==null;}
  removeAttribute(key){if(key==='class')this.className='';else if(key==='id')this.id='';else if(key.startsWith('data-'))delete this.dataset[key.slice(5).replace(/-([a-z])/g,(_,c)=>c.toUpperCase())];else this.attrs.delete(key);}
  append(...children){for(const child of children){child.remove?.();child.parentElement=child.parentNode=this;this.children.push(child);}}
@@ -41,6 +42,7 @@ export function installDOM(){
  globalThis.window=new EventTarget();window.confirm=()=>true;window.open=()=>({opener:null,location:'',close(){this.closed=true;}});
  globalThis.location={origin:'https://fixture.invalid',href:'https://fixture.invalid/'};globalThis.history={state:{},pushState(){},replaceState(){}};globalThis.innerWidth=1280;globalThis.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});globalThis.requestAnimationFrame=callback=>setTimeout(callback,0);globalThis.cancelAnimationFrame=clearTimeout;
  globalThis.ResizeObserver=class{observe(){}disconnect(){}};
+ globalThis.MutationObserver=class{observe(){}disconnect(){}};
  return document;
 }
 export const tick=()=>new Promise(resolve=>setImmediate(resolve));

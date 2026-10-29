@@ -193,7 +193,7 @@ export function renderMessageAttachments(refs,{client,scope,locale,onError,caps,
     const resource={...attachment,entry:attachment.name,files:[],download:{path:attachment.name}};
     const card=createResourceView({resource,mode:'preview'},{
       renderSlot:'attachment:'+attachment.id,
-      acquireResource:()=>{if(originalResource)return originalResource(attachment);const release=client.retainAttachment?.(attachment,scope);return {url:()=>client.attachmentURL(attachment,scope),release:()=>release?.(),onRetire:listener=>client.onResourceRetire?.(scope,listener)};},
+      acquireResource:()=>{if(originalResource)return originalResource(attachment);const release=client.retainAttachment?.(attachment,scope);return {...(client.attachmentBlob?{read:()=>client.attachmentBlob(attachment,scope)}:{}),url:()=>client.attachmentURL(attachment,scope),release:()=>release?.(),onRetire:listener=>client.onResourceRetire?.(scope,listener)};},
       downloadResource:()=>client.downloadAttachment(attachment,scope),
       noticeKey:caps&&!attachmentAllowed(caps,attachment.mime_type)?'attachments.historyUnavailable':null,
     });

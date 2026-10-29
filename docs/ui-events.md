@@ -466,9 +466,17 @@ and synchronizes the engine offset, then commits the flow DOM and measurements,
 resolves its current stable reading point and applies any remaining displacement.
 Native input translates the previously committed anchor by the input delta;
 it does not recapture an unreported DOM height change as new reading intent.
+When fast input leaves the mounted range before its replacement is prepared,
+the unprepared area stays blank with a small loading indicator. The indicator
+fades in after a short delay, respects reduced motion, and does not affect list
+geometry or intercept input. Old messages are never moved into that area as
+placeholders. The prepared destination replaces it in one geometry commit.
 Programmatic write echoes do not become input. Geometry that happens to reach
 the bottom does not enable following; downward user movement to the bottom or
 an explicit Latest command does.
+Reaching Latest retains the accumulated native input anchor until publication,
+so a rapid direction reversal before layout settles does not reuse an older
+reading position or count a scroll delta twice.
 
 The same reconciliation handles prepend, trimming, reorder, width reflow,
 external header/composer layout and asynchronous image or disclosure sizes.
@@ -479,6 +487,14 @@ component recursively reaches readiness or receives its five-second component
 frame before its parent is measured. Preparation uses batches of at most 96
 rows and admits at most 32 concurrent resource loads. It covers the entire
 loaded collection, while preserving the existing backend page boundaries.
+Render input snapshots detach caller-owned data before asynchronous preparation.
+Unchanged message subtrees and shared context records reuse their owned snapshot;
+in-place caller updates still produce a new revision. Geometry signatures contain
+compact per-row revision tokens, never serialized message bodies. Only the active
+window retains comparison snapshots; removed identities cannot reuse an obsolete
+revision when they return. Closing the window releases its snapshot and geometry
+references. IndexedDB remains the repository for historical message bodies.
+
 Only a complete measured index is installed into the engine. The prepared real
 nodes then move into the live tree in the same geometry transaction. Row and
 region containers retain natural flow; only bounded component frames isolate
@@ -794,13 +810,33 @@ activity indicators static and disables avatar/tray animation. Local stream keep
 See [Development](development.md) for backend and shared UI verification commands.
 
 
-## Silent page loading
+## Page loading feedback
 
 Page reads and metadata refreshes do not insert temporary loading prose. Existing
 content stays visible during refresh; asynchronous controls use `aria-busy` and
-retain their normal labels. Initial empty surfaces stay silent, and pagination
+retain their normal labels. Initial empty surfaces may show a delayed indicator,
+and pagination
 keeps its previous summary or a neutral page number until results arrive.
 Assistant settings preserve editable known fields while individual sections load.
 Errors and retry actions remain visible, including failed startup, permissions,
 model discovery and metadata reads. Operation progress such as downloading an
 upgrade is separate from page loading.
+
+Explicit form submissions, connection tests and resource downloads show a small
+spinner inside their existing control without replacing its label. Model discovery
+and list pagination use indicators beside their existing controls or summary.
+Resource previews overlay their reserved area until ready. First-load page
+indicators are limited to views without displayed data; background refreshes keep
+their content. Indicators appear after 120 ms, never intercept input, stop on
+completion or failure, and remain static with reduced motion enabled.
+
+Directory availability and conversation transport status remain independent. An
+unavailable directory entry can show an offline status without overwriting the
+stream state; a fresh online entry clears that indication automatically while a
+real stream disconnection remains visible.
+
+The conversation header represents pending connection and confirmation states with
+a small animated icon, and failures with a neutral status icon. Status details
+remain available on hover, keyboard focus or tap, with localized accessible
+labels. Recovery actions use labeled icon buttons; reduced-motion mode keeps
+indicators static. Healthy connections need no persistent status indicator.

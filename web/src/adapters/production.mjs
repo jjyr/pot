@@ -185,8 +185,23 @@ export async function createProductionClient({desktop = false, base = '', resour
   const runtime = startupIdentity?{runtime_id:startupIdentity.runtime_id,boot_id:startupIdentity.boot_id}:await request('/api/v1/runtime', {owner: '', space: ''});
   if (!runtime || !(runtime.runtime_id || runtime.id)) throw Error('Runtime identity is unavailable');
   const readBaselines=desktop&&!startupIdentity?await invoke('AssistantReads'):[];
-  const attachmentURLs=new Map(),attachmentLeases=new Map();
+  const attachmentReads=new Map(),attachmentLeases=new Map();
+  const retireAttachment=key=>{const entry=attachmentReads.get(key);if(!entry)return;attachmentReads.delete(key);entry.abort.abort(new DOMException('Attachment released','AbortError'));entry.url?.then(url=>URL.revokeObjectURL(url)).catch(()=>{});};
   const attachmentKey=(attachment,options)=>{const scope={...context,...options};return JSON.stringify([displayReader?resourceScope(displayReader.identity(scope)):'',attachment.id,attachment.size,attachment.mime_type]);};
+  function attachmentRead(attachment,options){
+    const scope={...context,...options},key=attachmentKey(attachment,scope);
+    if(attachmentReads.has(key))return attachmentReads.get(key);
+    const entry={key,abort:new AbortController(),blob:null,url:null};attachmentReads.set(key,entry);
+    entry.blob=(async()=>{
+      const signal=entry.abort.signal,source=displayReader.identity(scope),blob=await displayReader.attachment(attachment,{...scope,signal});
+      signal.throwIfAborted();
+      if(attachmentReads.get(key)!==entry||!displayReader.current(source))throw new DOMException('Attachment released','AbortError');
+      return blob;
+    })();
+    entry.blob.catch(()=>{if(attachmentReads.get(key)===entry)attachmentReads.delete(key);});
+    return entry;
+  }
+
   const onlineWaiters=new Set();
   const whenOnline=handler=>{onlineWaiters.add(handler);return()=>onlineWaiters.delete(handler);};
   async function resourceRequest(path,options={}){
@@ -281,20 +296,24 @@ export async function createProductionClient({desktop = false, base = '', resour
     onRead:desktop?handler=>runtimeAPI.Events.On('pot:read',event=>handler(event.data)):undefined,
     setReducedMotion:desktop?value=>invoke('SetReducedMotion',value):undefined,
     retainAttachment(attachment,options={}) {
-      const key=attachmentKey(attachment,options);attachmentLeases.set(key,(attachmentLeases.get(key)||0)+1);let released=false;
-      return ()=>{if(released)return;released=true;const count=(attachmentLeases.get(key)||1)-1;if(count){attachmentLeases.set(key,count);return;}attachmentLeases.delete(key);const pending=attachmentURLs.get(key);attachmentURLs.delete(key);pending?.then(url=>URL.revokeObjectURL(url)).catch(()=>{});};
+      const key=attachmentKey(attachment,options);let group=attachmentLeases.get(key);
+      if(!group){group={count:0};attachmentLeases.set(key,group);}group.count++;let released=false;
+      return ()=>{if(released)return;released=true;group.count--;queueMicrotask(()=>{
+        // A prepared/live transfer may release and reacquire in the same turn.
+        // Old release closures cannot retire a later generation's readers.
+        if(group.count||attachmentLeases.get(key)!==group)return;
+        attachmentLeases.delete(key);retireAttachment(key);
+      });};
     },
-    async attachmentURL(attachment,options={}) {
-      const scope={...context,...options},key=attachmentKey(attachment,scope);
-      if(attachmentURLs.has(key))return attachmentURLs.get(key);
-      const pending=(async()=>{
-        const source=displayReader.identity(scope),blob=await displayReader.attachment(attachment,scope);
-        if(!displayReader.current(source))throw new DOMException('Attachment released','AbortError');
+    attachmentBlob(attachment,options={}) {return attachmentRead(attachment,options).blob;},
+    attachmentURL(attachment,options={}) {
+      const entry=attachmentRead(attachment,options);
+      if(!entry.url)entry.url=entry.blob.then(blob=>{
+        entry.abort.signal.throwIfAborted();
+        if(attachmentReads.get(entry.key)!==entry)throw new DOMException('Attachment released','AbortError');
         return URL.createObjectURL(blob);
-      })();
-      attachmentURLs.set(key,pending);
-      pending.catch(()=>{if(attachmentURLs.get(key)===pending)attachmentURLs.delete(key);});
-      return pending;
+      });
+      return entry.url;
     },
     async downloadAttachment(attachment,options={}){
       const scope={...context,...options};
@@ -302,7 +321,7 @@ export async function createProductionClient({desktop = false, base = '', resour
       await request(`/api/v1/attachments/${encodeURIComponent(attachment.id)}?offset=0`,scope);
       const release=client.retainAttachment(attachment,scope);let url;try{url=await client.attachmentURL(attachment,scope);}catch(reason){release();throw reason;}const link=document.createElement('a');link.href=url;link.download=attachment.name;document.body.append(link);try{link.click();}finally{link.remove();setTimeout(release,1000);}
     },
-    releaseAttachments(){for(const pending of attachmentURLs.values())pending.then(url=>URL.revokeObjectURL(url)).catch(()=>{});attachmentURLs.clear();},
+    releaseAttachments(){attachmentLeases.clear();for(const key of attachmentReads.keys())retireAttachment(key);},
     async downloadFile(task,path,options={}) {
       const scope={...context,...options};
       if(desktop)return invoke('DownloadFile',task,path,scope.owner,scope.space);
@@ -399,7 +418,7 @@ export async function createProductionClient({desktop = false, base = '', resour
   client.onResourceRetire=(scope,listener)=>{const key=resourceScope(displayReader.identity(scope));return displayReader.copies.subscribe(event=>{if(event.kind==='clear'||event.kind==='retire'&&event.scope===key)listener();});};
   client.retireResourceCopies=scope=>displayReader.retire(displayReader.identity(scope));
   client.acquireResource=createDisplayResources(displayReader.read,()=>context,(resource,path,scope,operation='content',token='')=>desktop?`/pot-resource-content?${new URLSearchParams({id:resource.id,path,assistant_id:scope.owner,space_id:scope.space,render:operation==='render'?'1':'0',token})}`:`${base}${scopedPath(`/api/v1/resources/${encodeURIComponent(resource.id)}/${operation}?${new URLSearchParams({path,token})}`,scope)}`,{copies:displayReader.copies,identity:displayReader.identity,current:displayReader.current});
-  displayReader.copies.subscribe(event=>{if(event.kind==='clear'||event.kind==='retire'){for(const [key,pending] of attachmentURLs){if(event.kind==='clear'||JSON.parse(key)[0]===event.scope){attachmentURLs.delete(key);pending.then(url=>URL.revokeObjectURL(url)).catch(()=>{});}}}});
+  displayReader.copies.subscribe(event=>{if(event.kind==='clear'||event.kind==='retire'){for(const key of attachmentLeases.keys())if(event.kind==='clear'||JSON.parse(key)[0]===event.scope)attachmentLeases.delete(key);for(const key of attachmentReads.keys())if(event.kind==='clear'||JSON.parse(key)[0]===event.scope)retireAttachment(key);}});
   client.resources=createResourceReads(client,{storage:resourceStorage});
   client.read=(path,options)=>client.resources.read(path,options);
   return client;

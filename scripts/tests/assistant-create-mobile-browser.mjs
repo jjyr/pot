@@ -65,6 +65,7 @@ try{for(const locale of ['en','zh-CN']){
     await control({hold:['providers']});const providersBefore=count('/api/v1/providers');
     await tap('[data-runtime-id=local] button');await page.waitForTimeout(60);const localBox=await page.locator('[data-runtime-id=local] button').boundingBox();await page.touchscreen.tap(localBox.x+20,localBox.y+20);
     await page.waitForTimeout(120);const loading=await page.locator('.assistant-catalog-state').count(),busy=await page.locator('.assistant-runtime-choice[aria-busy="true"]').count();
+    if(!baseline)await page.waitForFunction(()=>{const button=document.querySelector('.assistant-runtime-choice[aria-busy="true"]');return button&&getComputedStyle(button,'::after').opacity==='1';});
     await page.screenshot({path:output+`/loading-${locale}-${baseline?'before':'after'}.png`});
     if(!baseline)await page.evaluate(locale=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:locale==='en'?'zh-CN':'en'}})),locale);
     await control({release:['providers']});await page.locator('.editor-form input').first().waitFor();
