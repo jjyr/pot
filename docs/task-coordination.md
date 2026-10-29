@@ -80,6 +80,14 @@ pause, local allowance controls, remote file reads and execution transcripts are
 currently unavailable across nodes.
 Disconnected nodes retain the last accepted state without replaying work.
 
+Catalogue projections compare both the original execution run and the saved record
+revision before committing. A delayed poll cannot replace newer facts within the
+same run. If accepted guidance returns a new run but loses this revision check to
+an old-run notification or cancellation update, reproject only that accepted
+receipt from a fresh local transaction; never resend the input. The original run
+fence still applies, so an already-admitted run cannot be overwritten. Same-run
+acceptance may describe an older snapshot and is not rebased after a conflict.
+
 ## Agent execution
 
 Every Task invokes the Agent Link port, including the in-process local Adapter.

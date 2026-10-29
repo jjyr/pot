@@ -151,18 +151,44 @@ func (s *Service) guideTaskExecution(ctx context.Context, owner, id string, inpu
 		// Never project its old run over an admitted continuation.
 		return remote, nil
 	}
-	linkRun := d.Execution.Receipt.RunID
-	if s.isPotMCP(ctx, d.Info.AgentLink.LinkID) {
-		projectPotMCPTaskReceipt(d, remote)
-	} else {
-		projectTaskReceipt(d, remote)
-	}
-	_, err = s.Tasks.UpdateExecution(ctx, *d, linkRun)
+	_, err = s.projectAcceptedTaskGuidance(ctx, d, remote)
 	if err == nil {
 		s.wakeTasks()
 		s.Changes.Notify("tasks")
 	}
 	return remote, err
+}
+
+// projectAcceptedTaskGuidance never resends accepted input. A new-run receipt
+// may lose its revision CAS to an old-run notification or cancellation; polling
+// need not revisit that terminal run, so recover the receipt locally. Same-run
+// acceptance can be older than a committed event and must not be rebased.
+func (s *Service) projectAcceptedTaskGuidance(ctx context.Context, d *tasks.Record, remote agentlink.Task) (bool, error) {
+	expectedRun := d.Execution.Receipt.RunID
+	projectPotMCPTaskReceipt(d, remote)
+	changed, err := s.Tasks.UpdateExecution(ctx, *d, expectedRun)
+	if err != nil || changed || remote.RunID == "" || remote.RunID == expectedRun {
+		return changed, err
+	}
+	err = storage.Transaction(ctx, s.Tasks.DB(), func(tx *sql.Tx) error {
+		current, err := s.Tasks.GetTx(ctx, tx, d.AssistantID, d.Info.ID)
+		if err != nil {
+			return err
+		}
+		if current == nil || current.Execution == nil || current.Execution.Receipt.RunID != expectedRun {
+			return nil
+		}
+		projectPotMCPTaskReceipt(current, remote)
+		changed, err = s.Tasks.UpdateExecutionTx(ctx, tx, *current, expectedRun)
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	if changed {
+		s.Tasks.Notify()
+	}
+	return changed, nil
 }
 
 func (s *Service) StopTask(ctx context.Context, owner, id, mode string) error {
