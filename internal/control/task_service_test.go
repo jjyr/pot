@@ -33,7 +33,7 @@ func TestLocalTaskUsesSharedCapacityOwnerModelAndSummary(t *testing.T) {
 		raw, _ := io.ReadAll(r.Body)
 		var fields map[string]json.RawMessage
 		json.Unmarshal(raw, &fields)
-		isSummary := strings.Contains(string(fields["messages"]), "Process background updates")
+		isSummary := requestIsNotification(raw)
 		var event any
 		if isSummary {
 			summaryCalls.Add(1)

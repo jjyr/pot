@@ -37,7 +37,7 @@ func TestTaskResultExecutesCommandAndImportsTaskAvatar(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		if !strings.Contains(body.Messages[0].Content, "Process background updates") {
+		if !requestIsNotification(raw) {
 			batchReply(w, "Created avatar.png")
 			return
 		}

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 )
@@ -18,6 +19,7 @@ func TestUserSteeringDuringSummaryQueuesIndependentMainTurn(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var calls, cleanup atomic.Int64
+	var notificationSystem string
 	c := conversationFixture(t, filepath.Join(t.TempDir(), "chat.sqlite"), "boot", func(ctx context.Context, r core.ModelRequest) (io.ReadCloser, error) {
 		var body struct {
 			Messages []struct {
@@ -31,8 +33,9 @@ func TestUserSteeringDuringSummaryQueuesIndependentMainTurn(t *testing.T) {
 		}
 		system := body.Messages[0].Content
 		if calls.Add(1) == 1 {
-			if !strings.Contains(system, "Process background updates") {
-				t.Error("notification must retain its processing instructions")
+			notificationSystem = system
+			if body.Messages[len(body.Messages)-1].Content != "Task A completed" {
+				t.Error("notification payload was lost")
 			}
 			close(entered)
 			select {
@@ -42,8 +45,8 @@ func TestUserSteeringDuringSummaryQueuesIndependentMainTurn(t *testing.T) {
 			}
 			return replySSE("A completed"), nil
 		}
-		if strings.Contains(system, "Process background updates") {
-			t.Error("user request inherited summary role")
+		if system != notificationSystem {
+			t.Error("user and notification turns must share system instructions")
 		}
 		if !strings.Contains(string(r.Body), "start B") {
 			t.Error("queued user input was lost")
@@ -74,6 +77,22 @@ func TestUserSteeringDuringSummaryQueuesIndependentMainTurn(t *testing.T) {
 	if calls.Load() != 2 {
 		t.Fatal("unexpected model attempts", calls.Load())
 	}
+	raw, err := c.store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var checkpoint agent.Checkpoint
+	if err := json.Unmarshal(raw, &checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	kinds := map[string]string{}
+	for _, message := range checkpoint.Messages {
+		kinds[message.Text] = message.Kind.Type
+	}
+	if kinds["Task A completed"] != "notification" || kinds["start B"] != "conversation" {
+		t.Fatal("input provenance changed", kinds)
+	}
+
 	for _, m := range snapshot.Messages {
 		if m.ID == receipt.MessageID && (m.Queued || m.Status != protocol.Complete) {
 			t.Fatal("queued user request was not applied", m)
