@@ -154,6 +154,7 @@ func (c *Conversation) abandonIdleLocked(ctx context.Context) error {
 		c.turn = previous
 		return err
 	}
+	c.notifyTurnFinishedLocked()
 	return nil
 }
 

@@ -605,7 +605,7 @@ func TestCompactionPersistsReducedClassifiedHistory(t *testing.T) {
 }
 
 func TestFileDeliveryInstructionsWithoutResourceTools(t *testing.T) {
-	for _, role := range []core.ExecutionRole{core.Main, core.Worker, core.Summary} {
+	for _, role := range []core.ExecutionRole{core.Main, core.Worker} {
 		t.Run(string(role), func(t *testing.T) {
 			a, _, service, thread, execution := setup(t)
 			execution.Role = role
@@ -630,7 +630,7 @@ func TestFileDeliveryInstructionsWithoutResourceTools(t *testing.T) {
 
 func TestNotificationRetainsConfiguredToolsAndRefreshesContext(t *testing.T) {
 	a, _, service, thread, execution := setup(t)
-	execution.Role = core.Summary
+	execution.Role = core.Main
 	execution.Instructions = "fresh-notification-instructions"
 	a.Tools = []m.ToolDefinition{
 		{Name: "exec_command", InputSchema: json.RawMessage(`{"type":"object"}`)},
@@ -647,7 +647,7 @@ func TestNotificationRetainsConfiguredToolsAndRefreshesContext(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		notification, err := a.available(core.Summary, settings, core.DefaultModelDescriptor())
+		notification, err := a.available(core.Main, settings, core.DefaultModelDescriptor())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -663,7 +663,7 @@ func TestNotificationRetainsConfiguredToolsAndRefreshesContext(t *testing.T) {
 		return SkillCatalog{}, nil
 	}
 	a.Dispatch = func(_ context.Context, ctx core.ExecutionContext, call m.ToolCall, _ func(core.Update) error) (json.RawMessage, error) {
-		if ctx.Role != core.Summary || call.Name != "update_agent_profile" {
+		if ctx.Role != core.Main || call.Name != "update_agent_profile" {
 			t.Fatal("notification lost its execution binding")
 		}
 		effects++
@@ -678,7 +678,7 @@ func TestNotificationRetainsConfiguredToolsAndRefreshesContext(t *testing.T) {
 		}
 		return response("done"), nil
 	}
-	if err := a.Execute(context.Background(), execution, thread, core.TurnRequest{RequestID: "pot-result-1", Text: "Task completed"}, false, func(core.AgentEvent) error { return nil }); err != nil {
+	if err := a.Execute(context.Background(), execution, thread, core.TurnRequest{RequestID: "pot-result-1", Notification: true, Text: "Task completed"}, false, func(core.AgentEvent) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if skills != 1 || effects != 1 {

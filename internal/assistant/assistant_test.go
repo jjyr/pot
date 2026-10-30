@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -118,8 +119,19 @@ func TestThreadConfigurationPreservesContextAndRules(t *testing.T) {
 	if _, err := ConfigureNextGeneration(ctx, store, 1, next); err == nil {
 		t.Fatal("stale config accepted")
 	}
-	if loaded, err := store.LoadContext(ctx); err != nil || string(loaded) != string(body) {
-		t.Fatal(string(loaded), err)
+	loaded, err := store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got, want any
+	if err := json.Unmarshal(loaded, &got); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(body, &want); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatal("context changed", string(loaded))
 	}
 	rules, err := store.Instructions(ctx)
 	if err != nil {

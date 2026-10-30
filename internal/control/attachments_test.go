@@ -15,7 +15,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/attachments"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/pkg/agent"
@@ -159,11 +158,11 @@ func TestAttachmentControlBytesRetryOwnershipAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	var checkpoint string
-	if err = db.QueryRow("SELECT value FROM metadata WHERE key=?", assistant.ContextKey).Scan(&checkpoint); err != nil {
+	checkpoint, err := readConversationCheckpoint(ctx, db, filepath.Join(root, "assistants", "main", "conversation.sqlite"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(checkpoint, base64.StdEncoding.EncodeToString(pdf)) {
+	if strings.Contains(string(checkpoint), base64.StdEncoding.EncodeToString(pdf)) {
 		t.Fatal("base64 persisted in checkpoint")
 	}
 	var saved agent.Checkpoint

@@ -182,8 +182,9 @@ the workspace. The Agent inspects current Git state when developing, committing
 or preparing a pull request. Initial branch validation, separate branch creation
 and starting-commit selection still apply when preparing a new managed worktree.
 
-Task state, checkpoints and operation receipts remain in their owning component
-stores. Downloads must resolve through recorded original file locations or
+Task state and operation receipts remain in their owning component stores.
+Model checkpoints use durable [session rollouts](session-rollouts.md), outside
+the task workspace. Downloads must resolve through recorded original file locations or
 explicitly retained delivered files, rather than assuming `WORKSPACE/tasks/ID`.
 Preserve delivered artifacts independently before reclaiming their temporary
 source directory.

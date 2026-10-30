@@ -98,6 +98,7 @@ type Service struct {
 	tasksDB             *sql.DB
 	Terminals           *terminal.Hub
 	taskLife            *taskLifecycle
+	rolloutCompression  *rolloutCompressor
 }
 
 func Open(options Options) (*Service, error) {
@@ -242,6 +243,7 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 	options.ResolveTurnConfig = func(ctx context.Context, request string, base core.ResolvedSpec) (core.ResolvedSpec, error) {
 		return s.experimentTurnConfig(ctx, id, request, base)
 	}
+	options.OnTurnFinished = s.rolloutCompression.trigger
 	options.BatchKey = func(ctx context.Context, request string) (string, error) { return s.experimentRoot(ctx, id, request) }
 	options.IdlePolicy = s.idleCompactPolicy
 	options.OnResumeStarting = func(ctx context.Context, request protocol.SendMessage) error {
@@ -310,7 +312,7 @@ func (s *Service) host(owner string, generation uint64) (*executor.Engine, error
 		if err != nil {
 			return nil, err
 		}
-		options := executor.Options{ProcessWorker: []string{worker}, Admit: s.executionAdmission, Node: s.options.Node, Home: s.options.AgentHome, SandboxDirectory: s.options.SandboxDirectory, ProtectedPaths: []string{s.options.Root}}
+		options := executor.Options{ProcessWorker: []string{worker}, Admit: s.executionAdmission, Node: s.options.Node, SandboxDirectory: s.options.SandboxDirectory, ProtectedPaths: []string{s.options.Root}}
 		workspace, workspaceErr := s.RunJournal.TaskWorkspace(s.ctx, owner)
 		if workspaceErr != nil {
 			return nil, workspaceErr
@@ -365,7 +367,7 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	for _, definition := range identities {
 		if definition.ID == principal {
 			identity, _ := json.Marshal(map[string]any{"directory": s.Registry.Directory(principal), "name": definition.Name, "has_avatar": definition.Avatar != "", "address": protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "assistant", AgentID: principal}})
-			executionContext.MainPrompt += "\nCurrent assistant identity (data): " + string(identity) + ". Edit profile.json, avatar.png or AGENTS.md in this directory with ordinary file tools and the current filesystem authorization when the user requests a change."
+			executionContext.RolePrompt += "\nCurrent assistant identity (data): " + string(identity) + ". Edit profile.json, avatar.png or AGENTS.md in this directory with ordinary file tools and the current filesystem authorization when the user requests a change."
 			break
 		}
 	}
@@ -391,7 +393,7 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	if strings.HasPrefix(request.RequestID, "pot-result-") {
 		stage = "assistant_result"
 	}
-	model := &ModelSession{Directory: s.Profiles.directory, Attribution: usage.Attribution{Assistant: principal, Request: root, Stage: stage}, IdleMaintenance: strings.HasPrefix(request.RequestID, "pot-compact-"), WaitScope: waitScope, Registry: s.Providers, Usage: s.Usage, Spec: thread.Config, Scope: principal, Turn: request.RequestID, Generation: thread.Generation, Role: modelRole(request.RequestID), Claim: func(ctx context.Context, id string) error {
+	model := &ModelSession{Directory: s.Profiles.directory, Attribution: usage.Attribution{Assistant: principal, Request: root, Stage: stage}, IdleMaintenance: strings.HasPrefix(request.RequestID, "pot-compact-"), WaitScope: waitScope, Registry: s.Providers, Usage: s.Usage, Spec: thread.Config, Scope: principal, Turn: request.RequestID, Generation: thread.Generation, Role: "pot", Claim: func(ctx context.Context, id string) error {
 		return c.ClaimModel(ctx, request.RequestID, thread.Generation, id)
 	}}
 	ports := &executionPorts{model: model, compaction: func(ctx context.Context, raw json.RawMessage) error {
@@ -481,6 +483,7 @@ func (s *Service) Close() error {
 		engines = append(engines, e)
 	}
 	s.mu.Unlock()
+	s.rolloutCompression.wait()
 	s.potMCP.wg.Wait()
 	linkErr := s.closeAgentLinks()
 	s.pluginWG.Wait()
@@ -546,11 +549,4 @@ func (s *Service) Close() error {
 // signed nanoseconds while protocol request timeouts use safe JSON milliseconds.
 func validRequestTimeout(ms uint64) bool {
 	return ms > 0 && ms <= uint64((1<<63-1)/int64(time.Millisecond))
-}
-
-func modelRole(requestID string) string {
-	if strings.HasPrefix(requestID, "pot-result-") {
-		return "summary"
-	}
-	return "pot"
 }

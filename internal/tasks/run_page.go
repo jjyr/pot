@@ -24,6 +24,9 @@ func (j *Journal) Runs(ctx context.Context) ([]Run, error) {
 		if err = j.validateRun(run); err != nil {
 			return nil, err
 		}
+		if err := j.hydrateRun(&run); err != nil {
+			return nil, err
+		}
 		out = append(out, run)
 	}
 	return out, rows.Err()

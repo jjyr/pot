@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 
 	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/pkg/agent"
@@ -180,11 +179,7 @@ func (s *Service) proveMainRecoveryCleanup(ctx context.Context, owner string, st
 // Completing admission/wait cleanup is idempotent under the original identity,
 // including retries after the durable conversation recovery receipt was saved.
 func (s *Service) finishMainRecovery(ctx context.Context, owner string, state assistant.RecoveryState) error {
-	role := "assistant"
-	if strings.HasPrefix(state.RequestID, "pot-result-") {
-		role = "summary"
-	}
-	if err := s.options.Manager.ReconcileInterrupted(execution.Identity{Owner: owner, RequestID: state.RequestID, Generation: state.Generation, Role: role}); err != nil {
+	if err := s.options.Manager.ReconcileInterrupted(execution.Identity{Owner: owner, RequestID: state.RequestID, Generation: state.Generation, Role: "assistant"}); err != nil {
 		return err
 	}
 	return s.Usage.ClearWaitForTurn(ctx, owner, state.RequestID)

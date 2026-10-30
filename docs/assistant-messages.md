@@ -125,7 +125,7 @@ size. Additional messages and arrivals during execution remain for the next turn
 | Category | Group | Processing role |
 | --- | --- | --- |
 | User input | One assistant's pending user messages, in receipt order | Main |
-| Runtime notifications | One assistant's pending task outcomes and plugin events, in receipt order | Summary |
+| Runtime notifications | One assistant's pending task outcomes and plugin events, in receipt order | Main |
 | Agent correspondence | Owning recipient and full sender address | Owning assistant conversation |
 
 User batch selection commits all original projections, queue removal and turn
@@ -135,7 +135,7 @@ user texts together. Retries do not resubmit any member. Uncertain started batch
 remain fenced during restart/recovery, while unstarted queued inputs are retained.
 
 Agent delivery membership is journaled in `agent_delivery_items`, a binding over
-the shared inbox rather than another queue. The notification role processes
+the shared inbox rather than another queue. Main processes
 background updates and continues related work
 within existing authorization using only supplied tools. It replies only with a
 useful result, an unresolved blocker or a needed user decision; otherwise it ends

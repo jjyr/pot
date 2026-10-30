@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/protocol"
 )
@@ -14,6 +15,23 @@ import (
 //
 //go:embed assets/main_prompt.txt
 var MainPrompt string
+
+// Canonical task execution instructions, independent of the owner's policy.
+//
+//go:embed assets/task_prompt.txt
+var TaskPrompt string
+
+// PromptForRole selects product instructions before the generic Agent runs.
+func PromptForRole(role core.ExecutionRole) string {
+	switch role {
+	case core.Worker:
+		return TaskPrompt
+	case core.Main:
+		return MainPrompt
+	default:
+		return ""
+	}
+}
 
 const ResultPrefix = "pot-result:"
 
@@ -53,7 +71,7 @@ func (d Driver) Serve(ctx context.Context, input <-chan protocol.SendMessage) er
 				result.Err = errors.New("configure an assistant before sending messages")
 			} else {
 				identity := d.Services.Identity(request)
-				if identity.Owner == "" || identity.RequestID != request.RequestID || identity.Generation == 0 || (identity.Role != "assistant" && identity.Role != "summary") {
+				if identity.Owner == "" || identity.RequestID != request.RequestID || identity.Generation == 0 || identity.Role != "assistant" {
 					result.Err = errors.New("invalid assistant execution identity")
 				} else {
 					_, result = d.Manager.Execute(ctx, identity, func(runCtx context.Context) execution.Result { return d.Services.Execute(runCtx, request) })

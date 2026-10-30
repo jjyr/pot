@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 
@@ -12,7 +13,7 @@ import (
 
 // initializeWelcome commits the transcript and model checkpoint with the initial
 // conversation marker. It emits no unread notification and makes no model call.
-func initializeWelcome(tx *sql.Tx, options ConversationOptions) error {
+func initializeWelcome(ctx context.Context, store *storage.Store, tx *sql.Tx, options ConversationOptions) error {
 	message := protocol.Message{ID: storage.ID(), ConversationID: options.ConversationID, Role: protocol.Assistant, Text: options.InitialWelcome, Status: protocol.Complete, CreatedAtMS: storage.Now()}
 	if err := message.Validate(); err != nil {
 		return err
@@ -37,6 +38,5 @@ func initializeWelcome(tx *sql.Tx, options ConversationOptions) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec("INSERT INTO metadata VALUES (?,?)", ContextKey, string(checkpoint))
-	return err
+	return store.SaveContextTx(ctx, tx, checkpoint)
 }

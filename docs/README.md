@@ -9,6 +9,7 @@ Code defines actual behavior.
 | Deployment, resource APIs and web-ui-server | [Deployment](deployment.md) |
 | Linux server image, persistent volumes and Docker isolation | [Docker](docker.md) |
 | Local updates, interruption confirmation and release signing | [Updates](updates.md) |
+| Append-only model context, compression and recovery | [Session rollouts](session-rollouts.md) |
 | Database schemas, version history and automatic upgrades | [Database migrations](database-migrations.md) |
 | Build, test and release | [Development](development.md) |
 | UI implementation rules and behavioral validation | [UI development](ui-development.md) |

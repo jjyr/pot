@@ -303,7 +303,7 @@ func (s *liveStream) Read(data []byte) (int, error) {
 	}
 	return n, err
 }
-func RunLive(ctx context.Context, scenario Scenario, directory string, connection *DeepSeekConnection, limits LiveLimits, composer agent.Composer) (Report, error) {
+func RunLive(ctx context.Context, scenario Scenario, directory string, connection *DeepSeekConnection, limits LiveLimits, composer agent.Composer, rolePrompt string) (Report, error) {
 	transport, err := connection.configure(&scenario, limits)
 	if err != nil {
 		return Report{}, err
@@ -314,7 +314,7 @@ func RunLive(ctx context.Context, scenario Scenario, directory string, connectio
 	}
 	services := &liveServices{connection: connection, directory: directory, transport: transport, budget: budget, client: &http.Client{Timeout: time.Duration(scenario.DeadlineMS) * time.Millisecond, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	defer services.Close()
-	return Run(ctx, scenario, directory, RunOptions{Composer: composer, Services: services, Mode: "native_policy_live", Transport: transport})
+	return Run(ctx, scenario, directory, RunOptions{RolePrompt: rolePrompt, Composer: composer, Services: services, Mode: "native_policy_live", Transport: transport})
 }
 
 func liveHTTPClient(timeout time.Duration) *http.Client {

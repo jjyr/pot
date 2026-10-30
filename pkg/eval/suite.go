@@ -94,6 +94,7 @@ func CacheScenarios() []Scenario {
 }
 
 type nodeRunner struct {
+	rolePrompt string
 	composer   agent.Composer
 	connection *DeepSeekConnection
 	budgets    []*LiveBudget
@@ -101,6 +102,7 @@ type nodeRunner struct {
 
 func (r nodeRunner) node(ctx context.Context, s Scenario, path string, maxRequests uint64, options RunOptions) (Report, error) {
 	options.Composer = r.composer
+	options.RolePrompt = r.rolePrompt
 	if r.connection == nil {
 		return Run(ctx, s, path, options)
 	}
@@ -263,19 +265,19 @@ func runTree(ctx context.Context, r nodeRunner, path string) (TreeReport, error)
 	result.Limits = budget.Snapshot()
 	return result, nil
 }
-func RunTree(ctx context.Context, path string, connection *DeepSeekConnection, composer agent.Composer) (TreeReport, error) {
-	result, err := runTree(ctx, nodeRunner{composer: composer, connection: connection}, path)
+func RunTree(ctx context.Context, path string, connection *DeepSeekConnection, composer agent.Composer, rolePrompt string) (TreeReport, error) {
+	result, err := runTree(ctx, nodeRunner{rolePrompt: rolePrompt, composer: composer, connection: connection}, path)
 	if err == nil {
 		err = WriteJSON(filepath.Join(path, "summary.json"), result)
 	}
 	return result, err
 }
-func RunSuite(ctx context.Context, path string, connection *DeepSeekConnection, composer agent.Composer) (map[string]any, error) {
+func RunSuite(ctx context.Context, path string, connection *DeepSeekConnection, composer agent.Composer, rolePrompt string) (map[string]any, error) {
 	if err := os.Mkdir(path, 0700); err != nil {
 		return nil, err
 	}
 	budget, _ := NewLiveBudget(LiveLimits{22, 50000}, 300*time.Second)
-	r := nodeRunner{composer: composer, connection: connection, budgets: []*LiveBudget{budget}}
+	r := nodeRunner{rolePrompt: rolePrompt, composer: composer, connection: connection, budgets: []*LiveBudget{budget}}
 	mode := "deterministic"
 	if connection != nil {
 		mode = "live"

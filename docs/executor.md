@@ -28,7 +28,13 @@ Protected launches require packaged Node/SRT assets and a confined workspace.
 Workspace/project files are writable. System libraries, selected installation
 roots and the immutable plugin bundle are readable; unrelated user directories
 and Runtime state are excluded. The launcher itself must not be inside a workload
-write root. It generates a private home, temp and cache directory for each launch.
+write root. It generates a private temporary directory for each launch. Commands inherit the
+service account HOME; Pot does not redirect HOME to its data root or set Go, npm,
+XDG or other toolchain cache locations. Filesystem permissions still apply: an
+inherited HOME does not grant access to that directory, and protected commands
+may fail when their toolchain defaults require an ungranted cache or config path.
+Use an explicitly authorized execution environment or project configuration; Pot
+does not silently widen access or substitute a cache directory.
 Do not interpret a writable workspace as data-loss protection.
 System read roots are selected by the execution OS before checking path existence.
 macOS installation roots and Linux-specific CA, font and browser configuration

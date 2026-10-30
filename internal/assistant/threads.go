@@ -13,7 +13,6 @@ import (
 const (
 	ProfileKey = "agent.profiles.v1"
 	ThreadKey  = "thread"
-	ContextKey = "thread.context"
 )
 const emptyContext = `{"type":"context","version":2,"messages":[]}`
 
@@ -89,7 +88,7 @@ func InitializeThread(ctx context.Context, store *storage.Store, owner string, c
 		if _, err = tx.ExecContext(ctx, "INSERT INTO metadata VALUES (?,?)", ThreadKey, string(body)); err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO metadata VALUES (?,?) ON CONFLICT(key) DO NOTHING", ContextKey, emptyContext); err != nil {
+		if err = store.EnsureContextTx(ctx, tx, json.RawMessage(emptyContext)); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, "INSERT INTO metadata VALUES ('agent.setup.pending','false') ON CONFLICT(key) DO UPDATE SET value='false'")
@@ -101,7 +100,7 @@ func AssignInitial(ctx context.Context, store *storage.Store, config core.Resolv
 		return err
 	}
 	return storage.Transaction(ctx, store.DB(), func(tx *sql.Tx) error {
-		var raw, contextBody string
+		var raw string
 		if err := tx.QueryRowContext(ctx, "SELECT value FROM metadata WHERE key=?", ThreadKey).Scan(&raw); err != nil {
 			return err
 		}
@@ -109,7 +108,8 @@ func AssignInitial(ctx context.Context, store *storage.Store, config core.Resolv
 		if err != nil {
 			return err
 		}
-		if err := tx.QueryRowContext(ctx, "SELECT value FROM metadata WHERE key=?", ContextKey).Scan(&contextBody); err != nil {
+		contextBody, err := store.LoadContextTx(ctx, tx)
+		if err != nil {
 			return err
 		}
 		if err := storage.CheckContext(json.RawMessage(contextBody)); err != nil {

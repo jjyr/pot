@@ -50,6 +50,8 @@ func (s *Service) openTasks() error {
 		return err
 	}
 	s.TaskRuns = &tasks.Executor{Journal: s.RunJournal, Executions: s.options.Manager, Context: s.ctx, Prepare: s.prepareTask}
+	s.rolloutCompression = newRolloutCompressor(s.ctx, s.Registry.CompressRolloutBatch, s.RunJournal.CompressRolloutBatch)
+	s.RunJournal.SetOnFinished(s.rolloutCompression.trigger)
 	s.Tasks, err = tasks.Open(s.tasksDB, tasks.Options{OwnerAvailable: s.assistantAvailable, NodeID: s.options.RuntimeID, Executor: s.TaskRuns, ResolveModel: s.selectTask, ValidateRequirements: s.validateTaskRequirements, AdmitModel: s.admitTaskModel, AwaitingApproval: s.taskAwaitingApproval, PublishHook: s.publishHook, OutcomesChanged: func() { s.Changes.Notify("task-outcomes") }, PrepareOutcome: func(ctx context.Context, record tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
 		return s.prepareTaskOutcome(ctx, record, event)
 	}})

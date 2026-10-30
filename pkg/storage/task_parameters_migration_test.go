@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -17,7 +18,13 @@ func TestTaskParametersMigration(t *testing.T) {
 					t.Fatal(err)
 				}
 				paths := taskDefaultMigrationPaths(t, kind)
-				prior := paths[:len(paths)-1]
+				var prior []string
+				for _, path := range paths {
+					if strings.HasSuffix(path, "_task_parameters.sql") {
+						break
+					}
+					prior = append(prior, path)
+				}
 				if skipped {
 					prior = prior[:1]
 				}

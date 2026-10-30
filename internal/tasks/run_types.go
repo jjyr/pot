@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
+	"github.com/jjyr/pot/pkg/rollout"
 	"strings"
 )
 
@@ -148,6 +149,7 @@ type Run struct {
 	FinishedAtMS     int64           `json:"finished_at_ms"`
 	Result           *Terminal       `json:"result"`
 	Context          json.RawMessage `json:"context,omitempty"`
+	RolloutRef       *rollout.Ref    `json:"rollout_ref,omitempty"`
 	EventSequence    uint64          `json:"event_sequence"`
 	Sequence         uint64          `json:"sequence"`
 	CleanupConfirmed bool            `json:"cleanup_confirmed"`

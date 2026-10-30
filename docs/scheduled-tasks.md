@@ -142,7 +142,7 @@ and recovery fences; the Worker is not relaunched locally.
 
 Scheduled and ordinary results use the same bounded summary batches and durable
 reply acknowledgment. Policy-excluded outcomes remain in the inbox as `suppressed`
-without a model call. Accepted summary execution alone does not acknowledge an
+without a model call. Accepted background notification execution alone does not acknowledge an
 outcome. See [Hooks](hooks.md) and [Agent messages](assistant-messages.md#completion-events).
 
 Workers execute independently. They may message their owner when coordination is

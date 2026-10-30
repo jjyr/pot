@@ -41,6 +41,18 @@ func TestTaskResultExecutesCommandAndImportsTaskAvatar(t *testing.T) {
 			batchReply(w, "Created avatar.png")
 			return
 		}
+		found := false
+		for _, active := range s.options.Manager.Snapshot() {
+			if strings.HasPrefix(active.RequestID, "pot-result-") {
+				found = true
+				if active.Role != "assistant" {
+					t.Errorf("background notification execution role = %q", active.Role)
+				}
+			}
+		}
+		if !found {
+			t.Error("notification has no admitted assistant execution")
+		}
 		names := map[string]bool{}
 		for _, tool := range body.Tools {
 			names[tool.Function.Name] = true

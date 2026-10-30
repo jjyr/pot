@@ -129,14 +129,11 @@ func (c *Conversation) ReconcileRecovery(ctx context.Context, state RecoveryStat
 			return err
 		}
 	}
-	// Event, checkpoint and admission fence change share one SQLite transaction.
+	// Event, durable rollout reference and admission fence share one SQLite transaction.
 	receipt, _ := json.Marshal(recoveryReceipt{RequestID: state.RequestID, UserMessageID: state.UserMessageID, Generation: state.Generation, BootID: state.BootID})
 	retry, _ := json.Marshal(c.recovery)
 	metadata := map[string]string{"conversation.turn": "null", "conversation.blocked": "false", "conversation.recovery": "null", "conversation.retry": string(retry), "conversation.recovered." + state.RequestID: string(receipt)}
-	if len(recovered) > 0 {
-		metadata["thread.context"] = string(recovered)
-	}
-	event, err := c.store.AppendEvent(ctx, protocol.Event{Type: "turn"}, metadata)
+	event, err := c.store.AppendEventWithContext(ctx, protocol.Event{Type: "turn"}, metadata, recovered)
 	if err != nil {
 		return err
 	}

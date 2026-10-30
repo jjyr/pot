@@ -83,20 +83,19 @@ func (g *EventGate) Finish() Outcome {
 }
 
 type TurnRequest struct {
-	Inputs      []ConversationInput
-	Attachments []Attachment
-	RequestID   string
-	Text        string
+	// Notification classifies background input as reference data, independent of agent role.
+	Notification bool
+	Inputs       []ConversationInput
+	Attachments  []Attachment
+	RequestID    string
+	Text         string
 }
 type ExecutionRole string
 
 const (
-	Main    ExecutionRole = "main"
-	Worker  ExecutionRole = "worker"
-	Summary ExecutionRole = "summary"
+	Main   ExecutionRole = "main"
+	Worker ExecutionRole = "worker"
 )
-
-func (r ExecutionRole) IsNotification() bool { return r == Summary }
 
 type SkillRoot struct {
 	Path     string
@@ -120,7 +119,9 @@ type ExecutionContext struct {
 	Workspace       string
 	Owner           string
 	Role            ExecutionRole
-	MainPrompt      string
+	// RolePrompt is caller-selected runtime policy, not persisted context.
+	// Main use it in the overridable base; Worker appends it after overrides.
+	RolePrompt string
 }
 type ModelRequest struct {
 	ID           string          `json:"id" required:"true"`

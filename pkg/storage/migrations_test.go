@@ -310,7 +310,7 @@ func TestTaskFinishTimeUpgrade(t *testing.T) {
 			for _, table := range []string{"tasks", "task_run_history", "task_runs"} {
 				path, version := "$.info.finished_at_ms", 14
 				if table == "task_runs" {
-					path, version = "$.finished_at_ms", 8
+					path, version = "$.finished_at_ms", 10
 				}
 				var gotVersion, finish, start int
 				startPath := "$.info.started_at_ms"

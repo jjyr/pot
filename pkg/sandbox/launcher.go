@@ -115,10 +115,8 @@ func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace stri
 	if l.Markers != nil {
 		*l.Markers = processscope.Markers{Allow: markerAllow, Deny: markerDeny}
 	}
-	for _, dir := range []string{"home", "tmp", "cache"} {
-		if err = os.Mkdir(filepath.Join(private, dir), 0700); err != nil {
-			return nil, err
-		}
+	if err = os.Mkdir(filepath.Join(private, "tmp"), 0700); err != nil {
+		return nil, err
 	}
 	request := launch{CWD: cwd, Argv: command.Args, Read: append([]string{workspace, private}, read...), Write: append([]string{workspace, private}, write...), TTY: tty}
 	// The packaged Node distribution supplies node plus npm's relative modules.
@@ -174,11 +172,12 @@ func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace stri
 		}
 	}
 	// The SDK defaults include convenience writes. Deny the real home explicitly
-	// and redirect HOME/cache/temp for every protected workload.
+	// without redirecting toolchain configuration or caches. Only scratch files
+	// use a per-launch temporary directory. HOME does not grant filesystem access.
 	if home, e := os.UserHomeDir(); e == nil && !within(workspace, home) {
 		request.DenyWrite = append(request.DenyWrite, home)
 	}
-	command.Env = ReplaceEnvironment(command.Env, map[string]string{"HOME": filepath.Join(private, "home"), "TMPDIR": filepath.Join(private, "tmp"), "XDG_CACHE_HOME": filepath.Join(private, "cache"), "npm_config_cache": filepath.Join(private, "cache/npm"), "GOCACHE": filepath.Join(private, "cache/go-build")})
+	command.Env = ReplaceEnvironment(command.Env, map[string]string{"TMPDIR": filepath.Join(private, "tmp")})
 	helper := exec.Command(l.Node, filepath.Join(l.Directory, "launcher.mjs"))
 	helper.Dir = cwd
 	helper.Env = append(Environment(), "CLAUDE_CODE_TMPDIR="+filepath.Join(private, "tmp"))
@@ -278,7 +277,7 @@ func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace stri
 // Environment excludes ambient application secrets and startup-code variables.
 func Environment() []string {
 	values := map[string]string{"PATH": defaultExecutablePath(runtime.GOOS), "LANG": "C.UTF-8"}
-	for _, key := range []string{"PATH", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR"} {
+	for _, key := range []string{"HOME", "PATH", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR"} {
 		if value := os.Getenv(key); value != "" {
 			values[key] = value
 		}

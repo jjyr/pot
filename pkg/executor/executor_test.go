@@ -75,6 +75,26 @@ func TestProductHostAdmissionPrecedesStartupAndSanitizesEnvironment(t *testing.T
 	}
 }
 
+func TestProductHostUsesAccountHomeUnlessExplicitlyConfigured(t *testing.T) {
+	accountHome := t.TempDir()
+	t.Setenv("HOME", accountHome)
+	for _, configured := range []string{"", t.TempDir()} {
+		_, r := fixture(t)
+		e := New(Options{Home: configured, Admit: func(uint64) (func(), error) { return func() {}, nil }})
+		r.Operation = "exec_command"
+		r.Args = map[string]any{"cmd": `printf '%s|%s|%s|%s' "$HOME" "${GOCACHE-unset}" "${npm_config_cache-unset}" "${XDG_CACHE_HOME-unset}"`}
+		result, err := e.Execute(context.Background(), r, nil)
+		closeErr := e.Close()
+		want := configured
+		if want == "" {
+			want = accountHome
+		}
+		if err != nil || closeErr != nil || result["stdout"] != want+"|unset|unset|unset" {
+			t.Fatal(result, err, closeErr)
+		}
+	}
+}
+
 func TestSandboxPreparationFailureReportsNoStartedWorkload(t *testing.T) {
 	e, r := fixture(t)
 	r.Mode = "sandbox"

@@ -61,6 +61,7 @@ lines.close();`
 	}
 	command := exec.Command("/bin/sh", "-c", "true")
 	command.Dir = workspace
+	command.Env = []string{"HOME=/account/home", "GOCACHE=/explicit/go-cache", "XDG_CACHE_HOME=/explicit/cache", "npm_config_cache=/explicit/npm", "CARGO_HOME=/explicit/cargo", "TMPDIR=/outside/tmp"}
 	finish, err := (Launcher{Node: node, Directory: sdk, ProtectedPaths: []string{alias, outsideAlias}}).Prepare(context.Background(), command, workspace, nil, nil, false)
 	if err != nil {
 		t.Fatal(err)
@@ -73,6 +74,25 @@ lines.close();`
 	var request launch
 	if err := json.Unmarshal([]byte(command.Args[2]), &request); err != nil {
 		t.Fatal(err)
+	}
+	for _, entry := range []string{"HOME=/account/home", "GOCACHE=/explicit/go-cache", "XDG_CACHE_HOME=/explicit/cache", "npm_config_cache=/explicit/npm", "CARGO_HOME=/explicit/cargo"} {
+		found := false
+		for _, value := range command.Env {
+			found = found || value == entry
+		}
+		if !found {
+			t.Fatalf("sandbox replaced caller toolchain environment: %s", entry)
+		}
+	}
+	for _, value := range command.Env {
+		if value == "TMPDIR=/outside/tmp" {
+			t.Fatal("sandbox scratch directory was not confined")
+		}
+	}
+	for _, path := range append(append([]string{}, request.Read...), request.Write...) {
+		if path == "/account/home" || strings.HasPrefix(path, "/explicit/") {
+			t.Fatalf("environment implicitly granted filesystem access: %s", path)
+		}
 	}
 	canonical, err := filepath.EvalSymlinks(workspace)
 	if err != nil {

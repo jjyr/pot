@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/pkg/composition"
 	"github.com/jjyr/pot/pkg/eval"
 )
@@ -61,7 +62,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		}
 		var report eval.Report
 		if args[0] == "run" {
-			report, err = eval.Run(ctx, scenario, args[2], eval.RunOptions{Composer: composer})
+			report, err = eval.Run(ctx, scenario, args[2], eval.RunOptions{Composer: composer, RolePrompt: assistant.TaskPrompt})
 		} else {
 			path := ""
 			if len(args) == 4 {
@@ -71,7 +72,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 			if e != nil {
 				return e
 			}
-			report, err = eval.RunLive(ctx, scenario, args[2], c, eval.DefaultLiveLimits(), composer)
+			report, err = eval.RunLive(ctx, scenario, args[2], c, eval.DefaultLiveLimits(), composer, assistant.TaskPrompt)
 		}
 		result = report
 		success = report.Success
@@ -106,12 +107,12 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		}
 		if args[0] == "suite" {
 			var report map[string]any
-			report, err = eval.RunSuite(ctx, args[2], c, composer)
+			report, err = eval.RunSuite(ctx, args[2], c, composer, assistant.TaskPrompt)
 			result = report
 			success = report["success"] == true
 		} else {
 			var report eval.TreeReport
-			report, err = eval.RunTree(ctx, args[2], c, composer)
+			report, err = eval.RunTree(ctx, args[2], c, composer, assistant.TaskPrompt)
 			result = report
 			success = report.Success
 		}

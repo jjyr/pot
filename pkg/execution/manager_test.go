@@ -104,3 +104,17 @@ func TestMaintenanceIsRecheckedAtAdmission(t *testing.T) {
 		t.Fatal("work crossed the maintenance admission barrier", called, result)
 	}
 }
+
+func TestRemovedSummaryRoleCannotEnterManager(t *testing.T) {
+	m, err := New("runtime", "boot", Limits{1, 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Stop()
+	id := identity("notification")
+	id.Role = "summary"
+	_, result := m.Execute(context.Background(), id, func(context.Context) Result { t.Fatal("obsolete execution role admitted"); return Result{} })
+	if result.Err == nil || len(m.Snapshot()) != 0 {
+		t.Fatal("obsolete role was accepted", result)
+	}
+}

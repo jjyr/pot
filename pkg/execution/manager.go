@@ -99,7 +99,7 @@ func (m *Manager) pumpLocked() {
 	}
 }
 func (m *Manager) register(ctx context.Context, id Identity) (*entry, error) {
-	if id.Owner == "" || id.RequestID == "" || (id.Role != "assistant" && id.Role != "task" && id.Role != "summary") {
+	if id.Owner == "" || id.RequestID == "" || (id.Role != "assistant" && id.Role != "task") {
 		return nil, errors.New("invalid execution identity")
 	}
 	if err := ctx.Err(); err != nil {

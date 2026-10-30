@@ -211,7 +211,7 @@ func TestValidatorAcceptsRestartOfSameIncompleteMessage(t *testing.T) {
 }
 
 func TestSmallSuiteRunsMemoryCacheDelegationAndFaults(t *testing.T) {
-	report, err := RunSuite(context.Background(), filepath.Join(t.TempDir(), "suite"), nil, nil)
+	report, err := RunSuite(context.Background(), filepath.Join(t.TempDir(), "suite"), nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -249,7 +249,7 @@ package explicitly declaring `event_routing`. The internal `CommitBackground` ad
 accepts this trusted host binding and calls the same `inbox.EnqueueTx` primitive
 used by `send_message` and task-result hooks, inside the checkpoint transaction.
 It is not a model tool or a public event ingestion API. External text enters the
-existing assistant conversation's notification summary lane as reference data.
+existing assistant conversation's assistant lane as reference data.
 Plugin events grant no tool authority and provide summaries/suggestions only. A
 mixed batch may also recover eligible failed Tasks through batch-scoped tools;
 plugin content cannot select or authorize recovery. These turns cannot reply externally,

@@ -9,18 +9,23 @@ import (
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
+	"github.com/jjyr/pot/pkg/rollout"
 	"github.com/jjyr/pot/pkg/storage"
+	"sync"
 	"time"
 )
 
-const SchemaVersion = 8
+const SchemaVersion = 10
 
 type Journal struct {
-	db        *sql.DB
-	NodeID    string
-	BootID    string
-	changes   core.Changes
-	resources storage.ResourceFiles
+	db               *sql.DB
+	rolloutDirectory string
+	NodeID           string
+	BootID           string
+	changes          core.Changes
+	resources        storage.ResourceFiles
+	finishedMu       sync.RWMutex
+	onFinished       func()
 }
 
 // OpenJournal borrows an already migrated Tasks database. The caller owns Close.
@@ -32,34 +37,24 @@ func OpenJournal(db *sql.DB, cache, nodeID, bootID string) (*Journal, error) {
 		return nil, fmt.Errorf("run journal requires a Tasks database")
 	}
 
-	j := &Journal{db: db, NodeID: nodeID, BootID: bootID, resources: storage.ResourceFiles{Root: cache}}
-	err := storage.Transaction(context.Background(), db, func(tx *sql.Tx) error {
-		rows, err := tx.Query("SELECT control_id,task_id,run_id,body FROM task_runs")
+	directory, err := taskRolloutDirectory(db)
+	if err != nil {
+		return nil, err
+	}
+	j := &Journal{db: db, rolloutDirectory: directory, NodeID: nodeID, BootID: bootID, resources: storage.ResourceFiles{Root: cache}}
+	err = storage.Transaction(context.Background(), db, func(tx *sql.Tx) error {
+		rows, err := tx.Query("SELECT control_id,task_id,run_id FROM task_runs ORDER BY control_id,task_id,CAST(json_extract(body,'$.sequence') AS INTEGER)")
 		if err != nil {
 			return err
 		}
-		runs := []Run{}
+		var keys [][3]string
 		for rows.Next() {
-			var raw string
-			var control, task, runID string
-			if err := rows.Scan(&control, &task, &runID, &raw); err != nil {
+			var key [3]string
+			if err := rows.Scan(&key[0], &key[1], &key[2]); err != nil {
 				rows.Close()
 				return err
 			}
-			var run Run
-			if err := core.DecodeJSON([]byte(raw), &run); err != nil {
-				rows.Close()
-				return err
-			}
-			if err := j.validateRun(run); err != nil {
-				rows.Close()
-				return err
-			}
-			if run.Launch.ControlID != control || run.Launch.TaskID != task || run.Launch.RunID != runID {
-				rows.Close()
-				return fmt.Errorf("task journal key identity mismatch")
-			}
-			runs = append(runs, run)
+			keys = append(keys, key)
 		}
 		if err := rows.Err(); err != nil {
 			rows.Close()
@@ -68,10 +63,51 @@ func OpenJournal(db *sql.DB, cache, nodeID, bootID string) (*Journal, error) {
 		if err := rows.Close(); err != nil {
 			return err
 		}
-		for _, run := range runs {
+		validatedHeads := map[[2]string]bool{}
+		for _, key := range keys {
+			run, err := readRun(context.Background(), tx, key[0], key[1], key[2])
+			if err != nil {
+				return err
+			}
+			if run == nil {
+				return fmt.Errorf("task run disappeared during startup")
+			}
+			if err := j.validateRun(*run); err != nil {
+				return err
+			}
+			if run.RolloutRef != nil {
+				head, err := readTaskHead(context.Background(), tx, run.Launch.ControlID, run.Launch.TaskID)
+				if err != nil {
+					return err
+				}
+				if head.IsZero() {
+					return fmt.Errorf("unsupported prototype per-run rollout; task session head missing")
+				}
+				if head.Sequence < run.RolloutRef.Sequence || head.Sequence == run.RolloutRef.Sequence && head.Hash != run.RolloutRef.Hash {
+					return fmt.Errorf("task session head precedes historical checkpoint")
+				}
+				identity := [2]string{run.Launch.ControlID, run.Launch.TaskID}
+				if !validatedHeads[identity] {
+					if _, err := rollout.Load(j.rolloutPath(*run), head); err != nil {
+						return fmt.Errorf("load task session head: %w", err)
+					}
+					validatedHeads[identity] = true
+				}
+				if err := j.hydrateRun(run); err != nil {
+					return err
+				}
+			}
+			if len(run.Context) > 0 && run.RolloutRef == nil {
+				if err := j.persistRunCheckpoint(context.Background(), tx, run, true); err != nil {
+					return err
+				}
+			}
+			if err := ensureTaskSession(context.Background(), tx, *run); err != nil {
+				return err
+			}
 			if !run.Phase.Ended() && run.BootID != bootID {
 				run.Phase = RecoveryRequired
-				if err := writeRun(context.Background(), tx, run); err != nil {
+				if err := writeRun(context.Background(), tx, *run); err != nil {
 					return err
 				}
 			}
@@ -79,6 +115,9 @@ func OpenJournal(db *sql.DB, cache, nodeID, bootID string) (*Journal, error) {
 		return nil
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := j.reclaimMigratedRollouts(context.Background()); err != nil {
 		return nil, err
 	}
 	return j, nil
@@ -97,6 +136,22 @@ func (j *Journal) CheckPolicyCleanup(ctx context.Context) error {
 	return nil
 }
 func (j *Journal) Subscribe() *core.Subscription { return j.changes.Subscribe() }
+
+// SetOnFinished installs a lightweight wake-up callback. It runs outside the
+// database transaction, once per newly committed terminal transition.
+func (j *Journal) SetOnFinished(fn func()) {
+	j.finishedMu.Lock()
+	j.onFinished = fn
+	j.finishedMu.Unlock()
+}
+func (j *Journal) notifyFinished() {
+	j.finishedMu.RLock()
+	fn := j.onFinished
+	j.finishedMu.RUnlock()
+	if fn != nil {
+		fn()
+	}
+}
 func (j *Journal) validateRun(run Run) error {
 	if run.SchemaVersion != SchemaVersion || !core.Identifier(run.BootID) {
 		return fmt.Errorf("invalid run journal identity/schema")
@@ -148,6 +203,9 @@ func readRun(ctx context.Context, q querier, control, task, run string) (*Run, e
 	return &value, nil
 }
 func writeRun(ctx context.Context, tx *sql.Tx, run Run) error {
+	if run.RolloutRef != nil {
+		run.Context = nil
+	}
 	raw, err := json.Marshal(run)
 	if err != nil {
 		return err
@@ -156,7 +214,11 @@ func writeRun(ctx context.Context, tx *sql.Tx, run Run) error {
 	return err
 }
 func (j *Journal) Inspect(ctx context.Context, control, task, run string) (*Run, error) {
-	return readRun(ctx, j.db, control, task, run)
+	value, err := readRun(ctx, j.db, control, task, run)
+	if err == nil {
+		err = j.hydrateRun(value)
+	}
+	return value, err
 }
 func (j *Journal) Accept(ctx context.Context, launch Launch) (value Run, err error) {
 	err = storage.Transaction(ctx, j.db, func(tx *sql.Tx) error { var e error; value, e = j.acceptTx(ctx, tx, launch); return e })
@@ -178,6 +240,9 @@ func (j *Journal) acceptTx(ctx context.Context, tx *sql.Tx, launch Launch) (valu
 		if old != nil {
 			if old.LaunchDigest != hash {
 				return fmt.Errorf("launch conflicts with accepted immutable input")
+			}
+			if err := j.hydrateRun(old); err != nil {
+				return err
 			}
 			value = *old
 			return nil
@@ -230,11 +295,14 @@ func (j *Journal) acceptTx(ctx context.Context, tx *sql.Tx, launch Launch) (valu
 			sequence = previous.Sequence + 1
 			eventSequence = previous.EventSequence
 			if previous.Launch.Generation == launch.Generation && previous.Launch.ExecutionTarget == launch.ExecutionTarget && previous.Launch.Config.SpecHash == launch.Config.SpecHash {
+				if err := j.hydrateRun(previous); err != nil {
+					return err
+				}
 				checkpoint = previous.Context
 			}
 		}
 		value = Run{SchemaVersion: SchemaVersion, Launch: launch, LaunchDigest: hash, BootID: j.BootID, Phase: Accepted, Context: checkpoint, Sequence: sequence, EventSequence: eventSequence}
-		return writeRun(ctx, tx, value)
+		return j.persistRun(ctx, tx, &value)
 	})(tx)
 	return value, err
 }
@@ -246,6 +314,7 @@ func (j *Journal) changeTx(ctx context.Context, control, task, run string, fn fu
 }
 func (j *Journal) changeTxTopic(ctx context.Context, control, task, run, topic string, fn func(*sql.Tx, *Run) error) error {
 	changed := false
+	finished := false
 	err := storage.Transaction(ctx, j.db, func(tx *sql.Tx) error {
 		value, err := readRun(ctx, tx, control, task, run)
 		if err != nil {
@@ -254,6 +323,7 @@ func (j *Journal) changeTxTopic(ctx context.Context, control, task, run, topic s
 		if value == nil {
 			return fmt.Errorf("task run not accepted")
 		}
+		wasEnded := value.Phase.Ended()
 		before, _ := json.Marshal(value)
 		if err := fn(tx, value); err != nil {
 			return err
@@ -263,10 +333,14 @@ func (j *Journal) changeTxTopic(ctx context.Context, control, task, run, topic s
 			return nil
 		}
 		changed = true
-		return writeRun(ctx, tx, *value)
+		finished = !wasEnded && value.Phase.Ended()
+		return j.persistRun(ctx, tx, value)
 	})
 	if err == nil && changed {
 		j.changes.Notify(topic)
+		if finished {
+			j.notifyFinished()
+		}
 	}
 	return err
 }
@@ -305,7 +379,8 @@ func (j *Journal) Finish(ctx context.Context, control, task, run string, result 
 	if err != nil {
 		return err
 	}
-	return storage.Transaction(ctx, j.db, func(tx *sql.Tx) error {
+	finished := false
+	err = storage.Transaction(ctx, j.db, func(tx *sql.Tx) error {
 		value, err := readRun(ctx, tx, control, task, run)
 		if err != nil {
 			return err
@@ -327,13 +402,24 @@ func (j *Journal) Finish(ctx context.Context, control, task, run string, result 
 		value.FinishedAtMS = time.Now().UnixMilli()
 		value.Result = &result
 		value.CleanupConfirmed = true
-		return writeRun(ctx, tx, *value)
+		if err := j.persistRun(ctx, tx, value); err != nil {
+			return err
+		}
+		finished = true
+		return nil
 	})
+	if err == nil && finished {
+		j.notifyFinished()
+	}
+	return err
 }
 func (j *Journal) Wait(ctx context.Context, control, task, run, detail string) error {
 	return j.changeTx(ctx, control, task, run, func(tx *sql.Tx, value *Run) error {
 		if value.Phase != Running || value.BootID != j.BootID {
 			return fmt.Errorf("run is fenced")
+		}
+		if err := j.hydrateRun(value); err != nil {
+			return err
 		}
 		if len(value.Context) > 0 {
 			var state agent.Checkpoint
@@ -345,6 +431,11 @@ func (j *Journal) Wait(ctx context.Context, control, task, run, detail string) e
 			}
 		}
 
+		// Context was loaded only to validate the waiting boundary.
+		// Preserve its committed reference without adding another snapshot.
+		if value.RolloutRef != nil {
+			value.Context = nil
+		}
 		value.Phase = Waiting
 		value.WaitDetail = detail
 		value.CleanupConfirmed = true
@@ -381,6 +472,9 @@ func (j *Journal) ReconcileRecovered(ctx context.Context, control, task, run str
 			return fmt.Errorf("run does not require recovery")
 		}
 
+		if err := j.hydrateRun(value); err != nil {
+			return err
+		}
 		if len(value.Context) > 0 {
 			vision := false
 			if catalog := value.Launch.Config.Params.Agent.ModelCatalog; catalog != nil {

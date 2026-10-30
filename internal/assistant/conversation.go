@@ -36,6 +36,9 @@ type RunOptions struct {
 	Settle             func(context.Context) error
 }
 type ConversationOptions struct {
+	// OnTurnFinished signals background maintenance after durable turn retirement.
+	// It must not block or reenter the conversation.
+	OnTurnFinished func()
 	// Request-local configuration and batching; callbacks must not reenter this conversation.
 	ResolveTurnConfig func(context.Context, string, core.ResolvedSpec) (core.ResolvedSpec, error)
 	BatchKey          func(context.Context, string) (string, error)
@@ -179,7 +182,7 @@ func OpenConversation(path string, options ConversationOptions) (*Conversation, 
 		}
 		if !initialized {
 			if options.InitialWelcome != "" {
-				if err := initializeWelcome(tx, options); err != nil {
+				if err := initializeWelcome(options.Context, store, tx, options); err != nil {
 					return err
 				}
 			}
@@ -531,7 +534,7 @@ func (c *Conversation) Send(ctx context.Context, request protocol.SendMessage) (
 }
 
 // Report atomically claims an automatic result summary using a stable ID. It is
-// system transcript data and enters the shared summary lane. Control may supply
+// system transcript data and enters the shared assistant lane. Control may supply
 // recovery tools for delivered failures.
 func (c *Conversation) Report(ctx context.Context, id, text string) (protocol.SendMessageAccepted, error) {
 	if !strings.HasPrefix(id, "pot-result-") {
@@ -695,6 +698,7 @@ func (c *Conversation) Cancel(ctx context.Context, request protocol.CancelTurn) 
 				return err
 			}
 		}
+		c.notifyTurnFinishedLocked()
 		return c.startNextUserLocked(ctx)
 	}
 	metadata := map[string]string{key: request.UserMessageID}
@@ -821,6 +825,9 @@ func (c *Conversation) Close() error {
 		if c.turn != nil && c.turn.State == "queued" {
 			c.turn = nil
 			c.closeErr = c.appendTurnLocked(context.Background())
+			if c.closeErr == nil {
+				c.notifyTurnFinishedLocked()
+			}
 		}
 		c.mu.Unlock()
 		c.closeErr = errors.Join(c.closeErr, c.store.Close())
@@ -882,11 +889,7 @@ func (c *Conversation) Identity(request protocol.SendMessage) execution.Identity
 	if c.turn != nil && c.turn.Request.RequestID == request.RequestID {
 		generation = c.turn.Generation
 	}
-	role := "assistant"
-	if strings.HasPrefix(request.RequestID, "pot-result-") {
-		role = "summary"
-	}
-	return execution.Identity{Owner: c.options.Owner, RequestID: request.RequestID, Generation: generation, Role: role}
+	return execution.Identity{Owner: c.options.Owner, RequestID: request.RequestID, Generation: generation, Role: "assistant"}
 }
 func (c *Conversation) Failed(err error) { c.mu.Lock(); c.lastError = err; c.mu.Unlock() }
 func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage) execution.Result {
@@ -964,7 +967,8 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 	c.finalizing = false
 	c.mu.Unlock()
 	defer cancel()
-	options, err := c.options.Prepare(runCtx, thread, core.TurnRequest{RequestID: request.RequestID, Text: inputText, Attachments: inputAttachments, Inputs: modelInputs})
+	turnRequest := core.TurnRequest{RequestID: request.RequestID, Text: inputText, Attachments: inputAttachments, Inputs: modelInputs, Notification: strings.HasPrefix(request.RequestID, "pot-result-")}
+	options, err := c.options.Prepare(runCtx, thread, turnRequest)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return execution.Result{Phase: execution.Cancelled, Err: err}
@@ -973,9 +977,6 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 	}
 	if options.Execution.Owner != thread.Owner || options.Services == nil || options.Cleanup == nil {
 		return execution.Result{Phase: execution.Failed, Err: errors.New("invalid fixed assistant execution ports")}
-	}
-	if strings.HasPrefix(request.RequestID, "pot-result-") {
-		options.Execution.Role = core.Summary
 	}
 	binding := &turnFeedback{baseSpecHash: baseSpecHash, conversation: c, thread: thread, request: request, options: options, gate: core.NewEventGate(thread.Generation, request.RequestID), toolMessages: map[string]string{}}
 	cleanup := func(ctx context.Context, execution core.ExecutionContext, abort bool) error {
@@ -1007,7 +1008,7 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 		}
 	}
 	loop.ResolveReferences = binding.resolveReferences
-	err = loop.Execute(runCtx, options.Execution, thread, core.TurnRequest{RequestID: request.RequestID, Text: inputText, Attachments: inputAttachments, Inputs: modelInputs}, resuming, binding.event)
+	err = loop.Execute(runCtx, options.Execution, thread, turnRequest, resuming, binding.event)
 	phase := execution.Succeeded
 	if err != nil {
 		phase = execution.Failed
@@ -1167,6 +1168,7 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 	c.finalizing, c.finishError = false, nil
 	c.lastError = result.Err
 	c.changedLocked()
+	c.notifyTurnFinishedLocked()
 	return c.startNextUserLocked(ctx)
 }
 

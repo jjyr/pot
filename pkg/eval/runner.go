@@ -188,13 +188,14 @@ func number(v any) *uint64 {
 }
 
 type RunOptions struct {
-	Composer  agent.Composer
-	Services  agent.Services
-	Mode      string
-	Transport json.RawMessage
-	Tools     []modelprotocol.ToolDefinition
-	Dispatch  agent.Dispatch
-	Configure func(*agent.Agent)
+	RolePrompt string // Caller-owned product policy; empty for standalone generic evaluations.
+	Composer   agent.Composer
+	Services   agent.Services
+	Mode       string
+	Transport  json.RawMessage
+	Tools      []modelprotocol.ToolDefinition
+	Dispatch   agent.Dispatch
+	Configure  func(*agent.Agent)
 }
 
 func WriteJSON(path string, v any) error {
@@ -336,7 +337,7 @@ func Run(ctx context.Context, s Scenario, directory string, options RunOptions) 
 	runctx, cancel := context.WithTimeout(ctx, time.Duration(s.DeadlineMS)*time.Millisecond)
 	defer cancel()
 	executionErrors := []string{}
-	execution := core.ExecutionContext{Owner: "eval", Role: core.Worker, Data: directory, Workspace: workspace, SkillResources: core.SkillResources{Roots: []core.SkillRoot{}}}
+	execution := core.ExecutionContext{Owner: "eval", Role: core.Worker, RolePrompt: options.RolePrompt, Data: directory, Workspace: workspace, SkillResources: core.SkillResources{Roots: []core.SkillRoot{}}}
 	thread := core.Thread{Owner: "eval", Generation: 1, Config: spec}
 	for i, text := range s.Turns {
 		turn := fmt.Sprintf("turn-%d", i+1)

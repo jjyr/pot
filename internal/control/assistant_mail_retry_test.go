@@ -208,8 +208,8 @@ func TestAcceptedSendSurvivesTranscriptWriteFailureWithoutResend(t *testing.T) {
 		t.Fatal(err)
 	}
 	failed := awaitConversation(t, c, func(p protocol.Snapshot) bool { return p.Turn == nil && p.Continuation != nil })
-	var raw string
-	if err = db.QueryRow("SELECT value FROM metadata WHERE key='thread.context'").Scan(&raw); err != nil {
+	raw, err := readConversationCheckpoint(ctx, db, filepath.Join(s.options.Root, "assistants", "main", "conversation.sqlite"))
+	if err != nil {
 		t.Fatal(err)
 	}
 	var checkpoint agent.Checkpoint

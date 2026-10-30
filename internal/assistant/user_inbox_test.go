@@ -14,7 +14,7 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-func TestUserSteeringDuringSummaryQueuesIndependentMainTurn(t *testing.T) {
+func TestUserSteeringDuringNotificationQueuesIndependentMainTurn(t *testing.T) {
 	ctx := context.Background()
 	entered := make(chan struct{})
 	release := make(chan struct{})
@@ -53,6 +53,22 @@ func TestUserSteeringDuringSummaryQueuesIndependentMainTurn(t *testing.T) {
 		}
 		return replySSE("handled B"), nil
 	}, &cleanup)
+	for _, id := range []string{"pot-result-a", "user-b"} {
+		if identity := c.Identity(protocol.SendMessage{RequestID: id}); identity.Role != "assistant" {
+			t.Fatalf("identity for %s = %s", id, identity.Role)
+		}
+	}
+	prepare := c.options.Prepare
+	c.options.Prepare = func(ctx context.Context, thread core.Thread, request core.TurnRequest) (RunOptions, error) {
+		if request.Notification != strings.HasPrefix(request.RequestID, "pot-result-") {
+			t.Error("Prepare lost notification provenance")
+		}
+		options, err := prepare(ctx, thread, request)
+		if options.Execution.Role != core.Main {
+			t.Error("assistant did not use Main role")
+		}
+		return options, err
+	}
 	if _, err := c.Report(ctx, "pot-result-a", "Task A completed"); err != nil {
 		t.Fatal(err)
 	}

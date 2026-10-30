@@ -115,7 +115,7 @@ func writeConfiguration(ctx context.Context, tx *sql.Tx, state configurationStat
 	_, err = tx.ExecContext(ctx, "INSERT INTO metadata VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", configurationKey, string(body))
 	return err
 }
-func writeConfiguredThread(ctx context.Context, tx *sql.Tx, thread core.Thread) error {
+func writeConfiguredThread(ctx context.Context, store *storage.Store, tx *sql.Tx, thread core.Thread) error {
 	body, err := json.Marshal(thread)
 	if err != nil {
 		return err
@@ -123,7 +123,7 @@ func writeConfiguredThread(ctx context.Context, tx *sql.Tx, thread core.Thread) 
 	if _, err = tx.ExecContext(ctx, "INSERT INTO metadata VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ThreadKey, string(body)); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO metadata VALUES (?,?)", ContextKey, emptyContext); err != nil {
+	if err = store.EnsureContextTx(ctx, tx, json.RawMessage(emptyContext)); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, "INSERT INTO metadata VALUES ('agent.setup.pending','false') ON CONFLICT(key) DO UPDATE SET value='false'")
@@ -188,7 +188,7 @@ func (c *Conversation) QueueConfiguration(ctx context.Context, change Configurat
 	}
 	err = storage.Transaction(ctx, c.store.DB(), func(tx *sql.Tx) error {
 		if nextThread != nil {
-			if err := writeConfiguredThread(ctx, tx, *nextThread); err != nil {
+			if err := writeConfiguredThread(ctx, c.store, tx, *nextThread); err != nil {
 				return err
 			}
 		}
@@ -261,7 +261,7 @@ func (c *Conversation) applyConfigurationBoundaryLocked(ctx context.Context) err
 	next := core.Thread{Owner: c.options.Owner, Generation: generation + 1, Config: spec}
 	state.PendingSpec = nil
 	if err = storage.Transaction(ctx, c.store.DB(), func(tx *sql.Tx) error {
-		if err := writeConfiguredThread(ctx, tx, next); err != nil {
+		if err := writeConfiguredThread(ctx, c.store, tx, next); err != nil {
 			return err
 		}
 		return writeConfiguration(ctx, tx, state)

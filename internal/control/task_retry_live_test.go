@@ -156,7 +156,7 @@ func TestConfiguredModelTaskRecoveryLive(t *testing.T) {
 						if err != nil {
 							return options, err
 						}
-						options.Execution.MainPrompt = string(data)
+						options.Execution.RolePrompt = string(data)
 					}
 				}
 				return options, err

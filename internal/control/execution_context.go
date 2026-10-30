@@ -38,11 +38,11 @@ func (s *Service) ExecutionWorkspace(owner string) (string, error) {
 	return directory, nil
 }
 func (s *Service) prepareExecutionFor(ctx context.Context, owner, workspaceOwner string, target core.ExecutionTarget, worker bool, rules string) (core.ExecutionContext, error) {
-	result := core.ExecutionContext{Owner: owner, Data: s.options.Root, Role: core.Main, MainPrompt: assistant.MainPrompt}
+	result := core.ExecutionContext{Owner: owner, Data: s.options.Root, Role: core.Main}
 	if worker {
 		result.Role = core.Worker
-		result.MainPrompt = ""
 	}
+	result.RolePrompt = assistant.PromptForRole(result.Role)
 	var roots []core.SkillRoot
 
 	if !target.IsLocalTo(s.options.RuntimeID) {

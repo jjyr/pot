@@ -72,7 +72,7 @@ It is not permission to fold future released histories.
 | `control` | `control.sqlite` | Assistant registry, providers, encrypted secrets, integration accounts, Agent Link connections and host access configuration |
 | `tasks` | `tasks.sqlite` | Tasks, receipts, runs, checkpoints, events, workspaces, schedules, inbox, mailbox and plugin checkpoints |
 | `runner` | Retired `runner.sqlite` | Inactive local-run import format; old pre-reset files remain unsupported |
-| `conversation` | Each conversation database | Messages, context, configuration, steering and pending instruction-file exports |
+| `conversation` | Each conversation database | Messages, committed rollout references, configuration, steering and pending instruction-file exports |
 | `machines` | `machines.sqlite` | Autonomous signing identity, labels and archived membership records |
 | `usage` | `usage.sqlite` | Requests, routing, accounting/price snapshots, allowances, tools and compactions |
 | `operations` | `operations.sqlite` | Operation receipts and scope/input bindings |
@@ -307,3 +307,11 @@ chat-record identity. It transfers submitted content and original Blobs into
 jobs referencing those records. Existing delivery states survive without
 dispatch. Locally owned records are protected from business-cache clearing;
 server-only records follow history retention. See [Chat outbox](chat-outbox.md).
+
+Conversation `0005_session_rollouts` stages legacy context snapshots for durable
+JSONL export and tracks space reclamation. Conversation `0006_rollout_activity`
+tracks durable activity so background compression can reject recently resumed
+sessions even when their context file has not changed. Tasks `0016_session_rollouts`
+stages inline checkpoint export; `0017_task_sessions` adds Task-owned session heads
+and upgrades run schema to 10. File export and recovery
+semantics are described in [Session rollouts](session-rollouts.md).

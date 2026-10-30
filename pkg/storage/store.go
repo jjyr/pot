@@ -25,6 +25,7 @@ type Store struct {
 	ReplyCommitted func(protocol.Message)
 	db             *sql.DB
 	directory      string
+	rolloutPath    string
 }
 
 func Open(path string) (*Store, error) {
@@ -36,7 +37,12 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	s := &Store{db: db, directory: filepath.Dir(path)}
+	s := &Store{db: db, directory: filepath.Dir(path), rolloutPath: filepath.Join(filepath.Dir(path), "sessions", strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))+".jsonl")}
+	if err := s.migrateContextRollout(context.Background()); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	// Reopening never replays uncertain model/tool effects. Preserve partial text.
 	messages, err := s.Messages(context.Background())
 	if err == nil {
@@ -76,8 +82,15 @@ func (s *Store) Get(ctx context.Context, key string) (string, bool, error) {
 	return value, err == nil, err
 }
 func (s *Store) Set(ctx context.Context, key, value string) error {
-	_, err := s.db.ExecContext(ctx, "INSERT INTO metadata VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", key, value)
-	return err
+	return Transaction(ctx, s.db, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO metadata VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", key, value); err != nil {
+			return err
+		}
+		if key == "conversation.turn" || key == "conversation.completion" {
+			return touchContextActivity(ctx, tx)
+		}
+		return nil
+	})
 }
 func (s *Store) Messages(ctx context.Context) ([]Message, error) {
 	return s.messages(ctx, "SELECT body FROM messages ORDER BY rowid")
@@ -174,6 +187,12 @@ func (s *Store) SaveWithMutation(ctx context.Context, m Message, mutation func(*
 // AppendEvent atomically persists a non-message state transition and its owner
 // metadata. Message projections must use Save so projection/outbox/event agree.
 func (s *Store) AppendEvent(ctx context.Context, event Event, metadata map[string]string) (Event, error) {
+	return s.AppendEventWithContext(ctx, event, metadata, nil)
+}
+
+// AppendEventWithContext commits recovery admission, its event and the synced
+// checkpoint reference together. The journal tail alone never authorizes work.
+func (s *Store) AppendEventWithContext(ctx context.Context, event Event, metadata map[string]string, checkpoint json.RawMessage) (Event, error) {
 	if event.Type == "message" {
 		return Event{}, errors.New("message events require Save")
 	}
@@ -187,6 +206,14 @@ func (s *Store) AppendEvent(ctx context.Context, event Event, metadata map[strin
 		return Event{}, err
 	}
 	err = Transaction(ctx, s.db, func(tx *sql.Tx) error {
+		if err := touchContextActivity(ctx, tx); err != nil {
+			return err
+		}
+		if len(checkpoint) > 0 {
+			if err := s.SaveContextTx(ctx, tx, checkpoint); err != nil {
+				return err
+			}
+		}
 		for key, value := range metadata {
 			if _, err := tx.ExecContext(ctx, "INSERT INTO metadata VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", key, value); err != nil {
 				return err
@@ -231,6 +258,9 @@ func (s *Store) saveMessages(ctx context.Context, messages []Message, metadata m
 	var events []Event
 	var replies []Message
 	err := Transaction(ctx, s.db, func(tx *sql.Tx) error {
+		if err := touchContextActivity(ctx, tx); err != nil {
+			return err
+		}
 		if mutation != nil {
 			if err := mutation(tx); err != nil {
 				return err
@@ -324,36 +354,6 @@ func CheckContext(body json.RawMessage) error {
 		return errors.New("invalid thread context")
 	}
 	return nil
-}
-func (s *Store) SaveContext(ctx context.Context, body json.RawMessage) error {
-	if err := CheckContext(body); err != nil {
-		return err
-	}
-	return Transaction(ctx, s.db, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, "INSERT INTO context_history(classification,body,at) VALUES ('context',?,?)", string(body), Now()); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx, "INSERT INTO metadata VALUES ('thread.context',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", string(body))
-		return err
-	})
-}
-func (s *Store) LoadContext(ctx context.Context) (json.RawMessage, error) {
-	value, exists, err := s.Get(ctx, "thread.context")
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		_, started, err := s.Get(ctx, "thread")
-		if err != nil {
-			return nil, err
-		}
-		if started {
-			return nil, errors.New("thread context missing; cannot resume with empty history")
-		}
-		return nil, nil
-	}
-	body := json.RawMessage(value)
-	return body, CheckContext(body)
 }
 
 type Rules struct {

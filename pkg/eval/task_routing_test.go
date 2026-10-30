@@ -583,7 +583,7 @@ func routingRun(ctx context.Context, prompt string, rc routingCase, dir string, 
 	loop := &agent.Agent{Services: &routingCappedServices{inner: capture, local: budget, global: global, output: model.OutputCap}, Feedback: fb, Tools: defs, Dispatch: routingDispatch(rc.Tasks, &calls), Cleanup: func(context.Context, core.ExecutionContext, bool) error { return nil }}
 	runctx, cancel := context.WithTimeout(ctx, 150*time.Second)
 	defer cancel()
-	executeErr := loop.Execute(runctx, core.ExecutionContext{Owner: "eval", Role: core.Main, MainPrompt: prompt, Data: dir, Workspace: dir}, core.Thread{Owner: "eval", Generation: 1, Config: resolved}, core.TurnRequest{RequestID: "decision", Text: rc.Input}, false, func(e core.AgentEvent) error { return fb.record("agent", e) })
+	executeErr := loop.Execute(runctx, core.ExecutionContext{Owner: "eval", Role: core.Main, RolePrompt: prompt, Data: dir, Workspace: dir}, core.Thread{Owner: "eval", Generation: 1, Config: resolved}, core.TurnRequest{RequestID: "decision", Text: rc.Input}, false, func(e core.AgentEvent) error { return fb.record("agent", e) })
 	verify := routingVerify(calls, rc)
 	decisionCase := rc
 	decisionCase.RequireGet = ""

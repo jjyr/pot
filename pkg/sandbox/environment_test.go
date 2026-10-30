@@ -38,3 +38,18 @@ func TestEnvironmentPathFallbackAndOverride(t *testing.T) {
 		}
 	}
 }
+
+func TestEnvironmentInheritsHomeWithoutToolchainOverrides(t *testing.T) {
+	t.Setenv("HOME", "/account/home")
+	t.Setenv("POT_TEST_AUTH_SECRET", "private")
+	env := Environment()
+	if !slices.Contains(env, "HOME=/account/home") {
+		t.Fatal("account HOME was not inherited", env)
+	}
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if slices.Contains([]string{"GOCACHE", "GOPATH", "CARGO_HOME", "RUSTUP_HOME", "npm_config_cache", "XDG_CACHE_HOME", "POT_TEST_AUTH_SECRET"}, key) {
+			t.Fatalf("unexpected toolchain override or ambient secret: %s", key)
+		}
+	}
+}

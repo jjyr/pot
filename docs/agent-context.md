@@ -11,10 +11,11 @@ Route background work by goal, sending additions or fixes to matching Tasks and
 creating new Tasks for goals that do not overlap; see
 [Task routing](task-coordination.md#coherent-objectives-and-routing).
 
-Main handles user requests and background results with the same prompt. Summary
-selects notification input classification and Runtime capabilities, not a separate
-system prompt. Both use `MainPrompt`, the same configured system-prompt and model
-template override precedence, and common system suffixes. Worker execution retains
+Main handles user requests and background results with the same prompt and tools.
+`TurnRequest.Notification` classifies background input as reference data independently
+of the execution role. Both inputs use the embedded `main_prompt.txt`, selected through `PromptForRole`,
+with the same configured system-prompt and model-template override precedence
+and common system suffixes. Worker execution retains
 its separate role instructions. Notification content remains reference data and
 grants no authority.
 
@@ -40,7 +41,7 @@ reply is needed, it reflects the reported state, including queues and approval
 waits, without claiming that execution has started. Empty successful replies
 produce neither a completed chat bubble nor a reply notification.
 
-Main, Worker and Summary executions through `pkg/agent` share goal-completion
+Main and Worker executions through `pkg/agent` share goal-completion
 guidance: repair failed acceptance or deviations within the existing goal and
 authorization, handle routine decisions, and report only goal completion, a blocker
 that cannot be resolved autonomously, or a needed user decision. Repairable issues
@@ -255,10 +256,16 @@ relaxes tool or machine permissions.
 
 ## Prompt sources and resource preparation
 
-Main's built-in delegation prompt is embedded from
-[`main_prompt.txt`](../internal/assistant/assets/main_prompt.txt). Updating it
-requires explicit authorization and rebuilding; a custom `system_prompt`
-replaces the default `pkg/agent` prompt.
+Product role instructions are embedded from
+[`main_prompt.txt`](../internal/assistant/assets/main_prompt.txt) for Main
+and [`task_prompt.txt`](../internal/assistant/assets/task_prompt.txt) for Workers.
+`PromptForRole` selects the asset and Control injects it through the transient
+`ExecutionContext.RolePrompt`; the generic Agent contains no hardcoded task-role
+instructions. Updating either asset requires explicit authorization and rebuilding.
+A custom `system_prompt` replaces Main's default base; a model instructions
+template takes precedence over that custom base. Worker role instructions are
+appended after either override, preserving their execution and messaging rules.
+Common runtime, file-delivery and compaction suffixes remain shared.
 
 Before a local Task first executes, the node prepares the selected current global
 Skills and source assistant's plugin Profile. Missing resources fail before model

@@ -7,6 +7,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/dop251/goja v0.0.0-20261014135309-2cb8274eed06
 	github.com/godbus/dbus/v5 v5.2.2
+	github.com/klauspost/compress v1.20.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/rubenv/sql-migrate v1.8.1

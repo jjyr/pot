@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -111,25 +112,25 @@ func TestAtomicSaveRollbackAndContextCorruption(t *testing.T) {
 	if err := s.SaveContext(ctx, body); err != nil {
 		t.Fatal(err)
 	}
-	if loaded, err := s.LoadContext(ctx); err != nil || string(loaded) != string(body) {
+	if loaded, err := s.LoadContext(ctx); err != nil || !sameContextJSON(loaded, body) {
 		t.Fatal(string(loaded), err)
 	}
 	if err := s.SaveContext(ctx, json.RawMessage(`{"messages":[]}`)); err == nil {
 		t.Fatal("invalid context accepted")
 	}
-	if err := s.Set(ctx, "thread.context", "corrupt"); err != nil {
+	if err := os.WriteFile(s.rolloutPath, []byte("corrupt\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.LoadContext(ctx); err == nil {
 		t.Fatal("corrupt context silently replaced")
 	}
-	s.Set(ctx, "thread", "{}")
-	if _, err := s.db.Exec("DELETE FROM metadata WHERE key='thread.context'"); err != nil {
+	if err := os.Remove(s.rolloutPath); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.LoadContext(ctx); err == nil {
 		t.Fatal("missing context silently replaced")
 	}
+
 }
 func TestInstructionContentCASAcrossHandlesAndExternalEdits(t *testing.T) {
 	ctx := context.Background()
@@ -232,4 +233,12 @@ func TestRestartRetainsToolDetailsWithoutDeclaringSuccess(t *testing.T) {
 	if err != nil || saved == nil || saved.Tool == nil || saved.Tool.Phase != "unknown" || saved.Tool.Output[0].Text != "partial output" || string(saved.Tool.Args) != `{"cmd":"pwd"}` || saved.Status != protocol.Failed {
 		t.Fatal(saved, err)
 	}
+}
+
+func sameContextJSON(a, b json.RawMessage) bool {
+	var x, y any
+	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
+		return false
+	}
+	return reflect.DeepEqual(x, y)
 }
