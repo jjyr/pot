@@ -1,0 +1,675 @@
+#!/usr/bin/env python3
+"""Local orchestrator for deploying Pot builds to a remote host over SSH."""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import uuid
+from pathlib import Path
+
+FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+UNIT = re.compile(r"^[A-Za-z0-9_.@:-]+[.]service$")
+
+BOOTSTRAP_CODE = r"""
+import json,os,shutil,sys,tempfile
+from pathlib import Path
+data=json.load(sys.stdin)
+raw=data.get("install_dir")
+if not isinstance(raw,str) or not raw: raise SystemExit("bad install_dir")
+root=Path(raw).resolve()
+parent=root.parent
+if not parent.is_dir(): raise SystemExit("parent missing")
+pot=root/"bin"/"pot"
+if not pot.is_file(): raise SystemExit("pot missing or not file")
+d=tempfile.mkdtemp(prefix="."+root.name+".upload-",dir=str(parent))
+os.chmod(d,0o700)
+sys.stdout.write(json.dumps({"upload_dir":d}))
+"""
+
+CLEAN_CODE = r"""
+import json,shutil,sys
+from pathlib import Path
+d=json.load(sys.stdin).get("path")
+if not isinstance(d,str) or not d: raise SystemExit("bad path")
+p=Path(d)
+if ".upload-" not in p.name: raise SystemExit("guard")
+if p.is_dir(): shutil.rmtree(str(p),ignore_errors=True)
+"""
+
+WORKER = "pot_deploy_remote.py"
+
+RECOVER_CODE = r"""
+import json,sys
+from pathlib import Path
+data=json.load(sys.stdin)
+raw=data.get("install_dir")
+if not isinstance(raw,str) or not raw: raise SystemExit("bad install_dir")
+root=Path(raw).resolve()
+journal=root.parent/(root.name+".deploy")/"state.json"
+try:
+    with open(journal,"rb") as f:
+        blob=f.read(1048576+1)
+except OSError as e: raise SystemExit("journal unreadable")
+if len(blob)>1048576: raise SystemExit("journal too large")
+try:
+    obj=json.loads(blob.decode("utf-8"))
+except (ValueError,UnicodeError): raise SystemExit("journal invalid")
+if not isinstance(obj,dict): raise SystemExit("journal not object")
+out={k:obj.get(k) for k in ("operation_id","revision","archive_sha256","phase","install","backup","old_package","hosts")}
+sys.stdout.write(json.dumps(out))
+"""
+
+SSH_DEFAULTS = [
+    "-o",
+    "ServerAliveInterval=30",
+    "-o",
+    "ServerAliveCountMax=6",
+    "-o",
+    "ConnectTimeout=15",
+]
+
+
+class Fail(Exception):
+    pass
+
+
+def die(msg):
+    sys.stderr.write("deploy: %s\n" % msg)
+    sys.exit(1)
+
+
+def run(argv, op, **kw):
+    try:
+        return subprocess.run(argv, **kw)
+    except OSError as e:
+        raise Fail("%s failed: %s" % (op, e.strerror or e))
+
+
+def check_str(val, name, allow_empty=False):
+    if not isinstance(val, str):
+        raise Fail("%s must be string" % name)
+    if not allow_empty and not val:
+        raise Fail("%s must be non-empty" % name)
+    if "\n" in val or "\r" in val or "\x00" in val:
+        raise Fail("%s contains newline/NUL" % name)
+    return val
+
+
+def check_abs(val, name):
+    check_str(val, name)
+    if not val.startswith("/"):
+        raise Fail("%s must be absolute" % name)
+    return val
+
+
+def check_host(val):
+    check_str(val, "host")
+    if val.startswith("-") or any(c.isspace() for c in val):
+        raise Fail("host invalid")
+    return val
+
+
+def load_config(path, overrides=None):
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+        cfg = json.loads(text)
+    except (OSError, ValueError, UnicodeError) as e:
+        raise Fail("config unreadable: %s" % e)
+    if not isinstance(cfg, dict):
+        raise Fail("config must be object")
+    if overrides:
+        cfg.update(overrides)
+    out = {}
+    out["host"] = check_host(cfg.get("host", ""))
+    opts = cfg.get("ssh_options", [])
+    if not isinstance(opts, list) or any(not isinstance(o, str) for o in opts):
+        raise Fail("ssh_options must be string list")
+    for o in opts:
+        check_str(o, "ssh_options entry")
+    out["ssh_options"] = opts
+    out["install_dir"] = check_abs(cfg.get("install_dir", ""), "install_dir")
+    if Path(out["install_dir"]).resolve() == Path("/"):
+        raise Fail("install_dir cannot be root")
+    plat = cfg.get("platform")
+    if plat not in ("linux-amd64", "linux-arm64"):
+        raise Fail("platform invalid")
+    out["platform"] = plat
+    svcs = cfg.get("services")
+    if not isinstance(svcs, list) or not svcs:
+        raise Fail("services must be non-empty list")
+    seen = set()
+    for s in svcs:
+        check_str(s, "service")
+        if not UNIT.match(s):
+            raise Fail("service name invalid: %s" % s)
+        if s in seen:
+            raise Fail("duplicate service")
+        seen.add(s)
+    out["services"] = list(svcs)
+    rt = cfg.get("readiness_timeout", 120)
+    if isinstance(rt, bool) or not isinstance(rt, int) or not 1 <= rt <= 600:
+        raise Fail("readiness_timeout must be 1..600")
+    out["readiness_timeout"] = rt
+    scope = cfg.get("systemd_scope")
+    if scope not in ("user", "system"):
+        raise Fail("systemd_scope invalid")
+    out["systemd_scope"] = scope
+    roots = cfg.get("data_roots")
+    if not isinstance(roots, list) or not roots:
+        raise Fail("data_roots must be non-empty list")
+    out["data_roots"] = [check_abs(r, "data_roots entry") for r in roots]
+    out["backup_dir"] = check_abs(cfg.get("backup_dir", ""), "backup_dir")
+    bp = cfg.get("backup_prefix", [])
+    if not isinstance(bp, list) or any(not isinstance(x, str) for x in bp):
+        raise Fail("backup_prefix must be string list")
+    for x in bp:
+        check_str(x, "backup_prefix entry")
+    out["backup_prefix"] = bp
+    key = check_str(cfg["update_public_key"], "update_public_key")
+    try:
+        raw = base64.b64decode(key, validate=True)
+    except (ValueError, base64.binascii.Error):
+        raise Fail("update_public_key not base64")
+    if len(raw) != 32:
+        raise Fail("update_public_key must be 32 bytes")
+    out["update_public_key"] = key
+    ver = cfg.get("version", "0.0.0")
+    out["version"] = check_str(ver, "version")
+    if not re.fullmatch(r"[0-9]+[.][0-9]+[.][0-9]+", out["version"]):
+        raise Fail("version must match major.minor.patch")
+    return out
+
+
+def check_ref(val):
+    check_str(val, "ref")
+    if val.startswith("-"):
+        raise Fail("ref cannot start with dash")
+    return val
+
+
+def parse_args(argv):
+    p = argparse.ArgumentParser(add_help=True)
+    p.add_argument("--config", required=True)
+    p.add_argument("--host")
+    p.add_argument("--install-dir")
+    p.add_argument("--ref")
+    p.add_argument("--package")
+    p.add_argument("--revision")
+    p.add_argument("--sha256")
+    p.add_argument(
+        "--apply",
+        action="store_true",
+        help="Deploy the selected revision and interrupt active work.",
+    )
+    p.add_argument("--readiness-timeout", type=int)
+    return p.parse_args(argv)
+
+
+def main(argv=None):
+    try:
+        return run_main(sys.argv[1:] if argv is None else argv)
+    except Fail as e:
+        die(str(e))
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        die("%s" % e)
+    except subprocess.SubprocessError as e:
+        die("subprocess error")
+    return 1
+
+
+def recover_worker_result(ssh_base, cfg, payload):
+    cmd = "python3 -c " + shlex.quote(RECOVER_CODE)
+    data = json.dumps({"install_dir": cfg["install_dir"]}).encode()
+    try:
+        r = subprocess.run(
+            ssh_base + [cmd],
+            input=data,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        raise Fail(
+            "worker outcome unknown: journal query timed out; manual inspection required (no automatic retry)"
+        )
+    except OSError as e:
+        raise Fail(
+            "worker outcome unknown: journal query failed: %s; manual inspection required (no automatic retry)"
+            % (e.strerror or e)
+        )
+    if r.returncode != 0:
+        raise Fail(
+            "worker outcome unknown: journal query exited %d; manual inspection required (no automatic retry)"
+            % r.returncode
+        )
+    try:
+        jr = json.loads(r.stdout.decode("utf-8"))
+    except (ValueError, UnicodeError):
+        raise Fail(
+            "worker outcome unknown: journal query invalid; manual inspection required (no automatic retry)"
+        )
+    if not isinstance(jr, dict):
+        raise Fail(
+            "worker outcome unknown: journal query invalid; manual inspection required (no automatic retry)"
+        )
+    if jr.get("operation_id") != payload["operation_id"]:
+        raise Fail(
+            "worker outcome unknown: journal operation_id mismatch; manual inspection required (no automatic retry)"
+        )
+    if jr.get("revision") != payload["revision"]:
+        raise Fail(
+            "worker outcome unknown: journal revision mismatch; manual inspection required (no automatic retry)"
+        )
+    if jr.get("archive_sha256") != payload["sha256"]:
+        raise Fail(
+            "worker outcome unknown: journal archive_sha256 mismatch; manual inspection required (no automatic retry)"
+        )
+    phase = jr.get("phase")
+    if phase == "completed":
+        install = jr.get("install")
+        if not isinstance(install, str) or not install:
+            raise Fail(
+                "worker outcome unknown: journal install invalid; manual inspection required (no automatic retry)"
+            )
+        hosts = jr.get("hosts")
+        if not isinstance(hosts, dict):
+            raise Fail(
+                "worker outcome unknown: journal hosts invalid; manual inspection required (no automatic retry)"
+            )
+        return {
+            "ok": True,
+            "revision": jr.get("revision"),
+            "installation": install,
+            "backup": jr.get("backup"),
+            "old_package": jr.get("old_package"),
+            "services": hosts,
+            "recovered_from_journal": True,
+        }
+    bounded = str(phase)[:128] if isinstance(phase, str) else "unknown"
+    if bounded in ("blocked", "rolled_back", "inprogress"):
+        raise Fail(
+            "worker reported phase %s; manual inspection required, no automatic retry" % bounded
+        )
+    raise Fail(
+        "worker outcome unknown: journal phase %s; manual inspection required (no automatic retry)"
+        % bounded
+    )
+
+
+def run_main(argv):
+    a = parse_args(argv)
+    overrides = {}
+    if a.host is not None:
+        overrides["host"] = a.host
+    if a.install_dir is not None:
+        overrides["install_dir"] = a.install_dir
+    cfg = load_config(a.config, overrides)
+    if a.readiness_timeout is not None:
+        if not 1 <= a.readiness_timeout <= 600:
+            raise Fail("readiness-timeout must be 1..600")
+        timeout = a.readiness_timeout
+    else:
+        timeout = cfg["readiness_timeout"]
+
+    if a.package is not None and a.ref is not None:
+        raise Fail("--ref and --package are mutually exclusive")
+    is_package = a.package is not None
+
+    if is_package:
+        if not a.revision or not a.sha256:
+            raise Fail("--revision and --sha256 required with --package")
+        if not FULL_SHA.match(a.revision or ""):
+            raise Fail("revision must be full 40-hex")
+        if not SHA256_HEX.match(a.sha256 or ""):
+            raise Fail("sha256 must be 64-hex")
+        ref = None
+    else:
+        if a.revision or a.sha256:
+            raise Fail("--revision/--sha256 invalid with source")
+        ref = check_ref(a.ref if a.ref is not None else "main")
+
+    if is_package:
+        pkg = Path(a.package)
+        try:
+            st = pkg.stat()
+        except OSError as e:
+            raise Fail("package stat failed: %s" % e)
+        if not pkg.is_file():
+            raise Fail("package not a file")
+        pkg_size = st.st_size
+        pkg_hash = (
+            hashlib.sha256(pkg.read_bytes()).hexdigest()
+            if pkg_size <= 10 * 1024 * 1024
+            else _hash_file(pkg)
+        )
+        if pkg_hash != a.sha256:
+            raise Fail("package sha256 mismatch")
+
+    if not cfg.get("update_public_key") and not is_package:
+        raise Fail("update_public_key required for source deploy")
+
+    plan = {
+        "host": cfg["host"],
+        "platform": cfg["platform"],
+        "install_dir": cfg["install_dir"],
+        "source": "package" if is_package else "ref",
+        "ref": ref,
+        "package": str(a.package) if is_package else None,
+        "revision": a.revision if is_package else "unresolved:" + (ref or ""),
+        "sha256": a.sha256 if is_package else None,
+        "services": cfg["services"],
+        "systemd_scope": cfg["systemd_scope"],
+        "data_roots": cfg["data_roots"],
+        "backup_dir": cfg["backup_dir"],
+        "readiness_timeout": timeout,
+        "interrupts_active_work": True,
+    }
+
+    if not a.apply:
+        sys.stdout.write(json.dumps({"apply": False, "plan": plan}) + "\n")
+        return 0
+
+    operation_id = uuid.uuid4().hex
+
+    script_root = Path(__file__).resolve().parents[1]
+    worker_local = script_root / "scripts" / WORKER
+    if not worker_local.is_file():
+        raise Fail("remote worker script missing: %s" % WORKER)
+
+    if not is_package and not cfg.get("update_public_key"):
+        raise Fail("update_public_key required")
+
+    with tempfile.TemporaryDirectory(prefix="pot-deploy-") as tmp:
+        tmp = Path(tmp)
+        artifacts = tmp / "artifacts"
+        artifacts.mkdir()
+        copied_pkg = None
+        copied_size = 0
+        copied_hash = None
+        sha = None
+        if is_package:
+            copied_pkg = tmp / "package.tar.gz"
+            with open(a.package, "rb") as src, open(copied_pkg, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            with open(copied_pkg, "rb") as f:
+                copied_size = os.fstat(f.fileno()).st_size
+                copied_hash = hashlib.file_digest(f, "sha256").hexdigest()
+            if copied_hash != a.sha256:
+                raise Fail("package sha256 changed during copy")
+            if copied_size != pkg_size:
+                raise Fail("package size changed during copy")
+            sha = a.revision
+            archive = copied_pkg
+        else:
+            sha, archive = build_source(script_root, tmp, ref, cfg)
+
+        if not archive.is_file():
+            raise Fail("build artifact missing")
+        if copied_hash is None:
+            with open(archive, "rb") as f:
+                copied_size = os.fstat(f.fileno()).st_size
+                copied_hash = hashlib.file_digest(f, "sha256").hexdigest()
+
+        ssh_base = ["ssh"] + list(cfg["ssh_options"]) + SSH_DEFAULTS + [cfg["host"]]
+
+        boot_json = json.dumps({"install_dir": cfg["install_dir"]}).encode()
+        remote_boot = "python3 -c " + shlex.quote(BOOTSTRAP_CODE)
+        try:
+            r = subprocess.run(
+                ssh_base + [remote_boot], input=boot_json, stdout=subprocess.PIPE, stderr=None
+            )
+        except OSError as e:
+            raise Fail("ssh bootstrap failed: %s" % (e.strerror or e))
+        if r.returncode != 0:
+            raise Fail("ssh bootstrap exited %d" % r.returncode)
+        try:
+            boot = json.loads(r.stdout.decode("utf-8"))
+        except ValueError:
+            raise Fail("bootstrap returned invalid JSON")
+        if not isinstance(boot, dict):
+            raise Fail("bootstrap result not object")
+        upload_dir = boot.get("upload_dir")
+        if not isinstance(upload_dir, str) or not upload_dir:
+            raise Fail("bootstrap upload_dir missing")
+        check_str(upload_dir, "upload_dir")
+        if not upload_dir.startswith("/"):
+            raise Fail("upload_dir not absolute")
+        if ".upload-" not in Path(upload_dir).name:
+            raise Fail("upload_dir guard failed")
+
+        worker_started = False
+        remote_pkg = upload_dir + "/package.tar.gz"
+        remote_worker = upload_dir + "/worker.py"
+        try:
+            upload(cfg, ssh_base, archive, remote_pkg)
+            upload(cfg, ssh_base, worker_local, remote_worker)
+
+            payload = {
+                "operation_id": operation_id,
+                "config": cfg,
+                "archive": remote_pkg,
+                "archive_size": copied_size,
+                "sha256": copied_hash,
+                "revision": sha,
+                "readiness_timeout": timeout,
+            }
+            worker_started = True
+            remote_cmd = "python3 " + shlex.quote(remote_worker)
+            r = None
+            parsed = None
+            try:
+                r = subprocess.run(
+                    ssh_base + [remote_cmd],
+                    input=json.dumps(payload).encode(),
+                    stdout=subprocess.PIPE,
+                    stderr=None,
+                )
+            except OSError:
+                r = None
+            if r is not None and r.returncode != 255:
+                try:
+                    parsed = json.loads(r.stdout.decode("utf-8"))
+                except (ValueError, UnicodeError):
+                    parsed = None
+            if r is None or r.returncode == 255 or not isinstance(parsed, dict):
+                result = recover_worker_result(ssh_base, cfg, payload)
+            else:
+                result = parsed
+                if r.returncode != 0 or result.get("ok") is not True:
+                    err = result.get("error")
+                    if isinstance(err, str):
+                        err = err[:4096]
+                    else:
+                        err = "worker did not confirm success"
+                    raise Fail(
+                        "worker exited %d: %s (upload retained: %s)"
+                        % (r.returncode, err, upload_dir)
+                    )
+        except BaseException:
+            if not worker_started:
+                cleanup_remote(ssh_base, upload_dir)
+            else:
+                sys.stderr.write("deploy: upload retained: %s\n" % upload_dir)
+            raise
+
+        out = {
+            "apply": True,
+            "operation_id": operation_id,
+            "revision": sha,
+            "sha256": copied_hash,
+            "archive_size": copied_size,
+            "upload_dir": upload_dir,
+            "result": result,
+        }
+        sys.stdout.write(json.dumps(out) + "\n")
+        return 0
+
+
+def _hash_file(path):
+    with open(path, "rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
+
+
+def cleanup_remote(ssh_base, upload_dir):
+    payload = json.dumps({"path": upload_dir}).encode()
+    cmd = "python3 -c " + shlex.quote(CLEAN_CODE)
+    try:
+        r = subprocess.run(
+            ssh_base + [cmd], input=payload, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+        )
+    except OSError as e:
+        sys.stderr.write("deploy: warning: cleanup failed: %s\n" % e)
+        return
+    if r.returncode != 0:
+        msg = (r.stderr or b"").decode("utf-8", "replace").strip()
+        sys.stderr.write("deploy: warning: cleanup exited %d: %s\n" % (r.returncode, msg))
+
+
+def upload(cfg, ssh_base, local, remote_path):
+    cmd = "cat > " + shlex.quote(remote_path)
+    try:
+        with open(local, "rb") as f:
+            r = subprocess.run(
+                ssh_base + [cmd], stdin=f, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+    except OSError as e:
+        raise Fail("upload failed: %s" % (e.strerror or e))
+    if r.returncode != 0:
+        raise Fail("upload exited %d" % r.returncode)
+
+
+def build_source(script_root, tmp, ref, cfg):
+    origin = run(
+        ["git", "-C", str(script_root), "remote", "get-url", "origin"],
+        "git origin",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if origin.returncode != 0:
+        raise Fail("git origin lookup failed")
+    origin_url = origin.stdout.decode("utf-8", "replace").strip()
+    if not origin_url:
+        raise Fail("git origin empty")
+
+    bare = tmp / "fetch.git"
+    r = run(
+        ["git", "init", "--bare", str(bare)],
+        "git init",
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if r.returncode != 0:
+        raise Fail("git init bare failed")
+
+    r = run(
+        ["git", "-C", str(bare), "fetch", "--no-tags", "--", origin_url, ref],
+        "git fetch",
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    if r.returncode != 0:
+        raise Fail("git fetch failed")
+
+    r = run(
+        ["git", "-C", str(bare), "rev-parse", "--verify", "FETCH_HEAD^{commit}"],
+        "git rev-parse",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if r.returncode != 0:
+        raise Fail("git rev-parse failed")
+    sha = r.stdout.decode("ascii", "replace").strip()
+    if not FULL_SHA.match(sha):
+        raise Fail("resolved sha invalid")
+
+    snapshot = tmp / "snapshot"
+    snapshot.mkdir()
+    archive_path = tmp / "source.tar"
+    with open(archive_path, "wb") as f:
+        r = subprocess.run(
+            ["git", "-C", str(bare), "archive", "--format=tar", sha],
+            stdout=f,
+            stderr=subprocess.DEVNULL,
+        )
+    if r.returncode != 0:
+        raise Fail("git archive failed")
+    import tarfile
+
+    with tarfile.open(archive_path, "r:") as tf:
+        tf.extractall(str(snapshot), filter="data")
+
+    mise_toml = snapshot / "mise.toml"
+    if not mise_toml.is_file():
+        raise Fail("snapshot missing mise.toml")
+
+    trust = run(
+        ["mise", "trust", str(mise_toml)],
+        "mise trust",
+        cwd=str(snapshot),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if trust.returncode != 0:
+        raise Fail("mise trust failed")
+
+    artifacts = tmp / "artifacts"
+    try:
+        env = dict(os.environ)
+        env["POT_BUILD_REVISION"] = sha
+        env["POT_APP_VERSION"] = cfg["version"]
+        if cfg.get("update_public_key"):
+            env["POT_UPDATE_PUBLIC_KEY"] = cfg["update_public_key"]
+
+        artifacts.mkdir(exist_ok=True)
+        r = subprocess.run(
+            [
+                "mise",
+                "exec",
+                "--",
+                "python",
+                "scripts/build-pot-cli",
+                "--platform",
+                cfg["platform"],
+                "--output",
+                str(artifacts),
+            ],
+            cwd=str(snapshot),
+            env=env,
+            stdout=sys.stderr,
+            stderr=None,
+        )
+        if r.returncode != 0:
+            raise Fail("build exited %d" % r.returncode)
+    finally:
+        try:
+            result = subprocess.run(
+                ["mise", "untrust", str(mise_toml)],
+                cwd=str(snapshot),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if result.returncode != 0:
+                print("warning: mise untrust exited %d" % result.returncode, file=sys.stderr)
+        except OSError as e:
+            print("warning: mise untrust failed: %s" % e, file=sys.stderr)
+
+    name = "pot-%s.tar.gz" % cfg["platform"]
+    out = artifacts / name
+    if not out.is_file():
+        raise Fail("build artifact missing: %s" % name)
+    return sha, out
+
+
+if __name__ == "__main__":
+    sys.exit(main())
