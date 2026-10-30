@@ -1,4 +1,5 @@
-import {UI_CACHE_VERSION} from '../../pkg/storage/migrations/ui-cache/0011_task_parameters.mjs';
+import {installWSFixture} from './helpers/ws-fixture.mjs';
+import {UI_CACHE_VERSION} from '../../pkg/storage/migrations/ui-cache/0012_chat_records.mjs';
 import {createIndexedStore,idbRequest} from '../../web/src/state/indexed-store.mjs';
 import {clearBusinessCaches} from '../../web/src/state/cache-lifecycle.mjs';
 import {createProductionClient} from '../../web/src/adapters/production.mjs';
@@ -52,6 +53,7 @@ export async function projectionStoreContract(report=()=>{}){
     const budget=createProjectionStore({name:resourceName,maxBytes:32});const meta=cold.describe('/api/v1/assistants');await budget.commit('budget',meta,{id:'old'},await budget.token(meta));let overflow=false;try{await budget.commit('budget',meta,{id:'x'.repeat(100)},await budget.token(meta));}catch(error){overflow=error.storage;}check(overflow&&(await budget.read('budget')).value.id==='old','Byte budget failure preserves the committed value');budget.close();
     const expired=createProjectionStore({name:resourceName,retention:-1});await expired.commit('expired',meta,{},await expired.token(meta));check(await expired.read('expired')===null,'Expired projections cannot bootstrap a view');expired.close();
   }finally{for(const reads of clients)reads.clear();await remove(resourceName);}
+  const commandWS=installWSFixture();
   const commandName='pot-command-contract-'+crypto.randomUUID(),originalFetch=globalThis.fetch;let posts=0,transport;
   globalThis.fetch=async(path,options={})=>{if(options.method==='POST')posts++;return new Response(JSON.stringify(path.startsWith('/api/v1/runtime')?{runtime_id:'commands',boot_id:'boot'}:{id:'profile',revision:2,name:'Saved',api_key:'never-persist'}));};
   try{
@@ -63,7 +65,7 @@ export async function projectionStoreContract(report=()=>{}){
     const db=createIndexedStore({name:commandName});const contents=await db.transaction(['projections'],'readonly',tx=>idbRequest(tx.objectStore('projections').getAll()));check(!JSON.stringify(contents).includes('input-private')&&!JSON.stringify(contents).includes('never-persist'),'Command receipts contain neither request credentials nor secret response fields');db.close();
     await clearBusinessCaches({name:commandName});let retired=false;try{await transport.resources.storage.commit('late',{control:'commands',space:'local',topics:[]},{},'[0]');}catch{retired=true;}check(retired,'Logout retires old repository writers');
     const reopened=createProjectionStore({name:commandName});check(await reopened.read(contents[0].key)===null,'Logout clears committed business projections');reopened.close();
-  }finally{transport?.resources.clear();globalThis.fetch=originalFetch;await remove(commandName);await remove(commandName+'-tasks');}
+  }finally{transport?.resources.clear();commandWS.restore();globalThis.fetch=originalFetch;await remove(commandName);await remove(commandName+'-tasks');}
   const startupName='pot-startup-v5-'+crypto.randomUUID(),v5=createIndexedStore({name:startupName,version:5,migrate:migrateAssistantDrafts});
   await v5.transaction(['composerDrafts','composerFiles','views'],'readwrite',tx=>{
     tx.objectStore('composerDrafts').put({key:'fixture',text:'preserved draft',pending:{request_id:'fixed-request'}});

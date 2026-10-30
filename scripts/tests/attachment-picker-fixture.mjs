@@ -19,7 +19,7 @@ export async function attachmentPickerFixture(sourceOrigin,{durableReceipts=fals
   if(p==='/fixture/control'){
    for(const key of ['image','pdf','permission','holdInitial','holdSend','holdUploads','receipt','running','conversation','uploadFailure','continuation','messages','holdContinue','continueError','references','rejectSend','acceptSend','dropAfterAccept','dropBeforeAccept','receiptForbidden','hideAssistant'])if(key in body)s[key]=body[key];
    if(body.releaseContinue){s.releaseContinue?.();s.releaseContinue=null;}
-   if(body.releaseSends)for(const response of (s.heldSends||[]).splice(0))json(response,{message_id:'accepted',duplicate:false});
+   if(body.releaseSends)for(const entry of (s.heldSends||[]).splice(0)){json(entry.res,{message_id:entry.message_id,duplicate:entry.duplicate});s.trace.push({kind:'post-response',owner:entry.owner,request_id:entry.message_id,duplicate:entry.duplicate});}
    if(body.releaseUploads){for(const release of s.held.splice(0))release();}
    if(body.publish||body.release){s.revision++;for(const stream of s.streams)if(stream.path.endsWith('/events'))send(stream);}
    if(body.directory){s.revision++;for(const stream of s.streams)if(stream.path.endsWith('/changes'))stream.res.write('event: changed\ndata: '+JSON.stringify({assistants:s.revision})+'\n\n');}
@@ -39,7 +39,7 @@ export async function attachmentPickerFixture(sourceOrigin,{durableReceipts=fals
    const duplicate=!!db.prepare('SELECT 1 FROM accepted WHERE scenario=? AND owner=? AND request=?').get(name,owner,body.request_id);
    if(s.acceptSend!==false)db.prepare('INSERT OR IGNORE INTO accepted VALUES (?,?,?,?)').run(name,owner,body.request_id,JSON.stringify(body));
    if(s.dropAfterAccept){s.dropAfterAccept=false;s.trace.push({kind:'response-lost-after-accept',request_id:body.request_id});return;}
-   if(s.holdSend){(s.heldSends||=[]).push(res);return;}
+   if(s.holdSend){(s.heldSends||=[]).push({res,message_id:body.request_id,duplicate,owner});return;}
    s.trace.push({kind:'post-response',owner,request_id:body.request_id,duplicate});
    return json(res,{message_id:body.request_id,duplicate});
   }
@@ -73,6 +73,6 @@ export async function attachmentPickerFixture(sourceOrigin,{durableReceipts=fals
  }catch(error){json(res,{message:error.stack},500);}});
  const fixtureWS=await installFixtureWebSocket(server);
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
- return {origin:'http://127.0.0.1:'+server.address().port,states,close:async()=>{for(const s of states.values()){s.releaseContinue?.();for(const release of s.held)release();for(const stream of s.streams)stream.res.end();}await fixtureWS.close();
+ return {origin:'http://127.0.0.1:'+server.address().port,states,close:async()=>{for(const s of states.values()){s.releaseContinue?.();for(const release of s.held)release();for(const entry of (s.heldSends||[]).splice(0))entry.res.end();for(const stream of s.streams)stream.res.end();}await fixtureWS.close();
 server.closeAllConnections();await new Promise(resolve=>server.close(resolve));db.close();}};
 }

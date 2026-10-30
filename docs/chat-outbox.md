@@ -8,26 +8,39 @@ saved conversation cannot invent a destination. Settings and ordinary unsent
 drafts never enter this queue.
 
 ```text
-Explicit Send --> one IndexedDB transaction --> submitted message + originals
-                         |                              |
-                  submitted draft versions             v
-                         |                      target FIFO head claim
-                         v                              |
-                 clear matching input                  v
-                         |                   fresh identity/session/permission
-                         v                              |
-              prepared chat message row                v
-                                            upload originals / receipt lookup
-                                                       |
-                                                       v
-                                            same request ID --> acceptance
+Explicit Send --> one IndexedDB transaction
+                         |
+                         +--> canonical chat record + originals
+                         +--> outbox delivery job referencing that record
+                         +--> clear matching submitted draft versions
+                                      |
+          +---------------------------+-------------------------+
+          |                                                     |
+          v                                                     v
+Chat repository --> prepared chat row             target FIFO head claim
+          ^                                                     |
+          |                                      fresh identity/session/permission
+          |                                                     |
+          |                                      upload originals / receipt lookup
+          |                                                     |
+          +--- reconcile same record <--- receipt / WS / history
 ```
 
 Text, references, attachment metadata and local originals commit together. Only
 the submitted text/reference versions and attachment IDs leave the composer;
 new typing and files added during the save remain. A failed transaction retains
 the input. Queued rows use the same hidden preparation, readiness, measurement
-and node transfer as other conversation content.
+and node transfer as other conversation content. The chat repository owns both
+local submissions and server messages. Outbox owns delivery state and references
+the chat record; it does not append a separate set of rows during rendering.
+
+Receipt, live updates and fetched history reconcile the same record within its
+captured destination. The stable display identity survives acceptance, while
+server message IDs and sequence numbers retain their history-query meaning.
+Acceptance updates a mounted row in place without moving existing nodes. An
+accepted submission awaiting its server transcript record remains available after
+reopening. Once materialized, an accepted record outside the loaded history
+window is not appended again as a pending message.
 
 Reconnection and reopening the same origin resume submitted messages
 automatically. Each captured destination has a FIFO lane, and different
@@ -99,12 +112,16 @@ retargeting an old browser request to a new conversation.
 
 ## Local schema and recovery
 
-`ui-cache/0007_chat_outbox.mjs` adds submission records and separate original-Blob
-records in the existing shared migration ledger. It preserves projection cache,
+`ui-cache/0012_chat_records.mjs` moves submitted content and original Blobs from
+the original `0007_chat_outbox` stores into canonical chat records and their file
+store. Outbox jobs retain delivery metadata and references to those records.
+The upgrade preserves submission identities, delivery states, projection cache,
 startup locator, ordinary drafts and existing pending confirmation fences. A
 pre-existing draft confirmation fence keeps its explicit Check and retry
 behavior; migration never treats ordinary draft content as a submitted message.
-Business cache retention and clearing exclude both outbox stores. Failed upgrades
+Migration does not dispatch submissions. Business cache retention and clearing
+preserve outbox jobs, locally owned chat records and their originals, while
+server-only chat records follow history-cache eviction. Failed upgrades
 roll back; older schema clients cannot downgrade or erase the newer database.
 
 Dispatchers use transactional, expiring claims and revision checks across tabs

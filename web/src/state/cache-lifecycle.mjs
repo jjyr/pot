@@ -14,6 +14,9 @@ export async function clearBusinessCaches({name='pot-chat-cache',indexedDB=globa
   for(const database of [name,name+'-tasks']){
     const store=createIndexedStore({name:database,indexedDB});
     const caches=['conversations','messages','views','cacheStats','projections','epochs','taskCheckpoints','startup','resourceCopies','resourceScopes'];
-    try{await store.transaction(caches,'readwrite',async tx=>{const previous=await idbRequest(tx.objectStore('cacheStats').get('resourceAuthority'));for(const name of caches)tx.objectStore(name).clear();tx.objectStore('cacheStats').put({key:'resourceAuthority',generation:(previous?.generation||0)+1});});}finally{store.close();}
+    const scopes=[...caches,'chatRecords'];
+    try{await store.transaction(scopes,'readwrite',async tx=>{const previous=await idbRequest(tx.objectStore('cacheStats').get('resourceAuthority'));for(const name of caches)tx.objectStore(name).clear();
+      await new Promise((resolve,reject)=>{const op=tx.objectStore('chatRecords').openCursor();op.onerror=()=>reject(op.error);op.onsuccess=()=>{const cursor=op.result;if(!cursor){resolve();return;}if(!cursor.value.local_owned){cursor.delete();}cursor.continue();};});
+      tx.objectStore('cacheStats').put({key:'resourceAuthority',generation:(previous?.generation||0)+1});});}finally{store.close();}
   }
 }

@@ -1,5 +1,6 @@
 import {bindCacheLifecycle} from './cache-lifecycle.mjs';
 import {createIndexedStore,idbRequest as request,indexedRows} from './indexed-store.mjs';
+import {recordStores,upsertServerRecords,removeServerRecord,eraseServerRecords,readRecordRows} from './chat-record-store.mjs';
 import {mergeUIFrame,mergeHistoryPage} from './chat-history.mjs';
 import {messageBytes} from './projection-bytes.mjs';
 
@@ -38,7 +39,7 @@ function ranges(values) {
   }
   return result;
 }
-const chatStores=['conversations','messages','views','cacheStats'];
+const chatStores=['conversations','messages','views','cacheStats',...recordStores];
 const bounds=(key,before='0',after='999999999999999999999999')=>IDBKeyRange.bound([key,String(before).padStart(24,'0')],[key,String(after).padStart(24,'0')]);
 const windowOf=snapshot=>snapshot.messages.map(message=>({id:message.id,context_only:!!message.context_only}));
 const sameWindow=(a,b)=>a?.length===b?.length&&a.every((item,index)=>item.id===b[index].id&&!!item.context_only===!!b[index].context_only);
@@ -74,12 +75,13 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
     return [...selected.map(row=>({...row.message,context_only:false})),...[...extra.values()].map(row=>({...row.message,context_only:true}))];
   }
   async function erase(tx,key,removeViews=true){
+    await eraseServerRecords(tx,key);
     const catalogue=tx.objectStore('conversations'),meta=await request(catalogue.get(key)),stats=await request(tx.objectStore('cacheStats').get('chat'))||{key:'chat',bytes:0};
     tx.objectStore('messages').delete(IDBKeyRange.bound([key,''],[key,[]]));
     if(removeViews)tx.objectStore('views').delete(IDBKeyRange.bound([key,''],[key,[]]));
     catalogue.delete(key);if(checkpoints)tx.objectStore('taskCheckpoints').delete(key);tx.objectStore('cacheStats').put({...stats,bytes:Math.max(0,stats.bytes-(meta?.bytes||0))});
   }
-  async function upsert(tx,key,meta,messages){
+  async function upsert(tx,key,identity,meta,messages){
     const store=tx.objectStore('messages'),oldRows=await records(tx,key,messages.map(message=>message.id)),byID=new Map(oldRows.map(row=>[row.id,row])),accepted=[];
     meta.count||=0;meta.bytes||=0;
     for(const message of messages){
@@ -87,12 +89,13 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
       const row={key,id:current.id,order:order(current),message:current,normal:old?.normal||!current.context_only,bytes:messageBytes(current),used:Date.now()};
       store.put(row);meta.count+=old?0:1;meta.bytes+=row.bytes-(old?.bytes||0);byID.set(row.id,row);accepted.push(current);
     }
+    await upsertServerRecords(tx,key,identity,accepted);
     return accepted;
   }
   async function save(tx,key,meta,snapshot){
     const store=tx.objectStore('messages'),pinned=new Set(snapshot.messages.map(message=>message.id));
     if(meta.count>maxMessages||meta.bytes>maxBytes){
-      await new Promise((resolve,reject)=>{const op=store.index('used').openCursor(IDBKeyRange.bound([key,0],[key,Infinity]));op.onerror=()=>reject(op.error);op.onsuccess=()=>{const row=op.result;if(!row||meta.count<=maxMessages&&meta.bytes<=maxBytes){resolve();return;}if(!pinned.has(row.value.id)){meta.count--;meta.bytes-=row.value.bytes;meta.ranges=evictedRanges(meta.ranges||[],BigInt(row.value.message.sequence));meta.replies=meta.replies.filter(reply=>reply.input_id!==row.value.id);row.delete();}row.continue();};});
+      await new Promise((resolve,reject)=>{const op=store.index('used').openCursor(IDBKeyRange.bound([key,0],[key,Infinity]));op.onerror=()=>reject(op.error);op.onsuccess=()=>{const row=op.result;if(!row||meta.count<=maxMessages&&meta.bytes<=maxBytes){resolve();return;}if(!pinned.has(row.value.id)){(async()=>{await removeServerRecord(tx,key,meta.projection,row.value.message);meta.count--;meta.bytes-=row.value.bytes;meta.ranges=evictedRanges(meta.ranges||[],BigInt(row.value.message.sequence));meta.replies=meta.replies.filter(reply=>reply.input_id!==row.value.id);row.delete();row.continue();})().catch(reject);}else row.continue();};});
     }
     if(meta.count>maxMessages||meta.bytes>maxBytes||meta.bytes>totalBytes)throw Error('chat_cache_capacity');
     const catalogue=tx.objectStore('conversations'),old=await request(catalogue.get(key)),stats=await request(tx.objectStore('cacheStats').get('chat'))||{key:'chat',bytes:0};
@@ -147,7 +150,7 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
           const retired=[...(meta.retired_boots||[]),meta.projection.boot_id].slice(-8);await erase(tx,key,false);meta={retired_boots:retired,retired_conversations:meta.retired_conversations};snapshot=null;
         }
         if(snapshot&&BigInt(frame.cursor)<BigInt(snapshot.cursor)||snapshot&&frame.kind==='delta'&&frame.cursor===snapshot.cursor)continue;
-        meta||={};frame={...frame,messages:await upsert(tx,key,meta,frame.messages)};
+        meta||={};frame={...frame,messages:await upsert(tx,key,frame,meta,frame.messages)};
         validate();const previousCursor=snapshot?.cursor;snapshot=mergeUIFrame(snapshot,frame,anchor);
         const replies=new Map((meta.replies||[]).map(reply=>[reply.input_id,reply]));for(const reply of frame.replies)replies.set(reply.input_id,reply);
         meta={...meta,history_floor:frame.kind==='reset'&&previousCursor!==frame.cursor?frame.cursor:meta.history_floor||'0',replies:[...replies.values()].slice(-maxMessages),ranges:ranges([...(frame.kind==='delta'||previousCursor===frame.cursor?meta.ranges||[]:[]),...(frame.kind==='reset'&&frame.history?[{before:frame.history.before,after:frame.history.after}]:frame.messages.filter(message=>!message.context_only).map(message=>({before:message.sequence,after:message.sequence})))])};
@@ -165,7 +168,7 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
       let meta=await request(tx.objectStore('conversations').get(key));if(!meta||meta.projection.boot_id!==page.boot_id||meta.projection.conversation_id!==page.conversation_id)return null;
       if(BigInt(meta.projection.cursor)-BigInt(page.cursor)>256n||BigInt(page.cursor)<BigInt(meta.history_floor||0))throw Error('history_gap');
       const {window}=options.context?.()||options;
-      const previous=await projection(tx,key,meta,window||meta.window),messages=await upsert(tx,key,meta,page.messages);
+      const previous=await projection(tx,key,meta,window||meta.window),messages=await upsert(tx,key,meta.projection,meta,page.messages);
       options.validate?.();
       // A page can wait behind another IDB transaction. Capture the reader's
       // latest intent inside this transaction, after that wait, not at HTTP
@@ -180,7 +183,7 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
       validate();if(signal?.aborted)throw signal.reason;
       let meta=await request(tx.objectStore('conversations').get(key));if(!meta)return null;
       if(conversation&&meta.projection.conversation_id!==conversation)throw new DOMException('Task run changed','AbortError');
-      validate();const snapshot=await projection(tx,key,meta);await upsert(tx,key,meta,messages);validate();if(signal?.aborted)throw signal.reason;
+      validate();const snapshot=await projection(tx,key,meta);await upsert(tx,key,meta.projection,meta,messages);validate();if(signal?.aborted)throw signal.reason;
       meta.ranges=ranges([...(meta.ranges||[]),history]);meta=await save(tx,key,meta,snapshot);validate();if(signal?.aborted)throw signal.reason;return {meta,snapshot};
     });return committed(key,result);
   }
@@ -205,7 +208,15 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
 
     });
   }
-  return {read,writeFrames,writePage,writeRecords,readPage,projectPage:(key,query,options)=>readPage(key,query,{...options,project:true}),readMessages:(key,ids,{identity,validate=()=>{}}={})=>transaction('readonly',async tx=>{validate();const meta=await request(tx.objectStore('conversations').get(key));if(identity){const projection=meta?.projection;if(!projection||projection.runtime_id!==identity.runtime_id||projection.owner_id!==identity.owner_id||projection.conversation_id!==identity.conversation_id||projection.boot_id!==identity.boot_id)throw new DOMException('Chat history identity retired','AbortError');}const values=await records(tx,key,ids);validate();return values.map(row=>row.message);}),subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},
+  const readRecords=(key,serverSnapshot,{retainedRecordIDs=[],validate=()=>{}}={})=>transaction('readonly',async tx=>{
+    validate();
+    const meta=await request(tx.objectStore('conversations').get(key)),projection=meta?.projection;
+    if(!projection||projection.runtime_id!==serverSnapshot.runtime_id||projection.owner_id!==serverSnapshot.owner_id||projection.conversation_id!==serverSnapshot.conversation_id||projection.boot_id!==serverSnapshot.boot_id)throw new DOMException('Chat history identity retired','AbortError');
+    const rows=await readRecordRows(tx,key,serverSnapshot,{retainedRecordIDs,validate});
+    validate();
+    return rows;
+  });
+  return {read,writeFrames,writePage,writeRecords,readPage,readRecords,projectPage:(key,query,options)=>readPage(key,query,{...options,project:true}),readMessages:(key,ids,{identity,validate=()=>{}}={})=>transaction('readonly',async tx=>{validate();const meta=await request(tx.objectStore('conversations').get(key));if(identity){const projection=meta?.projection;if(!projection||projection.runtime_id!==identity.runtime_id||projection.owner_id!==identity.owner_id||projection.conversation_id!==identity.conversation_id||projection.boot_id!==identity.boot_id)throw new DOMException('Chat history identity retired','AbortError');}const values=await records(tx,key,ids);validate();return values.map(row=>row.message);}),subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},
     async saveView(key,surface,value){await transaction('readwrite',async tx=>{
       const meta=await request(tx.objectStore('conversations').get(key));if(!meta||meta.projection.conversation_id!==value.conversation_id)return;
       const store=tx.objectStore('views'),previous=await request(store.get([key,surface]));

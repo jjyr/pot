@@ -123,7 +123,7 @@ export function createChatOutbox({client,changed=()=>{},cacheFailed=()=>{},stora
   if(channel)channel.onmessage=()=>wake();
   const timer=clock.setInterval(wake,interval);queueMicrotask(wake);
   return {
-    wake,refresh,rows:()=>rows,error:()=>failure,
+    wake,refresh,rows:()=>rows,error:()=>failure,saved:()=>storage.listSaved(),
     async edit(row,text){const value=await storage.edit(row,text);channel?.postMessage('changed');await refresh();return value;},
     async retry(row){const value=await storage.retry(row);channel?.postMessage('changed');await refresh();wake();return value;},
     async cancel(row){const value=await storage.cancel(row);channel?.postMessage('changed');await refresh();return value;},

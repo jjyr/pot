@@ -2,7 +2,6 @@ import {outboxIndicator} from './outbox-controls.mjs';
 import {createOutboxDialog} from './outbox-dialog.mjs';
 import {createChatOutbox} from '../state/chat-outbox.mjs';
 import {outboxTarget,outboxIdentityKey} from '../state/chat-outbox-store.mjs';
-import {projectOutboxRows} from '../state/chat-outbox-projection.mjs';
 import {moveConversationNode} from './conversation-dom.mjs';
 import {currentPreparedRender,preparedAsset,consumePreparationSurrogates} from './prepared-render.mjs';
 import {domainsFor} from '../state/domains/index.mjs';
@@ -99,7 +98,6 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let cancelPending = false;
   let editorOwner = null;
   let assistantDrafts=null,outbox=null,outboxDialog=null,enqueuePending=false;
-  const queueEditors=new Map();
   let menuOpen = false;
   let preferencesOpen = false,restoringHistory=false;
   let assistants = [], spaces = [], selectedAssistant = null, pendingSelection = null;
@@ -958,21 +956,21 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         moveConversationNode(row,record.speaker,record.groupUI?.prefix?.parentNode===row ? record.groupUI.prefix.nextSibling : row.firstChild);
       }
     }else if(record.speaker){record.speaker.remove();record.speaker=null;}
-    const source=message.queue?null:message.role==='assistant'?bubble.querySelector('.reply-content'):message.role==='user'?bubble.querySelector('.message-prose'):null;
+    const source=message.local_only?null:message.role==='assistant'?bubble.querySelector('.reply-content'):message.role==='user'?bubble.querySelector('.message-prose'):null;
     if(source&&message.text&&!message.id.startsWith('pending:'))source.dataset.referenceSource=message.id;
     const referenceSignature=JSON.stringify([message.references||[],locale,(message.references||[]).map(ref=>{const source=snapshot?.messages?.find(row=>row.id===ref.message_id);return [source?.role,ref.quote?null:source?.text];})]);
     if(message.role==='user'&&(record.referenceSignature!==referenceSignature||record.referenceNode&&!record.referenceNode.isConnected)){
       record.referenceNode?.remove();record.referenceSignature=referenceSignature;
       if(message.references?.length){record.referenceNode=preparedAsset('references',referenceSignature,()=>renderMessageReferences(message.references,{messages:snapshot?.messages||[],locale:()=>locale,onJump:jumpToMessage}));moveConversationNode(bubble,record.referenceNode,bubble.firstChild);}
     }
-    const attachmentSignature=JSON.stringify([message.attachments||[],snapshot?.agent?.attachments,!!message.queue]);
+    const attachmentSignature=JSON.stringify([message.attachments||[],snapshot?.agent?.attachments,!!message.delivery]);
     if(message.role==='user'&&(record.attachmentSignature!==attachmentSignature||!record.attachmentNode?.isConnected)){
-      const prepared=message.attachments?.length?preparedAsset('attachments',attachmentSignature,()=>renderMessageAttachments(message.attachments,{client,originalResource:message.queue?(attachment=>outbox.acquireOriginal(message.queue.target.key,message.queue.request.request_id,attachment,{space:message.queue.target.space,owner:message.queue.target.owner})):undefined,caps:snapshot?.agent?.attachments,scope:{...context.scope},locale:()=>locale,onError:reason=>{error=reason.message;updateControls();}})):null;
+      const prepared=message.attachments?.length?preparedAsset('attachments',attachmentSignature,()=>renderMessageAttachments(message.attachments,{client,originalResource:message.delivery?(attachment=>outbox.acquireOriginal(message.delivery.target.key,message.delivery.request.request_id,attachment,{space:message.delivery.target.space,owner:message.delivery.target.owner})):undefined,caps:snapshot?.agent?.attachments,scope:{...context.scope},locale:()=>locale,onError:reason=>{error=reason.message;updateControls();}})):null;
       record.attachmentNode?.dispose?.();record.attachmentNode?.remove();record.attachmentSignature=attachmentSignature;record.attachmentNode=prepared;
       if(prepared){moveConversationNode(bubble,prepared);if(currentPreparedRender()?.context.phase==='commit')consumePreparationSurrogates(prepared);}
     }
-    if(message.queue){
-      const queued=message.queue,editing=queueEditors.has(outboxIdentityKey(queued)),signature=JSON.stringify([outboxIdentityKey(queued),queued.revision,locale,editing]);
+    if(message.delivery){
+      const queued=message.delivery,signature=JSON.stringify([outboxIdentityKey(queued),queued.revision,locale]);
       if(record.queueSignature!==signature||!record.queueNode?.isConnected){
         const controls=preparedAsset('outbox-controls',signature,()=>outboxIndicator(queued,locale));
         record.queueNode?.remove();record.queueNode=controls;record.queueSignature=signature;moveConversationNode(bubble,controls);
@@ -1007,21 +1005,20 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const anchor=messageWindow.anchor;
     const snapshot=state.snapshot;
     const sending=state.sends.get(editorOwner||(snapshot&&ownerKey(snapshot)));
-    const queued=outbox?.rows().filter(row=>row.state!=='cancelled'&&row.target.host===client.runtime?.runtime_id&&row.target.space===selectedAssistant?.space_id&&row.target.owner===selectedAssistant?.id&&row.target.control===controlOf(selectedAssistant)&&row.target.conversation===snapshot?.conversation_id)||[];
-    const queueSignature=JSON.stringify(queued.map(row=>[outboxIdentityKey(row),row.revision,queueEditors.has(outboxIdentityKey(row))]));
     const activeTurn=snapshot?.running?(snapshot.messages.find(message=>message.id===snapshot.turn_id)?.request_id||snapshot.turn_id):null;
     const offline=connection!=='connected'||disconnected||selectedAssistant?.offline;
     const projectionScope=JSON.stringify([snapshot?.runtime_id,snapshot?.owner_id,snapshot?.conversation_id]);
     if(lifetimeScope!==projectionScope){projectionLifetime.reset();lifetimeScope=projectionScope;}
-    if(!chatProjection||chatProjection.queueSignature!==queueSignature||chatProjection.snapshot!==snapshot||chatProjection.sending!==sending||chatProjection.phase!==sending?.phase||chatProjection.detail!==sending?.detail||chatProjection.offline!==offline||chatProjection.activeTurn!==activeTurn){
+    if(!chatProjection||chatProjection.snapshot!==snapshot||chatProjection.sending!==sending||chatProjection.phase!==sending?.phase||chatProjection.detail!==sending?.detail||chatProjection.offline!==offline||chatProjection.activeTurn!==activeTurn){
       const rawChat=projectChatReplies(snapshot,sending,{offline});
-      const outboxRows=projectOutboxRows(rawChat,queued,{editing:queueEditors});
-      const {rows:messages,suppressedKeys}=projectScriptRuns(outboxRows,{activeTurn});
-      const ephemeralKeys=messages.flatMap(message=>message.activity===true||message.queue||String(message.id).startsWith('pending:')||String(message.id).startsWith('pending-reply:')?[message.viewKey||message.id]:[]);
+      const projected=projectScriptRuns(rawChat,{activeTurn});
+      const suppressedKeys=[...(snapshot?.suppressedRecordIDs||[]),...projected.suppressedKeys];
+      const {rows:messages}=projected;
+      const ephemeralKeys=messages.flatMap(message=>message.activity===true||message.local_only===true||String(message.id).startsWith('pending:')||String(message.id).startsWith('pending-reply:')?[message.viewKey||message.id]:[]);
       const lifetime=projectionLifetime.update(messages,{sourceMessages:snapshot?.messages||[],suppressedKeys,ephemeralKeys});
       const forest=toolForest(messages),roots=messages;
       const parents=new Map(messages.flatMap(message=>{const parent=message.tool?.parent_id&&forest.byID.get(message.tool.turn_id+':'+message.tool.parent_id)?.message;return parent?[[message.id,parent.id]]:[];}));
-      chatProjection={snapshot,sending,queueSignature,phase:sending?.phase,detail:sending?.detail,offline,activeTurn,messages,forest,roots,parents,suppressedKeys:lifetime.suppressedKeys,ephemeralKeys:lifetime.ephemeralKeys};
+      chatProjection={snapshot,sending,phase:sending?.phase,detail:sending?.detail,offline,activeTurn,messages,forest,roots,parents,suppressedKeys:lifetime.suppressedKeys,ephemeralKeys:lifetime.ephemeralKeys};
     }
     const {messages:visibleMessages,forest,roots,parents,suppressedKeys,ephemeralKeys}=chatProjection;
     renderingSnapshot=snapshot;renderingSending=sending;renderingForest=forest;
@@ -1080,7 +1077,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       attachmentUI?.cancelSelection();connection = 'offline'; error = t('identityChanged'); updateControls(); return;
     }
     const readingBeforeReset=snapshot.kind==='reset'&&!messageWindow.following?messageWindow.anchor:null;
-    if(chatSession&&readingBeforeReset&&!snapshot.messages.some(message=>message.id===readingBeforeReset.id&&!message.context_only)){
+    if(chatSession&&readingBeforeReset&&!/^(local:|pending:)/.test(String(readingBeforeReset.id))&&!snapshot.messages.some(message=>message.id===readingBeforeReset.id&&!message.context_only)){
       const ticket={generation:chatNavigation,epoch},generation=historyGeneration;
       connection='connecting';updateControls();
       try{
@@ -1196,7 +1193,14 @@ if (messageWindow.following && snapshot.history?.has_newer && !chatPosition) {
       if(client.production&&record)saveNavigation('chat',initial);
       renderShell();attach();pages?.permissions();refreshBackgroundTasks();
       const anchor=messageWindow.anchor,ticket={generation:chatNavigation,epoch};
-      const missing=restoreAnchor&&!state.snapshot?.messages.some(message=>message.id===restoreAnchor.id)?restoreAnchor:anchor&&!state.snapshot?.messages.some(message=>message.id===anchor.id)?anchor:null;
+      const needsHistory=(value)=>{
+        if(!value||typeof value!=='object')return null;
+        const id=value.id;
+        if(!id||/^(local:|pending:)/.test(String(id)))return null;
+        if(state.snapshot?.messages?.some(message=>message.id===id))return null;
+        return value;
+      };
+      const missing=needsHistory(restoreAnchor)||needsHistory(anchor);
       if(missing){chatRestore={ticket,intent:restoreIntent};readHistory({around:missing.id},{around:true,positionTicket:ticket,restoreIntent});}
       else if(messageWindow.following&&state.snapshot?.history?.has_newer)readHistory({},{around:true,positionTicket:ticket});
     }catch(reason){if(!disposed&&receivedEpoch===epoch){cacheFailure(reason);}}
