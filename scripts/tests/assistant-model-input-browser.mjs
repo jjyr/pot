@@ -18,6 +18,8 @@ try{
    await page.goto(origin+'/?assistant_id=alpha&locale='+locale);
    await page.getByRole('button',{name:translate(locale,'assistantSettings'),exact:true}).click();
    await page.getByLabel(locale==='en'?'Name':'名称',{exact:true}).waitFor();
+   await page.locator('[data-model-scope="assistant"] > summary').click();
+   await page.locator('[data-model-scope="task"] > summary').click();
    assert(!await page.locator('.editor-form').innerText().then(text=>/Loading…|正在加载/.test(text)),'Settings reads stay silent');
    await configure({hold:[],release:'all'});
    const input=page.getByLabel(translate(locale,'agentLinks.assistantModel'),{exact:true});

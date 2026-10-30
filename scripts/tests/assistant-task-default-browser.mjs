@@ -19,7 +19,7 @@ try{
    await page.goto(origin+'/?assistant_id=alpha&locale='+locale);
    const settingsButton=()=>page.getByRole('button',{name:translate(locale,'assistantSettings'),exact:true});
    const nameField=()=>page.getByLabel(locale==='en'?'Name':'名称',{exact:true});
-   const openSettings=async()=>{await settingsButton().click();await nameField().waitFor();};
+   const openSettings=async()=>{await settingsButton().click();await nameField().waitFor();await page.screenshot({path:`${output}/model-sections-collapsed-${width}-${locale}-after.png`});for(const scope of ['assistant','task']){const section=page.locator(`[data-model-scope="${scope}"]`);assert.equal(await section.evaluate(node=>node.open),false,'Model section defaults collapsed');await section.locator(':scope > summary').click();}};
    const mainModel=()=>page.getByLabel(translate(locale,'agentLinks.assistantModel'),{exact:true});
    const mainProvider=()=>page.getByLabel(locale==='en'?'Provider':'提供商',{exact:true});
    const taskProvider=()=>page.getByLabel(translate(locale,'assistant.taskProvider'),{exact:true});
@@ -71,6 +71,12 @@ try{
    await page.evaluate(value=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value}})),locale);
    assert(await taskModel().evaluate(node=>node===window.taskField),'Locale updates retain the task model input');
 
+   await page.getByLabel(translate(locale,'assistant.taskContextWindow'),{exact:true}).fill('64000');
+   await page.getByLabel(translate(locale,'assistant.taskMaxOutput'),{exact:true}).fill('4000');
+   await page.getByLabel(translate(locale,'assistant.taskEffort'),{exact:true}).fill(' high ');
+   assert(await page.locator('[data-model-scope="task"]').evaluate(node=>node.getBoundingClientRect().right<=innerWidth),'Task section fits viewport');
+   await page.screenshot({path:`${output}/task-parameters-${width}-${locale}-after.png`,fullPage:true});
+
    // 4. Simultaneous main + task edit must use ONE config POST.
    await mainModel().fill('cached/picked');
    assert.equal(await mainModel().inputValue(),'cached/picked');
@@ -79,7 +85,7 @@ try{
    let posts=await agentPosts();
    assert.equal(posts.length,1,'Simultaneous main+task edit must use one config POST');
    assert.equal(posts[0].body.selection.model,'cached/picked');
-   assert.deepEqual(posts[0].body.selection.task_default,{profile_id:'second',model:'my-task/route'});
+   assert.deepEqual(posts[0].body.selection.task_default,{profile_id:'second',model:'my-task/route',context_window:64000,max_output_tokens:4000,reasoning_effort:'high'});
    let mutations=await allMutations();
    assert(!mutations.some(call=>call.path==='/api/v1/providers/check'||call.path==='/api/v1/messages'),'Model choices must not trigger discovery or inference');
 
@@ -90,6 +96,9 @@ try{
    assert.equal(await taskProvider().inputValue(),'second');
    assert.equal(await taskModel().inputValue(),'my-task/route');
    assert(!await taskModel().isDisabled());
+
+   assert.equal(await page.getByLabel(translate(locale,'assistant.taskContextWindow'),{exact:true}).inputValue(),'64000');
+   assert.equal(await page.getByLabel(translate(locale,'assistant.taskEffort'),{exact:true}).inputValue(),'high');
 
    // 5. Main provider change must NOT change task default/custom model.
    await mainProvider().selectOption('second');
@@ -102,7 +111,7 @@ try{
    assert.equal(posts.length,2,'Main-only edit adds exactly one more config POST');
    const afterMain=(await configure()).state;
    assert.equal(afterMain.model,'other-default');
-   assert.deepEqual(afterMain.task_default,{profile_id:'second',model:'my-task/route'},'Main provider change preserves the task default');
+   assert.deepEqual(afterMain.task_default,{profile_id:'second',model:'my-task/route',context_window:64000,max_output_tokens:4000,reasoning_effort:'high'},'Main provider change preserves the task default');
    await openSettings();
    await waitBoth();
    assert.equal(await mainModel().inputValue(),'other-default');
@@ -113,6 +122,7 @@ try{
    await taskProvider().selectOption('');
    await waitFollow();
    assert(await taskModel().isDisabled());
+   assert(await page.getByLabel(translate(locale,'assistant.taskContextWindow'),{exact:true}).isDisabled());
    await save();
    await waitClosed();
    posts=await agentPosts();

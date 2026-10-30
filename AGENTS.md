@@ -20,6 +20,9 @@ Keep each tool focused on its responsibility. Update affected callers, tests and
 When modifying UI, read and follow the [UI development rules](docs/ui-development.md).
 For chat submission or delivery changes, also follow [Chat outbox](docs/chat-outbox.md).
 
+After UI changes, show before-and-after screenshots to the user.
+Screenshot scripts default to `output/screenshots/`.
+
 ## UI internationalization
 
 New or changed user-visible UI text must use the shared i18n catalog and lookup,

@@ -65,7 +65,7 @@ func TestMCPUpgradePreservesHistory(t *testing.T) {
 				if _, e = db.Exec(`INSERT INTO assistant_initial_intent(id,intent) VALUES('preserved-assistant',?)`, intent); e != nil {
 					t.Fatal(e)
 				}
-				preserved[`SELECT intent FROM assistant_initial_intent WHERE id='preserved-assistant'`] = intent
+				preserved[`SELECT intent FROM assistant_initial_intent WHERE id='preserved-assistant'`] = `{"task_default":{"profile_id":"p","model":"keep","context_window":null,"max_output_tokens":null,"reasoning_effort":null},"other":true}`
 				if _, e = db.Exec(`INSERT INTO agent_link_received_tasks VALUES('old-receipt','{"node_id":"old-peer","kind":"assistant","agent_id":"old-owner"}','old-request','old-owner','{"text":"immutable historical request"}','historical-task')`); e != nil {
 					t.Fatal(e)
 				}
