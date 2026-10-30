@@ -12,7 +12,7 @@ const waitFor=async(predicate,timeout=5000,label='condition')=>{
   throw Error('Timed out waiting for '+label);
 };
 
-const source=await sourceServer();
+const source=await sourceServer({});
 let fixture,browser,failure;
 try{
   fixture=await chatInteractionsFixture(source.origin);

@@ -1,6 +1,7 @@
 import {translate} from './locales/messages.mjs';
 import {storedPreference} from './state/preferences.mjs';
 import {ensureBrowserAccess} from './adapters/access.mjs';
+import {getBusinessSocket} from './adapters/ws-client.mjs';
 
 const root=document.querySelector('#connection');
 const locale=()=>storedPreference('pot-ui-locale',navigator.language.startsWith('zh')?'zh-CN':'en');
@@ -16,7 +17,7 @@ function button(key,action){
   finally{if(!navigating){busy=false;for(const control of controls)control.disabled=false;}}
  };return node;
 }
-async function api(path,body){const response=await fetch(path,{credentials:'same-origin',...(body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});if(!response.ok)throw Error('MCP connection request failed');return response.json();}
+async function api(path,body){return getBusinessSocket().request(path,body?{method:'POST',body}:{});}
 async function start(){
  await ensureBrowserAccess(root);
  const params=new URLSearchParams(location.search),returnTo=params.get('return_to');

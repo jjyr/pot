@@ -1,3 +1,5 @@
+import { installWSFixture } from './helpers/ws-fixture.mjs';
+installWSFixture();
 import {createMemoryProjectionStore} from '../../web/src/state/projection-store.mjs';
 import assert from 'node:assert/strict';
 import {attachmentAllowed,attachmentProblem,failedMessageInput} from '../../web/src/components/attachments.mjs';

@@ -1,4 +1,4 @@
-import {currentPreparedRender,preparedAsset,staticPreparationClone,preparedPreviousRoot} from './prepared-render.mjs';
+import {currentPreparedRender,preparedAsset,staticPreparationClone,preparedPreviousRoot,consumePreparationSurrogates} from './prepared-render.mjs';
 import {moveConversationNode} from './conversation-dom.mjs';
 import {inlineLinks,fileHref} from '../state/markdown-links.mjs';
 import {createMermaidBlock} from './mermaid.mjs';
@@ -120,7 +120,6 @@ export function createMarkdownView(host,{slot='markdown'}={}) {
     return next.preparationOriginal||next;
   }
   function adopt(node){
-    for(const child of [...node.childNodes]){const value=original(child);if(value!==child){moveConversationNode(node,value,child);child.remove();}else if(child.nodeType===1)adopt(child);}
     return node;
   }
   function patch(old,next) {
@@ -147,7 +146,7 @@ export function createMarkdownView(host,{slot='markdown'}={}) {
     const children=[...next.childNodes];
     for(const [index,child]of children.entries()){
       const current=old.childNodes[index],retained=patch(current,child);
-      if(retained!==current){moveConversationNode(old,retained,current||null);current?.remove();}
+      if(retained!==current){moveConversationNode(old,retained,current||null);if(currentPreparedRender()?.context.phase!=='prepare'&&retained.nodeType===1)consumePreparationSurrogates(retained);current?.remove();}
     }
     while(old.childNodes.length>children.length)old.lastChild.remove();
     return old;
@@ -156,7 +155,7 @@ export function createMarkdownView(host,{slot='markdown'}={}) {
     for(const [index,node]of nodes.entries()){
       const position=retained+index,current=blocks[position],at=offset+(node.markdownOffset||0),value=patch(current,node);
       value.markdownOffset=at;
-      if(value!==current){moveConversationNode(host,value,current||null);current?.remove();}
+      if(value!==current){moveConversationNode(host,value,current||null);if(currentPreparedRender()?.context.phase!=='prepare'&&value.nodeType===1)consumePreparationSurrogates(value);current?.remove();}
       blocks[position]=value;
     }
     for(const block of blocks.splice(retained+nodes.length))block.remove();

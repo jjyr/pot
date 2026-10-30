@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {sourceServer,launchBrowser} from './browser-harness.mjs';
 import {attachmentPickerFixture} from './attachment-picker-fixture.mjs';
-const source=await sourceServer(),fixture=await attachmentPickerFixture(source.origin),browser=await launchBrowser();
+const source=await sourceServer({}),fixture=await attachmentPickerFixture(source.origin),browser=await launchBrowser();
 try{
   for(const width of [1280,390]){
     const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:850}}),page=await context.newPage(),errors=[];page.setDefaultTimeout(12000);page.on('pageerror',error=>errors.push(error.message));

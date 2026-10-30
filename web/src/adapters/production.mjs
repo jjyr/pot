@@ -2,7 +2,7 @@ import {translate} from '../locales/messages.mjs';
 import {supportsCapability,agentFailureKey} from '../state/agent-links.mjs';
 import {createResourceReads} from '../state/resource-cache.mjs';
 import {createTopicVersions} from '../state/changes.mjs';
-import {createEventStream} from '../state/event-stream.mjs';
+import {getBusinessSocket,readBusinessStartup} from './ws-client.mjs';
 import {validSnapshot} from '../state/conversation.mjs';
 import {createFileImages} from '../state/file-images.mjs';
 import {createResourceReader} from '../state/resource-reader.mjs';
@@ -13,33 +13,10 @@ import {configurationIdentityCurrent} from '../state/settings-access.mjs';
 export class APIError extends Error {
   constructor(status, value) { super(value?.message || (typeof value?.error === 'string' && value.error) || `HTTP ${status}`); this.status = status; this.code = value?.code || 'http_error'; this.uiKey=agentFailureKey(this.code); }
 }
-export function decodeDesktopResponse(raw) {
-  const value=typeof raw==='string'?JSON.parse(raw):raw;
-  // Service.Call failures have this exact envelope. Domain DTOs also contain
-  // error text (for example a successfully cancelled preparation request).
-  if(value&&typeof value==='object'&&Object.keys(value).length===2
-      &&Number.isInteger(value.status)&&value.status>=400&&value.status<=599
-      &&value.error&&typeof value.error==='object'&&!Array.isArray(value.error)
-      &&typeof value.error.code==='string'&&typeof value.error.message==='string')throw new APIError(value.status,value.error);
-  return value;
-}
 // Startup identity reads deliberately bypass the retained client's request gate.
 // They only confirm the local Control; they never replay a business operation.
 export async function readDesktopStartup({signal}={}) {
-  const api=await import('/wails/runtime.js');
-  const invoke=(method,...args)=>api.Call.ByName(`github.com/jjyr/pot/internal/desktop.Service.${method}`,...args);
-  const read=async(method,...args)=>{
-    signal?.throwIfAborted();
-    const pending=invoke(method,...args);
-    let abort;
-    try{return await (signal?Promise.race([pending,new Promise((_,reject)=>{abort=()=>{pending.cancel?.();reject(signal.reason);};signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();})]):pending);}
-    finally{if(abort)signal.removeEventListener('abort',abort);}
-  };
-  const runtime=decodeDesktopResponse(await read('Call','GET','/api/v1/runtime',''));
-  if(!(runtime?.runtime_id||runtime?.id)||!runtime.boot_id)throw Error('Runtime identity is unavailable');
-  const readBaselines=await read('AssistantReads');
-  signal?.throwIfAborted();
-  return {runtime,readBaselines};
+  return readBusinessStartup({desktop:true,base:'',signal});
 }
 export function scopedPath(path, {owner = '', space = '',configuration=false,control_id,configurationBoot,expectedControl} = {}) {
   const [base, query = ''] = path.split('?');
@@ -112,20 +89,6 @@ export async function createProductionClient({desktop = false, base = '', resour
     }
     return commit();
   }
-  async function terminalStreamFailure(signal){
-    const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),5000);
-    const cancel=()=>abort.abort();signal.addEventListener('abort',cancel,{once:true});if(signal.aborted)cancel();
-    try{
-      const response=await fetch(`${base}/access/status`,{credentials:'same-origin',signal:abort.signal});
-      if(response.status===401)return {uiKey:'connection.authenticationRequired',code:'stream_authentication'};
-      if(response.status===403)return {uiKey:'connection.streamUnavailable',code:'stream_forbidden'};
-      if(response.ok){const value=await response.json();if(value.authenticated===false)return {uiKey:'connection.authenticationRequired',code:'stream_authentication'};if(value.authenticated===true)return {retry:true};}
-    }catch{/* An unavailable probe cannot establish an authentication failure. */}
-    finally{clearTimeout(timer);signal.removeEventListener('abort',cancel);}
-    // Both conversation and changes streams must recover from transient status
-    // failures without depending on a consumer Retry button or foreground remount.
-    return {retry:true};
-  }
   // A transport retry must re-confirm the startup identity before publishing
   // frames or enabling requests in the old namespace.
   function guardReconnect(onStatus=()=>{}){
@@ -159,23 +122,10 @@ export async function createProductionClient({desktop = false, base = '', resour
     };
     if(signature&&acceptedCommands.has(signature))return completeCommand(path,method,body,acceptedCommands.get(signature).value,capturedScope,signature,options.submission);
     if (signal?.aborted) throw signal.reason;
-    if (desktop) {
-      const pending = invoke('Call', method, fullPath, body === undefined ? '' : JSON.stringify(body));
-      const abort = () => pending.cancel?.();
-      signal?.addEventListener('abort', abort, {once: true});
-      try {
-        const raw = await pending;
-        if (signal?.aborted) throw signal.reason;
-        if(method==='GET'&&generation!==client?.connectionGeneration)throw new DOMException('Connection retired','AbortError');
-        let value;try{value=decodeDesktopResponse(raw);}catch(error){throw localized(error);}configurationResult();if(method==='GET')await displayReader?.observe(path,value,capturedScope,{isCurrent:readCurrent,signal}).catch(error=>{client.resourceCopiesError=error;});checkRead();if(method!=='GET')return completeCommand(path,method,body,value,capturedScope,signature,options.submission);return value;
-      } finally { signal?.removeEventListener('abort', abort); }
-    }
-    const response = await fetch(`${base}${fullPath}`, {method, signal, credentials: 'same-origin',
-      headers: body === undefined ? {} : {'Content-Type': 'application/json'},
-      body: body === undefined ? undefined : JSON.stringify(body)});
-    const value = response.status === 204 ? null : await response.json().catch(() => null);
+    let value;try{value=await getBusinessSocket({desktop,base}).request(fullPath,{method,body,signal,expected_control_id:client?.runtime?.runtime_id||client?.runtime?.id});}
+catch(error){if(signal?.aborted||error?.name==='AbortError')throw signal?.reason??error;const failure=error instanceof APIError?error:new APIError(error?.status??0,error);if(error?.uiKey)failure.uiKey=error.uiKey;if(error?.unknown!==undefined)failure.unknown=error.unknown;throw localized(failure);}
+    if(signal?.aborted)throw signal.reason;
     if(method==='GET'&&generation!==client?.connectionGeneration)throw new DOMException('Connection retired','AbortError');
-    if (!response.ok) throw localized(new APIError(response.status, value));
     configurationResult();
     if(method==='GET')await displayReader?.observe(path,value,capturedScope,{isCurrent:readCurrent,signal}).catch(error=>{client.resourceCopiesError=error;});
     checkRead();
@@ -339,55 +289,21 @@ export async function createProductionClient({desktop = false, base = '', resour
       let active = true;
       const connectionGeneration=client.connectionGeneration;
       const current=()=>active&&client.onlineReady&&connectionGeneration===client.connectionGeneration;
-      const deliver = value => {
-        if (!current()) return;
-        let snapshot;
-        try { snapshot = normalizeSnapshot(value, runtime, scope.owner, scope.space); }
-        catch (reason) { onStatus('offline', reason); return; }
-        onSnapshot(snapshot);
-      };
-      if (desktop) {
-        // Allocate before Subscribe: the native goroutine can emit its initial
-        // reset before the binding promise resolves, even in a second WebView.
-        const token=crypto.randomUUID();let source=0,hasFrame=false;
-        const matches=value=>current()&&value.token===token&&value.space_id===scope.space&&value.owner===scope.owner&&Number.isSafeInteger(value.generation)&&value.generation>0;
-        const revalidate=()=>{client.suspendStartup();client.revalidateStartup?.();};
-        const failure=reason=>localized(Object.assign(reason,{uiKey:reason.uiKey||'connection.streamUnavailable'}));
-        onStatus('connecting');
-        const stop = runtimeAPI.Events.On('pot:snapshot', event => {
-          const value = event.data;
-          if(!matches(value)||value.generation!==source)return;
-          if(client.startup&&value.snapshot?.view?.state?.boot_id!==runtime.boot_id){revalidate();return;}
-          let snapshot;try{snapshot=normalizeSnapshot(value.snapshot,runtime,scope.owner,scope.space);if(!validSnapshot(snapshot)||!hasFrame&&snapshot.kind!=='reset')throw Error('Invalid initial conversation frame');}
-          catch(reason){onStatus('offline',failure(reason));if(client.startup)revalidate();return;}
-          hasFrame=true;deliver(value.snapshot);
-        });
-        const stopStatus=runtimeAPI.Events.On('pot:subscription',event=>{
-          const value=event.data;
-          if(!matches(value)||value.generation<source)return;
-          if(value.status==='connecting'){
-            if(value.generation===source)return;
-            source=value.generation;hasFrame=false;
-            // A reconnect may belong to a new Control boot. Verify it before
-            // accepting any frame; startup confirmation owns the new attachment.
-            if(source>1&&client.startup){revalidate();return;}
-          }else if(value.generation!==source||value.status==='connected'&&!hasFrame)return;
-          if(value.status==='offline')confirmedSessions.delete(sessionKey(scope));
-          onStatus(value.status,value.error?failure(new Error(value.error)):undefined);
-          if(value.status==='offline'&&client.startup)revalidate();
-        });
-        invoke('Subscribe',token,scope.space,scope.owner,client.uiLocale?.()||'en').then(()=>{if(!active)invoke('Unsubscribe',token).catch(()=>{});}).catch(reason=>{if(current()){onStatus('offline',failure(reason));if(client.startup)revalidate();}});
-        return () => { active = false; stop(); stopStatus(); confirmedSessions.delete(sessionKey(scope));invoke('Unsubscribe', token).catch(() => {}); };
-      }
-      return createEventStream({url:`${base}${scopedPath('/api/v1/events?'+new URLSearchParams({locale:client.uiLocale?.()||'en'}),scope)}`,
+      const revalidate=()=>{if(!client.startup||!client.onlineReady)return;client.suspendStartup();client.revalidateStartup?.();};
+      const status=guardReconnect((state,reason)=>{
+        if(state==='offline'){confirmedSessions.delete(sessionKey(scope));revalidate();}
+        onStatus(state,reason);
+      });
+      const stop = getBusinessSocket({desktop,base}).subscribe(`${scopedPath('/api/v1/events?'+new URLSearchParams({locale:client.uiLocale?.()||'en'}),scope)}`,{expected_control_id:runtime.runtime_id||runtime.id,
         events:{conversation:(event,initial)=>{
-          if(!client.onlineReady)return false;
-          const snapshot=normalizeSnapshot(JSON.parse(event.data),runtime,scope.owner,scope.space);
-          if(!validSnapshot(snapshot)||initial&&snapshot.kind!=='reset')throw Error('Invalid initial conversation frame');
-          return ()=>onSnapshot(snapshot);
-        }},onStatus:guardReconnect(onStatus),terminal:terminalStreamFailure});
+          if(!current())return false;
+          const value=JSON.parse(event.data);if(client.startup&&value?.view?.state?.boot_id!==runtime.boot_id){revalidate();return false;}const snapshot=normalizeSnapshot(value,runtime,scope.owner,scope.space);if(!validSnapshot(snapshot)||initial&&snapshot.kind!=='reset')throw Error('Invalid initial conversation frame');return ()=>{if(current())onSnapshot(snapshot);};
+        }},
+        onStatus:status,
+      });
+      return () => { active = false; stop(); confirmedSessions.delete(sessionKey(scope)); };
     },
-    changesHealthy(space=''){return !desktop&&client.onlineReady&&[...changeStreams].some(stream=>stream.healthy&&stream.generation===client.connectionGeneration&&stream.boot===client.runtime.boot_id&&(!stream.space||stream.space===space));},
+    changesHealthy(space=''){return client.onlineReady&&[...changeStreams].some(stream=>stream.healthy&&stream.generation===client.connectionGeneration&&stream.boot===client.runtime.boot_id&&(!stream.space||stream.space===space));},
     changes(onChange,{space=context.space}={}) {
       const scope = {...context,space};
       if(!client.onlineReady){let active=true,stop;const cancel=whenOnline(()=>{if(active)stop=client.changes(onChange,{space});});return ()=>{active=false;cancel();stop?.();};}
@@ -395,21 +311,19 @@ export async function createProductionClient({desktop = false, base = '', resour
       const versions=createTopicVersions();
       const generation=client.connectionGeneration;
       const notify=(topics,sourceSpace,boot)=>{const changed=versions(topics,sourceSpace,boot);if(changed.length)onChange(changed,{space:sourceSpace,boot});};
-      if (desktop) {const stop=runtimeAPI.Events.On('pot:changed', event => {
-        if(!client.onlineReady||generation!==client.connectionGeneration)return;
-        if(scope.space&&event.data.space_id!==scope.space)return;
-        if(client.startup&&(event.data.reset||event.data.boot_id&&event.data.boot_id!==runtime.boot_id)){client.suspendStartup();client.revalidateStartup?.();return;}
-        if(event.data.reset){onChange([],{space:event.data.space_id,reset:true});return;}
-        notify(event.data.topics,event.data.space_id,event.data.boot_id||'');
-      });return()=>{changeStreams.delete(health);stop();};}
+      const revalidate=()=>{if(!client.startup||!client.onlineReady)return;client.suspendStartup();client.revalidateStartup?.();};
       const deliver=(event,initial)=>{
         if(!client.onlineReady||generation!==client.connectionGeneration)return false;
         const value=JSON.parse(event.data),id=event.lastEventId||'',separator=id.lastIndexOf(':');
-        return ()=>{if(!client.onlineReady||generation!==client.connectionGeneration)return;health.boot=separator<0?'':id.slice(0,separator);health.healthy=!!health.boot;if(initial)onChange([],{space:scope.space,reset:true});
-          notify(value.topics||value,scope.space,separator<0?'':id.slice(0,separator));};
+        const boot=separator<0?'':id.slice(0,separator);
+        if(client.startup&&boot&&boot!==runtime.boot_id){revalidate();return false;}
+        return ()=>{if(!client.onlineReady||generation!==client.connectionGeneration)return;health.boot=boot;health.healthy=!!health.boot;if(initial)onChange([],{space:scope.space,reset:true});
+          notify(value.topics||value,scope.space,boot);};
       };
-      const reconnect=guardReconnect(),stop=createEventStream({url:`${base}${scopedPath('/api/v1/changes',scope)}`,
-        events:{changed:deliver,changes:deliver,message:deliver},onStatus:(state,reason)=>{health.healthy=false;reconnect(state,reason);},terminal:terminalStreamFailure});
+      const reconnect=guardReconnect((state,reason)=>{if(state==='offline'){health.healthy=false;revalidate();}});
+      const stop=getBusinessSocket({desktop,base}).subscribe(`${scopedPath('/api/v1/changes',scope)}`,{
+        expected_control_id:runtime.runtime_id||runtime.id,
+        events:{changed:deliver,changes:deliver,message:deliver},onStatus:(state,reason)=>reconnect(state,reason)});
       return()=>{changeStreams.delete(health);stop();};
     },
   };

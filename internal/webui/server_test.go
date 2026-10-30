@@ -1,14 +1,13 @@
 package webui
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"testing/fstest"
-	"time"
 )
 
 func TestPotMCPOAuthCallbackNavigationKeepsAPIsFenced(t *testing.T) {
@@ -58,13 +57,6 @@ func TestAuthenticationAllowlistCredentialSeparationAndRotation(t *testing.T) {
 	requests := make(chan string, 4)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests <- r.Header.Get("Authorization") + "|" + r.Header.Get("Cookie")
-		if r.URL.Path == "/api/v1/events" {
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.Write([]byte("event: snapshot\ndata: {}\n\n"))
-			w.(http.Flusher).Flush()
-			<-r.Context().Done()
-			return
-		}
 		w.Write([]byte(`{"ok":true}`))
 	}))
 	defer upstream.Close()
@@ -75,6 +67,15 @@ func TestAuthenticationAllowlistCredentialSeparationAndRotation(t *testing.T) {
 	}
 	defer server.Close()
 	invoke := func(method, path, authorization, cookie, origin string) *httptest.ResponseRecorder {
+		if strings.HasPrefix(path, "/api/") {
+			var c *http.Cookie
+			if cookie != "" {
+				r := httptest.NewRequest(method, "http://localhost"+path, nil)
+				r.Header.Set("Cookie", cookie)
+				c, _ = r.Cookie("pot_session")
+			}
+			return invokeSocket(t, server, method, path, nil, c, origin)
+		}
 		r := httptest.NewRequest(method, "http://localhost"+path, nil)
 		r.Header.Set("Authorization", authorization)
 		r.Header.Set("Cookie", cookie)
@@ -133,26 +134,10 @@ func TestAuthenticationAllowlistCredentialSeparationAndRotation(t *testing.T) {
 	if w = invoke("POST", "/api/v1/messages", "", cookie.String(), "https://attacker.example"); w.Code != 403 {
 		t.Fatal(w.Code)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	r := httptest.NewRequest("GET", "http://localhost/api/v1/events", nil).WithContext(ctx)
-	r.Header.Set("Cookie", cookie.String())
-	done := make(chan struct{})
-	go func() { server.ServeHTTP(httptest.NewRecorder(), r); close(done) }()
-	select {
-	case <-requests:
-	case <-time.After(time.Second):
-		t.Fatal("stream not connected")
-	}
 	next := NewConfig()
 	next.Generation = config.Generation + 1
 	if err = server.ReplaceAccess(next); err != nil {
 		t.Fatal(err)
-	}
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("rotation did not stop stream")
 	}
 	if w = invoke("GET", "/api/v1/runtime", "", cookie.String(), ""); w.Code != 401 {
 		t.Fatal(w.Code)
@@ -229,22 +214,30 @@ func TestBrowserReadPagesReachControl(t *testing.T) {
 			if kind == "send-receipt" {
 				path = "/api/v1/messages/receipt?space_id=remote&assistant_id=alice&conversation_id=main&request_id=send&user_message_id=original&expected_control_id=owning-control"
 			}
-			r := httptest.NewRequest("GET", "http://localhost"+path, nil)
-			r.AddCookie(cookie)
-			w := httptest.NewRecorder()
-			server.ServeHTTP(w, r)
+			w := invokeSocket(t, server, "GET", path, nil, cookie, "")
 			if w.Code != http.StatusOK || w.Body.String() != `{"items":[],"offset":20,"next_offset":null}` {
 				t.Fatalf("read page not proxied: status=%d body=%s", w.Code, w.Body.String())
 			}
-			if received := <-requests; received != path {
+			if received := <-requests; func() bool {
+				want, err := url.ParseRequestURI(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := url.ParseRequestURI(received)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return got.Path == want.Path && got.Query().Encode() == want.Query().Encode()
+			}() == false {
 				t.Fatal("read query changed", received)
 			}
 			for _, method := range []string{"POST", "PUT", "DELETE"} {
-				r = httptest.NewRequest(method, "http://localhost"+path, nil)
-				r.AddCookie(cookie)
-				w = httptest.NewRecorder()
-				server.ServeHTTP(w, r)
-				if w.Code != http.StatusNotFound {
+				expectedStatus := http.StatusMethodNotAllowed
+				if method == "POST" {
+					expectedStatus = http.StatusNotFound
+				}
+				w = invokeSocket(t, server, method, path, nil, cookie, "")
+				if w.Code != expectedStatus {
 					t.Fatal("read page allowed mutation", method, w.Code)
 				}
 			}

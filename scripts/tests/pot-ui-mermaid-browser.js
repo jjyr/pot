@@ -35,9 +35,14 @@ async page=>{
     assert(loads===0,'Ordinary Markdown does not load Pele');
     assert(await page.locator('strong').innerText()==='Markdown','Inline Markdown still renders');
     await page.evaluate(()=>mermaidFixture.draw('```mermaid\nflowchart LR\n A --> B'));
-    assert(await page.locator('pot-mermaid').count()===0&&loads===0,'An unclosed streamed fence remains code without loading Pele');
+    assert(await page.locator('pot-mermaid[data-unfinished="true"][aria-busy="true"]').count()===1,'An open Mermaid fence creates an unfinished loading shell');
+    assert(await page.locator('pot-mermaid svg').count()===0,'The unfinished Mermaid shell renders no svg');
+    assert(!await page.locator('.mermaid-source').evaluate(node=>node.open),'The unfinished Mermaid shell has no visible source');
+    assert(loads===0,'No Pele load is triggered by the unfinished Mermaid shell');
     await page.evaluate(()=>mermaidFixture.draw('````mermaid\nflowchart LR\n A --> B\n```\n````suffix'));
-    assert(await page.locator('pot-mermaid').count()===0,'Short fences and fences with trailing text do not terminate a diagram');
+    assert(await page.locator('pot-mermaid[data-unfinished="true"][aria-busy="true"]').count()===1,'Short fences and fences with trailing text do not terminate a diagram');
+    assert(await page.locator('pot-mermaid svg').count()===0,'The unfinished shell renders no svg for short fences or trailing text');
+    assert(!await page.locator('.mermaid-source').evaluate(node=>node.open),'The unfinished shell has no visible source for short fences or trailing text');
 
     await page.evaluate(()=>{
       const f=mermaidFixture;f.draw(f.fence('flowchart LR\n A[旧消息] --> B'));
@@ -129,7 +134,9 @@ async page=>{
       const f=mermaidFixture;f.host.replaceChildren();f.reply=f.createReplyBubble(f.host);
       f.reply.update({phase:'streaming',text:'```mermaid\nflowchart TD\n A --> B'},{t:f.t});
     });
-    assert(await page.locator('pot-mermaid').count()===0,'Reply streaming keeps an unfinished diagram as code');
+    assert(await page.locator('pot-mermaid[data-unfinished="true"][aria-busy="true"]').count()===1,'Reply streaming keeps an unfinished diagram as an unfinished loading shell');
+    assert(await page.locator('pot-mermaid svg').count()===0,'The streaming unfinished diagram renders no svg');
+    assert(!await page.locator('.mermaid-source').evaluate(node=>node.open),'The streaming unfinished diagram has no visible source');
     await page.evaluate(()=>{
       const f=mermaidFixture;f.reply.update({phase:'streaming',text:f.fence('flowchart TD\n A --> B')},{t:f.t});
     });

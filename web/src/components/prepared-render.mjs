@@ -118,10 +118,27 @@ export function preparedIsland(element){
   return element;
 }
 
-export function consumePreparationSurrogates(root){
-  for(const element of [...root.childNodes]){
-    if(element.preparationOriginal){element.preparationOriginal.commitPreparedState?.(element);moveConversationNode(element.parentNode,element.preparationOriginal,element);element.remove();}
-    else if(element.nodeType===1)consumePreparationSurrogates(element);
+export function consumePreparationSurrogates(root) {
+  const children = Array.from(root.childNodes);
+  for (const child of children) {
+    if (child && child.preparationOriginal) {
+      const original = child.preparationOriginal;
+      if (
+        original.isConnected &&
+        !original.closest?.('[data-preparation-surface]') &&
+        root.closest?.('[data-preparation-surface]')
+      ) {
+        throw Error('Live node cannot enter preparation');
+      }
+      original.commitPreparedState?.(child);
+      if (child.preparationUpdates) {
+        original.updatePreparedProperties?.(child.preparationUpdates);
+      }
+      moveConversationNode(root, original, child);
+      child.remove();
+    } else if (child && child.nodeType === 1) {
+      consumePreparationSurrogates(child);
+    }
   }
   return root;
 }
@@ -283,10 +300,8 @@ export function adoptPreparedChildren(target,source,{retain=[]}={}){
   const attributes=[...source.attributes].map(attribute=>[attribute.name,attribute.value]);
   const oldText=target.childNodes.length===1&&target.firstChild.nodeType===3?target.firstChild:null,newText=source.childNodes.length===1&&source.firstChild.nodeType===3?source.firstChild:null;
   const selection=getSelection(),endpoints=oldText&&newText&&selection?.rangeCount?[selection.anchorNode,selection.anchorOffset,selection.focusNode,selection.focusOffset]:null;
-  for(const [candidate,live]of retain)if(candidate&&live&&candidate!==live&&candidate.parentNode){moveConversationNode(candidate.parentNode,live,candidate);candidate.remove();}
-  consumePreparationSurrogates(source);
-  const nodes=[...source.childNodes];
-  for(const [index,node]of nodes.entries())moveConversationNode(target,node,target.childNodes[index]||null);
+  const retained=new Map(retain.filter(([candidate,live])=>candidate&&live));
+  const adopt=(candidate,parent,before)=>{const node=retained.get(candidate)||candidate.preparationOriginal||candidate;if(candidate.preparationOriginal===node)node.commitPreparedState?.(candidate);if(candidate.preparationUpdates)node.updatePreparedProperties?.(candidate.preparationUpdates);if(node!==before&&(node.parentNode!==parent||node.nextSibling!==before))moveConversationNode(parent,node,before);if(node!==candidate)candidate.remove();if(node===candidate){for(const child of[...node.childNodes])if(retained.has(child)||child.preparationOriginal)adopt(child,node,child);else resolveChildren(child);}return node;};const resolveChildren=(parent)=>{for(const child of[...parent.childNodes])if(retained.has(child)||child.preparationOriginal)adopt(child,parent,child);else resolveChildren(child);};const nodes=[...source.childNodes].map((candidate,index)=>adopt(candidate,target,target.childNodes[index]||null));
   if(endpoints&&[0,2].every(index=>endpoints[index]!==oldText||oldText.data.slice(0,endpoints[index+1])===newText.data.slice(0,endpoints[index+1])))selection.setBaseAndExtent(...endpoints.map((value,index)=>index%2===0&&value===oldText?newText:value));
   for(const node of [...target.childNodes])if(!nodes.includes(node))node.remove();
   source.removeAttribute('id');for(const attribute of [...target.attributes])if(!attributes.some(([name])=>name===attribute.name))target.removeAttribute(attribute.name);

@@ -1,7 +1,6 @@
 package localui
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
@@ -93,12 +93,18 @@ func (c *HTTPClient) request(ctx context.Context, method, path string, body json
 	if c.client == nil || c.token == "" {
 		return nil, errors.New("native local UI transport unavailable")
 	}
-	if method != "GET" && method != "POST" {
-		return nil, errors.New("local UI request method must be GET or POST")
-	}
 	path, err := operatorPath(path)
 	if err != nil {
 		return nil, err
+	}
+	if method != "GET" && method != "POST" {
+		if method != "DELETE" {
+			return nil, errors.New("local UI request method must be GET, POST, or DELETE")
+		}
+		parsed, perr := url.ParseRequestURI(path)
+		if perr != nil || !strings.HasPrefix(parsed.Path, "/api/v1/integrations/") {
+			return nil, errors.New("local UI request method must be GET or POST")
+		}
 	}
 	request, err := http.NewRequestWithContext(ctx, method, c.origin+path, bytes.NewReader(body))
 	if err != nil {
@@ -146,71 +152,124 @@ func (c *HTTPClient) Call(ctx context.Context, method, path string, body json.Ra
 	}
 	return data, nil
 }
+
 func (c *HTTPClient) Stream(ctx context.Context, path string, receive func(Event) error) error {
-	response, err := c.request(ctx, "GET", path, nil)
+	if c.client == nil || c.token == "" {
+		return errors.New("native local UI transport unavailable")
+	}
+	validatedPath, err := operatorPath(path)
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
-	if !strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
-		return errors.New("local UI stream has invalid content type")
+	header := http.Header{}
+	header.Set("Authorization", "Bearer "+c.token)
+	if c.expectedID != "" {
+		header.Set("X-Pot-Control-ID", c.expectedID)
 	}
-	scanner := bufio.NewScanner(response.Body)
-	scanner.Buffer(make([]byte, 4096), responseLimit)
-	event := Event{}
-	data := []byte{}
-	flush := func() error {
-		if len(data) == 0 {
-			event = Event{}
-			return nil
+	conn, response, err := websocket.Dial(ctx, c.origin+"/api/v1/ws", &websocket.DialOptions{
+		HTTPClient:   c.client,
+		HTTPHeader:   header,
+		Subprotocols: []string{"pot.v1"},
+	})
+	if err != nil {
+		if response != nil {
+			if response.Body != nil {
+				response.Body.Close()
+			}
 		}
-		event.Data = bytes.Clone(data)
-		if event.Type == "" {
-			event.Type = "message"
-		}
-		err := receive(event)
-		event = Event{}
-		data = nil
 		return err
 	}
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			if err := flush(); err != nil {
+	defer conn.CloseNow()
+	if conn.Subprotocol() != "pot.v1" {
+		return errors.New("local UI stream did not negotiate pot.v1")
+	}
+	conn.SetReadLimit(responseLimit)
+
+	subscribe := struct {
+		ID                string `json:"id"`
+		Type              string `json:"type"`
+		Path              string `json:"path"`
+		ExpectedControlID string `json:"expected_control_id,omitempty"`
+	}{
+		ID:                "stream",
+		Type:              "subscribe",
+		Path:              validatedPath,
+		ExpectedControlID: c.expectedID,
+	}
+	payload, err := json.Marshal(subscribe)
+	if err != nil {
+		return err
+	}
+	writeCtx, writeCancel := context.WithTimeout(ctx, 15*time.Second)
+	err = conn.Write(writeCtx, websocket.MessageText, payload)
+	writeCancel()
+	if err != nil {
+		return err
+	}
+
+	type frame struct {
+		Type    string             `json:"type"`
+		ID      string             `json:"id"`
+		Event   string             `json:"event"`
+		EventID string             `json:"event_id"`
+		Data    json.RawMessage    `json:"data"`
+		Status  int                `json:"status"`
+		Error   *protocol.APIError `json:"error"`
+	}
+
+	acked := false
+	for {
+		typ, data, err := conn.Read(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if errors.Is(err, io.EOF) || websocket.CloseStatus(err) == websocket.StatusNormalClosure {
+				return io.EOF
+			}
+			return err
+		}
+		if typ != websocket.MessageText {
+			return errors.New("local UI stream received non-text frame")
+		}
+		var f frame
+		if err := json.Unmarshal(data, &f); err != nil {
+			return err
+		}
+		if f.Type == "heartbeat" {
+			continue
+		}
+		if f.ID != "stream" {
+			return errors.New("local UI stream received unexpected frame id")
+		}
+		if !acked {
+			if f.Type == "event" {
+				return errors.New("local UI stream received event before acknowledgement")
+			}
+			if f.Type != "response" {
+				return errors.New("local UI stream received unexpected frame")
+			}
+			if f.Status != http.StatusOK || f.Error != nil {
+				if f.Error != nil {
+					return *f.Error
+				}
+				return errors.New("Control rejected stream subscription")
+			}
+			acked = true
+			continue
+		}
+		switch f.Type {
+		case "event":
+			if err := receive(Event{Type: f.Event, ID: f.EventID, Data: f.Data}); err != nil {
 				return err
 			}
-			continue
-		}
-		if strings.HasPrefix(line, ":") {
-			continue
-		}
-		key, value, found := strings.Cut(line, ":")
-		if !found {
-			value = ""
-		}
-		value = strings.TrimPrefix(value, " ")
-		switch key {
-		case "event":
-			event.Type = value
-		case "id":
-			if !strings.ContainsRune(value, 0) {
-				event.ID = value
+		case "end":
+			if f.Error != nil {
+				return *f.Error
 			}
-		case "data":
-			if len(data) > 0 {
-				data = append(data, '\n')
-			}
-			data = append(data, value...)
-			if len(data) > responseLimit {
-				return errors.New("local UI event exceeds limit")
-			}
+			return io.EOF
+		default:
+			return errors.New("local UI stream received unexpected frame")
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return io.EOF
 }

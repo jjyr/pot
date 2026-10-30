@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
 	"slices"
 	"strconv"
 	"strings"
@@ -35,17 +36,18 @@ type Assistant struct {
 }
 
 type Snapshot struct {
-	Assistants     []Assistant       `json:"assistants,omitempty"`
-	RuntimeID      string            `json:"runtime_id"`
-	BootID         string            `json:"boot_id"`
-	OwnerID        string            `json:"owner_id"`
-	ConversationID string            `json:"conversation_id"`
-	Cursor         string            `json:"cursor"`
-	Messages       []Message         `json:"messages"`
-	Running        bool              `json:"running"`
-	TurnID         *string           `json:"turn_id"`
-	Configuration  map[string]string `json:"configuration,omitempty"`
-	Usage          map[string]uint64 `json:"usage,omitempty"`
+	Assistants     []Assistant          `json:"assistants,omitempty"`
+	RuntimeID      string               `json:"runtime_id"`
+	BootID         string               `json:"boot_id"`
+	OwnerID        string               `json:"owner_id"`
+	ConversationID string               `json:"conversation_id"`
+	Cursor         string               `json:"cursor"`
+	Messages       []Message            `json:"messages"`
+	Replies        []protocol.ChatReply `json:"replies"`
+	Running        bool                 `json:"running"`
+	TurnID         *string              `json:"turn_id"`
+	Configuration  map[string]string    `json:"configuration,omitempty"`
+	Usage          map[string]uint64    `json:"usage,omitempty"`
 }
 
 type SendRequest struct {
@@ -133,7 +135,7 @@ func (s *Service) snapshotLocked() Snapshot {
 		Assistants: catalogue,
 		RuntimeID:  "pot-ui-preview", BootID: s.boot, OwnerID: "preview-assistant",
 		ConversationID: ConversationID, Cursor: strconv.FormatUint(s.cursor, 10),
-		Messages: slices.Clone(s.messages), Running: s.active != nil, TurnID: turn,
+		Messages: slices.Clone(s.messages), Replies: []protocol.ChatReply{}, Running: s.active != nil, TurnID: turn,
 		Configuration: map[string]string{"name": "Fixture connection", "model": "fixture-model"}, Usage: map[string]uint64{"input": 12000, "output": 3500},
 	}
 }

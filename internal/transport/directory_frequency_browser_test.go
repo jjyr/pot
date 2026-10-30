@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,21 +18,7 @@ import (
 	webassets "github.com/jjyr/pot/web"
 )
 
-type frequencyWriter struct {
-	http.ResponseWriter
-	log  func(string, map[string]any)
-	path string
-}
-
-func (w frequencyWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
-func (w frequencyWriter) Write(data []byte) (int, error) {
-	if strings.Contains(string(data), "event:") {
-		w.log("sse", map[string]any{"path": w.path, "data": string(data)})
-	}
-	return w.ResponseWriter.Write(data)
-}
-
-// Opt-in real Control, journal, authenticated gateway, SSE and product assets.
+// Opt-in real Control, journal, authenticated gateway, WS and product assets.
 // Only fixture state is modified, and model responses come from loopback.
 func TestDirectoryFrequencyBrowserFixture(t *testing.T) {
 	file := os.Getenv("POT_DIRECTORY_FREQUENCY_URL_FILE")
@@ -85,8 +70,59 @@ func TestDirectoryFrequencyBrowserFixture(t *testing.T) {
 		fields["at"] = time.Now().UnixMilli()
 		trace = append(trace, fields)
 	}
-	upstream := httptest.NewServer(Handler(app, "synthetic-frequency-only"))
+	applicationHandler := Handler(app, "synthetic-frequency-only")
+	var gateMu sync.Mutex
+	var directoryGate chan struct{}
+	directoryHeld := 0
+	t.Cleanup(func() {
+		gateMu.Lock()
+		gate := directoryGate
+		directoryGate = nil
+		gateMu.Unlock()
+		if gate != nil {
+			close(gate)
+		}
+	})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log("http-start", map[string]any{"path": r.URL.Path, "query": r.URL.RawQuery, "method": r.Method})
+		defer log("http-end", map[string]any{"path": r.URL.Path, "query": r.URL.RawQuery, "method": r.Method})
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/assistants" {
+			gateMu.Lock()
+			gate := directoryGate
+			if gate != nil {
+				directoryHeld++
+			}
+			gateMu.Unlock()
+			if gate != nil {
+				select {
+				case <-gate:
+				case <-r.Context().Done():
+					gateMu.Lock()
+					directoryHeld--
+					gateMu.Unlock()
+					return
+				}
+				gateMu.Lock()
+				directoryHeld--
+				gateMu.Unlock()
+			}
+			select {
+			case <-time.After(80 * time.Millisecond):
+			case <-r.Context().Done():
+				return
+			}
+		}
+		applicationHandler.ServeHTTP(w, r)
+	}))
 	defer upstream.Close()
+	defer func() {
+		gateMu.Lock()
+		if directoryGate != nil {
+			close(directoryGate)
+			directoryGate = nil
+		}
+		gateMu.Unlock()
+	}()
 	done := make(chan struct{}, 1)
 	var gateway *webui.Server
 	var gatewayConfig webui.Config
@@ -132,6 +168,33 @@ func TestDirectoryFrequencyBrowserFixture(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(record)
 			return
+		case "/fixture/directory-gate":
+			var body struct {
+				Hold bool `json:"hold"`
+			}
+			if r.Method == http.MethodPost {
+				if json.NewDecoder(r.Body).Decode(&body) != nil {
+					http.Error(w, "invalid gate request", 400)
+					return
+				}
+			}
+			gateMu.Lock()
+			if r.Method == http.MethodPost {
+				if body.Hold {
+					if directoryGate == nil {
+						directoryGate = make(chan struct{})
+					}
+				} else if directoryGate != nil {
+					close(directoryGate)
+					directoryGate = nil
+				}
+			}
+			held := directoryHeld
+			holding := directoryGate != nil
+			gateMu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"held": held, "holding": holding})
+			return
 		case "/fixture/emit":
 			emitMu.Lock()
 			defer emitMu.Unlock()
@@ -174,19 +237,6 @@ func TestDirectoryFrequencyBrowserFixture(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{}`)
-			return
-		}
-		if strings.HasPrefix(r.URL.Path, "/api/") {
-			log("http-start", map[string]any{"path": r.URL.Path, "query": r.URL.RawQuery, "method": r.Method})
-			if r.URL.Path == "/api/v1/assistants" {
-				select {
-				case <-r.Context().Done():
-					return
-				case <-time.After(80 * time.Millisecond):
-				}
-			}
-			gateway.ServeHTTP(frequencyWriter{ResponseWriter: w, log: log, path: r.URL.Path}, r)
-			log("http-end", map[string]any{"path": r.URL.Path})
 			return
 		}
 		gateway.ServeHTTP(w, r)

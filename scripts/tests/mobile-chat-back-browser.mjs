@@ -7,7 +7,7 @@ import {mobileChatBackHTTPFixture} from './mobile-chat-back-http-fixture.mjs';
 const baseline=process.argv.includes('--baseline'),label=baseline?'before':'after';
 if(baseline&&!process.env.POT_BACK_UI_SOURCE)throw Error('Baseline requires the exact original ui.js module via POT_BACK_UI_SOURCE');
 const output=resolve(process.env.POT_BACK_OUTPUT||'.pot-artifacts/mobile-chat-back');await mkdir(output,{recursive:true});
-const source=await sourceServer(),fixture=await mobileChatBackHTTPFixture(source.origin,{uiSource:process.env.POT_BACK_UI_SOURCE?await readFile(process.env.POT_BACK_UI_SOURCE,'utf8'):undefined});
+const source=await sourceServer({}),fixture=await mobileChatBackHTTPFixture(source.origin,{uiSource:process.env.POT_BACK_UI_SOURCE?await readFile(process.env.POT_BACK_UI_SOURCE,'utf8'):undefined});
 const browser=await launchBrowser(),results=[];
 let context,page;const errors=[],consoleErrors=[];
 const setup=async()=>{

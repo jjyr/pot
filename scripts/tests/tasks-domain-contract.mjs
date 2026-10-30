@@ -4,6 +4,7 @@ import {createQueryRegistry,createCommands} from '../../web/src/state/domains/qu
 // Exercise the domain boundary: testing createTaskPages alone missed a dropped
 // onProgress callback in the domain's listQuery adapter.
 export async function tasksDomainContract(report=()=>{}) {
+  await taskDirectoryRecoveryContract(report);
   const check=(condition,label)=>{if(!condition)throw Error(label);report('PASS '+label);};
   const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {resolve,promise};};
   const flush=async()=>{for(let i=0;i<32;i++)await Promise.resolve();};
@@ -44,4 +45,85 @@ export async function tasksDomainContract(report=()=>{}) {
     check(later.length===length,'Disposed search consumer ignores late source completion');
     check(replacement.at(-1).data.pages.every(page=>page.value.items[0].id.endsWith('-replacement')),'Late prior query cannot replace the current scope results');
   }finally{slow.resolve();retired.resolve();stop?.();stopOld?.();stopNew?.();domain.dispose();queries.dispose();commands.dispose();}
+}
+
+export async function taskDirectoryRecoveryContract(report=()=>{}) {
+  const check=(c,l)=>{if(!c)throw Error(l);report('PASS '+l);};
+  const flush=async()=>{for(let i=0;i<64;i++)await Promise.resolve();};
+  let reads=0,ready=true,listeners=new Set(),nextGate;
+  const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return{promise,resolve};};
+  const record={run_id:'run',capabilities:{version:1,operations:['task.read','task.control']}};
+  const resources={
+    subscribe:()=>()=>{},subscribeInvalidation:()=>()=>{},
+    state:()=>({freshness:'fresh'}),
+    describe:(path,scope)=>({control:'c',boot:'b'}),
+    async read(){
+      reads++;
+      const value=structuredClone(record),gate=nextGate;nextGate=null;
+      if(gate)await gate.promise;
+      return value;
+    },
+  };
+  const transcriptRepository={read:async()=>null,close(){}};
+  const client={
+    runtime:{runtime_id:'r',boot_id:'b'},connectionGeneration:0,
+    spaces:[{id:'s',control_id:'c',boot_id:'b'}],
+    operationScopeReady:()=>ready,
+  };
+  let writes=0;
+  client.request=async()=>{writes++;return{};};
+  const directory={watch(listener){listeners.add(listener);listener({});return()=>listeners.delete(listener);}};
+  const registry=createQueryRegistry(resources),commands=createCommands(client);
+  const domain=createTasksDomain(client,{resources,queries:registry,commands,transcriptRepository,directory});
+  const published=()=>{for(const l of [...listeners])l({});};
+  let stop;
+  try{
+    const task={id:'t',run_id:'run'},scope={space:'s',owner:'o'},updates=[];
+    stop=domain.watchDetail(task,scope,s=>updates.push(s));
+    await flush();
+    check(typeof stop==='function','watchDetail returns stop function');
+    check(updates.at(-1)?.fresh===true&&updates.at(-1)?.data?.record?.capabilities?.operations?.includes('task.control'),'initial detail is fresh with control capability');
+    const before=reads;
+    ready=false;published();await flush();
+    check(updates.at(-1)?.fresh===false,'lost readiness publishes stale');
+    check(reads===before,'loss of readiness performs no extra reads');
+    record.capabilities.operations=['task.read'];
+    ready=true;published();await flush();
+    check(updates.at(-1)?.fresh===true&&!updates.at(-1)?.data?.record?.capabilities?.operations?.includes('task.control'),'restored readiness is fresh with control removed');
+    const freshReads=reads;
+    published();published();published();await flush();
+    check(reads===freshReads,'unchanged publications perform no extra reads');
+    for(const mode of ['same-identity','generation']){
+      const gate=deferred();nextGate=gate;
+      record.marker='old-'+mode;
+      const beforeDelayed=reads;
+      const pending=domain.refreshDetail(task,scope).then(value=>({value}),error=>({error}));
+      await flush();
+      check(reads===beforeDelayed+1,'delayed read started for '+mode);
+      if(mode==='same-identity'){
+        ready=false;published();
+        const pauseResult=await domain.pause(task,scope,true).then(()=>({}),error=>({error}));
+        check(pauseResult.error?.uiKey==='identityChanged','stale mutation rejected during readiness loss');
+        ready=true;published();
+      }else{
+        client.connectionGeneration++;published();
+      }
+      record.marker='current-'+mode;
+      gate.resolve();
+      const result=await pending;
+      await flush();
+      if(mode==='same-identity'){
+        check(result.value&&!result.value.fresh,'same identity fences old response');
+      }else{
+        check(result.error?.name==='AbortError','generation change aborts old response');
+      }
+      check(!updates.some(s=>s.fresh===true&&s.data?.record?.marker==='old-'+mode),'no fresh snapshot of old '+mode);
+      check(updates.at(-1)?.fresh===true&&updates.at(-1)?.data?.record?.marker==='current-'+mode,'latest fresh snapshot is current '+mode);
+      check(writes===0,'no writes during delayed '+mode);
+    }
+    stop();
+    check(listeners.size===0,'stop removes listeners');
+    const after=reads;client.connectionGeneration++;published();await flush();
+    check(reads===after,'later publishes perform no reads');
+  }finally{stop?.();domain.dispose();registry.dispose();commands.dispose();}
 }

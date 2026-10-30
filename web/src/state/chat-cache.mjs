@@ -205,7 +205,7 @@ export function createChatCache({indexedDB=globalThis.indexedDB,name='pot-chat-c
 
     });
   }
-  return {read,writeFrames,writePage,writeRecords,readPage,projectPage:(key,query,options)=>readPage(key,query,{...options,project:true}),readMessages:(key,ids)=>transaction('readonly',async tx=>(await records(tx,key,ids)).map(row=>row.message)),subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},
+  return {read,writeFrames,writePage,writeRecords,readPage,projectPage:(key,query,options)=>readPage(key,query,{...options,project:true}),readMessages:(key,ids,{identity,validate=()=>{}}={})=>transaction('readonly',async tx=>{validate();const meta=await request(tx.objectStore('conversations').get(key));if(identity){const projection=meta?.projection;if(!projection||projection.runtime_id!==identity.runtime_id||projection.owner_id!==identity.owner_id||projection.conversation_id!==identity.conversation_id||projection.boot_id!==identity.boot_id)throw new DOMException('Chat history identity retired','AbortError');}const values=await records(tx,key,ids);validate();return values.map(row=>row.message);}),subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},
     async saveView(key,surface,value){await transaction('readwrite',async tx=>{
       const meta=await request(tx.objectStore('conversations').get(key));if(!meta||meta.projection.conversation_id!==value.conversation_id)return;
       const store=tx.objectStore('views'),previous=await request(store.get([key,surface]));

@@ -1,13 +1,9 @@
 package preview
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -96,23 +92,25 @@ func TestDelayedCancellationCannotStopLaterReply(t *testing.T) {
 	}
 }
 
-func TestPreviewHTTPRejectsCrossOriginAndInvalidRequests(t *testing.T) {
-	handler := Handler(fixture(t), fstest.MapFS{"index.html": {Data: []byte("preview")}})
+func TestPreviewRejectsCrossOriginAndInvalidRequests(t *testing.T) {
+	s := New(context.Background())
+	t.Cleanup(s.Close)
+	handler := Handler(s, fstest.MapFS{"index.html": {Data: []byte("preview")}})
 	for _, tc := range []struct {
-		name, body, origin, host string
-		want                     int
+		name, origin, host string
+		want               int
 	}{
-		{"cross origin", `{}`, "https://other.example", "127.0.0.1:17702", 403},
-		{"DNS rebinding", `{}`, "", "other.example:17702", 403},
-		{"unknown field", `{"request_id":"r","conversation_id":"preview-conversation","text":"hello","target":"host"}`, "", "127.0.0.1:17702", 400},
-		{"multiple bodies", `{} {}`, "", "127.0.0.1:17702", 400},
-		{"wrong conversation", `{"request_id":"r","conversation_id":"another","text":"hello"}`, "", "127.0.0.1:17702", 400},
+		{"missing origin", "", "127.0.0.1:17702", 403},
+		{"cross origin", "https://other.example", "127.0.0.1:17702", 403},
+		{"same origin wrong scheme", "https://127.0.0.1:17702", "127.0.0.1:17702", 403},
+		{"DNS rebinding", "http://other.example:17702", "other.example:17702", 403},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := httptest.NewRequest("POST", "http://127.0.0.1:17702/api/preview/messages", strings.NewReader(tc.body))
+			r := httptest.NewRequest("GET", "http://"+tc.host+"/api/preview/ws", nil)
 			r.Host = tc.host
-			r.Header.Set("Content-Type", "application/json")
-			r.Header.Set("Origin", tc.origin)
+			if tc.origin != "" {
+				r.Header.Set("Origin", tc.origin)
+			}
 			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, r)
 			if w.Code != tc.want {
@@ -122,49 +120,18 @@ func TestPreviewHTTPRejectsCrossOriginAndInvalidRequests(t *testing.T) {
 	}
 }
 
-func TestSSEInitialSnapshotAndDisconnectReleaseSubscription(t *testing.T) {
-	s := fixture(t)
-	server := httptest.NewServer(Handler(s, fstest.MapFS{}))
-	defer server.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	request, err := http.NewRequestWithContext(ctx, "GET", server.URL+"/api/preview/events", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response, err := server.Client().Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	reader := bufio.NewReader(response.Body)
-	if event, _ := reader.ReadString('\n'); event != "event: snapshot\n" {
-		t.Fatalf("event: %q", event)
-	}
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		t.Fatal(err)
-	}
-	var snapshot Snapshot
-	if err = json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &snapshot); err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.ConversationID != ConversationID || snapshot.Cursor != "0" {
-		t.Fatalf("snapshot: %#v", snapshot)
-	}
-	cancel()
-	_, _ = io.Copy(io.Discard, response.Body)
-	response.Body.Close()
-	deadline := time.After(time.Second)
-	for {
-		s.mu.Lock()
-		remaining := len(s.subscribers)
-		s.mu.Unlock()
-		if remaining == 0 {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatal("disconnect retained subscription")
-		case <-time.After(time.Millisecond):
+func TestPreviewLegacyEndpointsRemoved(t *testing.T) {
+	s := New(context.Background())
+	t.Cleanup(s.Close)
+	handler := Handler(s, fstest.MapFS{})
+	for _, path := range []string{"/api/preview/snapshot", "/api/preview/messages", "/api/preview/events"} {
+		r := httptest.NewRequest("GET", "http://127.0.0.1:17702"+path, nil)
+		r.Host = "127.0.0.1:17702"
+		r.Header.Set("Origin", "http://127.0.0.1:17702")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("%s status %d, want 404", path, w.Code)
 		}
 	}
 }

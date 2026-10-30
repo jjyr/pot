@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"testing"
 	"testing/fstest"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/usage"
@@ -87,12 +89,17 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 	upstream := httptest.NewServer(Handler(app, "control-secret"))
 	defer upstream.Close()
 	config := webui.NewConfig()
-	browser, err := webui.New(webui.Options{Origin: "http://localhost", Config: config, Upstream: webui.Upstream{URL: upstream.URL, Credential: "control-secret", Client: upstream.Client()}, Assets: fstest.MapFS{}})
+	browserHTTP := httptest.NewUnstartedServer(nil)
+	browserOrigin := "http://" + browserHTTP.Listener.Addr().String()
+	browser, err := webui.New(webui.Options{Origin: browserOrigin, Config: config, Upstream: webui.Upstream{URL: upstream.URL, Credential: "control-secret", Client: upstream.Client()}, Assets: fstest.MapFS{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer browser.Close()
-	login := httptest.NewRequest("POST", "http://localhost/access/token", nil)
+	browserHTTP.Config.Handler = browser
+	browserHTTP.Start()
+	defer browserHTTP.Close()
+	login := httptest.NewRequest("POST", browserOrigin+"/access/token", nil)
 	login.Header.Set("Authorization", "Bearer "+config.Token)
 	response := httptest.NewRecorder()
 	browser.ServeHTTP(response, login)
@@ -100,6 +107,56 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 		t.Fatal("browser login failed", response.Code)
 	}
 	cookie := response.Result().Cookies()[0]
+	wsCtx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(wsCtx, browserHTTP.URL+"/api/v1/ws", &websocket.DialOptions{Subprotocols: []string{"pot.v1"}, HTTPHeader: http.Header{"Cookie": []string{cookie.String()}, "Origin": []string{browserOrigin}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	conn.SetReadLimit(16 << 20)
+	socketID := 0
+	socketGET := func(t *testing.T, path string) *httptest.ResponseRecorder {
+		socketID++
+		id := strconv.Itoa(socketID)
+		payload, err := json.Marshal(struct {
+			ID     string `json:"id"`
+			Type   string `json:"type"`
+			Method string `json:"method"`
+			Path   string `json:"path"`
+		}{ID: id, Type: "request", Method: "GET", Path: path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.Write(wsCtx, websocket.MessageText, payload); err != nil {
+			t.Fatal(err)
+		}
+		_, data, err := conn.Read(wsCtx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var resp struct {
+			ID     string          `json:"id"`
+			Type   string          `json:"type"`
+			Status int             `json:"status"`
+			Result json.RawMessage `json:"result"`
+			Error  json.RawMessage `json:"error"`
+		}
+		if err := json.Unmarshal(data, &resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp.ID != id {
+			t.Fatalf("websocket response id %q does not match request %q", resp.ID, id)
+		}
+		w := httptest.NewRecorder()
+		w.Code = resp.Status
+		if resp.Status >= http.StatusOK && resp.Status < http.StatusMultipleChoices {
+			w.Body.Write(resp.Result)
+		} else {
+			w.Body.Write(resp.Error)
+		}
+		return w
+	}
 	for _, path := range []string{
 		"/api/v1/runtime", "/api/v1/control", "/api/v1/spaces", "/api/v1/assistants",
 		"/api/v1/providers", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/about",
@@ -115,10 +172,7 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 		"/api/v1/usage/models?days=365&timezone=Asia%2FShanghai&offset=20",
 	} {
 		t.Run(path, func(t *testing.T) {
-			r := httptest.NewRequest("GET", "http://localhost"+path, nil)
-			r.AddCookie(cookie)
-			w := httptest.NewRecorder()
-			browser.ServeHTTP(w, r)
+			w := socketGET(t, path)
 			if w.Code != http.StatusOK || !json.Valid(w.Body.Bytes()) {
 				t.Fatalf("browser/application route mismatch: %d %s", w.Code, w.Body.String())
 			}
@@ -175,10 +229,7 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 		{"2024-01-01", "2024-12-31", 366},
 	} {
 		path := "/api/v1/usage/summary?assistant_id=" + owner.ID + "&scope=main&timezone=UTC&start=" + period.start + "&end=" + period.end
-		r := httptest.NewRequest("GET", "http://localhost"+path, nil)
-		r.AddCookie(cookie)
-		w := httptest.NewRecorder()
-		browser.ServeHTTP(w, r)
+		w := socketGET(t, path)
 		var summary usage.Summary
 		if err := json.Unmarshal(w.Body.Bytes(), &summary); err != nil || w.Code != http.StatusOK || summary.Days != period.days || summary.Start != period.start || summary.End != period.end || len(summary.Buckets) != period.days || summary.Total.Requests != 0 || summary.Timezone != "UTC" || summary.Scope != "main" {
 			t.Fatalf("assistant browser dates did not reach the ledger: status=%d days=%d start=%s end=%s error=%v", w.Code, summary.Days, summary.Start, summary.End, err)
@@ -193,10 +244,7 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 		}
 	}
 	for _, path := range []string{"/api/v1/runtime/control", "/api/v1/runtime/resources", "/api/v1/terminals", "/api/v1/usage/policy"} {
-		r := httptest.NewRequest("GET", "http://localhost"+path, nil)
-		r.AddCookie(cookie)
-		w := httptest.NewRecorder()
-		browser.ServeHTTP(w, r)
+		w := socketGET(t, path)
 		if w.Code != http.StatusNotFound {
 			t.Fatal("private or unsupported route published", path, w.Code, w.Body.String())
 		}

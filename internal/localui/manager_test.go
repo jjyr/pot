@@ -70,14 +70,14 @@ func TestChangedEventRejectsUnchangedAndRetainsScopeReset(t *testing.T) {
 	}
 }
 
-func TestChangedEventPreservesProductionSSEBoot(t *testing.T) {
+func TestChangedEventPreservesProductionEventBoot(t *testing.T) {
 	first, versions, dirty := changedEvent(Event{ID: "boot-a:1", Data: json.RawMessage(`{"tasks":1}`)}, nil)
 	if !dirty || string(versions["boot_id"]) != `"boot-a"` || !json.Valid(first.Data) {
-		t.Fatalf("lost initial SSE identity: %s %+v", first.Data, versions)
+		t.Fatalf("lost initial event identity: %s %+v", first.Data, versions)
 	}
 	_, _, dirty = changedEvent(Event{ID: "boot-a:2", Data: json.RawMessage(`{"tasks":1}`)}, versions)
 	if dirty {
-		t.Fatal("SSE sequence without a version change invalidated state")
+		t.Fatal("event sequence without a version change invalidated state")
 	}
 	changed, _, dirty := changedEvent(Event{ID: "boot-b:1", Data: json.RawMessage(`{"tasks":1}`)}, versions)
 	var value map[string]json.RawMessage

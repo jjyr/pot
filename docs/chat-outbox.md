@@ -80,8 +80,8 @@ application before dispatch. A replacement Control rejects the old target even
 before its updated directory reaches the browser. This precondition does not
 bind a boot, so the same Control can reconcile durable receipts after restart.
 
-A durable request ID is allocated once. Before the first POST, the selected
-operation and turn are saved. Expired claims and unknown HTTP results query that
+A durable request ID is allocated once. Before the first command, the selected
+operation and turn are saved. Expired claims and unknown transport results query that
 same receipt before retrying the same payload and ID. An absent receipt does not
 prove rejection: the first copy may still arrive. Receiver-side atomic durable
 identity/content checks make an identical retry safe; the client does not claim

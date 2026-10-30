@@ -1,3 +1,5 @@
+import { installWSFixture } from './helpers/ws-fixture.mjs';
+installWSFixture();
 import {createMemoryProjectionStore} from '../../web/src/state/projection-store.mjs';
 import assert from 'node:assert/strict';
 import {createResourceCache,createResourceReads,displayProjection} from '../../web/src/state/resource-cache.mjs';

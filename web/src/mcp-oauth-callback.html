@@ -2,11 +2,12 @@
 <html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pot</title><link rel="stylesheet" href="/styles.css"></head><body><main style="padding:32px" id="result" role="status"></main><script type="module">
 import {translate} from './locales/messages.mjs';
 import {storedPreference} from './state/preferences.mjs';
+import {getBusinessSocket} from './adapters/ws-client.mjs';
 const params=new URLSearchParams(location.search),state=params.get('state');
 const locale=storedPreference('pot-ui-locale',navigator.language.startsWith('zh')?'zh-CN':'en');
 history.replaceState(null,'',location.pathname);
 let failed=!!params.get('error')||!params.get('code')||!state;
-if(!failed){try{const response=await fetch('/api/v1/extensions/mcp/oauth/complete?'+new URLSearchParams({space_id:params.get('space_id')||''}),{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({state,code:params.get('code')})});failed=!response.ok;}catch{failed=true;}}
+if(!failed){try{await getBusinessSocket().request('/api/v1/extensions/mcp/oauth/complete?'+new URLSearchParams({space_id:params.get('space_id')||''}),{method:'POST',body:{state,code:params.get('code')}});}catch{failed=true;}}
 document.querySelector('#result').textContent=translate(locale,failed?'extensions.oauthFailed':'extensions.oauthReturn');
 window.opener?.postMessage({type:'pot:mcp-oauth',state,completed:!failed,error:failed},location.origin);
 if(!failed)window.close();

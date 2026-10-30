@@ -1,39 +1,292 @@
 import assert from 'node:assert/strict';
-import {mkdir,writeFile} from 'node:fs/promises';
-import {resolve} from 'node:path';
-import {sourceServer,launchBrowser} from './browser-harness.mjs';
-import {preparedChatFixture} from './prepared-chat-fixture.mjs';
-const output=resolve(process.env.POT_ALIAS_OUTPUT||'.pot-artifacts/prepared-alias');await mkdir(output,{recursive:true});
-const source=await sourceServer(),browser=await launchBrowser(),results=[];
-try{
- for(const phone of [false,true]){
-  const fixture=await preparedChatFixture(source.origin,{workRecords:true}),context=await browser.newContext({viewport:phone?{width:390,height:852}:{width:1280,height:800},isMobile:phone,hasTouch:phone,serviceWorkers:'block'}),page=await context.newPage(),errors=[];page.setDefaultTimeout(15000);page.on('pageerror',error=>errors.push(error.message));const evidence=[];page.on('console',message=>{if(message.type()==='error')evidence.push({phase:'console',text:message.text()});});page.on('response',response=>{if(response.status()>=400)evidence.push({phase:'http-error',url:response.url(),status:response.status()});});
-  await context.route('**/*',route=>new URL(route.request().url()).origin===fixture.origin?route.continue():route.abort());
-  const control=async value=>{const response=await fetch(fixture.origin+'/fixture/control',{method:'POST',body:JSON.stringify(value)});assert(response.ok);};
-  const frames=()=>page.evaluate(async()=>{for(let i=0;i<12;i++)await new Promise(requestAnimationFrame);});
-  const sample=()=>page.evaluate(async()=>{const {readingAnchor}=await import('/components/reading-position.mjs'),history=document.querySelector('.history[role="log"]:not([data-preparation-surface])'),group=history.querySelector('.work-record-group[data-anchor-message-id="alpha-721"]'),box=group?.getBoundingClientRect(),viewport=history.getBoundingClientRect();return {anchor:readingAnchor(history),key:group?.dataset.windowKey,alias:group?.dataset.anchorMessageId,sequence:group?.dataset.sequence,before:group?.dataset.sequenceBefore,after:group?.dataset.sequenceAfter,open:group?.querySelector('.work-records').open,visible:box&&Math.min(box.bottom,viewport.bottom)-Math.max(box.top,viewport.top),offset:box&&box.top-viewport.top,children:group&&[...group.querySelectorAll('.work-record-items > article')].map(row=>row.dataset.messageId)};});
-  const alignHeader=async()=>{const box=await page.locator('.history[role="log"]:not([data-preparation-surface])').boundingBox();await page.mouse.move(box.x+box.width-12,box.y+box.height/2);for(let step=0;step<4;step++){await page.waitForFunction(()=>!document.querySelector('.history[role="log"]:not([data-preparation-surface]) .message-window[aria-busy]'));await frames();const current=await sample();assert(current.key);if(Math.abs(current.offset+2)<=1)return;const delta=Math.round(current.offset+2);evidence.push({phase:'align-before',sample:current,delta});await page.mouse.wheel(0,delta);await frames();evidence.push({phase:'align-after',sample:await sample()});}throw Error('Native wheel did not align the collapsed header');};
-  try{
-   await control({scenario:'prose',holdPreview:false});await page.goto(fixture.origin+'/?locale=en&theme=light&assistant_id=alpha');await page.waitForFunction(()=>document.querySelector('.connection-status.is-connected')&&getComputedStyle(document.querySelector('.history[role="log"]:not([data-preparation-surface])')).visibility==='visible');const dismiss=page.getByRole('button',{name:'Not now',exact:true});if(await dismiss.count())await dismiss.click();
-   await page.locator('.history[role="log"]:not([data-preparation-surface]) .message-reference-open').click();const group=page.locator('.history[role="log"]:not([data-preparation-surface]) .work-record-group[data-anchor-message-id="alpha-721"]');await group.waitFor();await frames();
-   const pagingBox=await page.locator('.history[role="log"]:not([data-preparation-surface])').boundingBox();await page.mouse.move(pagingBox.x+pagingBox.width-12,pagingBox.y+pagingBox.height/2);await page.mouse.wheel(0,-36);await frames();
-   await page.waitForFunction(()=>document.querySelector('.history[role="log"]:not([data-preparation-surface]) .work-record-group[data-anchor-message-id="alpha-721"]')?.dataset.sequenceBefore==='720');
-   if(await group.locator(':scope > .work-records').getAttribute('open')!==null){await group.locator(':scope > .work-records > summary').click();await frames();}
-   await alignHeader();const before=await sample();evidence.push({phase:'before-reload',sample:before});assert.equal(before.alias,'alpha-721');assert.equal(before.sequence,'721');assert.deepEqual([before.before,before.after],['720','723']);assert.equal(before.open,false);assert(before.visible>=24,'Only the actual collapsed representative is a readable witness');assert.equal(before.anchor.id,'alpha-721');assert.equal(before.anchor.sequence,'721');
-   assert(fixture.trace.some(row=>row.kind==='history-response'&&row.query.includes('before=')),'The extra member arrived through actual HTTP pagination');
-   const stored=await page.evaluate(async()=>{const deadline=performance.now()+12000;while(performance.now()<deadline){const value=await new Promise((resolve,reject)=>{const open=indexedDB.open('pot-chat-cache');open.onerror=()=>reject(open.error);open.onsuccess=()=>{const db=open.result,tx=db.transaction(['views','messages','startup'],'readonly'),views=tx.objectStore('views').getAll(),messages=tx.objectStore('messages').getAll(),startup=tx.objectStore('startup').get('last');let saved,rows,locator;startup.onsuccess=()=>locator=startup.result;views.onsuccess=()=>saved=views.result;messages.onsuccess=()=>rows=messages.result;tx.onerror=()=>reject(tx.error);tx.oncomplete=()=>{db.close();resolve({views:saved,messages:rows,startup:locator});};};});const view=value.views.find(view=>view.conversation_id==='alpha-conversation'&&view.position?.mode==='reading'&&view.position.position?.anchor?.id==='alpha-721');if(view&&value.startup?.owner==='alpha'&&value.startup?.space==='local')return {view,startup:value.startup,derivedPersisted:value.messages.some(row=>row.message?.members||row.message?.sourceAnchor)};await new Promise(requestAnimationFrame);}throw Error('Native representative view transaction did not commit');});
-   evidence.push({phase:'persisted',stored});assert.equal(stored.derivedPersisted,false,'Group source metadata is UI derived; persisted message records stay native');
-   await control({holdEvents:'alpha'});const historyReads=fixture.trace.filter(row=>row.kind==='history-response').length;
-   await page.reload();await page.waitForFunction(()=>getComputedStyle(document.querySelector('.history[role="log"]:not([data-preparation-surface])')).visibility==='visible'&&document.querySelector('.history[role="log"]:not([data-preparation-surface]) .work-record-group[data-anchor-message-id="alpha-721"]'));await frames();const cold=await sample();
-   assert.notEqual(cold.key,before.key,'Cold projection naturally rekeys the group after its earlier member was paged in');assert.equal(cold.alias,'alpha-721');assert.equal(cold.sequence,'721');assert.deepEqual([cold.before,cold.after],['720','723']);assert.equal(cold.open,false,'Restoring a header alias does not invent an expanded native child');assert(cold.visible>=24);assert(Math.abs(cold.offset-before.offset)<=3,'Cold IDB restoration resolves the native alias across the changed virtual key');assert.equal(fixture.trace.filter(row=>row.kind==='history-response').length,historyReads,'Cached native position restoration does not request another history page');
-   await group.locator(':scope > .work-records > summary').click();await frames();const expanded=await sample();assert.deepEqual(expanded.children,['alpha-720','alpha-721','alpha-722','alpha-723'],'Expanded work retains all native members in source order');
-   await group.locator(':scope > .work-records > summary').click();await frames();await page.evaluate(()=>window.aliasOriginal=document.querySelector('.history[role="log"]:not([data-preparation-surface]) .work-record-group[data-anchor-message-id="alpha-721"]'));
-   await page.locator('#pot-composer').click();
-   const box=await page.locator('.history[role="log"]:not([data-preparation-surface])').boundingBox();await page.mouse.move(box.x+box.width-12,box.y+box.height/2);await page.mouse.wheel(0,5000);await frames();assert(await page.evaluate(()=>!aliasOriginal.isConnected),'The group genuinely leaves the virtual DOM');
-   for(let step=0;step<12&&await group.count()===0;step++){await page.mouse.wheel(0,-600);await frames();}await group.waitFor();await alignHeader();const remount=await sample();assert.equal(remount.alias,'alpha-721');assert(remount.visible>=24);assert.equal(remount.anchor.id,'alpha-721');assert(await page.evaluate(()=>aliasOriginal!==document.querySelector('.history[role="log"]:not([data-preparation-surface]) .work-record-group[data-anchor-message-id="alpha-721"]')),'Remount retains the native representative in a new wrapper');assert.deepEqual(errors,[]);
-   const result={phone,evidence,before,stored:stored.view.position,cold,expanded,remount,errors};results.push(result);await page.screenshot({path:output+'/'+(phone?'phone':'desktop')+'-alias.png'});await writeFile(output+'/'+(phone?'phone':'desktop')+'-raw.json',JSON.stringify({result,http:fixture.trace},null,2));
-  }catch(error){await writeFile(output+'/'+(phone?'phone':'desktop')+'-failure.json',JSON.stringify({error:error.stack,sample:await sample().catch(()=>null),evidence,dom:await page.evaluate(()=>({root:document.querySelector('#app')?.className,history:[...document.querySelectorAll('.history[role="log"]:not([data-preparation-surface])')].map(h=>({hidden:h.hidden,style:h.getAttribute('style'),busy:h.getAttribute('aria-busy'),top:h.scrollTop,extent:h.scrollHeight,groups:[...h.querySelectorAll('.work-record-group')].map(g=>({key:g.dataset.windowKey,alias:g.dataset.anchorMessageId,sequence:g.dataset.sequence})),text:h.textContent.slice(0,400)})),body:document.body.innerText.slice(0,1200)})),http:fixture.trace,errors},null,2));throw error;}
-  finally{await context.close();await fixture.close();}
- }
- await writeFile(output+'/summary.json',JSON.stringify(results,null,2));console.log(JSON.stringify({passed:true,cases:results.length,results:results.map(({phone,before,cold,remount,errors})=>({phone,before,cold,remount,errors})),output}));
-}finally{await browser.close();await source.close();}
+import { sourceServer, launchBrowser } from './browser-harness.mjs';
+import { preparedChatFixture } from './prepared-chat-fixture.mjs';
+
+const targetId = 'alpha-721';
+const conversationId = 'alpha-conversation';
+const historySel = '.history[role="log"]:not([data-preparation-surface])';
+
+async function dismissNotNow(page) {
+  const btn = page.getByRole('button', { name: /not now/i });
+  if (await btn.first().isVisible().catch(() => false)) {
+    await btn.first().click().catch(() => {});
+  }
+}
+
+async function ensureGroupExpanded(page, workGroup) {
+  const leader = page.locator(`${historySel} .work-record-group[data-work-group="${workGroup}"]`);
+  const summary = leader.locator('button.work-record-summary');
+  const expanded = await summary.getAttribute('aria-expanded');
+  if (expanded !== 'true') {
+    await summary.click();
+    await page.waitForFunction(
+      ({ historySel, workGroup }) =>
+        document.querySelector(`${historySel} .work-record-group[data-work-group="${workGroup}"] button.work-record-summary`)?.getAttribute('aria-expanded') === 'true',
+      { historySel, workGroup },
+    );
+  }
+  assert.equal(await summary.getAttribute('aria-expanded'), 'true');
+}
+
+async function waitIdbAnchor(page) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const found = await page.evaluate(async ({ conversationId, targetId }) => {
+      const db = await new Promise((res, rej) => {
+        const req = indexedDB.open('pot-chat-cache');
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => rej(req.error);
+      });
+      const tx = db.transaction('views', 'readonly');
+      const store = tx.objectStore('views');
+      const all = await new Promise((res, rej) => {
+        const r = store.getAll();
+        r.onsuccess = () => res(r.result || []);
+        r.onerror = () => rej(r.error);
+      });
+      db.close();
+      for (const row of all) {
+        if (row.conversation_id !== conversationId) continue;
+        const pos = row.position;
+        if (!pos) continue;
+        if (pos.mode !== 'reading') continue;
+        if (pos.position?.anchor?.id !== targetId) continue;
+        return { found: true, mode: pos.mode, anchorId: pos.position.anchor.id };
+      }
+      return { found: false };
+    }, { conversationId, targetId });
+    if (found.found) {
+      assert.equal(found.mode, 'reading');
+      assert.equal(found.anchorId, targetId);
+      return;
+    }
+    await page.waitForTimeout(150);
+  }
+  throw new Error('IDB anchor not persisted');
+}
+
+async function wheelToTop(page, historySel) {
+  const measure = async () => {
+    return await page.evaluate((sel) => {
+      const h = document.querySelector(sel);
+      if (!h) return null;
+      const w = h.querySelector('.message-window[aria-busy]');
+      if (w && w.getAttribute('aria-busy') === 'true') return { busy: true };
+      const t = h.querySelector('article[data-message-id="alpha-721"]');
+      if (!t) return null;
+      const hr = h.getBoundingClientRect();
+      const tr = t.getBoundingClientRect();
+      return { busy: false, delta: Math.round(tr.top - hr.top) };
+    }, historySel);
+  };
+
+  const settle = async () => {
+    await page.evaluate(async () => {
+      await new Promise((resolve) => {
+        let remaining = 12;
+        const tick = () => {
+          if (--remaining <= 0) return resolve();
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+    });
+  };
+
+  const history = page.locator(historySel);
+  if (!(await history.count())) {
+    throw new Error(`wheelToTop: history element not found for selector "${historySel}"`);
+  }
+
+  const box = await history.boundingBox();
+  if (!box) {
+    throw new Error(`wheelToTop: history element has no bounding box for selector "${historySel}"`);
+  }
+  const x = Math.round(box.x + box.width - 2);
+  const y = Math.round(box.y + box.height / 2);
+  if (x < 0 || y < 0) {
+    throw new Error(`wheelToTop: invalid hover point (${x},${y}) for selector "${historySel}"`);
+  }
+
+  await page.mouse.move(x, y);
+
+  const maxIterations = 12;
+  let lastDelta = null;
+  let iterations = 0;
+
+  for (; iterations < maxIterations; iterations++) {
+    await settle();
+
+    let state;
+    let waited = 0;
+    while (true) {
+      state = await measure();
+      if (state && state.busy === false) break;
+      if (waited >= maxIterations) {
+        throw new Error(
+          `wheelToTop: history message window never became idle (aria-busy) after ${maxIterations} polls; ` +
+          `selector="${historySel}", lastDelta=${lastDelta}`
+        );
+      }
+      await settle();
+      waited++;
+    }
+
+    if (!state || state.delta === undefined) {
+      throw new Error(`wheelToTop: could not measure delta; selector="${historySel}", lastDelta=${lastDelta}`);
+    }
+
+    lastDelta = state.delta;
+    if (Math.abs(state.delta + 2) <= 1) {
+      return;
+    }
+
+    const step = Math.max(-2000, Math.min(2000, state.delta + 2));
+    await page.mouse.wheel(0, step);
+  }
+
+  throw new Error(
+    `wheelToTop: failed to reach target after ${maxIterations} bounded wheel iterations; ` +
+    `selector="${historySel}", lastDelta=${lastDelta}`
+  );
+}
+
+async function runScenario(viewportName, viewport) {
+  const origin1 = await sourceServer();
+  const fx = await preparedChatFixture(origin1.origin, { workRecords: true });
+  const browser = await launchBrowser();
+  const context = await browser.newContext({ viewport, isMobile: viewportName === 'phone', hasTouch: viewportName === 'phone', serviceWorkers: 'block' });
+  await context.route('**/*', (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin !== fx.origin) {
+      return route.abort();
+    }
+    return route.continue();
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(15000);
+  const pageErrors = [];
+  page.on('pageerror', (e) => pageErrors.push(e));
+
+  try {
+    await page.request.post(fx.origin + '/fixture/control', {
+      data: { scenario: 'prose', holdPreview: false },
+    });
+    await page.goto(fx.origin + '/?locale=en&theme=light&assistant_id=alpha');
+    await dismissNotNow(page);
+    await page.locator('.connection-status.is-connected').waitFor({ state: "attached", timeout: 15000 });
+    await page.locator(historySel).first().waitFor();
+    await page.locator(`${historySel} .message-reference-open`).first().click();
+    await page.locator(`${historySel} article[data-message-id="${targetId}"]`).waitFor({ timeout: 15000 });
+
+    const target = page.locator(`${historySel} article[data-message-id="${targetId}"]`);
+    const workGroup = await target.getAttribute('data-work-group');
+    assert.ok(workGroup, 'target should have data-work-group');
+
+    const sharedParent = await page.evaluate(({ historySel, targetId, workGroup }) => {
+      const h = document.querySelector(historySel);
+      if (!h) return false;
+      const t = h.querySelector(`article[data-message-id="${targetId}"]`);
+      const leader = h.querySelector(`.work-record-group[data-work-group="${workGroup}"]`);
+      if (!t || !leader) return false;
+      return t === leader || t.parentElement === leader.parentElement;
+    }, { historySel, targetId, workGroup });
+    assert.equal(sharedParent, true, 'target and leader must share parent or be identical');
+
+    const leader = page.locator(`${historySel} .work-record-group[data-work-group="${workGroup}"]`);
+    await leader.waitFor();
+    const summary = leader.locator('button.work-record-summary');
+    assert.ok(await summary.count() > 0, 'summary button exists');
+    assert.equal(await page.locator(`${historySel} .work-records`).count(), 0);
+    assert.equal(await page.locator(`${historySel} .work-record-items`).count(), 0);
+
+    await ensureGroupExpanded(page, workGroup);
+    await wheelToTop(page, historySel);
+    await waitIdbAnchor(page);
+
+    const histCount = fx.trace.filter((e) => e.kind === 'history-response').length;
+
+    await page.request.post(fx.origin + '/fixture/control', {
+      data: { scenario: 'prose', holdEvents: 'alpha' },
+    });
+    await page.reload();
+    await dismissNotNow(page);
+    await page.locator(`${historySel} article[data-message-id="${targetId}"]`).waitFor({ timeout: 15000 });
+
+    await page.locator('.history[role="log"]:not([data-preparation-surface])').first().waitFor();
+    await page.waitForFunction(
+      () => !document.querySelector('.message-window[aria-busy="true"]'),
+      null,
+      { timeout: 10000 },
+    );
+    await page.evaluate(() => new Promise((res) => {
+      let n = 12;
+      const step = () => (n-- <= 0 ? res() : requestAnimationFrame(step));
+      requestAnimationFrame(step);
+    }));
+
+    const afterCount = fx.trace.filter((e) => e.kind === 'history-response').length;
+    assert.equal(afterCount, histCount, 'no additional history read for warm cached anchor');
+
+    const restored = await page.evaluate((sel) => {
+      const h = document.querySelector(sel);
+      const t = h?.querySelector(`article[data-message-id="alpha-721"]`);
+      return { delta: Math.round(t.getBoundingClientRect().top - h.getBoundingClientRect().top) };
+    }, historySel);
+    assert.ok(Math.abs(restored.delta + 2) <= 3, `restored delta <=3px near -2, got ${restored.delta}`);
+
+    const initial = await page.evaluate((historySel) => {
+      const h = document.querySelector(historySel);
+      const t = h?.querySelector(`article[data-message-id="alpha-721"]`);
+      window.__node = t;
+      window.__parent = t?.parentElement;
+      return { tag: t?.tagName, parent: t?.parentElement?.className || '' };
+    }, historySel);
+    assert.ok(initial);
+
+    const history = page.locator(historySel);
+    await history.hover();
+    await page.mouse.wheel(0, 5000);
+    await page.waitForTimeout(400);
+    await page.waitForFunction(
+      () => !document.querySelector('.message-window[aria-busy="true"]'),
+      null,
+      { timeout: 10000 },
+    );
+    const sameAfterDown = await page.evaluate((historySel) => {
+      const h = document.querySelector(historySel);
+      const t = h?.querySelector(`article[data-message-id="alpha-721"]`);
+      return !!t && t === window.__node && t.parentElement === window.__parent;
+    }, historySel);
+    assert.equal(sameAfterDown, true, 'same node+parent after scroll down');
+
+    await wheelToTop(page, historySel);
+    await page.waitForFunction(
+      () => !document.querySelector('.message-window[aria-busy="true"]'),
+      null,
+      { timeout: 10000 },
+    );
+    await page.waitForTimeout(200);
+    const sameAfterUp = await page.evaluate((historySel) => {
+      const h = document.querySelector(historySel);
+      const t = h?.querySelector(`article[data-message-id="alpha-721"]`);
+      return {
+        same: !!t && t === window.__node && t.parentElement === window.__parent,
+        delta: Math.round(t.getBoundingClientRect().top - h.getBoundingClientRect().top),
+      };
+    }, historySel);
+    assert.equal(sameAfterUp.same, true, 'same node+parent after scroll back up');
+    assert.ok(Math.abs(sameAfterUp.delta + 2) <= 3, `after-up delta <=3px near -2, got ${sameAfterUp.delta}`);
+
+    assert.deepEqual(pageErrors, [], `page errors: ${pageErrors.map((e) => e.message).join('; ')}`);
+    console.log(JSON.stringify({ passed: viewportName, restored: restored.delta, sameAfterUp: sameAfterUp.delta }));
+  } finally {
+    await context.close();
+    await fx.close();
+    await origin1.close();
+    await browser.close();
+  }
+}
+
+await runScenario('desktop', { width: 1280, height: 900 });
+await runScenario('phone', { width: 390, height: 852 });

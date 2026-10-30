@@ -19,24 +19,21 @@ import (
 	"github.com/jjyr/pot/internal/selfupdate"
 	"github.com/jjyr/pot/internal/systemnotifications"
 	"github.com/jjyr/pot/internal/transport"
-	"github.com/jjyr/pot/pkg/protocol"
 	assets "github.com/jjyr/pot/web"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
 
-// Service is the desktop adapter to the same application contract used by CLI
-// and browser. Exported bindings contain no lifecycle or credential access.
+// Desktop service: native UI shell drives the shared browser business WebSocket adapter.
+// Exports scoped ephemeral Transport bootstrap and native window/notification/download/attention integrations.
 type Service struct {
-	ctx    context.Context
 	app    *application.App
-	api    *transport.Application
 	spaces *localui.Manager
 
 	main, tray                *application.WebviewWindow
 	mu                        sync.Mutex
-	subscriptions             *localui.NativeSubscriptions
+	transport                 transportBootstrap
 	reads                     *attention.Store
 	notificationStore         *systemnotifications.Store
 	notifier                  *notifications.NotificationService
@@ -51,27 +48,8 @@ type Service struct {
 	smokeReady                bool
 }
 
-func (s *Service) Call(ctx context.Context, method, path, body string) (string, error) {
-	value, err := s.call(ctx, method, path, body)
-	if err == nil {
-		return value, nil
-	}
-	api := protocol.APIError{Code: "request_failed", Message: err.Error()}
-	_ = errors.As(err, &api)
-	status := 409
-	if api.Code == "not_found" {
-		status = 404
-	}
-	encoded, marshalErr := json.Marshal(map[string]any{"error": api, "status": status})
-	return string(encoded), marshalErr
-}
-func (s *Service) OpenMain() { s.tray.Hide(); s.main.Show(); s.main.Focus() }
-func (s *Service) Subscribe(token, space, owner, locale string) error {
-	return s.subscriptions.Subscribe(token, space, owner, locale)
-}
-func (s *Service) Unsubscribe(token string) {
-	s.subscriptions.Unsubscribe(token)
-}
+func (s *Service) Transport() transportBootstrap { return s.transport }
+func (s *Service) OpenMain()                     { s.tray.Hide(); s.main.Show(); s.main.Focus() }
 func Run(root string) error {
 	ctx := context.Background()
 	host, err := selfupdate.OpenHost()
@@ -114,7 +92,7 @@ func runProduct(parent context.Context, root string) (result error) {
 		return err
 	}
 	notifier := notifications.New()
-	service := &Service{notificationStore: notificationStore, notifier: notifier, notificationViews: map[string]NotificationView{}, ctx: ctx, api: api, reads: reads, attentionWake: make(chan struct{}, 1)}
+	service := &Service{notificationStore: notificationStore, notifier: notifier, notificationViews: map[string]NotificationView{}, reads: reads, attentionWake: make(chan struct{}, 1)}
 
 	service.smoke = smoke
 	service.notificationAuthorization = &systemnotifications.Authorization{
@@ -123,41 +101,20 @@ func runProduct(parent context.Context, root string) (result error) {
 	}
 	localClient := socket.Endpoint.Client()
 	localClient.Timeout = 0
-	manager, err := localui.Open(ctx, localui.Options{Local: localui.NewLocalHTTPClient(localClient, socket.Endpoint.Token, api.RuntimeID), LocalID: api.RuntimeID, LocalName: localDeviceName(), OnStreamReset: func(space string) {
-		service.mu.Lock()
-		app := service.app
-		service.mu.Unlock()
-		if app != nil {
-			app.Event.Emit("pot:changed", map[string]any{"space_id": space, "reset": true})
-		}
-	}, OnChange: func(space string, topics json.RawMessage) {
+	manager, err := localui.Open(ctx, localui.Options{Local: localui.NewLocalHTTPClient(localClient, socket.Endpoint.Token, api.RuntimeID), LocalID: api.RuntimeID, LocalName: localDeviceName(), OnChange: func(space string, topics json.RawMessage) {
 		service.wakeAttention()
-		service.mu.Lock()
-		app := service.app
-		service.mu.Unlock()
-		if app != nil {
-			var value map[string]json.RawMessage
-			if json.Unmarshal(topics, &value) == nil {
-				var boot string
-				_ = json.Unmarshal(value["boot_id"], &boot)
-				delete(value, "boot_id")
-				app.Event.Emit("pot:changed", map[string]any{"space_id": space, "boot_id": boot, "topics": value})
-			}
-		}
 	}})
 	if err != nil {
 		return err
 	}
 	defer manager.Close()
 	service.spaces = manager
-	service.subscriptions = localui.NewNativeSubscriptions(ctx, manager, func(name string, value localui.NativeEvent) {
-		service.mu.Lock()
-		app := service.app
-		service.mu.Unlock()
-		if app != nil {
-			app.Event.Emit(name, value)
-		}
-	})
+	desktopTransport, err := startDesktopSocket(ctx, "/api/v1/ws", desktopCaller(service), api.RuntimeID)
+	if err != nil {
+		return err
+	}
+	defer desktopTransport.Close()
+	service.transport = desktopTransport.bootstrap
 	files := service.resourceAssets(application.AssetFileServerFS(assets.FS()))
 
 	var cleanupOnce sync.Once
@@ -165,8 +122,7 @@ func runProduct(parent context.Context, root string) (result error) {
 	cleanup := func() error {
 		cleanupOnce.Do(func() {
 			stop()
-			service.subscriptions.Close()
-			cleanupResult = errors.Join(manager.Close(), runtime.Close())
+			cleanupResult = errors.Join(desktopTransport.Close(), manager.Close(), runtime.Close())
 			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			cleanupResult = errors.Join(cleanupResult, socket.Close(closeCtx))
@@ -213,22 +169,6 @@ func runProduct(parent context.Context, root string) (result error) {
 			host.Ready()
 		}
 		go service.runAttention(ctx, status)
-		go func() {
-			sub := manager.Changes.Subscribe()
-			defer sub.Close()
-			for {
-				topics, err := sub.Next(ctx)
-				if err != nil {
-					return
-				}
-				service.wakeAttention()
-				catalog := manager.Snapshot()
-				service.app.Event.Emit("pot:changed", map[string]any{"space_id": "", "topics": topics})
-				for _, space := range catalog.Items {
-					service.app.Event.Emit("pot:changed", map[string]any{"space_id": space.ID, "topics": topics})
-				}
-			}
-		}()
 
 	})
 	if selfupdate.FromContext(ctx) == nil {

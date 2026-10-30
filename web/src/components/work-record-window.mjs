@@ -1,5 +1,4 @@
-import {currentPreparedRender,withPreparedRender,registerPreparedRoot,preparedAsset,preparedDOM,preparedText} from './prepared-render.mjs';
-import {moveConversationNode as place} from './conversation-dom.mjs';
+import {preparedDOM,preparedText} from './prepared-render.mjs';
 import {createMessageWindow} from './message-window.mjs';
 import {createWorkRecordProjection,workRecordParents} from '../state/work-records.mjs';
 import {presentationLabel} from '../state/tool-presentation.mjs';
@@ -8,135 +7,149 @@ import {reconcile} from './reconcile.mjs';
 import {communication} from '../state/communication.mjs';
 import {taskIdentities} from '../state/task-identity.mjs';
 import {translate} from '../locales/messages.mjs';
+import {mergeConversationRows} from '../state/stable-message-rows.mjs';
 
 const node=(tag,cls='',text)=>{const value=document.createElement(tag);value.className=cls;if(text!==undefined)value.textContent=text;return value;};
-// The virtualizer still owns scrolling. This adapter only projects adjacent
-// logical records and retains the original render records across regrouping.
+
 export function createWorkRecordWindow({locale=()=> 'en',actor=()=>undefined,resolveIdentity=()=>undefined,blocked,
   memory=new Map(),scope='',...options}) {
-  let project=createWorkRecordProjection(),currentScope;
-  const records=new Map();
-  let owners=new Map(),projectedOwners=new Map(),current=[],source,actorSignature;
-  const groupMemory=message=>memory.get(currentScope+message.viewKey)||message.members.map(member=>memory.get(currentScope+'work:'+member.viewKey)).find(Boolean);
-  const forget=(key,owner)=>{
-    const entry=records.get(key);if(!entry||entry.owner!==owner)return;
-    if(owners.has(key)&&owners.get(key)!==owner)return;
-    options.dispose(entry.record);records.delete(key);
-  };
-  const renderMember=(message,owner,existing,preparedMembers)=>{
-    const environment=currentPreparedRender(),preparing=environment?.context.phase==='prepare',entry=records.get(message.viewKey);
-    if(preparing)registerPreparedRoot(environment.context,entry?.record.row);
-    let record;
-    const preparedMember=!preparing&&!entry&&environment?.context.phase==='commit'
-      ?preparedAsset('work-record-member:'+message.viewKey,JSON.stringify(message),()=>{throw Error('Missing measured work-record member');})
-      :preparedMembers?.get(message.viewKey);
-    if(!preparing&&!entry&&preparedMember){
-      record=preparedMember;record.commit?.();record.preparing=false;
-    }else{
-      const build=()=>options.render({...message,workRecord:true},preparing?existing:entry?.record||existing);
-      record=environment?withPreparedRender(environment.context,message.id,build):build();
-    }
-    record.row.dataset.windowKey=message.viewKey;
-    if(preparing){
-      record.preparing=true;preparedAsset('work-record-member:'+message.viewKey,JSON.stringify(message),()=>record);
-      if(!record.registerWorkRecord){const commit=record.commit;record.commit=()=>{commit?.();record.preparing=false;records.set(message.viewKey,{record,owner});return record;};record.registerWorkRecord=true;}
-    }else{record.preparing=false;records.set(message.viewKey,{record,owner});}
-    return record;
-  };
+  let project=createWorkRecordProjection(),currentScope,rawRows=[],closed=false;
+  const currentActor=()=>actor();
+
   function render(message,existing){
-    const environment=currentPreparedRender(),preparing=environment?.context.phase==='prepare';
-    if(!message.members)return renderMember(message,message.viewKey,existing);
-    let group=existing;
+    const record=options.render({...message,workRecord:!!message.workGroup},existing);
+    let group=record.groupUI;
     if(!group){
-      const row=node('article','message role-tool work-record-group'),details=node('details','work-records'),summary=node('summary','work-record-summary'),title=node('span','work-record-title'),counts=node('span','work-record-counts'),participants=node('span','work-record-participants'),failure=node('span','work-record-failure'),activity=node('div','work-record-activity'),body=node('div','work-record-body');
-      const people=node('div','work-record-people'),items=node('div','work-record-items');body.append(people,items);
-      summary.append(title,counts,participants,failure);details.append(summary,body);row.append(details,activity);
-      group={row,details,title,counts,participants,failure,activity,body:items,people,members:[],preparedMembers:new Map(),preparing};
-      group.commit=()=>render(message,group);
-      const memoryKey=currentScope+message.viewKey,saved=groupMemory(message);
-      if(saved)memory.set(memoryKey,saved);
-      details.open=saved?.open??message.members.some(member=>records.get(member.viewKey)?.record.tool?.element.open);
-      // Native toggle also fires for renderer assignments in hidden candidates.
-      // Only the summary action and explicit native-member navigation own saved
-      // disclosure intent; preparation must never write it back asynchronously.
-      details.addEventListener('toggle',()=>{if(!group.preparing&&row.isConnected&&options.host.contains(row))options.requestRender();});
+      const prefix=node('div','work-record-prefix');
+      const summary=node('button','work-record-summary');summary.type='button';
+      const title=node('span','work-record-title');
+      const counts=node('span','work-record-counts');
+      const participants=node('span','work-record-participants');
+      const failure=node('span','work-record-failure');
+      const people=node('div','work-record-people');
+      const activity=node('div','work-record-activity');
+      summary.append(title,counts,participants,failure);
+      prefix.append(summary,people,activity);
+      record.row.prepend(prefix);
+      group={prefix,summary,title,counts,participants,failure,people,activity,message};
+      record.groupUI=group;
       summary.addEventListener('click',event=>{
         if(event.defaultPrevented)return;
-        window.engage(event);event.preventDefault();window.pause();
-        memory.set(memoryKey,{open:!(memory.get(memoryKey)?.open??details.open)});
-        row.dispatchEvent(new CustomEvent('pot:prepare-resize',{bubbles:true}));options.requestRender();
+        const g=record.groupUI;
+        if(!g||!g.message?.workGroup)return;
+        if(!g.prefix.isConnected||!options.host.contains(g.prefix))return;
+        core.engage(event);event.preventDefault();core.pause();
+        const meta=g.message.workGroup;
+        const key=currentScope+meta.key;
+        memory.set(key,{open:!meta.open});
+        record.row.dispatchEvent(new CustomEvent('pot:prepare-resize',{bubbles:true}));
+        options.requestRender();
       });
     }
-    // Connect the destination before moving live members. moveBefore preserves
-    // selection, focus and embedded resource state across the new wrapper.
-    if(!preparing&&!group.row.isConnected&&options.host.isConnected)options.host.append(group.row);
-    group.members=message.members;group.row.dataset.messageId=message.id;group.row.dataset.scrollAnchor=`message:${message.viewKey}`;
-    const remembered=groupMemory(message);if(remembered)group.details.open=remembered.open;
-    group.row.dataset.anchorMessageId=message.sourceAnchor?.id||'';group.row.dataset.sequence=message.sourceAnchor?.sequence||'';
-    group.row.dataset.sequenceBefore=message.sourceAnchor?.before||'';group.row.dataset.sequenceAfter=message.sourceAnchor?.after||'';
-    const destination=window.destination?.id,nativeReading=message.members.some(member=>window.position?.anchors?.[0]?.key===`message:${member.viewKey}`);
-    if(window.revealing&&(destination&&message.members.some(member=>member.id===destination||window.visibilityPath.has(member.id))||nativeReading&&window.visibilityPath.has(message.id))){group.details.open=true;if(!preparing)memory.set(currentScope+message.viewKey,{open:true});}
-    // A disclosure intent may change after this candidate was measured. Commit
-    // this batch's measured state; the new intent owns a subsequent preparation.
-    const intendedOpen=group.details.open;
-    group.details.open=preparedAsset('work-record-open',message.viewKey,()=>intendedOpen);
-    if(!preparing&&group.details.open!==intendedOpen)queueMicrotask(()=>{
-      if(!options.host.contains(group.row))return;
-      group.row.dispatchEvent(new CustomEvent('pot:prepare-resize',{bubbles:true}));options.requestRender();
-    });
-    const work=message.work,format=value=>value.toLocaleString(locale()),t=key=>translate(locale(),'work.'+key);
-    preparedText(group.title,'work-record-window:group.title',t('title'));
-    preparedText(group.counts,'work-record-window:group.counts',(work.tools?[t('tools').replace('{count}',format(work.tools))]:[]).concat(work.messages?[t('messages').replace('{count}',format(work.messages))]:[]).join(' · '));
-    group.counts.title=group.counts.textContent;
-    group.failure.hidden=!work.failures;preparedText(group.failure,'work-record-window:group.failure',work.failures?t('failures').replace('{count}',format(work.failures)):'');
-    const participantRevision=JSON.stringify([work.participants,locale(),work.participants.map(address=>resolveIdentity(address))]);
-    preparedDOM(group.participants,'work-participants',participantRevision,target=>{
-      const marks=node('span','work-record-participants');
-      work.participants.forEach((address,index)=>{const mark=communicationParticipant(address,{resolveIdentity,locale});mark.dataset.participantIndex=String(index);marks.append(mark);});
-      reconcile(target,marks);
-    });group.participants.hidden=!work.participants.length;
-    preparedDOM(group.people,'work-people',participantRevision,target=>{
-      const people=node('div','work-record-people');for(const address of work.participants)people.append(communicationParticipant(address,{resolveIdentity,locale}));reconcile(target,people);
-    });group.people.hidden=work.participants.length<2;
-    group.activity.hidden=!work.active;
-    preparedText(group.activity,'work-record-window:group.activity',work.active?t('activity').replace('{name}',work.active.name==='compaction'?translate(locale(),'compact.title'):translate(locale(),'tool.'+presentationLabel(work.active))):'');
-    let index=0;
-    for(const member of message.members){
-      // Each member keeps its own disclosure. Already mounted bodies stay alive.
-      if(!group.details.open&&!records.has(member.viewKey)&&!group.preparedMembers.has(member.viewKey))continue;
-      const record=renderMember(member,message.viewKey,preparing?group.preparedMembers.get(member.viewKey):undefined,group.preparedMembers);
-      if(preparing)group.preparedMembers.set(member.viewKey,record);
-      if(group.body.children[index]!==record.row)place(group.body,record.row,group.body.children[index]||null);
-      index++;
+    group.message=message;
+    const metadata=message.workGroup;
+    const leader=!!metadata?.leader;
+    group.prefix.hidden=!leader;
+    group.summary.setAttribute('aria-expanded',String(!!metadata?.open));
+    record.row.classList.toggle('work-record-member',!!metadata);
+    record.row.classList.toggle('work-record-group',leader);
+    record.row.classList.toggle('work-record-folded',leader&&!metadata?.open&&!metadata?.exposed);
+    record.row.hidden=!!metadata&&!leader&&!metadata.open&&!metadata.exposed;
+    if(message.sequence!=null){record.row.dataset.sequence=String(message.sequence);}else{delete record.row.dataset.sequence;}
+    if(metadata?.key){record.row.dataset.workGroup=metadata.key;}else{delete record.row.dataset.workGroup;}
+    delete record.row.dataset.sequenceBefore;
+    delete record.row.dataset.sequenceAfter;
+    if(leader){
+      const work=metadata;
+      const format=value=>value.toLocaleString(locale()),t=key=>translate(locale(),'work.'+key);
+      preparedText(group.title,'work-record-window:group.title',t('title'));
+      preparedText(group.counts,'work-record-window:group.counts',(work.work.tools?[t('tools').replace('{count}',format(work.work.tools))]:[]).concat(work.work.messages?[t('messages').replace('{count}',format(work.work.messages))]:[]).join(' · '));
+      group.counts.title=group.counts.textContent;
+      group.failure.hidden=!work.work.failures;preparedText(group.failure,'work-record-window:group.failure',work.work.failures?t('failures').replace('{count}',format(work.work.failures)):'');
+      const participantRevision=JSON.stringify([work.work.participants,locale(),work.work.participants.map(address=>resolveIdentity(address))]);
+      preparedDOM(group.participants,'work-participants',participantRevision,target=>{
+        const marks=node('span','work-record-participants');
+        work.work.participants.forEach((address,index)=>{const mark=communicationParticipant(address,{resolveIdentity,locale});mark.dataset.participantIndex=String(index);marks.append(mark);});
+        reconcile(target,marks);
+      });group.participants.hidden=!work.work.participants.length;
+      preparedDOM(group.people,'work-people',participantRevision,target=>{
+        const people=node('div','work-record-people');for(const address of work.work.participants)people.append(communicationParticipant(address,{resolveIdentity,locale}));reconcile(target,people);
+      });group.people.hidden=work.work.participants.length<2||!metadata.open;
+      group.activity.hidden=!work.work.active;
+      preparedText(group.activity,'work-record-window:group.activity',work.work.active?t('activity').replace('{name}',work.work.active.name==='compaction'?translate(locale(),'compact.title'):translate(locale(),'tool.'+presentationLabel(work.work.active))):'');
+    }else{
+      group.prefix.hidden=true;
     }
-    while(group.body.children.length>index)group.body.lastElementChild.remove();
-    group.preparing=preparing;return group;
+    return record;
   }
-  function dispose(record){
-    if(record.preparing){for(const member of record.preparedMembers?.values()||[])if(member.preparing)options.dispose(member);if(!record.members)options.dispose(record);else record.row.remove();return;}
-    if(record.members){const moving=record.members.some(member=>owners.has(member.viewKey)&&owners.get(member.viewKey)!==record.row.dataset.windowKey);for(const member of record.members)forget(member.viewKey,record.row.dataset.windowKey);if(!moving)record.row.remove();}
-    else forget(record.row.dataset.windowKey,record.row.dataset.windowKey);
+
+  const core=createMessageWindow({...options,locale,render});
+
+  function reset(){
+    rawRows=[];project=createWorkRecordProjection();currentScope=undefined;
+    core.reset();
   }
-  const window=createMessageWindow({...options,locale,render,dispose});
+
   function layout(messages,settings={}){
+    if(closed)return;
     const nextScope=typeof scope==='function'?scope():scope;
-    if(currentScope!==undefined&&currentScope!==nextScope){owners.clear();projectedOwners.clear();window.setMessages([]);for(const {record}of records.values())options.dispose(record);records.clear();project=createWorkRecordProjection();source=undefined;}
+    if(currentScope!==undefined&&currentScope!==nextScope){reset();}
     currentScope=nextScope;
-    const currentActor=actor(),nextActorSignature=JSON.stringify(currentActor);
-    if(source!==messages||actorSignature!==nextActorSignature||blocked){
-      const addresses=messages.flatMap(message=>communication(message.tool,currentActor)?.messages.flatMap(mail=>[mail.from,mail.to])||[]);
-      taskIdentities.register(addresses);
-      const selection=getSelection(),selected=selection&&!selection.isCollapsed?selection.anchorNode?.parentElement?.closest('article.message'):null;
-      const focus=document.activeElement?.closest('article.message');
-      const anchor=(options.host.contains(focus)?focus:options.host.contains(selected)?selected:null)?.dataset.messageId||window.anchor?.id;
-      current=project(messages,{actor:currentActor,blocked,anchor});source=messages;actorSignature=nextActorSignature;
-      projectedOwners=new Map(current.flatMap(message=>(message.members||[message]).map(member=>[member.viewKey,message.viewKey])));
+    rawRows=mergeConversationRows(rawRows,messages,settings);
+    const visible=rawRows.filter(message=>!message.presentationSuppressed);
+    const act=currentActor();
+    const addresses=visible.flatMap(message=>communication(message.tool,act)?.messages.flatMap(mail=>[mail.from,mail.to])||[]);
+    taskIdentities.register(addresses);
+    const selection=getSelection(),selected=selection&&!selection.isCollapsed?selection.anchorNode?.parentElement?.closest('article.message'):null;
+    const focus=document.activeElement?.closest('article.message');
+    const anchor=(options.host.contains(focus)?focus:options.host.contains(selected)?selected:null)?.dataset.messageId||core.anchor?.id;
+    const projected=project(visible,{actor:act,blocked,anchor});
+    const nativeKeys=new Map(projected.map(m=>[m.id,m.viewKey]));
+    for(const message of projected){
+      const group=message.workGroup;
+      if(!group)continue;
+      const key=currentScope+group.key;
+      if(!memory.has(key)){
+        const inherited=group.memberIDs.map(id=>memory.get(currentScope+'work:'+nativeKeys.get(id))).find(value=>value!==undefined);
+        if(inherited)memory.set(key,{open:!!inherited.open});
+      }
+      if(!core.revealing)continue;
+      const anchors=core.position?.anchors;
+      if(group.memberIDs.some(id=>
+        id===core.destination?.id||
+        core.visibilityPath?.has(id)||
+        anchors?.some(a=>a.key===`message:${nativeKeys.get(id)}`)
+      )){
+        memory.set(currentScope+group.key,{open:true});
+      }
     }
-    const committedOwners=projectedOwners;
-    window.setMessages(current,{...settings,parents:workRecordParents(current,settings.parents),
-      beforeCommit:()=>{owners=committedOwners;settings.beforeCommit?.();},
-      afterCommit:()=>{for(const [key,entry]of records)if(!committedOwners.has(key)){options.dispose(entry.record);records.delete(key);}settings.afterCommit?.();},
+    const mapped=projected.map(message=>{
+      if(!message.workGroup)return message;
+      const key=currentScope+message.workGroup.key;
+      const saved=memory.get(key);
+      return {...message,workGroup:{...message.workGroup,open:saved?.open??false}};
+    });
+    core.setMessages(mapped,{...settings,parents:workRecordParents(mapped,settings.parents),
+      afterCommit:()=>{
+        settings.afterCommit?.();
+        let needsResize=false;
+        for(const message of mapped){
+          const group=message.workGroup;
+          if(!group)continue;
+          const expected=memory.get(currentScope+group.key)?.open??false;
+          if(expected!==group.open){needsResize=true;break;}
+        }
+        if(needsResize&&!closed&&currentScope===nextScope){
+          const scopeCheck=currentScope;
+          queueMicrotask(()=>{
+            if(closed||currentScope!==scopeCheck)return;
+            options.host?.dispatchEvent?.(new CustomEvent('pot:prepare-resize'));
+            options.requestRender();
+          });
+        }
+      }
     });
   }
-  return Object.assign(Object.create(window),{setMessages:layout,close(){owners.clear();window.close();for(const {record}of records.values())options.dispose(record);records.clear();}});
+
+  return Object.assign(Object.create(core),{setMessages:layout,close(){closed=true;core.close();},reset});
 }

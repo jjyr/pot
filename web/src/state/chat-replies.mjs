@@ -24,7 +24,7 @@ function replyText(text, lifecycle) {
 // Execution activity has its own stable identity, independent of model rounds.
 // Prose/tool ordering stays chronological; transport loss never ends execution.
 export function projectChatReplies(snapshot, send, {offline=false}={}) {
-  const messages=snapshot?.messages||[],inputs=new Map(),replyInputs=new Map(),firstReplies=new Set(),rows=[];
+  const messages=snapshot?.messages||[],inputs=new Map(),replyInputs=new Map(),rows=[];
   const positions=new Map(messages.map((message,index)=>[message.id,index])),anchors=new Map(),turnInputs=new Map();
   const lifecycleInputs=new Set((snapshot?.replies||[]).map(reply=>reply.input_id));
   let currentInput='';
@@ -43,13 +43,15 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
     if(message.context_only&&message.role!=='tool')continue;
     if(message.role==='system'&&message.request_id?.startsWith('pot-result-')&&!message.correspondence?.length)continue;
     if(routineTaskDisposition(message))continue;
-    const row={...message,viewKey:message.request_id?`input:${message.request_id}`:message.id};
+    const inputRequest=message.request_id||(message.role==='user'&&message.steering?message.accepted_request_id:undefined);
+    const row={...message,viewKey:inputRequest?`input:${inputRequest}`:message.id};
     if(message.role==='system'&&message.correspondence?.length){
       // Receipt details are a disclosure row, never ordinary user/assistant prose.
       // The authoritative system input stays unchanged in the model transcript.
       row.role='tool';row.text='';row.tool={id:message.id,turn_id:message.request_id,name:'receive_message',args:{messages:message.correspondence},phase:'completed',started_at_ms:message.created_at_ms,finished_at_ms:message.created_at_ms};
     }
     if(message.role==='assistant'){
+      row.viewKey=message.id;
       const input=inputs.get(replyInputs.get(message.id));
       // Empty model rounds do not own activity. Only the receiver lifecycle
       // owns that frame, including between tool completion and the next round.
@@ -59,9 +61,6 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
       // their receiver lifecycle. Keep those diagnostics on the message; only
       // an available lifecycle takes ownership in its separate activity row.
       if(lifecycleInputs.has(row.inputID))row.activity=false;
-      if(input&&!firstReplies.has(input.id)){
-        row.viewKey=`reply:${input.request_id||input.id}`;firstReplies.add(input.id);
-      }
       row.phase=message.status==='failed'?'failed':message.status==='cancelled'?'stopped':message.status==='streaming'?(message.text?'streaming':'thinking'):'complete';
     }
     rows.push(row);

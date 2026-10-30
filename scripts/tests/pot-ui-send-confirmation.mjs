@@ -1,3 +1,5 @@
+import { installWSFixture } from './helpers/ws-fixture.mjs';
+installWSFixture();
 import assert from 'node:assert/strict';
 import {createConversationState,beginSubscription,acceptSnapshot,beginSend,settleSend,setDraft,draft,setDraftReferences,draftReferences,ownerKey} from '../../web/src/state/conversation.mjs';
 import {createSendConfirmation} from '../../web/src/state/send-confirmation.mjs';
@@ -231,7 +233,7 @@ for(const route of ['message','steer','retry'])for(const newerDraft of [false,tr
   const storage={subscribe:()=>()=>{},close:()=>{},invalidate:async()=>{},
     command:async(key,meta,value)=>{commands.push({key,meta,value});if(fail)return value;return new Promise((resolve,reject)=>{resolveCommand=()=>resolve(value);rejectCommand=reject;});}};
   globalThis.fetch=async(url,options={})=>{
-    const path=new URL(url).pathname;calls.push({path,method:options.method||'GET',body:options.body});
+    const path=new URL(url, 'http://synthetic.invalid').pathname;calls.push({path,method:options.method||'GET',body:options.body});
     return Response.json(path==='/api/v1/runtime'?{runtime_id:'runtime'}:{message_id:'accepted',duplicate:false});
   };
   let client,manager;

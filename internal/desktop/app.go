@@ -23,23 +23,15 @@ var appIcon []byte
 //go:embed assets/PotMenuBar.png
 var trayIcon []byte
 
-// PreviewService binds only safe fixture operations. Service.Close/Subscribe are
-// not exported to JavaScript, and no production operator or execution API exists.
+// PreviewService binds only native presentation and a transport bootstrap. No
+// fixture, production operator, or execution API is exported to JavaScript.
 type PreviewService struct {
-	source *preview.Service
-	main   *application.WebviewWindow
-	tray   *application.WebviewWindow
+	main      *application.WebviewWindow
+	tray      *application.WebviewWindow
+	transport transportBootstrap
 }
 
-func (s *PreviewService) Snapshot() preview.Snapshot { return s.source.Snapshot() }
-
-func (s *PreviewService) Send(request preview.SendRequest) (preview.Receipt, error) {
-	return s.source.Send(request)
-}
-
-func (s *PreviewService) Cancel(request preview.CancelRequest) error {
-	return s.source.Cancel(request)
-}
+func (s *PreviewService) Transport() transportBootstrap { return s.transport }
 
 func (s *PreviewService) OpenMain() {
 	s.tray.Hide()
@@ -52,13 +44,20 @@ func RunPreview() error {
 	defer stop()
 	source := preview.New(ctx)
 	defer source.Close()
-	service := &PreviewService{source: source}
+	service := &PreviewService{}
+	desktopTransport, err := startDesktopSocket(ctx, "/api/preview/ws", preview.SocketCaller(source), "")
+	if err != nil {
+		return err
+	}
+	defer desktopTransport.Close()
+	service.transport = desktopTransport.bootstrap
 	app := application.New(application.Options{
 		Name: "Pot", Description: "Pot", Icon: appIcon,
 		Services: []application.Service{application.NewService(service)},
 		Assets:   application.AssetOptions{Handler: application.AssetFileServerFS(webassets.FS())},
 		Mac:      application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		OnShutdown: func() {
+			_ = desktopTransport.Close()
 			stop()
 			source.Close()
 		},
@@ -93,19 +92,5 @@ func RunPreview() error {
 	trayMenu.AddSeparator()
 	trayMenu.Add("Quit Pot Preview").OnClick(func(*application.Context) { app.Quit() })
 	status.SetMenu(trayMenu)
-	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
-		go func() {
-			updates, remove := source.Subscribe()
-			defer remove()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case snapshot := <-updates:
-					app.Event.Emit("preview:snapshot", snapshot)
-				}
-			}
-		}()
-	})
 	return app.Run()
 }

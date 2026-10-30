@@ -111,7 +111,7 @@ mise run licenses
 mise run build:linux
 ```
 
-`mise run test:settings-browser` uses isolated production HTTP/SSE services and
+`mise run test:settings-browser` uses isolated WebSocket fixture services and
 temporary browser profiles to check settings independently of assistant activity.
 Set `POT_SETTINGS_BEFORE` to an extracted baseline tree containing `web/src` and
 the UI cache/notification migrations. Configure an existing Playwright module
@@ -269,7 +269,7 @@ sets the synthetic status, `/fixture/calls` shows received check commands, and
 `output/update-before/`; `?before=1` selects those actual baseline assets. Use
 `locale=zh-CN` and a phone viewport for the narrow titlebar/menu.
 
-For an isolated long-chat browser fixture with real local history/SSE endpoints,
+For an isolated long-chat browser fixture with real local history and WebSocket endpoints,
 run `POT_HISTORY_FIXTURE_URL_FILE=/tmp/pot-history-url mise exec -- go test
 ./internal/transport -run '^TestHistoryBrowserFixture$' -v -count=1 -timeout=35m`.
 Open the origin from that URL file at
@@ -288,20 +288,21 @@ Playwright/Chromium overrides, run either
 its fixture; start a new fixture for the other runner. `--keep-fixture` leaves it
 available for inspection until `POST /fixture/stop` or its 12-minute limit.
 The fixture uses temporary state, local deterministic model output and an
-authenticated synthetic browser session. The frequency runner records HTTP,
-SSE, IndexedDB and composer frames in `POT_DIRECTORY_FREQUENCY_OUTPUT`, compares
+authenticated synthetic browser session. The frequency runner records WebSocket
+requests/events, IndexedDB and composer frames in `POT_DIRECTORY_FREQUENCY_OUTPUT`, compares
 pure output with lifecycle/permission invalidation, and captures review images.
-`--baseline` checks a fixture built from source before output invalidation was
-separated. The live runner creates a real Task, reads its incremental transcript
+It holds directory confirmation to verify that local outbox admission remains
+available while network dispatch waits for current authority, then resumes once.
+The live runner creates a real Task, reads its incremental transcript
 past the resource TTL and cancels through the UI.
 
 `mise run test:pwa-cold-start` covers local startup and reconnect authority with
-isolated production HTTP/SSE, IndexedDB and Service Worker fixtures. Its reconnect
+isolated WebSocket, IndexedDB and Service Worker fixtures. Its reconnect
 checks hold directory or session responses, revoke capabilities and release
 retired connection/Control responses; no command is submitted.
 
 `node scripts/tests/pot-ui-cache-entry-browser.mjs` independently checks cached
-Chat entry and local browsing while production bootstrap, SSE and history HTTP
+Chat entry and local browsing while production bootstrap, subscriptions and history
 responses are held. It seeds and verifies real committed IndexedDB identities,
 uses desktop and phone viewports, and exercises offline reopening, assistant
 switches, cached references and a pending page transaction. Use
@@ -312,7 +313,7 @@ closes its synthetic loopback server and temporary browser profile.
 
 For chat stream lifecycle checks, `node scripts/tests/ui-regressions.mjs --group
 connection` runs the production browser adapter and shared UI with real
-EventSource, IndexedDB and a controlling Service Worker against synthetic HTTP
+WebSockets, IndexedDB and a controlling Service Worker against synthetic transport
 faults. It uses the product watchdog durations and separate browser contexts.
 Use the existing `POT_PLAYWRIGHT_MODULE` and `POT_CHROMIUM_EXECUTABLE` overrides.
 For a real isolated Control and authenticated browser gateway, set
@@ -324,18 +325,40 @@ normal UI at `/` uses synthetic SQLite history and no model calls. Stop with
 POST `/fixture/stop`. These desktop browser checks do not qualify physical iOS
 PWA suspension or a real tailnet path.
 
-`mise run test:ui-http-integration` exercises real local HTTP/SSE and downloads
+`mise run test:ui-http-integration` exercises real local WebSocket business calls,
+subscriptions and HTTP downloads
 with a deterministic loopback model fixture; it needs cached Playwright CLI and
 an installed browser.
 
 Each synthetic browser contract gets a fresh context, including its own init
 scripts, routes and transcript cache. It receives the fixture browser's disposable
-authentication state for provider probes. The real HTTP contract keeps its two
+authentication state for provider probes. Synthetic domain fixtures may adapt
+their HTTP and event data through `helpers/browser-ws-fixture.js`; this test-only
+adapter does not establish WebSocket transport acceptance. The real transport
+contract uses native WebSockets and keeps its two
 independent authenticated clients. Set `TMPDIR` to a private directory when the
 default temporary filesystem is quota constrained.
 
+For gateway-only diagnosis, `POT_UI_REAL_ONLY=1` runs real WebSocket onboarding,
+gateway and session rotation in `pot-ui-http-integration.py`, explicitly skipping
+synthetic browser fixtures. The default run still includes those fixtures;
+gateway-only success does not qualify the complete browser suite.
+
+Node fixture servers use `helpers/ws-server.mjs` to expose real WebSockets while
+reusing their synthetic HTTP/event handlers internally. This preserves held
+responses, cancellation and fault controls without replacing the browser's
+WebSocket implementation. Gateway acceptance uses the Go server directly.
+
+`node scripts/tests/directory-chat-readiness-browser.mjs` exercises a late retained
+directory publication after an initial WebSocket snapshot. It verifies that cached
+offline state cannot grant commands and that fresh directory authority restores
+readiness without requiring another conversation event. Use the same existing
+Playwright and Chromium environment variables as the other browser fixtures.
+
+With `POT_PLAYWRIGHT_MODULE` set to an existing Playwright `index.mjs`, run `mise exec -- node --test scripts/tests/fixture-ws-server.test.mjs` to check fixture protocol and upstream cancellation over real loopback sockets. No browser needed. This test is opt-in and not a normal `test:ui` prerequisite.
+
 `mise run test:ui-assistant-create` exercises the phone creation flow in English
-and Chinese with the production HTTP adapter, SSE, IndexedDB and trusted Chromium
+and Chinese with the production WebSocket adapter, IndexedDB and trusted Chromium
 touch input. Its loopback API holds configuration and creation responses, counts
 requests and supplies only synthetic assistants; it does not connect a real peer
 or call a model. The runner also checks late catalogs after navigation, scope and
@@ -391,7 +414,7 @@ and theme. Add `capture-navigation=1` to pause at the multiline-draft return
 scenario; `window.navigationCaptureContinue()` resumes the checks.
 
 `mise run test:ui-chat-position` checks send positioning and assistant switches
-using the production UI, HTTP adapter, SSE and IndexedDB with synthetic loopback
+using the production UI, WebSocket adapter and IndexedDB with synthetic loopback
 history. It samples visible and hidden frames at desktop and phone widths,
 including delayed draft hydration, acceptance, fonts and images, history beyond
 the data window, reconnects and the five-second preview slot fallback. Set
@@ -404,7 +427,7 @@ draft-layout regressions in that tree while retaining the other assertions.
 `mise run test:ui-prepared-layout` exercises connected off-flow rendering with
 the same existing Playwright/Chromium prerequisites. It covers the native and
 fallback scroll-end branches, recursive readiness, stable component deadlines,
-load admission, same-node resource transfer, streaming HTTP/SSE output, mixed
+load admission, same-node resource transfer, streaming WebSocket output, mixed
 image/PDF/HTML/Markdown previews through real history pagination, cached initial
 layout and virtual remount, native group aliases across pagination/cold IndexedDB/remount, and a trusted mobile
 touch gesture during an incomplete Mermaid fence's completion. The fixtures
@@ -419,7 +442,7 @@ passing fix.
 check lifecycle activity through reconnects, empty model/tool rounds, long
 output, parallel inputs and terminal outcomes. It samples row/status identity,
 nonterminal frames, Latest visibility and historical reading anchors against
-synthetic HTTP/SSE and committed IndexedDB state. Its history diagnostic runner
+synthetic WebSocket events and committed IndexedDB state. Its history diagnostic runner
 also checks paged failed/cancelled messages without receiver lifecycles and
 cached paging after reload. `POT_HISTORY_OUTPUT` and `POT_HISTORY_SOURCE`
 select that runner's evidence directory and source tree; it accepts `--baseline`.
@@ -1024,7 +1047,7 @@ Each probe must exit nonzero at its corresponding behavior assertion; a tool
 startup error is not evidence. Update fault locations when product fixes move.
 
 The standard `test:ui-http-integration` entry builds the current CLI, runs one
-private real HTTP/SSE/model/artifact fixture, then all source groups once. It
+private real WebSocket/model/artifact fixture, then all source groups once. It
 retains authentication/rotation, two clients/reconnect, wrong-owner/path rejection,
 binary integrity and provider contracts. Task lifecycle integration keeps original
 run/owner, menu/approval decisions, retry identity, drafts/disclosures, keyboard

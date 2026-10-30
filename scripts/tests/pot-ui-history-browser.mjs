@@ -1,4 +1,4 @@
-// Interactive fixture using production DOM, HTTP history and SSE with a local
+// Interactive fixture using production DOM, WebSocket history and transport with a local
 // deterministic provider. Run through computer-use, without browser automation dependencies.
 const frame=document.querySelector('iframe'),results=document.querySelector('#results');
 // Background browser tabs can defer scroll/animation work past a timer. Sample

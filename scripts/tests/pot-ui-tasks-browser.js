@@ -8,10 +8,13 @@ async page => {
  const goal='安装 GitHub CLI 并验证可用。先检查操作系统与当前安装状态，再报告安装结果。';
  let phase='running',archived=false,runID='run-one',paused=false,result=null,version=1,offline=false,rejectGuidance=false,failEvents=false,errorText='',pending=[];
  let inputs=[{request_id:'initial',kind:'input',state:'active',text:goal}];
+ const gates=new Set();
+ const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});const gate={promise,resolve};gates.add(gate);return gate;};
+ let holdGuidance=null;
  const event=(sequence,type,value={})=>({sequence,event:{turn_id:'run-one',update:{type,...value}}});
  let events=[event(1,'message_started'),event(2,'text_delta',{text:'我先检查当前系统，以及 gh 是否已经安装。'}),event(3,'message_finished'),event(4,'tool_started',{id:'probe',name:'exec_command',args:{cmd:'gh --version'}})];
  const add=(type,value={})=>events.push(event(events.length+1,type,value));
- await page.addInitScript(()=>{const toUIFrame=value=>({kind:'reset',base_cursor:0,view:{replies:value.replies||[],state:{...value,messages:[]},messages:value.messages.map((message,index)=>({message,sequence:String(index+1),version:value.cursor})),history:{before:'1',after:String(value.messages.length),has_more:false,has_newer:false}}});const sources=new Set();window.EventSource=class extends EventTarget{constructor(url){super();this.url=String(url);sources.add(this);queueMicrotask(async()=>{this.onopen?.({});if(this.url.includes('/events')){const target=new URL(this.url,location.href);target.pathname=target.pathname.replace(/\/events$/,'/snapshot');const snapshot=await(await fetch(target)).json();if(sources.has(this))this.dispatchEvent(new MessageEvent('conversation',{data:JSON.stringify(snapshot)}));}});}close(){sources.delete(this);}};window.__taskChanges=value=>{for(const source of sources)if(source.url.includes('/changes'))source.dispatchEvent(new MessageEvent('changed',{data:JSON.stringify({tasks:value,permissions:value})}));};});
+ await page.addInitScript(()=>{const toUIFrame=value=>({kind:'reset',base_cursor:0,view:{replies:value.replies||[],state:{...value,messages:[]},messages:value.messages.map((message,index)=>({message,sequence:String(index+1),version:value.cursor})),history:{before:'1',after:String(value.messages.length),has_more:false,has_newer:false}}});const sources=new Set();window.EventSource=class extends EventTarget{constructor(url){super();this.url=String(url);sources.add(this);queueMicrotask(async()=>{this.onopen?.({});if(this.url.includes('/events')){const target=new URL(this.url,location.href);target.pathname=target.pathname.replace(/\/events$/,'/snapshot');const snapshot=await(await fetch(target)).json();if(sources.has(this))this.dispatchEvent(new MessageEvent('conversation',{data:JSON.stringify(snapshot)}));}else if(this.url.includes('/changes')&&sources.has(this))this.dispatchEvent(new MessageEvent('changed',{data:'{}',lastEventId:'boot:1'}));});}close(){sources.delete(this);}};window.__taskChanges=value=>{for(const source of sources)if(source.url.includes('/changes'))source.dispatchEvent(new MessageEvent('changed',{data:JSON.stringify({tasks:value,permissions:value}),lastEventId:'boot:'+value}));};});
  const routeHandler=async route=>{
   const url=new URL(route.request().url()),path=url.pathname;
   if(path.startsWith('/api/v1/tasks/task-proof'))reads.push({path,after:url.searchParams.get('after'),owner:url.searchParams.get('assistant_id'),space:url.searchParams.get('space_id')});
@@ -23,9 +26,9 @@ async page => {
    if(path.endsWith('/cancel')){phase='cancelled';archived=true;}
    if(path==='/api/v1/tasks/dispositions')archived=body.decisions[0].archived;
    if(path==='/api/v1/permissions')pending=pending.filter(item=>item.id!==body.id);
-   if(path.endsWith('/messages')){if(rejectGuidance){await route.fulfill({status:503,json:{message:'Guidance failed; try again'}});return;}if(!inputs.some(input=>input.request_id===body.request_id))inputs.push({...body,kind:'user_guidance',sender:'alpha',state:'pending'});if(['complete','failed','cancelled','interrupted'].includes(phase)){phase='queued';archived=false;runID='run-two';result=null;}}
+   if(path.endsWith('/messages')){if(rejectGuidance){await route.fulfill({status:503,json:{message:'Guidance failed; try again'}});return;}if(!inputs.some(input=>input.request_id===body.request_id))inputs.push({...body,kind:'user_guidance',sender:'alpha',state:'pending'});if(['complete','failed','cancelled','interrupted'].includes(phase)){phase='queued';archived=false;runID='run-two';result=null;}if(holdGuidance){const gate=holdGuidance;holdGuidance=null;await gate.promise;}}
   }
-  const data=path==='/api/v1/runtime'?{runtime_id:'fixture',boot_id:'boot'}:path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Local',kind:'local',connected:true}]}:path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1}]:path==='/api/v1/assistants/bootstrap'?{assistant:null}:path==='/api/v1/snapshot'?{cursor:1,boot_id:'boot',conversation_id:'alpha',messages:[],turn:null,agent:{phase:'ready'}}:path==='/api/v1/permissions'?{pending,policy:{machines:{}}}:path==='/api/v1/tasks/outcomes'?{items:[],cursor:0,has_more:false}:(path==='/api/v1/tasks/query'||path==='/api/v1/tasks/catalog')?{items:[{id:'task-proof',title:'安装 GitHub CLI 并验证可用',assistant_id:'alpha',machine_id:'fixture-runtime',phase}],total:1}:path==='/api/v1/tasks/task-proof'?{run_id:runID,info:{phase,archived,paused,machine_id:'fixture-runtime'},request:{text:goal},result,error:errorText,config:{model:'fixture-model'}}:path==='/api/v1/tasks/task-proof/messages'?inputs:path==='/api/v1/tasks/task-proof/events'?{run_id:runID,events:events.filter(row=>row.sequence>Number(url.searchParams.get('after'))),cursor:events.at(-1)?.sequence||0,has_more:false,unavailable:offline}:path==='/api/v1/completions'?{items:[{token:'/skill:review',label:'Review',detail:'Review changes'}]}:{items:[]};
+  const data=path==='/api/v1/runtime'?{runtime_id:'fixture',boot_id:'boot'}:path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Local',kind:'local',connected:true,control_id:'fixture',boot_id:'boot'}]}:path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1}]:path==='/api/v1/assistants/bootstrap'?{assistant:null}:path==='/api/v1/snapshot'?{cursor:1,boot_id:'boot',conversation_id:'alpha',messages:[],turn:null,agent:{phase:'ready'}}:path==='/api/v1/permissions'?{pending,policy:{machines:{}}}:path==='/api/v1/tasks/outcomes'?{items:[],cursor:0,has_more:false}:(path==='/api/v1/tasks/query'||path==='/api/v1/tasks/catalog')?{items:[{id:'task-proof',title:'安装 GitHub CLI 并验证可用',assistant_id:'alpha',machine_id:'fixture-runtime',phase}],total:1}:path==='/api/v1/tasks/task-proof'?{run_id:runID,info:{phase,archived,paused,machine_id:'fixture-runtime'},request:{text:goal},result,error:errorText,config:{model:'fixture-model'}}:path==='/api/v1/tasks/task-proof/messages'?inputs:path==='/api/v1/tasks/task-proof/events'?{run_id:runID,events:events.filter(row=>row.sequence>Number(url.searchParams.get('after'))),cursor:events.at(-1)?.sequence||0,has_more:false,unavailable:offline}:path==='/api/v1/completions'?{items:[{token:'/skill:review',label:'Review',detail:'Review changes'}]}:{items:[]};
 
   if(path==='/api/v1/assistants')for(const assistant of data)assistant.capabilities=capabilities;
   if(path==='/api/v1/tasks/task-proof')data.capabilities=capabilities;
@@ -59,8 +62,8 @@ async page => {
  try{
   await page.setViewportSize({width:1200,height:1000});await page.goto(state.origin+'/?theme=light&locale=zh-CN&conversation=alpha');await openTask();
   await page.locator('.task-transcript .reply-bubble').getByText('我先检查当前系统，以及 gh 是否已经安装。',{exact:true}).waitFor();
-  const composer=page.getByRole('textbox',{name:'任务追加',exact:true}),tool=page.locator('.tool-call[data-call-id="probe"]');
-  assert(!await page.locator('.task-goal').evaluate(node=>node.open),'Goal defaults to collapsed');
+  const composer=page.getByRole('textbox',{name:'任务追加',exact:true}),tool=page.locator('.task-history:not([data-preparation-surface]) .tool-call[data-call-id="probe"]');
+  assert(!await page.locator('.task-history:not([data-preparation-surface]) .task-goal').evaluate(node=>node.open),'Goal defaults to collapsed');
   assert(await page.locator('.task-transcript').getByText(goal,{exact:true}).count()===0,'Goal is not repeated in the conversation');
   assert(await page.getByRole('button',{name:'停止任务',exact:true}).count()===1,'Empty composer offers Stop');
   assert(await composer.evaluate(node=>document.activeElement!==node),'Opening Task does not focus the composer');
@@ -68,7 +71,7 @@ async page => {
   await composer.fill('/skill:r');await page.locator('.task-composer-area .completion-option').first().waitFor();const beforeCompletion=posts.length;await composer.press('Enter');assert(await composer.inputValue()===''&&await page.locator('.task-composer-area .composer-selector[title="/skill:review"]').count()===1&&posts.length===beforeCompletion,'Scoped completion chooses a Skill chip without sending');
   assert(await composer.getAttribute('aria-controls')==='pot-task-task-proof-completions-options','Task and main composers use distinct completion identities');
   await page.locator('.task-composer-area .composer-selector-remove').click();
-  await page.locator('.task-goal > summary').click();await composer.fill('保留这条尚未发送的指导');await page.locator('.task-transcript .work-records > summary').click();await tool.locator(':scope > summary').click();
+  await page.locator('.task-history:not([data-preparation-surface]) .task-goal > summary').click();await composer.fill('保留这条尚未发送的指导');await page.locator('.task-history:not([data-preparation-surface]) .work-record-group > .work-record-prefix > .work-record-summary').click();await tool.locator(':scope > summary').click();
   await composer.evaluate(node=>{window.__taskComposer=node;});
   inputs.push({request_id:'reference',kind:'reference',sender:'peer',state:'pending',text:'已确认仓库访问可用。'});
   pending=[{id:'approval-one',request:{owner:'alpha',task:'task-proof',turn:'run-one',call_id:'probe',machine_id:'fixture-runtime',tool:'exec_command',args:{cmd:'gh --version'},justification:'Verify the installed CLI'}},{id:'other-task',request:{owner:'alpha',task:'elsewhere',turn:'other',call_id:'other'}}];await push();
@@ -84,8 +87,8 @@ async page => {
   assert(await composer.inputValue()==='保留这条尚未发送的指导','Invalidation retains draft');
   assert(await composer.evaluate(node=>node===window.__taskComposer),'Invalidation retains editor node');
   assert(await tool.evaluate(node=>node.open),'Invalidation retains expanded tool');
-  assert(await page.locator('.task-goal').evaluate(node=>node.open),'Invalidation retains expanded goal');
-  const order=await page.locator('.task-event').allTextContents();assert(order.findIndex(text=>text.includes('参考信息'))<order.findIndex(text=>text.includes('已找到 GitHub CLI')),'Applied reference precedes continuation');
+  assert(await page.locator('.task-history:not([data-preparation-surface]) .task-goal').evaluate(node=>node.open),'Invalidation retains expanded goal');
+  await page.waitForFunction(()=>{const history=document.querySelector('.task-history:not([data-preparation-surface])');if(!history)return false;const texts=[...history.querySelectorAll('.task-event')].map(el=>el.textContent||'');const refIndex=texts.findIndex(text=>text.includes('参考信息'));const contIndex=texts.findIndex(text=>text.includes('已找到 GitHub CLI'));return refIndex>=0&&contIndex>=0&&refIndex<contIndex;});const order=await page.locator('.task-history:not([data-preparation-surface]) .task-event').allTextContents();const refIndex=order.findIndex(text=>text.includes('参考信息'));const contIndex=order.findIndex(text=>text.includes('已找到 GitHub CLI'));assert(refIndex>=0&&contIndex>=0&&refIndex<contIndex,'Applied reference precedes continuation');
   await menu().click();await page.getByRole('button',{name:'暂停任务',exact:true}).click();await page.locator('.task-status').getByText('已暂停',{exact:true}).waitFor();
   await menu().click();await page.getByRole('button',{name:'任务详情',exact:true}).click();await page.getByText('fixture-model',{exact:true}).waitFor();await page.locator('.task-actions').getByRole('button',{name:'关闭',exact:true}).click();
   assert(posts.some(post=>post.body.run_id==='run-one'&&post.body.action==='pause'),'Pause uses original run');
@@ -135,9 +138,9 @@ async page => {
 
   await scrollHistory(-400);const navigationReading=await readingPosition();
   await page.getByRole('button',{name:'返回',exact:true}).first().click();await page.getByRole('button',{name:'安装 GitHub CLI 并验证可用',exact:true}).click();await page.locator('.task-status').getByText('已完成',{exact:true}).waitFor();
-  await page.waitForFunction(()=>document.querySelector('.task-goal')?.open&&document.querySelector('[data-call-id="probe"]')?.open);
+  await page.waitForFunction(()=>document.querySelector('.task-history:not([data-preparation-surface]) .task-goal')?.open&&document.querySelector('[data-call-id="probe"]')?.open);
   assert(await composer.inputValue()==='完成时也保留这条草稿 /skill:r','Navigation retains Task draft');
-  assert(await page.locator('.task-goal').evaluate(node=>node.open)&&await tool.evaluate(node=>node.open),'Navigation restores disclosures');
+  assert(await page.locator('.task-history:not([data-preparation-surface]) .task-goal').evaluate(node=>node.open)&&await tool.evaluate(node=>node.open),'Navigation restores disclosures');
   await assertReading(navigationReading,'Navigation restores the historical message');
   await menu().click();await page.getByRole('button',{name:'保留待跟进',exact:true}).click();assert(posts.at(-1).path==='/api/v1/tasks/dispositions'&&!posts.at(-1).body.decisions[0].archived,'Unarchive is separate from cancellation');
   await menu().click();await page.getByRole('button',{name:'归档任务',exact:true}).click();assert(posts.at(-1).body.decisions[0].archived,'Manual archive retains the run');
@@ -155,9 +158,28 @@ async page => {
   await composer.fill('追加修改');await page.getByRole('button',{name:'发送追加要求',exact:true}).click();await page.locator('.task-status').getByText('排队中',{exact:true}).waitFor();assert(posts.at(-1).path==='/api/v1/tasks/task-proof/messages'&&runID==='run-two'&&!archived,'Follow-up reuses the Task and opens another run');
   phase='complete';archived=true;await page.goto(state.origin+'/?theme=light&locale=en&conversation=alpha');await page.getByRole('button',{name:'Tasks',exact:true}).first().click();await page.getByRole('button',{name:'安装 GitHub CLI 并验证可用',exact:true}).click();await page.getByRole('textbox',{name:'Task follow-up',exact:true}).waitFor();await page.getByText('Archived · Send a follow-up to continue this task.',{exact:true}).waitFor();
   await page.getByRole('textbox',{name:'Task follow-up',exact:true}).fill('English follow-up');await page.getByRole('button',{name:'Send follow-up',exact:true}).click();assert(posts.at(-1).body.text==='English follow-up','English follow-up keeps the same input flow');
+  await page.waitForFunction(()=>document.querySelector('.task-conversation .composer-input')?.value==='');
+  await page.getByRole('textbox',{name:'Task follow-up',exact:true}).fill('Held guidance');
+  const holdGate=deferred();holdGuidance=holdGate;
+  const [heldRequest]=await Promise.all([page.waitForRequest(request=>request.method()==='POST'&&new URL(request.url()).pathname==='/api/v1/tasks/task-proof/messages'),page.getByRole('button',{name:'Send follow-up',exact:true}).click()]);
+  assert(heldRequest,'Held guidance sends through the follow-up endpoint');
+  await page.getByRole('textbox',{name:'Task follow-up',exact:true}).fill('Newer draft survives');
+  holdGate.resolve();
+  await page.waitForFunction(()=>{const button=document.querySelector('.task-composer-area .send-button');return button&&!button.disabled;});
+  assert(await page.getByRole('textbox',{name:'Task follow-up',exact:true}).inputValue()==='Newer draft survives','In-flight send does not clobber a newer draft on resolution');
+
+  await page.getByRole('textbox',{name:'Task follow-up',exact:true}).fill('Old-view guidance');
+  const oldViewGate=deferred();holdGuidance=oldViewGate;
+  await Promise.all([page.waitForRequest(request=>request.method()==='POST'&&new URL(request.url()).pathname==='/api/v1/tasks/task-proof/messages'),page.getByRole('button',{name:'Send follow-up',exact:true}).click()]);
+  await page.getByRole('button',{name:'Back',exact:true}).first().click();
+  await page.getByRole('button',{name:'安装 GitHub CLI 并验证可用',exact:true}).click();
+  await page.getByRole('textbox',{name:'Task follow-up',exact:true}).fill('Replacement view draft');
+  await Promise.all([page.waitForResponse(response=>response.request().method()==='GET'&&new URL(response.url()).pathname==='/api/v1/tasks/task-proof'),oldViewGate.resolve()]);
+  await page.waitForFunction(()=>{const button=document.querySelector('.task-composer-area .send-button');return button&&!button.disabled;});
+  assert(await page.getByRole('textbox',{name:'Task follow-up',exact:true}).inputValue()==='Replacement view draft','Reopened view preserves its own draft when an old-view send resolves');
   assert(reads.some(read=>read.after==='4')&&reads.some(read=>Number(read.after)>4),'Event reads advance the cursor');
   assert(reads.every(read=>read.owner==='alpha'&&read.space==='local'),'Task reads retain owner and Space');
   assert(errors.length===0,'No browser exceptions: '+errors.join('; '));
   return {passed:true,checks:'conversation layout, scoped approvals and provenance, input bookmarks, menu controls, fixed composer, IME, retry identity, scroll following, archive and continuation in both locales, terminal deduplication, draft/disclosure/navigation retention, mobile layout and cached offline output'};
- }finally{await page.unroute('**/api/v1/**',routeHandler);await page.unroute('**/access/status',access);page.off('pageerror',onError);}
+ }finally{for(const gate of gates)gate.resolve();if(holdGuidance){const gate=holdGuidance;holdGuidance=null;gate.resolve();}await page.unroute('**/api/v1/**',routeHandler);await page.unroute('**/access/status',access);page.off('pageerror',onError);}
 }

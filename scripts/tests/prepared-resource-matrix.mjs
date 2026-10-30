@@ -43,11 +43,21 @@ export async function preparedResourceMatrix(page){
     live.querySelector('iframe.resource-interactive').contentWindow.postMessage('grow','*');await wait(()=>live.querySelector('iframe.resource-interactive').style.getPropertyValue('--resource-height')==='900px');await frames();
     if(live.getBoundingClientRect().height!==height)throw Error('Late isolated HTML resize changed the committed row frame '+JSON.stringify({before:height,after:live.getBoundingClientRect().height,nodes:nodes.map(node=>({kind:node.dataset.kind,height:node.getBoundingClientRect().height,frame:node.style.cssText,iframe:node.querySelector('iframe')?.style.cssText}))}));
     const ready={elapsed:performance.now()-start,height,acquired,released,kinds:nodes.map(node=>node.dataset.kind),sameNodes:nodes.every(node=>node.isConnected)};
-    document.body.tabIndex=-1;document.body.focus({preventScroll:true});window.locate({id:'matrix-0'});await wait(()=>window.prepared&&!live.isConnected);
-    if(released!==5)throw Error('Virtual removal did not release each resource exactly once');
-    window.scrollToLatest();await wait(()=>window.prepared&&!!f.host.querySelector('[data-message-id="matrix-99"] pot-mermaid[data-state="ready"]'));await frames();
+    document.body.tabIndex=-1;document.body.focus({preventScroll:true});
+    const liveParent=live.parentNode;
+    window.locate({id:'matrix-0'});await wait(()=>window.prepared);
+    if(!live.isConnected)throw Error('Leading row was disconnected during virtual eviction');
+    if(live.parentNode!==liveParent)throw Error('Leading row changed parent during virtual eviction');
+    if(acquired!==5||released!==0)throw Error('Virtual eviction did not retain resources before reset');
+    window.scrollToLatest();await wait(()=>window.prepared);
+    if(!live.isConnected||live.parentNode!==liveParent)throw Error('Leading row was not retained across scroll');
+    if(acquired!==5||released!==0)throw Error('Resource ownership changed without explicit reset');
+    window.reset();
+    if(live.isConnected)throw Error('Reset did not disconnect original resource row');
+    if(released!==5)throw Error('Reset did not release each resource exactly once');
+    window.setMessages(rows);await wait(()=>window.prepared&&!!f.host.querySelector('[data-message-id="matrix-99"] pot-mermaid[data-state="ready"]'));await frames();
     const remounted=f.host.querySelector('[data-message-id="matrix-99"]');if(remounted===live||acquired!==10||released!==5)throw Error('Actual remount did not prepare new instances with balanced ownership');
-    results.push({width,held,ready,remount:{height:remounted.getBoundingClientRect().height,acquired,released}});
+    results.push({width,held,ready,retention:true,remount:{height:remounted.getBoundingClientRect().height,acquired,released}});
    }finally{window?.close();HTMLImageElement.prototype.decode=decode;for(const url of urls)URL.revokeObjectURL(url);}
    if(released!==acquired)throw Error('Closing the resource window leaked leases');
   }

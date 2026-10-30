@@ -2,13 +2,18 @@ package access
 
 import (
 	"context"
-	"github.com/jjyr/pot/internal/webui"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
+
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
+	"github.com/jjyr/pot/internal/webui"
 )
 
 func TestExplicitBrowserAccessRotatesAndRevokesSessions(t *testing.T) {
@@ -76,14 +81,14 @@ func TestExplicitBrowserAccessRotatesAndRevokesSessions(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	cookie := w.Result().Cookies()[0].String()
-	if w = invoke("GET", "/api/v1/runtime", cookie, ""); w.Code != 200 {
-		t.Fatal(w.Code)
+	if status := invokeManagerSocket(t, manager, cookie); status != 200 {
+		t.Fatal(status)
 	}
 	if _, err = manager.Call(ctx, "POST", []byte(`{"action":"regenerate_token"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if w = invoke("GET", "/api/v1/runtime", cookie, ""); w.Code != 401 {
-		t.Fatal("old cookie survived rotation", w.Code)
+	if status := invokeManagerSocket(t, manager, cookie); status != 401 {
+		t.Fatal("old cookie survived rotation", status)
 	}
 	if _, err = manager.Call(ctx, "POST", []byte(`{"action":"disable"}`)); err != nil {
 		t.Fatal(err)
@@ -95,6 +100,60 @@ func TestExplicitBrowserAccessRotatesAndRevokesSessions(t *testing.T) {
 	if _, err = os.Stat(filepath.Join(root, "access-settings.json")); !os.IsNotExist(err) {
 		t.Fatal("retired settings were recreated", err)
 	}
+}
+
+func invokeManagerSocket(t *testing.T, manager http.Handler, cookie string) int {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Host = "fixture.example"
+		manager.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	wsURL := strings.Replace(server.URL, "http://", "ws://", 1) + "/api/v1/ws"
+	conn, resp, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		Subprotocols: []string{"pot.v1"},
+		HTTPHeader: http.Header{
+			"Origin": []string{"https://fixture.example"},
+			"Cookie": []string{cookie},
+		},
+	})
+	if err != nil {
+		if resp == nil {
+			t.Fatal("websocket dial failed", err)
+		}
+		status := resp.StatusCode
+		resp.Body.Close()
+		return status
+	}
+	defer conn.CloseNow()
+
+	if err := wsjson.Write(ctx, conn, map[string]any{
+		"id":     "one",
+		"method": "GET",
+		"path":   "/api/v1/runtime",
+		"type":   "request",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		Type   string `json:"type"`
+		ID     string `json:"id"`
+		Status int    `json:"status"`
+	}
+	if err := wsjson.Read(ctx, conn, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Type != "response" {
+		t.Fatalf("expected response type 'response', got %q", response.Type)
+	}
+	if response.ID != "one" {
+		t.Fatalf("expected response id 'one', got %q", response.ID)
+	}
+	return response.Status
 }
 
 func TestEmbeddedTailnetUpgradePreservesBrowserAccess(t *testing.T) {
@@ -131,13 +190,10 @@ func TestEmbeddedTailnetUpgradePreservesBrowserAccess(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		request := httptest.NewRequest("GET", "https://fixture.example/api/v1/runtime", nil)
-		request.AddCookie(cookie)
-		w = httptest.NewRecorder()
-		manager.ServeHTTP(w, request)
+		status := invokeManagerSocket(t, manager, cookie.String())
 		manager.Close()
-		if w.Code != 200 {
-			t.Fatal("browser session lost during upgrade", attempt, w.Code)
+		if status != 200 {
+			t.Fatal("browser session lost during upgrade", attempt, status)
 		}
 		after, err := os.ReadFile(filepath.Join(root, "browser-access.json"))
 		if err != nil || string(before) != string(after) {

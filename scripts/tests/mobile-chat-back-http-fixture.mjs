@@ -1,4 +1,5 @@
 import {createServer} from 'node:http';
+import {installFixtureWebSocket} from './helpers/ws-server.mjs';
 import {Readable} from 'node:stream';
 
 // Production shell, HTTP adapter, SSE and IndexedDB; synthetic data only.
@@ -29,6 +30,8 @@ export async function mobileChatBackHTTPFixture(sourceOrigin,{uiSource}={}){
     if(path==='/components/ui.js'&&uiSource){res.writeHead(200,{'content-type':'text/javascript','cache-control':'no-store'});res.end(uiSource);return;}
     const response=await fetch(sourceOrigin+req.url);res.writeHead(response.status,Object.fromEntries(response.headers));Readable.fromWeb(response.body).pipe(res);
   }catch(error){json(res,{message:error.stack},500);}});
-  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-  return {origin:'http://127.0.0.1:'+server.address().port,trace,close:async()=>{for(const stream of streams)stream.res.end();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}};
+  const fixtureWS=await installFixtureWebSocket(server);
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  return {origin:'http://127.0.0.1:'+server.address().port,trace,close:async()=>{for(const stream of streams)stream.res.end();await fixtureWS.close();
+server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}};
 }

@@ -37,7 +37,6 @@ type Options struct {
 	Local              Caller
 	LocalID, LocalName string
 	OnChange           func(string, json.RawMessage)
-	OnStreamReset      func(string)
 }
 type Manager struct {
 	mu      sync.Mutex
@@ -46,7 +45,6 @@ type Manager struct {
 	cancel  context.CancelFunc
 	local   Space
 	wg      sync.WaitGroup
-	Changes core.Changes
 }
 
 func Open(ctx context.Context, options Options) (*Manager, error) {
@@ -145,9 +143,6 @@ func (m *Manager) watch() {
 	for m.ctx.Err() == nil {
 		var versions map[string]json.RawMessage
 		_ = m.options.Local.Stream(m.ctx, "/api/v1/changes", func(event Event) error {
-			if versions == nil && m.options.OnStreamReset != nil {
-				m.options.OnStreamReset(m.options.LocalID)
-			}
 			changed, next, dirty := changedEvent(event, versions)
 			versions = next
 			if !dirty {
@@ -155,7 +150,6 @@ func (m *Manager) watch() {
 			}
 			if catalogDirty(changed) {
 				m.Refresh(m.ctx)
-				m.Changes.Notify("local-ui")
 			}
 			if m.options.OnChange != nil {
 				m.options.OnChange(m.options.LocalID, bytes.Clone(changed.Data))
@@ -197,8 +191,8 @@ func changedEvent(event Event, previous map[string]json.RawMessage) (Event, map[
 			current["boot_id"] = boot
 		}
 	}
-	// Production /changes carries the Runtime boot in its SSE ID, not its
-	// version-map body. Preserve that identity across the native broadcast.
+	// Production /changes carries the Runtime boot in its event ID, not its
+	// version-map body. Preserve that identity across the WebSocket event delivery.
 	if boot, _, ok := strings.Cut(event.ID, ":"); ok && boot != "" {
 		current["boot_id"], _ = json.Marshal(boot)
 	}

@@ -5,15 +5,12 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/jjyr/pot/internal/localui"
 	"github.com/jjyr/pot/internal/mcppublic"
-	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 )
 
 // Handler is the protected operator/client API. Browser publication uses its
@@ -31,6 +28,19 @@ func Handler(app *Application, token string) http.Handler {
 			writeError(w, http.StatusConflict, protocol.APIError{Code: "identity_changed", Message: "Control identity changed"})
 			return
 		}
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/ws" {
+			localui.ServeWebSocket(w, r, localui.SocketOptions{ExpectedControlID: app.RuntimeID, Caller: localui.Functions{
+				Request: func(ctx context.Context, method, path string, body json.RawMessage) (json.RawMessage, error) {
+					result, err := app.Call(ctx, Request{Method: method, Path: path, Body: body})
+					if err != nil {
+						return nil, err
+					}
+					return json.Marshal(result)
+				},
+				Events: app.Stream,
+			}})
+			return
+		}
 
 		if app.Maintenance != nil && app.Maintenance() && r.URL.Path != "/api/v1/updates" && r.URL.Path != "/api/v1/runtime" && r.URL.Path != "/api/v1/control" {
 			writeError(w, http.StatusServiceUnavailable, protocol.APIError{Code: "update_maintenance"})
@@ -41,18 +51,6 @@ func Handler(app *Application, token string) http.Handler {
 			return
 		}
 		if app.terminalSocket(w, r) {
-			return
-		}
-		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/events" {
-			streamSnapshots(w, r, app)
-			return
-		}
-		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/lifecycle" {
-			streamLifecycle(w, r, app)
-			return
-		}
-		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/changes" {
-			streamChanges(w, r, app)
 			return
 		}
 		if app.resourceContent(w, r) {
@@ -104,138 +102,4 @@ func writeError(w http.ResponseWriter, status int, err protocol.APIError) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(err)
-}
-func streamSnapshots(w http.ResponseWriter, r *http.Request, app *Application) {
-	owner, err := app.resolveOwner(r.Context(), r.URL.Query().Get("assistant_id"))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, protocol.APIError{Code: "owner_unavailable", Message: err.Error()})
-		return
-	}
-	subscription, err := app.Control.SubscribeAgent(r.Context(), owner, r.URL.Query().Get("locale"))
-	if err != nil {
-		writeError(w, http.StatusNotFound, protocol.APIError{Code: "owner_unavailable", Message: err.Error()})
-		return
-	}
-	defer subscription.Close()
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("X-Accel-Buffering", "no")
-	controller := http.NewResponseController(w)
-	if controller.Flush() != nil {
-		return
-	}
-	heartbeat := time.NewTicker(15 * time.Second)
-	defer heartbeat.Stop()
-	var cursor int64
-	initial := true
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-heartbeat.C:
-			if writeHeartbeat(controller, w) != nil {
-				return
-			}
-		case _, ok := <-subscription.Updates:
-			if !ok {
-				return
-			}
-			frame, err := subscription.Frame(r.Context(), cursor, initial)
-			if err != nil {
-				return
-			}
-			cursor, initial = frame.Cursor, false
-			data, err := json.Marshal(frame)
-			if err != nil {
-				return
-			}
-			id := app.BootID + ":" + owner + ":" + strconv.FormatInt(frame.Cursor, 10)
-			if err = writeSSE(controller, w, "conversation", id, data); err != nil {
-				return
-			}
-		}
-	}
-}
-func writeHeartbeat(controller *http.ResponseController, w http.ResponseWriter) error {
-	_ = controller.SetWriteDeadline(time.Now().Add(15 * time.Second))
-	defer controller.SetWriteDeadline(time.Time{})
-	if _, err := fmt.Fprint(w, "event: heartbeat\ndata: {}\n\n"); err != nil {
-		return err
-	}
-	return controller.Flush()
-}
-func writeSSE(controller *http.ResponseController, w http.ResponseWriter, event, id string, data []byte) error {
-	if strings.ContainsAny(event+id, "\r\n") {
-		return errors.New("invalid SSE identity")
-	}
-	_ = controller.SetWriteDeadline(time.Now().Add(15 * time.Second))
-	defer controller.SetWriteDeadline(time.Time{})
-	if _, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", id, event, data); err != nil {
-		return err
-	}
-	return controller.Flush()
-}
-func streamChanges(w http.ResponseWriter, r *http.Request, app *Application) {
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-	general := app.Control.Changes.Subscribe()
-	permissions := app.Control.Permissions.Changes.Subscribe()
-	defer general.Close()
-	defer permissions.Close()
-	merged := make(chan map[string]uint64, 2)
-	listen := func(s *core.Subscription) {
-		for {
-			topics, err := s.Next(ctx)
-			if err != nil {
-				return
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case merged <- topics:
-			}
-		}
-	}
-	go listen(general)
-	go listen(permissions)
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("X-Accel-Buffering", "no")
-	controller := http.NewResponseController(w)
-	if controller.Flush() != nil {
-		return
-	}
-	heartbeat := time.NewTicker(15 * time.Second)
-	defer heartbeat.Stop()
-	seq := 0
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-heartbeat.C:
-			if writeHeartbeat(controller, w) != nil {
-				return
-			}
-		case topics := <-merged:
-			seq++
-			body, _ := json.Marshal(topics)
-			if err := writeSSE(controller, w, "changed", app.BootID+":"+strconv.Itoa(seq), body); err != nil {
-				return
-			}
-		}
-	}
-}
-
-func streamLifecycle(w http.ResponseWriter, r *http.Request, app *Application) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("X-Accel-Buffering", "no")
-	controller := http.NewResponseController(w)
-	if controller.Flush() != nil {
-		return
-	}
-	_ = app.Control.StreamLifecycle(r.Context(), func(kind string, value any) error {
-		body, err := json.Marshal(value)
-		if err != nil {
-			return err
-		}
-		return writeSSE(controller, w, kind, "", body)
-	})
 }

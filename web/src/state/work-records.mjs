@@ -9,22 +9,25 @@ export const failedWork=tool=>!!tool&&(!!tool.failurePhase||['failed','denied'].
 // records. Keep logical ancestry inside a group and connect each root to its
 // mounted group. A child separated from its parent by prose owns its own group.
 export function workRecordParents(rows,logical=new Map()){
-  const groups=new Map(rows.flatMap(row=>(row.members||[]).map(member=>[member.id,row.id]))),parents=new Map(logical);
-  for(const [id,group]of groups){
-    const seen=new Set([id]);let parent=logical.get(id);
-    while(groups.get(parent)===group&&!seen.has(parent)){seen.add(parent);parent=logical.get(parent);}
-    if(groups.get(logical.get(id))!==group||seen.has(parent))parents.set(id,group);
+  const ids=new Set(rows.map(row=>row.id)),parents=new Map();
+  for(const row of rows){
+    const parent=logical.get(row.id);
+    if(!ids.has(parent)||parent===row.id)continue;
+    const seen=new Set([row.id]);let current=parent,valid=true;
+    while(current!==undefined&&ids.has(current)){
+      if(seen.has(current)){valid=false;break;}
+      seen.add(current);current=logical.get(current);
+    }
+    if(valid)parents.set(row.id,parent);
   }
   return parents;
 }
-// An aggregate exec can be waiting on a child. Only the actual approval is a
-// boundary; its wrapper must not create another approval or hide that child.
-export function processRecord(message,blocked=()=>false){
-  if(message.error||message.tool&&blocked(message))return false;
+// Approvals remain grouped but exposed independently.
+export function processRecord(message){
+  if(message.error)return false;
   if(message.compaction)return !['failed','error'].includes(message.compaction.state);
   const tool=message.role==='tool'&&message.tool;
-  const phase=tool?.script?.calls?.[0]?.phase||tool?.phase;
-  return !!tool&&!['unknown','stopped'].includes(tool.phase)&&phase!=='waiting_approval';
+  return !!tool&&!['unknown','stopped'].includes(tool.phase);
 }
 export function mailIdentity(mail){
   const from=addressKey(mail.from),to=addressKey(mail.to);
@@ -65,7 +68,7 @@ export function createWorkRecordProjection(){
       const before=sequences.reduce((a,b)=>a===undefined||BigInt(b)<BigInt(a)?b:a,undefined),after=sequences.reduce((a,b)=>a===undefined||BigInt(b)>BigInt(a)?b:a,undefined);
       const sourceAnchor={id:representative.id,sequence:nativeSequence(representative.sequence),before,after};
       const work=workRecordSummary(members,{actor,children});if(activityOwners.has(turn))work.active=null;
-      result.push({id:key,viewKey:key,role:'tool',members,work,sourceAnchor});
+      result.push(...members.map((member,index)=>({...member,workRecord:true,workGroup:{key,leader:index===0,memberIDs:members.map(value=>value.id),work,sourceAnchor,exposed:!!blocked?.(member)||member.tool?.phase==='waiting_approval'}})));
       for(const message of run)next.set(message.viewKey,key);
       run=[];
     };
@@ -74,7 +77,6 @@ export function createWorkRecordProjection(){
       const identity=message.tool?.turn_id||message.turn_id||contextTurn;
       // Task callers without an independent lifecycle row use the group's
       // activity. Execution-owned Chat rows retain their identity through tools.
-      if(message.activity!==true&&message.role==='assistant'&&!message.text&&!message.error&&!message.presentation&&message.phase==='tools'&&run.some(m=>activeTool(m.tool)))continue;
       if(processRecord(message,blocked)){
         if(run.length&&identity!==turn)flush();
         turn=identity;contextTurn=identity;run.push(message);

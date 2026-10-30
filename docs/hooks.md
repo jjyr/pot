@@ -78,7 +78,7 @@ paths, collection diagnostics and notification suppression reason. Silent schedu
 same inbox as `suppressed`, retain their history and do not wake a model.
 
 After commit, the shared typed lifecycle feed publishes the full fact independently
-of UI invalidations. The authenticated owner lifecycle SSE stream carries it to
+of UI invalidations. The authenticated owner lifecycle WebSocket subscription carries it to
 notification conversion; notification consumers never infer these events from
 version hints or resource snapshots. UI invalidations still wake current projections. The existing assistant
 receiver claims the durable result when user chat is available. Eligible failed

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import {projectScriptRuns} from '../../web/src/state/script-runs.mjs';
+import {projectScriptRuns as projectScriptRunsResult} from '../../web/src/state/script-runs.mjs';
+const projectScriptRuns=(...args)=>projectScriptRunsResult(...args).rows;
 import {toolForest,toolResult} from '../../web/src/state/tool-calls.mjs';
 
 const serialized={result:'{"output":"first"}'};
@@ -94,3 +95,7 @@ assert.equal(execution(rows,'machine-b').phase,'completed','Identical session ID
 const unresolved=receipt('unresolved','missing',{session_id:'missing'});
 assert.equal(execution(projectScriptRuns([unresolved],{activeTurn:'turn'}),'unresolved').phase,'running');
 assert.equal(execution(projectScriptRuns([unresolved]),'unresolved').phase,'unknown','Orphan live sessions cannot claim completion or run forever after a turn');
+
+const foldedPoll=receipt('folded-poll','session',{stdout:'folded',session_id:'session'}),foldedWait=wait('folded-wait','job-first',{completed:false,exec_id:'job-first',output:'folded'});
+const projection=projectScriptRunsResult([cmd,foldedPoll,first,foldedWait],{activeTurn:'turn'});
+assert.deepEqual(projection.suppressedKeys,['view-folded-poll','view-folded-wait'],'Folded process polling and exec waits report their original source keys');

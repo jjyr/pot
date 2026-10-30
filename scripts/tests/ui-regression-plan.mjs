@@ -2,7 +2,7 @@
 export const groups = {
   scroll: ['controller', 'continuity', 'task-continuity', 'scroll-components'],
   nav: ['directory', 'switching', 'chat-initial-layout.html', 'work-record-navigation.html'],
-  history: ['task-history', 'task-history-edges'],
+  history: ['retained-chat', 'task-history', 'task-history-edges'],
   domain: ['domain-repositories.html','query-resource-commits','task-status'],
   management: ['assistant-start-phone','mcp-onboarding','settings-phone','machines','topology-status'],
   composer: ['composer-phone','composer-enter','reference-cancel','attachment-picker','composer-continuation','composer-continuation-drafts','assistant-drafts'],

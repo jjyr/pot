@@ -47,12 +47,7 @@ func TestProviderAllowancesKeepOwnerCredentialsAtProxy(t *testing.T) {
 	cookie := w.Result().Cookies()[0]
 	for _, method := range []string{"GET", "POST"} {
 		body := `{"profile_id":"connection-a","action":"refresh"}`
-		r := httptest.NewRequest(method, "http://localhost"+path, strings.NewReader(body))
-		r.AddCookie(cookie)
-		r.Header.Set("Authorization", "Bearer browser-only")
-		r.Header.Set("Origin", "http://localhost")
-		w := httptest.NewRecorder()
-		server.ServeHTTP(w, r)
+		w := invokeSocket(t, server, method, path, []byte(body), cookie, "http://localhost")
 		if w.Code != http.StatusOK {
 			t.Fatalf("owner %s failed: %d %s", method, w.Code, w.Body.String())
 		}

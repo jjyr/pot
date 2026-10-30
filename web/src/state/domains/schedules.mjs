@@ -1,7 +1,7 @@
 import {resourceAuthority,resourceAuthorityCurrent} from '../resource-authority.mjs';
 import {translate} from '../../locales/messages.mjs';
 import {supportsCapability} from '../agent-links.mjs';
-export function createSchedulesDomain(client,{resources,queries,commands}){
+export function createSchedulesDomain(client,{resources,queries,commands,directory}){
   const manage=scope=>{
     const assistant=client.assistants?.find(item=>item.space_id===scope.space&&item.id===scope.owner);
     if(client.operationScopeReady?.(scope)===false||assistant?.retained||assistant?.offline||!supportsCapability(assistant,'schedules.manage'))throw Object.assign(Error(translate(client.uiLocale?.()||'en','agentLinks.capabilityUnavailable')),{uiKey:'agentLinks.capabilityUnavailable'});
@@ -10,8 +10,28 @@ export function createSchedulesDomain(client,{resources,queries,commands}){
     const authority=resourceAuthority(client,scope,resources),data=await resources.read('/api/v1/schedules?'+new URLSearchParams({...(selected?{selected}:{}),runs_offset:runsOffset,limit}),{...scope,authoritative:force});
     if(!resourceAuthorityCurrent(client,scope,authority,resources))return {data,freshness:'retained',authority};
     return {data,authority};
-  },{topics:['schedules','tasks','spaces','machines'],space:scope.space});
-  const collection=()=>queries.define('schedules:list',async force=>{const pages=await Promise.all((client.spaces||[]).flatMap(space=>(client.assistants||[]).filter(item=>item.id&&item.space_id===space.id&&space.control_id).map(async assistant=>{const scope={space:space.id,owner:assistant.id},path='/api/v1/schedules?limit=50';try{if(!supportsCapability(assistant,'schedules.manage')||client.operationScopeReady?.(scope)===false){const saved=await resources.query(path,{...scope,collection:true});return saved?{space,owner:assistant.id,value:saved.value,stale:true}:null;}const value=await resources.collection(path,{...scope,authoritative:force},async()=>{const items=[],seen=new Set();let offset=0,page;do{if(seen.has(offset))throw Error('schedule_pagination');seen.add(offset);page=await (client.transport||client.request)('/api/v1/schedules?'+new URLSearchParams({limit:50,offset}),scope);items.push(...(page.items||[]));offset=page.next_offset;if(items.length>5000)throw Error('schedule_page_limit');}while(offset!=null);return {...page,items,next_offset:null};});return {space,owner:assistant.id,value,stale:resources.state(value)?.freshness!=='fresh'};}catch(error){const saved=await resources.query(path,{...scope,collection:true});if(!saved)throw error;return {space,owner:assistant.id,value:saved.value,stale:true,error};}})));const visible=pages.filter(Boolean);return {data:visible,freshness:visible.some(page=>page.stale)?'retained':'fresh'};},{topics:['schedules','tasks','assistants','spaces','machines']});
+  },{topics:['schedules','tasks','spaces','machines'],space:scope.space,subscribe:notify => {
+  let authority = resourceAuthority(client, scope, resources), ready = client.operationScopeReady?.(scope) !== false;
+  return directory?.watch(() => {
+    const nextAuthority = resourceAuthority(client, scope, resources), nextReady = client.operationScopeReady?.(scope) !== false;
+    if (nextAuthority === authority && nextReady === ready) return;
+    authority = nextAuthority; ready = nextReady;
+    query(scope, { selected, runsOffset, limit }).invalidate();
+    if (ready) notify();
+  }) || (() => {});
+}});
+const directorySignature = () => JSON.stringify((client.spaces || []).flatMap(space => (client.assistants || []).filter(item => item.id && item.space_id === space.id && space.control_id).map(assistant => { const scope = { space: space.id, owner: assistant.id }; return [space.id, assistant.id, resourceAuthority(client, scope, resources), client.operationScopeReady?.(scope) !== false, supportsCapability(assistant, 'schedules.manage')]; })).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+  const collection=()=>queries.define('schedules:list',async force=>{const pages=await Promise.all((client.spaces||[]).flatMap(space=>(client.assistants||[]).filter(item=>item.id&&item.space_id===space.id&&space.control_id).map(async assistant=>{const scope={space:space.id,owner:assistant.id},path='/api/v1/schedules?limit=50';try{if(!supportsCapability(assistant,'schedules.manage')||client.operationScopeReady?.(scope)===false){const saved=await resources.query(path,{...scope,collection:true});return saved?{space,owner:assistant.id,value:saved.value,stale:true}:null;}const value=await resources.collection(path,{...scope,authoritative:force},async()=>{const items=[],seen=new Set();let offset=0,page;do{if(seen.has(offset))throw Error('schedule_pagination');seen.add(offset);page=await (client.transport||client.request)('/api/v1/schedules?'+new URLSearchParams({limit:50,offset}),scope);items.push(...(page.items||[]));offset=page.next_offset;if(items.length>5000)throw Error('schedule_page_limit');}while(offset!=null);return {...page,items,next_offset:null};});return {space,owner:assistant.id,value,stale:resources.state(value)?.freshness!=='fresh'};}catch(error){const saved=await resources.query(path,{...scope,collection:true});if(!saved)throw error;return {space,owner:assistant.id,value:saved.value,stale:true,error};}})));const visible=pages.filter(Boolean);return {data:visible,freshness:visible.some(page=>page.stale)?'retained':'fresh'};},{topics:['schedules','tasks','assistants','spaces','machines'],subscribe:(notify) => {
+  let previous = directorySignature();
+  const handler = () => {
+    const next = directorySignature();
+    if (next === previous) return;
+    previous = next;
+    collection().invalidate();
+    notify();
+  };
+  return directory?.watch(handler) ?? (() => {});
+}});
   const write=(scope,operation,input,requestID)=>{
     const authority=scope._authority||resourceAuthority(client,scope,resources);
     return commands.run(scope,'schedule:'+operation,input,(body,id,captured)=>{

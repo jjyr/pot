@@ -1,3 +1,5 @@
+import { installWSFixture } from './helpers/ws-fixture.mjs';
+const wsFixture=installWSFixture();
 import {createMemoryProjectionStore} from '../../web/src/state/projection-store.mjs';
 import assert from 'node:assert/strict';
 import {projectLinkedAssistants,linkedAssistantID,supportsCapability,agentFailureKey} from '../../web/src/state/agent-links.mjs';
@@ -30,21 +32,15 @@ assert.deepEqual(JSON.parse(calls.at(-1).options.body),{request_id:'same-request
 await client.sendReceipt({request_id:'same-request',conversation_id:'mail-conversation'});
 route=new URL(calls.at(-1).url,'http://fixture');assert.equal(route.searchParams.get('request_id'),'same-request');assert.equal(route.searchParams.get('conversation_id'),'mail-conversation');
 await assert.rejects(client.cancel({request_id:'stop',turn_id:'turn'}),error=>error.code==='agent_link_capability_unsupported','Unsupported controls never fall back to local execution');
-const sources=[];
-globalThis.EventSource=class {
- constructor(url){this.url=url;this.handlers=new Map();sources.push(this);}
- addEventListener(name,receive){this.handlers.set(name,receive);}
- close(){this.closed=true;}
-};
 for(const owner of ['main',projected[0].id]){
  client.setScope({space:'local',owner});
- let delivered;const stop=client.subscribe(value=>{delivered=value;});const source=sources.at(-1);
- const streamRoute=new URL(source.url,'http://fixture');assert.equal(streamRoute.pathname,'/api/v1/events');assert.equal(streamRoute.searchParams.get('locale'),'zh-CN','Unified subscriptions carry the current locale');assert.equal(streamRoute.searchParams.get('assistant_id'),owner);
+ let delivered;const stop=client.subscribe(value=>{delivered=value;});await wsFixture.flush();const source=wsFixture.sockets.at(-1);const subscription=source.sent.findLast(item=>item.type==='subscribe');
+ const streamRoute=new URL(subscription.path,'http://fixture');assert.equal(streamRoute.pathname,'/api/v1/events');assert.equal(streamRoute.searchParams.get('locale'),'zh-CN','Unified subscriptions carry the current locale');assert.equal(streamRoute.searchParams.get('assistant_id'),owner);
  const update={...frame,view:{...frame.view,replies:[{input_id:'input',state:'running'}]}};
- source.handlers.get('conversation')({data:JSON.stringify(update)});
+ source.emit({type:'event',id:subscription.id,event:'conversation',data:update,event_id:'boot:1'});
  assert.equal(delivered.owner_id,JSON.stringify(['local',owner]),'Every endpoint retains its exact subscription owner');
  assert.deepEqual(delivered.replies,update.view.replies,'The same stream carries execution lifecycle for every owner');
- stop();assert.equal(source.closed,true);
+ stop();assert.equal(source.subscriptions.has(subscription.id),false);
 }
 
 assert.equal(supportsCapability(projected[0],'task.list'),true);

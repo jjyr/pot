@@ -216,11 +216,16 @@ async function navigationFrames({root,client,select,snapshot,historyReads,emit})
   const nested=snapshot(client.scope().owner),turn=nested.messages[0].id;
   const tool=(id,parent='')=>({id,role:'tool',text:'',status:'complete',tool:{id,turn_id:turn,parent_id:parent,name:'fixture_tool',phase:'completed',args:{value:id},output:[]}});
   const parent=tool('parent-tool'),children=Array.from({length:40},(_,i)=>tool(`child-tool-${i}`,parent.id));
-  parent.tool.script={failureID:'child-tool-25'};parent.tool.diagnostic='Synthetic nested failure';
-  nested.cursor='90';nested.messages.splice(-2,0,parent,...children);nested.messages.forEach((message,i)=>message.sequence=String(i+1));nested.messages.at(-2).references=[{message_id:'child-tool-25',quote:'Nested tool destination'}];
+  parent.tool.script={failureID:'child-tool-15'};parent.tool.diagnostic='Synthetic nested failure';
+  const maxSequence=Math.max(...nested.messages.map(message=>Number(message.sequence)));
+  const proseBoundary={id:'work-boundary',role:'assistant',text:'Prose separates these work records.',status:'complete'};
+  const appended=[parent,...children.slice(0,20),proseBoundary,...children.slice(20)];
+  appended.forEach((message,index)=>{message.sequence=String(maxSequence+index+1);});
+  const referenceMessage={id:'nested-reference',role:'user',text:'See nested tool destinations.',status:'complete',sequence:String(maxSequence+appended.length+1),references:[{message_id:'child-tool-15',quote:'Nested tool destination'},{message_id:'child-tool-25',quote:'Cross boundary destination'}]};
+  nested.cursor='90';nested.messages.push(...appended,referenceMessage);
   root.querySelector('.latest-button').click();emit(nested);await settle();
-  await openReference('Nested tool destination',{source:nested.messages.at(-2)});await wait(()=>!!row('child-tool-25')&&row('parent-tool')?.querySelector('details')?.open);
-  check(!!row('child-tool-25')&&row('parent-tool').querySelector('details').open,'Reference mounts its target inside an expanded virtual tool tree');
+  await openReference('Nested tool destination',{source:referenceMessage});await wait(()=>!!row('child-tool-15')&&row('parent-tool')?.querySelector('details')?.open);
+  check(!!row('child-tool-15')&&row('parent-tool').querySelector('details').open,'Reference mounts its target inside an expanded virtual tool tree');
   const nestedAnchor=capture();await settings();await frames('Nested tool reading survives settings',returnFromSettings,atAnchor(nestedAnchor));
   const disclosure=row('parent-tool').querySelector('details');
   if(new URLSearchParams(location.search).has('trusted-parent-close')){
@@ -236,21 +241,31 @@ async function navigationFrames({root,client,select,snapshot,historyReads,emit})
     check(evidence.events.some(event=>event.kind==='click'&&event.trusted&&event.sameSummary&&event.id===expected.id&&event.sequence===expected.sequence),'Trusted close activated the exact native parent summary');
   }else{disclosure.querySelector('summary').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));disclosure.querySelector('summary').click();await settle();}
   check(!disclosure.open,'User disclosure changes supersede the restored nested reading anchor');
-  row('parent-tool').querySelector('.tool-failure').click();await wait(()=>!!row('child-tool-25')&&disclosure.open);
-  check(!!row('child-tool-25')&&disclosure.open,'Tool failure navigation uses the cursor to mount a recycled child');
-  const split=structuredClone(nested);split.cursor='91';
-  split.messages.splice(split.messages.findIndex(message=>message.id==='child-tool-20'),0,{id:'work-boundary',role:'assistant',text:'Prose separates these work records.',status:'complete'});
-  split.messages.forEach((message,i)=>message.sequence=String(i+1));
-  root.querySelector('.latest-button').click();emit(split);await settle();
-  await openReference('Nested tool destination',{source:split.messages.at(-2)});await wait(()=>{const group=row('child-tool-25')?.closest('.work-record-group');return group?.querySelector('.work-records')?.open&&!group.querySelector('[data-message-id="parent-tool"]');});
-  const splitTarget=row('child-tool-25'),splitGroup=splitTarget?.closest('.work-record-group');
-  check(!!splitTarget&&splitGroup?.querySelector('.work-records').open&&!splitGroup.querySelector('[data-message-id="parent-tool"]'),'Reference mounts and opens the target work group across a prose boundary');
+  row('parent-tool').querySelector('.tool-failure').click();await wait(()=>!!row('child-tool-15')&&disclosure.open);
+  check(!!row('child-tool-15')&&disclosure.open,'Tool failure navigation uses the cursor to mount a recycled child');
+  const groupFor=id=>{const member=row(id);return [...member.parentElement.children].find(r=>r.classList.contains('work-record-group')&&r.dataset.workGroup===member.dataset.workGroup);};
+  const parentGroup=groupFor('child-tool-15');
+  const preTarget=row('child-tool-25'),preTargetParent=preTarget.parentElement;
+  await openReference('Cross boundary destination',{source:referenceMessage});await wait(()=>{const target=row('child-tool-25');if(!target||!target.offsetHeight)return false;const group=groupFor('child-tool-25');return !!group&&group.querySelector('button.work-record-summary')?.getAttribute('aria-expanded')==='true';});
+  const splitTarget=row('child-tool-25'),splitGroup=groupFor('child-tool-25');
+  check(!!splitTarget&&splitTarget.offsetHeight>0&&splitGroup?.querySelector('button.work-record-summary')?.getAttribute('aria-expanded')==='true'&&splitGroup.dataset.workGroup!==parentGroup.dataset.workGroup&&splitTarget===preTarget&&splitTarget.parentElement===preTargetParent,'Reference mounts and opens the target work group across a prose boundary');
   root.querySelector('.latest-button').click();await settle();
   const original=snapshot(client.scope().owner);original.cursor='92';emit(original);await settle();
   check(historyReads.length===0,'Cached navigation and loaded references do not fetch history');
   // A delayed locate completing after an explicit Latest action cannot pull back.
   const read=client.history;let release;
-  client.history=query=>query.around?new Promise(resolve=>{const frame=snapshot(client.scope().owner);release=()=>resolve({...frame,cursor:'100',messages:[{id:query.around,sequence:'2',role:'assistant',reply_to:'alpha-1',text:'Late destination',status:'complete'}],history:{before:'2',after:'2',has_more:true,has_newer:true}});}):Promise.resolve({...snapshot(client.scope().owner),cursor:'100'});
+let locatedFrame;
+client.history = query => {
+  if (query.around) return new Promise(resolve => {
+    const frame = snapshot(client.scope().owner);
+    const offset = {'missing-target':1,'superseded-target':2,'retired-owner-target':3}[query.around];
+    const sequence = String(BigInt(nested.messages.at(-1).sequence) + BigInt(offset));
+    const answer = {...frame, cursor:'100', messages:[{id:query.around, sequence, role:'assistant', reply_to:'alpha-1', text:'Late destination', status:'complete'}], history:{before:sequence, after:sequence, has_more:true, has_newer:false}};
+    release = () => { locatedFrame = answer; resolve(answer); };
+  });
+  if (query.after && locatedFrame) return Promise.resolve(locatedFrame);
+  return Promise.resolve(locatedFrame || {...snapshot(client.scope().owner), cursor:'100'});
+};
   root.querySelector('.latest-button').click();await settle();
   const projected=snapshot(client.scope().owner);projected.cursor='100';projected.messages.at(-2).references=[{message_id:'missing-target',quote:'Delayed target'}];
   emit(projected);await openReference('Delayed target');await wait(()=>!!release);

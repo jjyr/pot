@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"bytes"
 	"github.com/jjyr/pot/internal/resources"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/instance"
@@ -299,26 +298,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			failure(w, 401, "browser authentication required")
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/v1/notifications/") {
-			s.notificationRoute(w, r, c)
+		if r.URL.Path == "/api/v1/ws" {
+			s.socket(w, r, c)
 			return
 		}
-		if !Allowed(r.Method, r.URL.Path) {
+		if !browserHTTPAllowed(r.Method, r.URL.Path) {
 			failure(w, 404, "browser route unavailable")
 			return
-		}
-		if r.URL.Path == protocol.AssistantMailAPI {
-			data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 65536))
-			if err != nil {
-				failure(w, 400, "invalid mail history request")
-				return
-			}
-			var request protocol.RelayRequest
-			if protocol.DecodeStrict(data, &request) != nil || request.Operation != "history" {
-				failure(w, 403, "browser mail route permits history only")
-				return
-			}
-			r.Body = io.NopCloser(bytes.NewReader(data))
 		}
 		s.proxy(w, r, c.Generation)
 		return
@@ -479,28 +465,6 @@ func (s *Server) proxy(w http.ResponseWriter, r *http.Request, generation uint64
 		}
 	}
 	w.WriteHeader(response.StatusCode)
-	if strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") {
-		controller := http.NewResponseController(w)
-		_ = controller.Flush()
-		buf := make([]byte, 32768)
-		for {
-			n, err := response.Body.Read(buf)
-			if n > 0 {
-				_ = controller.SetWriteDeadline(time.Now().Add(15 * time.Second))
-				if _, e := w.Write(buf[:n]); e != nil {
-					return
-				}
-				if e := controller.Flush(); e != nil {
-					return
-				}
-				// Bound each write, not the idle wait for the next SSE frame.
-				_ = controller.SetWriteDeadline(time.Time{})
-			}
-			if err != nil {
-				return
-			}
-		}
-	}
 	limit := int64(32 * 1024 * 1024)
 	if strings.HasSuffix(r.URL.Path, "/file-download") || strings.HasPrefix(r.URL.Path, "/api/v1/resources/") {
 		limit = 1 << 30

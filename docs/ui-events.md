@@ -9,7 +9,8 @@ and subscriptions wake the shared DOM components.
 
 ## Committed business event stream
 
-`GET /api/v1/lifecycle` requires the same operator identity as other owner APIs.
+The `/api/v1/lifecycle` WebSocket subscription requires the same operator identity
+as other owner APIs.
 It carries full structured reply, Task and approval facts after business commit,
 plus current access metadata and heartbeat frames. Native and browser-service
 notification consumers use this stream independently of page lifetime. It has no
@@ -19,12 +20,14 @@ See [Lifecycle hooks](hooks.md) and [System notifications](shared-ui.md#system-n
 
 ## Local invalidation stream
 
-`GET /api/v1/changes` requires operator authorization. The standalone browser
-server exposes it through its authenticated proxy. SSE `changed` frames contain
-a map of domain versions, such as `assistants`, `tasks`, `task-outcomes`, `schedules`, `usage`,
-`machines`, `resources`, `permissions` and `updates`. Frame IDs contain the Runtime boot ID
-and a stream sequence. Version markers are invalidation state, not durable
-conversation replay cursors.
+The `changes` subscription on `/api/v1/ws` requires operator authorization and is
+carried by the shared `pot.v1` protocol in browser and desktop. Each `event`
+frame contains a map of domain versions, such as `assistants`, `tasks`,
+`task-outcomes`, `schedules`, `usage`, `machines`, `resources`, `permissions` and
+`updates`. Event IDs contain the Runtime boot ID and a stream sequence. Version
+markers are invalidation state, not durable conversation replay cursors. Native
+and browser hosts no longer publish a separate `pot:changed` event; consumers
+receive these frames through the shared WS subscription.
 
 Subscriptions deliver their initial version map and coalesce pending changes.
 The frontend compares versions per local presentation scope through
@@ -188,57 +191,45 @@ sample-expiry redraw does no IO. Its thirty-second observation recovery reads
 runtime and Agent Link display resources through their TTLs; initial load and
 permission/Space invalidation separately read permission authority.
 
-The desktop local UI adapter consumes the same backend subscriptions and emits
-`pot:changed` through Wails. Responses and changes retain their local scope;
-Agent Link peer operations use their explicit connection identity. A suspended
-desktop startup generation ignores changes from its retired listeners.
-The manager preserves the `/changes` SSE ID's Runtime boot in the native
-`pot:changed.boot_id` envelope, independently of domain version markers. A reset
-or changed boot revalidates desktop startup even when no Chat is selected.
+Desktop and browser consume the same WebSocket subscriptions. Responses and
+changes retain their local scope; Agent Link peer operations use their explicit
+connection identity. A suspended startup generation ignores changes from retired
+listeners. The change event ID preserves the Runtime boot independently of domain
+version markers. A changed boot revalidates startup even when no Chat is selected.
 
-## Browser stream recovery
+## WebSocket stream recovery
 
-Conversation and change streams send a named `heartbeat` event with `{}` data
-at 15-second intervals. A heartbeat carries transport liveness only: it does
-not advance a cursor, invalidate a resource or make the composer ready.
+Browser and desktop use the shared [UI transport](ui-transport.md). One connection
+multiplexes business requests and active subscriptions; changing owners retires
+the relevant subscription rather than opening a separate transport implementation.
 
-The browser adapter owns one EventSource, watchdog and retry schedule per
-captured owner/Space. It closes the previous source before reconnecting, rather
-than competing with native EventSource retries or an additional UI reattach.
-Headers and the first valid conversation reset (or initial change event) have a
-20-second deadline. Heartbeats cannot satisfy or extend that deadline. After
-initial data, 45 seconds without heartbeat or data retires the stream. The first
-failure retries immediately; continuing failures use exponential backoff with
-jitter, capped at 30 seconds. Data or heartbeat after 15 seconds with an accepted
-initial frame resets backoff; repeatedly opening, sending a reset and immediately
-closing cannot create a hot retry loop.
+Request, connection, initial-frame and idle deadlines are bounded. Heartbeats
+prove transport liveness only: they do not advance a cursor, invalidate a resource
+or make the composer ready. A subscription acknowledgment must precede events,
+but only a valid initial reset or change map satisfies initial-frame readiness.
 
-Hidden pages pause watchdog/retry timers. Visible, focus, pageshow and online
-wakeups compare wall-clock deadlines before resuming them, so a suspended PWA
-can replace an expired stream without waiting for a throttled timer. Healthy
-streams survive these wakeups. Offline transitions close the stream; owner
-changes and disposal cancel its timers and terminal-status request. Cancellation
-revokes probe ownership synchronously, so online recovery does not wait for an
-aborted request to settle. Old source and probe callbacks cannot update the new
-generation or clear a newer probe.
+Connection generations fence late responses and events. Transport loss or a changed
+Runtime boot revokes startup authority; startup verification and fresh projections
+must restore it before commands become available. Reconnection obtains a new
+initial snapshot for every active subscription. Unknown mutation outcomes are
+reported to the caller and are never replayed automatically by the transport.
+The [chat outbox](chat-outbox.md) owns durable submission reconciliation.
 
-A terminal EventSource response triggers one bounded, cancellable same-origin
-access-status check. An expired session remains offline with an explicit
-reconnection message instead of a retry loop; an explicit access denial (403)
-also pauses recovery. Both remain paused across lifecycle wakeups and
-offline/online transitions. A confirmed valid session or an unknown result
-(including a probe timeout or network failure) retries with the same backoff.
-This also lets the global changes stream recover without a consumer Retry
-button. Opening the stream and receiving heartbeats never bypass the
-conversation cache: only a committed current snapshot makes Chat connected.
-Storage failures remain visible and retain drafts; transport reconnects neither
-replay sends nor recreate the composer or its reading position.
+Visible, focus, pageshow and online wakeups recheck liveness. Browser authentication
+failures require a bounded access-status check; expired or revoked sessions remain
+offline until access is restored. Desktop loopback availability is independent of
+internet connectivity.
+
+Opening the socket and receiving heartbeats never bypass the conversation cache:
+only a committed current snapshot makes Chat connected. Storage failures remain
+visible and retain drafts. Transport recovery does not recreate the composer or
+its reading position.
 
 ## Main conversation streams
 
-`GET /api/v1/events?assistant_id=...&locale=...` sends UI-only `conversation` frames.
-Snapshot reads and subscriptions carry the UI locale through the common endpoint
-so first-use introductions use the reader's language.
+The conversation subscription on `/api/v1/ws` sends UI-only `conversation` frames.
+Snapshot reads and subscriptions carry the UI locale with the subscription so
+first-use introductions use the reader's language.
 The first frame has `kind: reset`; subsequent frames have `kind: delta` and a
 `base_cursor` matching the preceding frame's cursor. `view.state` carries Runtime
 boot identity, conversation cursor, turn, budget, assistant capabilities and the
@@ -306,39 +297,37 @@ IDs in SQL, returning their current bodies plus current state. A gap exceeding
 message's projection; they do not resend unrelated history. HTTP writes retain
 the stream write deadline. No token queue grows behind a slow consumer.
 
-The browser uses EventSource and closes the old source when switching owners.
-Desktop forwards the same frames through `pot:snapshot`; its local UI adapter
-reconnects with bounded backoff. The WebView allocates an opaque subscription
-token before calling `Service.Subscribe(token, space, owner, locale)`. The host
-rejects duplicate live tokens and caps active subscriptions at 128. The production
-`localui.NativeSubscriptions` bridge owns the registry and recovery loop; the
-Wails service delegates to it and broadcasts its emitted payloads.
+Browser and desktop both use the shared `web/src/adapters/ws-client.mjs`; there
+is no per-host subscription bridge or `pot:snapshot`/`pot:subscription` event
+channel. The client shares one `/api/v1/ws` connection per host endpoint. Switching owners
+retires the corresponding subscription, while other subscriptions remain active. Desktop
+obtains its URL and ephemeral token from the native `Transport()` binding and
+connects with the `pot-token.<token>` subprotocol; the browser uses its
+same-origin session cookie. Each subscription request receives a `response` ack
+and then `event` frames carrying its `event` kind and `event_id`.
 
 ```text
-main WebView (token A) --+                        +--> pot:snapshot/subscription
-                        +--> Wails Service --> localui bridge --> Manager --> Control
-tray WebView (token B) --+                        +--> token + connection generation
+main WebView (browser or desktop) --+--> ws-client --> /api/v1/ws --> Control
+                                    +--> pot.v1 request/response/subscription
 ```
 
-Both `pot:snapshot` and `pot:subscription` carry `token`, `generation`,
-`space_id` and `owner`. Each connection attempt increments generation and emits
-`connecting` before its first frame. A WebView accepts only its token, scope,
-current startup generation and current connection attempt. A binding receipt
-does not mean connected; the first accepted reset must precede connected status.
-The Chat domain still confirms its session only after the snapshot commits to
-IndexedDB. Unsubscribe retires listeners immediately, including while the native
-binding promise is pending. Shutdown cancels and joins the bridge's streams.
+Each connection attempt carries a generation and its subscription IDs. A
+client accepts frames only for its current generation, scope, owner and current
+subscription IDs. An ack does not mean connected; the first accepted reset must
+precede connected status. The Chat domain still confirms its session only after
+the snapshot commits to IndexedDB. Unsubscribe retires its listener immediately,
+including while the cancel frame is in flight, and shutdown closes the socket
+and joins its streams.
 
 For a retained desktop client, transport loss or a changed frame boot revokes
 the startup generation before an old pending commit can confirm a session.
-Startup revalidation confirms native runtime/boot before the UI creates one
-replacement watch. Retained waiters defer resumption until that synchronous
-replacement can cancel them. The connected callback does not request another
-UI reattachment. Every new connection begins with a reset. The
-client rejects old cursors and duplicate deltas and renews the subscription on a
-base-cursor gap or boot change. Read versions prevent a concurrent older page
-from overwriting newer token text. A bounded recent-update map also covers
-updates received while a page is in flight.
+Startup verification revalidates native runtime/boot before the UI creates one
+replacement subscription. Retained waiters defer resumption until that
+synchronous replacement can cancel them. Every new connection begins each
+subscription with a reset. The client rejects old cursors and duplicate deltas
+and renews the subscription on a base-cursor gap or boot change. Read versions
+prevent a concurrent older page from overwriting newer token text. A bounded
+recent-update map also covers updates received while a page is in flight.
 
 Main Chat uses IndexedDB as its only retained transcript cache in browsers and
 Wails. The scope includes local node, connection, assistant and conversation
@@ -349,7 +338,7 @@ cannot publish uncommitted output. A failed cache write retains the existing
 view and shows a localized retry error; it never creates a memory-cache fallback.
 
 ```text
-HTTP/SSE or Wails -> scoped synchronization -> IndexedDB transaction
+WebSocket -> scoped synchronization -> IndexedDB transaction
                                                  |
                                             commit complete
                                                  |
@@ -466,11 +455,6 @@ and synchronizes the engine offset, then commits the flow DOM and measurements,
 resolves its current stable reading point and applies any remaining displacement.
 Native input translates the previously committed anchor by the input delta;
 it does not recapture an unreported DOM height change as new reading intent.
-When fast input leaves the mounted range before its replacement is prepared,
-the unprepared area stays blank with a small loading indicator. The indicator
-fades in after a short delay, respects reduced motion, and does not affect list
-geometry or intercept input. Old messages are never moved into that area as
-placeholders. The prepared destination replaces it in one geometry commit.
 Programmatic write echoes do not become input. Geometry that happens to reach
 the bottom does not enable following; downward user movement to the bottom or
 an explicit Latest command does.
@@ -478,9 +462,9 @@ Reaching Latest retains the accumulated native input anchor until publication,
 so a rapid direction reversal before layout settles does not reuse an older
 reading position or count a scroll delta twice.
 
-The same reconciliation handles prepend, trimming, reorder, width reflow,
+The same reconciliation handles prepend, append, width reflow,
 external header/composer layout and asynchronous image or disclosure sizes.
-New, changed and remounted rows first render in a connected, visually hidden
+New and changed rows first render in a connected, visually hidden
 surface with the actual ancestor CSS and available client width. The surface
 preserves the scroller's CSS inheritance, including relative line heights. Each
 component recursively reaches readiness or receives its five-second component
@@ -534,45 +518,24 @@ A new gesture cancels explicit navigation. Nested scrollable outputs consume
 input while they have room; a pointer cancellation handing control to touch does
 not retire native momentum protection. The controller adds no motion timers.
 
-Pot retains its normal message DOM/CSS and renders virtual gaps as flow spacers,
-with twelve overscan items on each side. Native scroll notifications commit the
-range synchronously. Held touch corrections may require a negative leading
-spacer margin. Each DOM replacement temporarily reserves the host extent until
-all rows and spacers are in place, preventing native clamping against an
-intermediate shorter list. A layout generation measures the complete loaded
-collection in bounded batches, retaining numeric measurements while disposing
-offscreen candidate DOM and leases. Only the current virtual range, pinned
-reading nodes and bounded preparation cohorts retain DOM. Item margins are
-included in every measured size. Recent valid measurements may be reused across
-page windows in the same layout generation; unknown or invalid values never
-become canvas offsets.
+Pot keeps every loaded durable message row mounted in its original parent and
+relative order. Older pages prepend and newer pages append. Updates change the
+existing row in place. TanStack provides measured offsets and scroll arbitration;
+its viewport range does not control DOM ownership. Folded work records remain
+mounted but hidden, with actionable approvals exposed. Item margins are included
+in measured sizes, including zero-height hidden rows.
 
-If a native jump outruns materialization, the list can temporarily hold its last
-readable real nodes while the measured destination is prepared. These nodes
-keep their original message IDs and sequences. The explicitly marked hold is
-excluded from reading-position capture, resolution and persistence, never
-represents the new range, and is removed atomically with the ready destination.
-Its rectangles remain actual DOM rectangles; no projected rectangle is used as
-a readable witness or measurement. The hold does not write scrollTop or replace
-the controller's latest input and navigation intent.
+The initial view may establish a continuous window around the saved native
+message ID and offset. Once exposed, navigation to an unloaded reference or
+Latest bridges contiguous history pages before publishing distant records.
+Presentation retention is separate from the bounded IndexedDB projection. Cache
+trimming and reconnects do not remove mounted rows. Explicit conversation, scope
+or run changes and closing the view release its nodes, snapshots and leases.
 
-Expanded tools have range-only child virtualizers sharing the chat scroller;
-only the root controller owns reading intent and scroll compensation. Child
-windows share its destination and parent path, report geometry and never write
-the parent scroller. Focus and selected
-text pin mounted rows through a custom range extractor. Navigation targets resolve
-by message identity against each current window; trimming, replacing or reordering
-rows never reuses a previous numeric target index. Retiring a row immediately
-disposes its DOM, nested window and attachment leases. No detached transcript DOM
-or inactive assistant projection remains cached in application memory. Returning
-to a recycled row renders it from its persisted message and disclosure state;
-resources use the shared resource cache.
-Scroll-only updates reuse the conversation's message projection and tool forest;
-new data, send state and connectivity invalidate that projection. Collapsed tools
-build their summaries and approval controls first; output and raw JSON render
-only when their disclosures open. Recycling releases observers and attachment
-leases, while shared viewers/downloads retain their own leases. Unchanged replies
-retain their Markdown nodes.
+Navigation resolves native message identities rather than reusing numeric
+indexes. Scroll-only updates reuse the conversation projection. New data, send
+state and connectivity invalidate dependent presentations. Unchanged replies
+retain their Markdown nodes and interactive resources retain their instances.
 
 Main Chat and Task conversations publish their list controller's reading state
 for page and conversation persistence. Composers retain native textarea, IME,
@@ -581,7 +544,7 @@ list; they do not wrap work in reading-cursor transactions or issue position
 restores after rendering. Input growth while following keeps the end visible;
 historical reading keeps its stable row offset through viewport changes. The
 same owner handles background Task disclosure, approval regions and delayed
-resources outside recycled message rows.
+resources outside the message rows.
 
 These APIs only project UI messages. Internal `Conversation.Snapshot`, the full
 `c.messages` collection, model checkpoints, input queues, persistence, recovery,
@@ -652,7 +615,7 @@ for the immutable target, FIFO and retirement rules.
 An earlier build may have saved a pending request in an ordinary draft. Its
 confirmation controller retains the following recovery contract independently
 of the outbox; migration does not convert that draft into a queued send.
-Success or a matching persisted SSE message confirms that original request.
+Success or a matching persisted subscription message confirms that original request.
 An explicit rejection retains the draft and reports the error. No receipt query
 runs while its POST is pending, including on foreground/online signals.
 
@@ -753,7 +716,8 @@ bookmark remain identifiable without inventing a delivery position.
 
 The task conversation uses the shared reply bubbles, tool disclosures, composer
 binding, measured message windows and reference completions. Expanded tool trees
-share its scroll container and retain disclosure state when recycled. Only its history scrolls; status and the composer
+share its scroll container and retain their nodes and disclosure state. Only its
+history scrolls; status and the composer
 remain visible. Following stops when the reader scrolls upward, and Latest resumes
 it. When the upper history boundary becomes visible, the view automatically reads
 an earlier committed page while preserving its message anchor. An initial short
@@ -796,8 +760,7 @@ bytes the executor did not retain.
 
 ## Lifecycle and remaining clocks
 
-SSE keepalive comments run every 15 seconds; writes have bounded deadlines that
-are cleared after flushing, so idle HTTP/2 streams remain open between frames.
+WebSocket heartbeats run every 15 seconds; writes have bounded deadlines.
 Backend shutdown or request cancellation closes subscriptions. Browser logout
 revokes access and reloads into authentication. Window/client disposal removes
 listeners and releases subscriptions. Browser changes streams also reject both parsed and deferred notifications from a retired client connection generation; an old stream cannot become healthy or refresh a replacement connection.

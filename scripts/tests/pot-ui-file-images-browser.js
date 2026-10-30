@@ -19,7 +19,7 @@ async page=>{
       const c=canvas.getContext('2d');c.fillStyle='#deecf5';c.fillRect(0,0,480,320);c.fillStyle='#f3c35d';c.beginPath();c.arc(375,75,32,0,Math.PI*2);c.fill();
       c.fillStyle='#9ab9a9';c.beginPath();c.moveTo(0,320);c.lineTo(165,90);c.lineTo(350,320);c.fill();c.fillStyle='#4c7e71';c.beginPath();c.moveTo(180,320);c.lineTo(330,145);c.lineTo(480,320);c.fill();
       const {renderMarkdown}=await import('/components/markdown.mjs'),{createReplyBubble}=await import('/components/reply.mjs'),{createProductionClient}=await import('/adapters/production.mjs'),{translate}=await import('/locales/messages.mjs');
-      const client=await createProductionClient();client.setScope({owner:'main',space:'local'});
+      const client=await createProductionClient();client.spaces=[{id:'local',control_id:'image-test'},{id:'remote',control_id:'image-test'}];client.setScope({owner:'main',space:'local'});
       const host=document.createElement('main');host.style.cssText='width:780px;max-width:calc(100% - 48px);margin:48px auto;';document.body.replaceChildren(host);document.documentElement.lang='zh-CN';
       const row=document.createElement('article');row.className='message role-assistant';const bubble=document.createElement('div');bubble.className='message-body reply-bubble';row.append(bubble);host.append(row);
       const source=`可以，直接内嵌显示：\n\n![生成的风景](pot-file://${task}/landscape.png)`;
@@ -54,7 +54,14 @@ async page=>{
     fail=false;hold=true;const pending=new Promise(resolve=>{started=resolve;});
     await page.evaluate(()=>imageFixture.draw());await pending;
     await page.evaluate(()=>{document.documentElement.lang='zh-CN';window.dispatchEvent(new Event('pot:locale'));});
-    assert(await page.getByText('正在加载图片……',{exact:true}).count()===1,'Language changes apply during IO');
+    const status=page.locator('.file-image-status');
+    assert(await status.count()===1,'Pending file image has a status element');
+    assert(await status.evaluate(el=>getComputedStyle(el).display==='none'),'Pending status is hidden');
+    assert(await status.textContent()==='','Pending status text is empty');
+    assert(await page.locator('.file-image-preview').isDisabled(),'Pending preview is disabled');
+    assert(await page.locator('.file-image-preview').getAttribute('aria-label')==='放大图片','Preview aria-label is translated during IO');
+    assert(await page.locator('.file-image-download').textContent()==='下载图片','Download text is translated during IO');
+    assert(await page.locator('[aria-busy="true"]').count()===1,'Pending file image root is aria-busy during IO');
     hold=false;resume();await page.locator('pot-file-image[data-state="ready"]').waitFor();
     await page.getByRole('button',{name:'放大图片',exact:true}).click();await page.evaluate(()=>imageFixture.bubble.replaceChildren());await page.locator('dialog').waitFor({state:'detached'});
     await page.evaluate(async task=>{
@@ -64,7 +71,8 @@ async page=>{
     await page.locator('.tool-call > summary').click();
     await page.locator('pot-file-image[data-state="ready"]').waitFor({state:'attached'});
     const digest=await page.evaluate(async png=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',Uint8Array.from(atob(png),char=>char.charCodeAt(0))))].map(byte=>byte.toString(16).padStart(2,'0')).join(''),png);
-    await page.route('**/api/v1/message-files/**',route=>{const bytes=Buffer.from(png,'base64');reads.push(new URL(route.request().url()));return route.fulfill({json:[{id:'task-image-binding',state:'ready',href:`pot-file://${task}/landscape.png`,resource:{id:'task-image',name:'landscape.png',entry:'landscape.png',mime_type:'image/png',size:bytes.length,files:[{path:'landscape.png',size:bytes.length,mime_type:'image/png',digest}],download:{path:'landscape.png'}}}]});});
+    const bindingRevision=await page.evaluate(async()=>{const {messageRevision}=await import('/state/resource-bytes.mjs');return messageRevision(imageFixture.source);});
+    await page.route('**/api/v1/message-files/**',route=>{const bytes=Buffer.from(png,'base64');reads.push(new URL(route.request().url()));return route.fulfill({json:[{id:'task-image-binding',message:'task-result',revision:bindingRevision,state:'ready',href:`pot-file://${task}/landscape.png`,resource:{id:'task-image',name:'landscape.png',entry:'landscape.png',mime_type:'image/png',size:bytes.length,files:[{path:'landscape.png',size:bytes.length,mime_type:'image/png',digest}],download:{path:'landscape.png'}}}]});});
     await page.route('**/api/v1/resources/task-image/content?*',route=>{reads.push(new URL(route.request().url()));return route.fulfill({contentType:'image/png',body:Buffer.from(png,'base64')});});
     await page.route('**/api/v1/resources/task-image/chunk?*',route=>{reads.push(new URL(route.request().url()));const bytes=Buffer.from(png,'base64');return route.fulfill({json:{size:bytes.length,offset:0,revision:digest,data:png}});});
     await page.evaluate(async task=>{

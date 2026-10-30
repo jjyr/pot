@@ -1053,12 +1053,16 @@ button.communication-task-endpoint:focus-visible{outline:2px solid var(--primary
 
 /* One projection for continuous work in both Chat and Task. The original
    disclosures/Markdown nodes stay alive; only their presentation is compact. */
-.message.work-record-group{display:block;margin-block:6px 12px;min-width:0;}
-.work-records{min-width:0;container-type:inline-size;}
+.message.work-record-group{display:block;margin-block:6px 0;min-width:0;}
+.message[data-conversation-suppressed]{display:none!important;}
+.message.work-record-folded>:not(.work-record-prefix){display:none!important;}
+.work-record-member{display:block;min-width:0;container-type:inline-size;width:100%;margin:0;}
 .work-record-summary{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-height:32px;list-style:none;cursor:pointer;color:var(--muted);font-size:13px;white-space:nowrap;}
-.work-record-summary::-webkit-details-marker{display:none;}
+
+.work-record-prefix{display:block;min-width:0;width:100%;}
+.work-record-summary{display:flex;border:0;background:transparent;padding:0;font-weight:400;text-align:start;width:100%;min-width:0;}
 .work-record-summary:before{content:'›';width:12px;flex:none;font-size:18px;line-height:1;}
-.work-records[open]>.work-record-summary:before{content:'⌄';}
+.work-record-summary[aria-expanded="true"]:before{content:'⌄';}
 .work-record-summary:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:4px;}
 .work-record-title{flex:none;color:var(--text);}
 .work-record-counts{min-width:0;overflow:hidden;text-overflow:ellipsis;}
@@ -1075,9 +1079,7 @@ button.communication-task-endpoint:focus-visible{outline:2px solid var(--primary
 .work-record-failure{color:var(--danger);flex:none;font-size:12px;}
 .work-record-activity{min-height:25px;margin-inline-start:20px;font-size:13px;color:var(--muted);}
 .work-record-activity:before{content:'·';color:var(--primary);margin-inline-end:6px;}
-.work-record-body{padding:4px 0 5px 7px;}
-.work-record-items>.message{width:100%;min-width:0;margin:0;}
-.work-record-items>.message>.message-body{width:100%;padding:0;background:transparent;border:0;}
+.work-record-member>.message-body{width:100%;padding:0;background:transparent;border:0;}
 .work-record-call{margin:0;padding:0;border:0;background:transparent;border-radius:0;}
 .work-record-call>.tool-summary{display:grid;grid-template-columns:12px minmax(0,1fr) 92px 44px;align-items:center;gap:6px;min-height:32px;padding:0;font-size:13px;}
 .work-record-call>.tool-summary>.tool-title{display:flex;align-items:center;gap:6px;min-width:0;max-width:none;font-size:13px;color:var(--text);font-weight:400;white-space:nowrap;overflow:hidden;line-height:1.5;}
@@ -1087,7 +1089,7 @@ button.communication-task-endpoint:focus-visible{outline:2px solid var(--primary
 .work-record-call>.tool-body{padding:8px 0 10px 19px;}
 .work-record-call[data-phase=failed]>.tool-summary>.tool-status,.work-record-call[data-phase=denied]>.tool-summary>.tool-status{color:var(--danger);}
 .work-message-action,.work-message-direction,.work-message-count{flex:none;color:var(--muted);font-size:12px;}
-.work-record-body .compact-record{min-height:32px;display:flex;align-items:center;margin:0;padding-inline-start:18px;font-size:13px;color:var(--muted);}
+.work-record-member .compact-record{min-height:32px;display:flex;align-items:center;margin:0;padding-inline-start:18px;font-size:13px;color:var(--muted);}
 @container(max-width:520px){
  .work-record-summary{gap:5px;font-size:12px;}
  .work-record-call>.tool-summary{grid-template-columns:10px minmax(0,1fr) 68px 36px;gap:4px;}
@@ -1095,7 +1097,7 @@ button.communication-task-endpoint:focus-visible{outline:2px solid var(--primary
  .work-record-failure{font-size:11px;}
 }
 @media(max-width:719px),(pointer:coarse){
- .work-record-summary,.work-record-call>.tool-summary,.work-record-body .compact-record{min-height:44px;}
+ .work-record-summary,.work-record-call>.tool-summary,.work-record-member .compact-record{min-height:44px;}
  .work-record-call .tool-raw>summary,.work-record-call .tool-action{min-height:44px;}
 }
 

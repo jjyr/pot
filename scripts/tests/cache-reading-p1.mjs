@@ -1,3 +1,5 @@
+import { installWSFixture } from './helpers/ws-fixture.mjs';
+installWSFixture();
 import assert from 'node:assert/strict';
 import {captureUsageWait} from '../../web/src/state/usage-wait.mjs';
 import {createProductionClient} from '../../web/src/adapters/production.mjs';
