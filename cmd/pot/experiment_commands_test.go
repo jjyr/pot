@@ -11,7 +11,7 @@ func TestExperimentOptions(t *testing.T) {
 		t.Fatal(overrides, err)
 	}
 	for _, flag := range []string{"--model", "--effort", "--task-model", "--task-effort", "--provider", "--task-provider"} {
-		if _, err := parseExperimentOptions([]string{"usage", flag, "value"}, nil); err == nil {
+		if _, err := parseExperimentOptions([]string{"usage", flag, "value"}, nil); err == nil && flag != "--model" && flag != "--provider" {
 			t.Fatalf("usage accepted %s", flag)
 		}
 		if _, err := parseExperimentOptions([]string{"ask", "hello", flag, "  "}, nil); err == nil {
@@ -40,6 +40,18 @@ func TestExperimentOptions(t *testing.T) {
 	for _, input := range []string{"  ", strings.Repeat("x", 65537)} {
 		if _, err = parseExperimentOptions([]string{"ask", "-"}, strings.NewReader(input)); err == nil {
 			t.Fatal("accepted invalid stdin")
+		}
+	}
+}
+
+func TestUsageModelFilters(t *testing.T) {
+	o, e := parseExperimentOptions([]string{"usage", "--assistant", "owner", "--ask", "request", "--model", "model/x", "--provider", "provider", "--group-by", "stage", "--details"}, nil)
+	if e != nil || o.Request != "request" || o.GroupBy != "stage" || o.Model != "model/x" || o.Provider != "provider" {
+		t.Fatal(o, e)
+	}
+	for _, args := range [][]string{{"usage", "--group-by", "bad"}, {"ask", "hello", "--group-by", "model"}, {"usage", "--prices", "x.json"}, {"usage", "--ask", "bad/id"}} {
+		if _, e = parseExperimentOptions(args, nil); e == nil {
+			t.Fatal(args)
 		}
 	}
 }

@@ -11,6 +11,10 @@ import (
 )
 
 type Query struct {
+	Request  string `json:"request"`
+	Model    string `json:"model"`
+	Provider string `json:"provider"`
+	GroupBy  string `json:"group_by"`
 	Turn     string `json:"turn"`
 	Days     int    `json:"days"`
 	Start    string `json:"start"`

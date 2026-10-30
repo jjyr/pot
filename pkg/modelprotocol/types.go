@@ -137,6 +137,7 @@ type Request struct {
 }
 type Response = Message
 type UsageReport struct {
+	ReasoningTokens  *uint64 `json:"reasoning_tokens,omitempty"`
 	InputTokens      *uint64 `json:"prompt_tokens"`
 	OutputTokens     *uint64 `json:"completion_tokens"`
 	CacheReadTokens  *uint64 `json:"prompt_cache_hit_tokens"`

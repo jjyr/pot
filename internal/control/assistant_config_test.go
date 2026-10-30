@@ -16,7 +16,7 @@ import (
 func fixtureDirectory(t *testing.T, window uint64) *modeldirectory.Directory {
 	t.Helper()
 	root := t.TempDir()
-	data := map[string]any{"providers": map[string]any{"fixture": map[string]any{"name": "Fixture", "npm": "@ai-sdk/openai-compatible", "api": "https://fixture.invalid/v1", "models": map[string]any{"first": map[string]any{"name": "First", "limit": map[string]uint64{"context": 64000, "output": 4000}}, "second": map[string]any{"name": "Second", "limit": map[string]uint64{"context": window, "output": 8000}}}}}}
+	data := map[string]any{"providers": map[string]any{"fixture": map[string]any{"name": "Fixture", "npm": "@ai-sdk/openai-compatible", "api": "https://fixture.invalid/v1", "models": map[string]any{"first": map[string]any{"name": "First", "cost": map[string]any{"input": 1, "output": 2}, "limit": map[string]uint64{"context": 64000, "output": 4000}}, "second": map[string]any{"name": "Second", "cost": map[string]any{"input": 3, "output": 4}, "limit": map[string]uint64{"context": window, "output": 8000}}}}}}
 	if err := instance.WriteJSON(filepath.Join(root, "catalog.json"), data); err != nil {
 		t.Fatal(err)
 	}

@@ -11,10 +11,12 @@ import (
 // ExperimentUsage is a local operator projection; it never queries remote ledgers.
 type ExperimentUsage struct {
 	usage.Breakdown
-	UsageAvailable bool                          `json:"usage_available"`
-	Turn           string                        `json:"turn,omitempty"`
-	Communications *assistant.CommunicationUsage `json:"communications"`
-	ToolRecords    *usage.Page                   `json:"tool_records,omitempty"`
+	Accounting        usage.Accounting              `json:"accounting"`
+	ActivityAvailable bool                          `json:"activity_available"`
+	UsageAvailable    bool                          `json:"usage_available"`
+	Turn              string                        `json:"turn,omitempty"`
+	Communications    *assistant.CommunicationUsage `json:"communications"`
+	ToolRecords       *usage.Page                   `json:"tool_records,omitempty"`
 }
 
 func (s *Service) ExperimentUsage(ctx context.Context, owner, task string, q usage.Query, details bool, at int64) (ExperimentUsage, error) {
@@ -23,19 +25,6 @@ func (s *Service) ExperimentUsage(ctx context.Context, owner, task string, q usa
 		return result, errors.New("invalid usage scope")
 	}
 	if owner != "" {
-		defs, err := s.Registry.Definitions(ctx)
-		if err != nil {
-			return result, err
-		}
-		found := false
-		for _, d := range defs {
-			if d.ID == owner {
-				found = true
-			}
-		}
-		if !found {
-			return result, errors.New("local assistant not found")
-		}
 		q.Scope = owner
 	} else if task != "" {
 		var taskOwner string
@@ -55,18 +44,35 @@ func (s *Service) ExperimentUsage(ctx context.Context, owner, task string, q usa
 		q.Scope = ""
 	}
 	var err error
+	result.Accounting, err = s.Usage.Accounting(ctx, usage.AccountingQuery{Details: details, Query: q, Assistant: owner, Task: task, Request: q.Request, Model: q.Model, Provider: q.Provider, GroupBy: q.GroupBy}, at)
+	if err != nil {
+		return result, err
+	}
+	if q.Request != "" || q.Model != "" || q.Provider != "" {
+		_, _, first, last, e := usage.Bounds(q, at)
+		if e != nil {
+			return result, e
+		}
+		zone := q.Timezone
+		if zone == "" {
+			zone = "Asia/Shanghai"
+		}
+		result.Breakdown = usage.Breakdown{Start: first, End: last, Timezone: zone, Scope: q.Scope}
+		return result, nil
+	}
+	result.ActivityAvailable = true
 	result.Breakdown, err = s.Usage.Breakdown(ctx, q, at)
 	if err != nil {
 		return result, err
 	}
-	if details {
+	if details && q.Request == "" && q.Model == "" && q.Provider == "" {
 		page, e := s.Usage.ToolRecords(ctx, q, at)
 		if e != nil {
 			return result, e
 		}
 		result.ToolRecords = &page
 	}
-	if q.Turn == "" {
+	if q.Turn == "" && q.Request == "" && q.Model == "" && q.Provider == "" {
 		start, stop, _, _, e := usage.Bounds(q, at)
 		if e != nil {
 			return result, e

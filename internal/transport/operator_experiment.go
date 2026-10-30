@@ -46,7 +46,7 @@ func (a *Application) operatorExperimentCall(ctx context.Context, method string,
 			}
 			details = v
 		}
-		v, e := a.Control.ExperimentUsage(ctx, q.Get("assistant_id"), q.Get("task_id"), usage.Query{Start: q.Get("start"), End: q.Get("end"), Timezone: q.Get("timezone"), Turn: q.Get("turn"), Offset: offset}, details, time.Now().UnixMilli())
+		v, e := a.Control.ExperimentUsage(ctx, q.Get("assistant_id"), q.Get("task_id"), usage.Query{Request: q.Get("request_id"), Model: q.Get("model"), Provider: q.Get("provider"), GroupBy: q.Get("group_by"), Start: q.Get("start"), End: q.Get("end"), Timezone: q.Get("timezone"), Turn: q.Get("turn"), Offset: offset}, details, time.Now().UnixMilli())
 		return v, e, true
 	default:
 		return nil, errors.New("unknown operator query"), true

@@ -41,13 +41,14 @@ type modalities struct {
 	Output []string `json:"output"`
 }
 type model struct {
-	Name       string     `json:"name"`
-	Limit      Limits     `json:"limit"`
-	Modalities modalities `json:"modalities"`
-	ToolCall   bool       `json:"tool_call"`
-	Provider   route      `json:"provider"`
-	Status     *string    `json:"status"`
-	Kind       *string    `json:"type"`
+	Cost       json.RawMessage `json:"cost,omitempty"`
+	Name       string          `json:"name"`
+	Limit      Limits          `json:"limit"`
+	Modalities modalities      `json:"modalities"`
+	ToolCall   bool            `json:"tool_call"`
+	Provider   route           `json:"provider"`
+	Status     *string         `json:"status"`
+	Kind       *string         `json:"type"`
 }
 type provider struct {
 	Name   string           `json:"name"`
@@ -57,9 +58,11 @@ type provider struct {
 	Models map[string]model `json:"models"`
 }
 type snapshot struct {
-	Providers map[string]provider `json:"providers"`
-	Logos     map[string]string   `json:"logos"`
-	ETag      *string             `json:"etag"`
+	PricingVersion int                 `json:"pricing_version,omitempty"`
+	UpdatedAt      int64               `json:"updated_at,omitempty"`
+	Providers      map[string]provider `json:"providers"`
+	Logos          map[string]string   `json:"logos"`
+	ETag           *string             `json:"etag"`
 }
 type Directory struct {
 	mu               sync.RWMutex
@@ -136,6 +139,21 @@ func Open(root string) (*Directory, error) {
 	if body, err := os.ReadFile(filepath.Join(root, "catalog.json")); err == nil && len(body) <= maxBytes {
 		var cached snapshot
 		if json.Unmarshal(body, &cached) == nil && validate(cached.Providers) == nil {
+			// Upgrade older caches which omitted prices. Keep their model facts,
+			// seed exact known prices locally, and force a full next refresh (no ETag).
+			if cached.PricingVersion == 0 {
+				for pid, p := range cached.Providers {
+					for mid, m := range p.Models {
+						if len(m.Cost) == 0 {
+							m.Cost = d.state.Providers[pid].Models[mid].Cost
+							p.Models[mid] = m
+						}
+					}
+					cached.Providers[pid] = p
+				}
+				cached.UpdatedAt = d.state.UpdatedAt
+				cached.ETag = nil
+			}
 			d.state = cached
 		}
 	}
@@ -489,7 +507,7 @@ func (d *Directory) Refresh(ctx context.Context) error {
 	}
 	close(jobs)
 	wg.Wait()
-	next := snapshot{Providers: providers, Logos: logos}
+	next := snapshot{Providers: providers, Logos: logos, PricingVersion: 1, UpdatedAt: time.Now().UnixMilli()}
 	if value := response.Header.Get("ETag"); value != "" {
 		next.ETag = &value
 	}

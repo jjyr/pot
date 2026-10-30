@@ -383,7 +383,15 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	if thread.Owner != principal {
 		waitScope = thread.Owner
 	}
-	model := &ModelSession{IdleMaintenance: strings.HasPrefix(request.RequestID, "pot-compact-"), WaitScope: waitScope, Registry: s.Providers, Usage: s.Usage, Spec: thread.Config, Scope: principal, Turn: request.RequestID, Generation: thread.Generation, Role: modelRole(request.RequestID), Claim: func(ctx context.Context, id string) error {
+	root, err := s.usageRequest(ctx, principal, request.RequestID)
+	if err != nil {
+		return assistant.RunOptions{}, err
+	}
+	stage := "assistant_processing"
+	if strings.HasPrefix(request.RequestID, "pot-result-") {
+		stage = "assistant_result"
+	}
+	model := &ModelSession{Directory: s.Profiles.directory, Attribution: usage.Attribution{Assistant: principal, Request: root, Stage: stage}, IdleMaintenance: strings.HasPrefix(request.RequestID, "pot-compact-"), WaitScope: waitScope, Registry: s.Providers, Usage: s.Usage, Spec: thread.Config, Scope: principal, Turn: request.RequestID, Generation: thread.Generation, Role: modelRole(request.RequestID), Claim: func(ctx context.Context, id string) error {
 		return c.ClaimModel(ctx, request.RequestID, thread.Generation, id)
 	}}
 	ports := &executionPorts{model: model, compaction: func(ctx context.Context, raw json.RawMessage) error {

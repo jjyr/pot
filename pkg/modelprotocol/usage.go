@@ -28,6 +28,7 @@ func (o *UsageObserver) observe(protocol Protocol, event map[string]any) (*Usage
 		}
 		report.InputTokens = uintValue(usage["prompt_tokens"])
 		report.OutputTokens = uintValue(usage["completion_tokens"])
+		report.ReasoningTokens = uintValue(get(usage, "completion_tokens_details", "reasoning_tokens"))
 		report.CacheReadTokens = uintValue(usage["prompt_cache_hit_tokens"])
 		if report.CacheReadTokens == nil {
 			report.CacheReadTokens = uintValue(get(usage, "prompt_tokens_details", "cached_tokens"))
@@ -44,6 +45,7 @@ func (o *UsageObserver) observe(protocol Protocol, event map[string]any) (*Usage
 		}
 		report.InputTokens = uintValue(usage["input_tokens"])
 		report.OutputTokens = uintValue(usage["output_tokens"])
+		report.ReasoningTokens = uintValue(get(usage, "output_tokens_details", "reasoning_tokens"))
 		report.CacheReadTokens = uintValue(get(usage, "input_tokens_details", "cached_tokens"))
 		report.CacheWriteTokens = uintValue(get(usage, "input_tokens_details", "cache_write_tokens"))
 	case AnthropicMessages:
@@ -87,6 +89,7 @@ func (o *UsageObserver) observe(protocol Protocol, event map[string]any) (*Usage
 		report.InputTokens = uintValue(usage["promptTokenCount"])
 		report.CacheReadTokens = uintValue(usage["cachedContentTokenCount"])
 		report.OutputTokens = uintValue(usage["candidatesTokenCount"])
+		report.ReasoningTokens = uintValue(usage["thoughtsTokenCount"])
 		if report.OutputTokens != nil {
 			if thoughts := uintValue(usage["thoughtsTokenCount"]); thoughts != nil {
 				total, err := sum(*report.OutputTokens, *thoughts)

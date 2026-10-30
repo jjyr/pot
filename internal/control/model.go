@@ -13,6 +13,7 @@ import (
 	"github.com/jjyr/pot/internal/gateway"
 	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/modeldirectory"
 	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/protocol"
 )
@@ -24,8 +25,10 @@ const MaxModelBody = 96 * 1024 * 1024
 // cancelled/replaced turns and enforce lifetime/per-turn request counts. Returning
 // an error means no network attempt occurred. It must not recursively call Model.
 type ModelSession struct {
+	Directory *modeldirectory.Directory
 	// Idle maintenance has no resumable foreground turn. Respect allowance limits
 	// without leaving an orphan wait that would block the next real user turn.
+	Attribution     usage.Attribution
 	IdleMaintenance bool
 	Registry        *gateway.Registry
 	Usage           *usage.Ledger
@@ -132,7 +135,14 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (stream i
 			return nil, protocol.APIError{Code: "pot_token_limit", Message: "Pot token allowance requires its original wait to be released"}
 		}
 	}
-	request := usage.ReserveRequest{ID: r.ID, Scope: s.Scope, Turn: s.Turn, AtMS: atMS, Model: s.Spec.Model, InputEstimate: int64(len(body)) + 1024, MaxOutput: int64(cap), Route: &usage.Route{Provider: provider.ID, Generation: int64(s.Generation), SpecHash: s.Spec.SpecHash, Agent: s.Role, ProfileID: s.Spec.SourceProfileID}}
+	attribution := s.Attribution
+	if s.Spec.Params.ReasoningEffort != nil {
+		attribution.Effort = *s.Spec.Params.ReasoningEffort
+	}
+	request := usage.ReserveRequest{Attribution: &attribution, ID: r.ID, Scope: s.Scope, Turn: s.Turn, AtMS: atMS, Model: s.Spec.Model, InputEstimate: int64(len(body)) + 1024, MaxOutput: int64(cap), Route: &usage.Route{Provider: provider.ID, Generation: int64(s.Generation), SpecHash: s.Spec.SpecHash, Agent: s.Role, ProfileID: s.Spec.SourceProfileID}}
+	if s.Directory != nil {
+		request.Price = usage.CatalogPrice(s.Directory.Price(provider.APIProvider, s.Spec.Model))
+	}
 	reservation, err := s.Usage.ReserveRouted(ctx, request)
 	if err != nil {
 		knownUnsent = false
@@ -263,8 +273,16 @@ func (m *meteredStream) Read(data []byte) (int, error) {
 			if err != nil {
 				return n, err
 			}
+			write, err := convert(report.CacheWriteTokens)
+			if err != nil {
+				return n, err
+			}
+			reasoning, err := convert(report.ReasoningTokens)
+			if err != nil {
+				return n, err
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			err = m.ledger.Settle(ctx, m.id, usage.Frame{Input: input, Output: output, Cache: cache})
+			err = m.ledger.Settle(ctx, m.id, usage.Frame{Input: input, Output: output, Cache: cache, CacheWrite: write, Reasoning: reasoning})
 			cancel()
 			if err != nil {
 				return n, err

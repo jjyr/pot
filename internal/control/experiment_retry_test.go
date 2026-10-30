@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/protocol"
 	"io"
 	"net/http"
@@ -97,4 +98,18 @@ func TestExperimentRetryRetainsMainAndTaskEfforts(t *testing.T) {
 	if status.State != "completed" || len(status.Tasks) != 2 || workers.Load() != 2 || len(status.ReplyIDs) == 0 || status.ReplyIDs[len(status.ReplyIDs)-1] == "" {
 		t.Fatalf("%+v workers=%d", status, workers.Load())
 	}
+	accounting, err := s.ExperimentUsage(ctx, "main", "", usage.Query{Days: 14, Timezone: "UTC", Request: "retry-experiment", GroupBy: "stage"}, true, time.Now().UnixMilli())
+	if err != nil || accounting.Accounting.Total.UnknownAttribution != 0 {
+		t.Fatal(accounting.Accounting, err)
+	}
+	taskCalls := int64(0)
+	for _, g := range accounting.Accounting.Groups {
+		if g.Key == "task_execution" {
+			taskCalls += g.Requests
+		}
+	}
+	if taskCalls != 1 {
+		t.Fatalf("rejected original or replacement miscounted: %+v", accounting.Accounting)
+	}
+
 }

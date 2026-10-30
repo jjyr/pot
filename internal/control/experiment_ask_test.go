@@ -20,7 +20,7 @@ func TestAskWaitsForWorkerAndResultProcessing(t *testing.T) {
 	workerRelease := make(chan struct{})
 	summaryRelease := make(chan struct{})
 	summaryEntered := make(chan struct{})
-	var mainCalls atomic.Int32
+	var mainCalls, notifications atomic.Int32
 	s, server := batchService(t, func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		var body struct {
@@ -36,11 +36,13 @@ func TestAskWaitsForWorkerAndResultProcessing(t *testing.T) {
 			if body.Model != "second" || body.Effort != "high" {
 				t.Errorf("result config: %s", raw)
 			}
-			close(summaryEntered)
-			select {
-			case <-summaryRelease:
-			case <-r.Context().Done():
-				return
+			if notifications.Add(1) == 1 {
+				close(summaryEntered)
+				select {
+				case <-summaryRelease:
+				case <-r.Context().Done():
+					return
+				}
 			}
 			batchReply(w, "Final task result")
 			return
@@ -152,6 +154,13 @@ completed:
 	if err != nil || len(task.Models) != 1 || task.Models[0].Agent != "task" {
 		t.Fatalf("task usage: %+v %v", task, err)
 	}
+	account, err := s.ExperimentUsage(ctx, "main", "", usage.Query{Days: 14, Timezone: "UTC", Request: "experiment", GroupBy: "stage"}, false, time.Now().UnixMilli())
+	if err != nil || account.Accounting.Total.Requests != 4 || account.Accounting.Total.Priced != 4 || len(account.Accounting.Groups) != 3 {
+		t.Fatalf("accounting: %+v %v", account.Accounting, err)
+	}
+	if task.Accounting.Total.Requests != 1 || global.Accounting.Total.Requests != account.Accounting.Total.Requests {
+		t.Fatal("scope totals disagree")
+	}
 	q.Turn = "experiment"
 	turn, err := s.ExperimentUsage(ctx, "main", "", q, true, time.Now().UnixMilli())
 	if err != nil || len(turn.Models) != 1 || turn.Communications != nil || turn.Tools.Calls != 1 {
@@ -169,5 +178,26 @@ completed:
 		t.Fatal(err)
 	}
 	awaitConversationContext(t, ctx, c, func(s protocol.Snapshot) bool { return s.Turn == nil && mainCalls.Load() >= 3 })
+	latest, err := s.ExperimentUsage(ctx, "main", "", usage.Query{Days: 14, Timezone: "UTC"}, false, time.Now().UnixMilli())
+	if err != nil || latest.Accounting.Total.Requests != 5 {
+		t.Fatalf("ordinary request not metered: %+v %v", latest.Accounting, err)
+	}
+	isolated, err := s.ExperimentUsage(ctx, "main", "", usage.Query{Days: 14, Timezone: "UTC", Request: "experiment"}, false, time.Now().UnixMilli())
+	if err != nil || isolated.Accounting.Total.Requests != 4 {
+		t.Fatalf("ordinary request leaked into ask: %+v %v", isolated.Accounting, err)
+	}
+
+	if err = s.Tasks.SendMessage(ctx, "main", status.Tasks[0].ID, "later-guidance", protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: "main"}, "Continue with another answer"); err != nil {
+		t.Fatal(err)
+	}
+	awaitConversationContext(t, ctx, c, func(s protocol.Snapshot) bool { return notifications.Load() >= 2 && s.Turn == nil })
+	isolated, err = s.ExperimentUsage(ctx, "main", "", usage.Query{Days: 14, Timezone: "UTC", Request: "experiment"}, false, time.Now().UnixMilli())
+	if err != nil || isolated.Accounting.Total.Requests != 4 {
+		t.Fatalf("later task continuation charged to old ask: %+v %v", isolated.Accounting, err)
+	}
+	latest, err = s.ExperimentUsage(ctx, "main", "", usage.Query{Days: 14, Timezone: "UTC"}, false, time.Now().UnixMilli())
+	if err != nil || latest.Accounting.Total.Requests != 7 {
+		t.Fatalf("continuation missing from assistant: %+v %v", latest.Accounting, err)
+	}
 
 }

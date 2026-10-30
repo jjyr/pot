@@ -106,6 +106,54 @@ repeated context replay, transport retries, or provider-billed consumption;
 they must not be added to actual model totals. This collection introduces no
 new network API or UI. Existing UI byte-based estimates remain separate.
 
+## Model cost accounting
+
+One durable accounting row extends each newly reserved model request in
+`usage.sqlite`; assistants, tasks, and request/ask queries are views of these same
+rows. Control records assistant ownership, optional task and request correlation,
+execution stage and reasoning effort before sending. Non-CLI requests receive the
+same metering. Task ownership survives archive and retries; ask correlation follows
+the existing experiment lineage, including result-processing turns. A later
+continuation of a completed task is not charged to its original ask; its task and
+assistant attribution remain intact, with request correlation unknown. Ordinary
+non-experiment task calls may have no request correlation. Missing historical
+attribution is not inferred: global queries retain those rows as unknown, while
+owner/request filters cannot include unassociated history.
+
+The metered model is the effective outbound model ID pinned to the execution,
+not a guessed underlying model behind a provider alias. Model groups include
+provider/profile. Provider adapters normalize input to include cache reads and
+writes, and output to include reasoning. Cache writes and reported reasoning are
+retained separately for audit; reasoning is not charged again. Raw cache counts
+are retained for costing even if they arrive before input in another usage frame.
+
+Reservation freezes the applicable models.dev price and provenance, or the absence
+of a price. Supplier-specific prices precede original-provider fallback. Usage
+frames replace that request's totals and cost, never append another charge.
+Known cost is `input * input_rate + output * output_rate`, plus the read/write
+counts times their difference from the ordinary input rate. A discounted or
+premium cache rate needs a reported count; missing counts remain unknown. Invalid
+cache splits cannot produce a priced amount. USD arithmetic uses exact decimal
+rationals: nine decimal places in per-million rates need at most fifteen places
+in request amounts. Aggregates sum these exact stored amounts without floats.
+
+Reports distinguish priced requests, unpriced requests, and priced requests with
+insufficient usage. `usd` is the sum of known complete request amounts, not a
+promise that unknown requests were free. `complete` concerns local monetary
+coverage; `unknown_attribution_requests` separately describes missing ownership.
+Rejected and pending-unsent requests are excluded. Started/uncertain requests
+remain visible, and failure/retry usage reported by the provider is retained.
+Context tiers use normalized input, including caches, and apply strictly above
+the catalog threshold. Unsupported price dimensions remain unpriced with a reason
+in the snapshot. No estimate for tools, communication, context or reservations
+adds to money.
+
+Model-cost groups and request pages use one usage-database transaction. Detail
+pages include frozen rates, raw cache-write/reasoning counts and costing status;
+page offsets never limit aggregate totals. Local operator queries do not combine
+remote ledgers or reconstruct provider invoices. Automatic price selection and CLI examples
+are documented in [Deployment](deployment.md).
+
 ## Context estimation
 
 The default estimator in [`pkg/agent/meter.go`](../pkg/agent/meter.go)

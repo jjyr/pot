@@ -76,7 +76,7 @@ func experimentCommand(ctx context.Context, args []string, in io.Reader, out, di
 
 func executeExperiment(ctx context.Context, o experimentOptions, api experimentAPI, streams experimentStreams, out, diagnostics io.Writer) error {
 	if o.Command == "usage" {
-		q := url.Values{"start": {o.From}, "end": {o.To}, "timezone": {o.Timezone}, "task_id": {o.Task}, "turn": {o.Turn}, "details": {strconv.FormatBool(o.Details)}, "offset": {strconv.Itoa(o.Offset)}}
+		q := url.Values{"request_id": {o.Request}, "group_by": {o.GroupBy}, "model": {o.Model}, "provider": {o.Provider}, "start": {o.From}, "end": {o.To}, "timezone": {o.Timezone}, "task_id": {o.Task}, "turn": {o.Turn}, "details": {strconv.FormatBool(o.Details)}, "offset": {strconv.Itoa(o.Offset)}}
 		raw, err := api(ctx, o.Assistant, "GET", "/api/v1/operator/usage?"+q.Encode(), nil)
 		if err != nil {
 			return err
@@ -166,17 +166,40 @@ func printExperimentUsage(out io.Writer, r control.ExperimentUsage) error {
 	if r.Turn != "" {
 		fmt.Fprintf(w, "Turn: %s\n", r.Turn)
 	}
-	fmt.Fprintln(w, "Actual model usage (cache is a subset of input)")
+	fmt.Fprintf(w, "Model cost estimate (USD): %s  complete=%t  priced=%d unpriced=%d missing-usage=%d unknown-attribution=%d\n", r.Accounting.Total.USD, r.Accounting.Total.Complete, r.Accounting.Total.Priced, r.Accounting.Total.Unpriced, r.Accounting.Total.MissingUsage, r.Accounting.Total.UnknownAttribution)
+	fmt.Fprintf(w, "Grouped by: %s\n", r.Accounting.GroupBy)
+	fmt.Fprintln(w, "GROUP\tREQUESTS\tINPUT\tOUTPUT\tCACHE\tUSD\tUNPRICED\tMISSING USAGE")
+	for _, g := range r.Accounting.Groups {
+		fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%s\t%d\t%d\n", g.Key, g.Requests, tokenNumber(g.Input, g.InputKnown), tokenNumber(g.Output, g.OutputKnown), tokenNumber(g.Cache, g.CacheKnown), g.USD, g.Unpriced, g.MissingUsage)
+	}
 	if !r.UsageAvailable {
 		fmt.Fprintln(w, "Remote execution usage unavailable in this local ledger.")
 	}
-	if len(r.Models) == 0 {
-		fmt.Fprintln(w, "No recorded model requests.")
+	if len(r.Accounting.Records) > 0 {
+		fmt.Fprintln(w, "REQUEST\tASSISTANT\tTASK\tTURN\tMODEL\tSTAGE\tEFFORT\tUSD\tSTATUS\tPRICE SOURCE")
+		for _, v := range r.Accounting.Records {
+			amount := "unknown"
+			if v.USD != nil {
+				amount = *v.USD
+			}
+			source := "unknown"
+			if v.Price != nil {
+				source = v.Price.Source + ":" + v.Price.Provider + "/" + v.Price.Model + " (" + v.Price.Match + ")"
+				if v.Price.Unsupported != "" {
+					source += " unsupported=" + v.Price.Unsupported
+				}
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", v.ID, v.Assistant, v.Task, v.Turn, v.Model, v.Stage, v.Effort, amount, v.CostStatus, source)
+		}
+		if r.Accounting.NextOffset != nil {
+			fmt.Fprintf(w, "More requests: --details --offset %d\n", *r.Accounting.NextOffset)
+		}
 	}
-	fmt.Fprintln(w, "AGENT\tSTAGE\tREQUESTS\tINPUT\tOUTPUT\tCACHE")
-	for _, v := range r.Models {
-		fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\n", v.Agent, v.Stage, v.Requests, tokenNumber(v.Input, v.InputKnown), tokenNumber(v.Output, v.OutputKnown), tokenNumber(v.Cache, v.CacheKnown))
+	if !r.ActivityAvailable {
+		fmt.Fprintln(w, "Tool/message attribution unavailable for these model/request filters.")
+		return w.Flush()
 	}
+	fmt.Fprintln(w, "Direct scope activity below (assistant task costs are included in model totals above)")
 	fmt.Fprintln(w, "Tool content estimates (do not add to actual model usage)")
 	fmt.Fprintln(w, "TOOL\tAGENT\tCALLS\tFAILED\tUNFINISHED\tARGUMENT TOKENS\tRESULT TOKENS")
 	for _, v := range r.ToolGroups {

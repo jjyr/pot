@@ -3,8 +3,9 @@
 `model-directory.json` is an offline seed generated from
 https://models.dev/api.json?type=all on 2026-10-15. It retains provider names,
 SDK/base URL hints, documentation links, model names, limits, modalities, tool
-support, lifecycle/type flags and per-model route overrides. Unused pricing and
-descriptive fields are omitted. Common SVG marks come from
+support, lifecycle/type flags and per-model route overrides. Matching model prices
+were enriched from the same upstream API on 2026-10-30; raw cost objects retain
+cache and tier dimensions. Other descriptive fields are omitted. Common SVG marks come from
 https://models.dev/logos/{provider}.svg. A failed runtime refresh never modifies
 this embedded seed.
 

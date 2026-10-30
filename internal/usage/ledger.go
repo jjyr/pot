@@ -86,7 +86,17 @@ type Route struct {
 	Agent      string `json:"agent"`
 	ProfileID  string `json:"profile_id"`
 }
+type Attribution struct {
+	Assistant string `json:"assistant"`
+	Task      string `json:"task"`
+	Request   string `json:"request"`
+	Stage     string `json:"stage"`
+	Effort    string `json:"effort"`
+}
+
 type ReserveRequest struct {
+	Price         *Price       `json:"-"`
+	Attribution   *Attribution `json:",omitempty"`
 	ID            string
 	Scope         string
 	Turn          string
@@ -101,9 +111,11 @@ type Reservation struct {
 	Duplicate bool  `json:"duplicate"`
 }
 type Frame struct {
-	Input  *int64
-	Output *int64
-	Cache  *int64
+	Reasoning  *int64
+	CacheWrite *int64
+	Input      *int64
+	Output     *int64
+	Cache      *int64
 }
 type Quota struct {
 	Provider   string `json:"provider,omitempty"`
@@ -296,6 +308,9 @@ func (l *Ledger) Reserve(ctx context.Context, r ReserveRequest) (*Reservation, e
 				return err
 			}
 		}
+		if err := reserveAccounting(ctx, tx, r); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM waits WHERE scope=?", r.Scope); err != nil {
 			return err
 		}
@@ -322,7 +337,7 @@ func (l *Ledger) Claim(ctx context.Context, id string) (bool, error) {
 	return n == 1, err
 }
 func (l *Ledger) Settle(ctx context.Context, id string, u Frame) error {
-	for _, n := range []*int64{u.Input, u.Output, u.Cache} {
+	for _, n := range []*int64{u.Input, u.Output, u.Cache, u.CacheWrite, u.Reasoning} {
 		if n != nil && (*n < 0 || *n > MaxSafeInteger) {
 			return errors.New("invalid provider usage")
 		}
@@ -348,7 +363,10 @@ func (l *Ledger) Settle(ctx context.Context, id string, u Frame) error {
 			cache = 0
 		}
 		_, err := tx.ExecContext(ctx, "UPDATE requests SET input=?,output=?,cache=?,cache_reported=MAX(cache_reported,?),reserved=CASE WHEN ? THEN 0 ELSE reserved END,state='reported' WHERE id=?", input, output, cache, u.Cache != nil, input.Valid && output.Valid, id)
-		return err
+		if err != nil {
+			return err
+		}
+		return settleAccounting(ctx, tx, id, u)
 	})
 }
 func (l *Ledger) Rejected(ctx context.Context, id string) error {

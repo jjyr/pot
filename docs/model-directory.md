@@ -18,7 +18,9 @@ metadata on node; all inference goes directly through Pot's Gateway.
 `GET /api/v1/providers` returns registered `provider_types`, configured connections,
 their typed cached catalogs, and public model facts. Save, discovery and inference-test requests identify the connection type with
 `provider_type_id`. Directory entries supply model facts and artwork, rather than
-an independent list of connection implementations. UI features and request formats
+an independent list of connection implementations. Price facts retain the raw
+models.dev cost object, including cache rates and context tiers; metering selects
+from this same local directory without extra network requests. UI features and request formats
 follow registered capabilities and supported protocols.
 
 Gateway routes retain the namespaced type and package identity separately from
@@ -51,7 +53,9 @@ perform no upstream metadata requests.
 The node refreshes public models.dev data every 24 hours, recording the attempt in
 `models-dev/check.json` before fetching. Restarts preserve that interval. Fetches
 use ETag, bounded responses and timeouts; failed updates retain the last valid
-catalog and logos. No credentials or connection details are sent to models.dev.
+catalog and logos. Cached snapshots from before price retention keep their model
+facts, seed prices for exact bundled provider/model matches, and clear their ETag
+so the next refresh fetches complete pricing. No credentials or connection details are sent to models.dev.
 
 Enabled plugin catalog connections refresh at startup, after a connection save,
 and every five minutes, through at most four supervised exchanges at once. This

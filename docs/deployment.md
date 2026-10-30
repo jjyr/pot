@@ -256,14 +256,51 @@ pot usage --assistant ASSISTANT-ID --turn REQUEST-ID --json
 `pot usage` defaults to today's global local-ledger usage in Asia/Shanghai.
 `--from` and `--to` are inclusive dates and must be supplied together;
 `--timezone` selects their time zone. Assistant and task filters are mutually
-exclusive; assistant scope excludes child task model usage. `--turn` requires
+exclusive; model accounting for an assistant includes its own calls and owned tasks. `--turn` requires
 one of these scopes. Actual model tokens, per-tool content estimates, and
 communication counts/content estimates are separate; estimates must not be added
 to actual usage. Missing measurements remain unknown. Remote execution usage
 is unavailable locally. Communication records have no precise turn attribution
-and are omitted for a turn filter. `--details` adds individual tool calls and
-messages, each paginated by 20 with independent next offsets; pass
+and are omitted for a turn filter. Tool/message activity is a separate direct-scope
+view; it does not include child tasks and is unavailable for model/provider/request
+filters. `--details` adds model request records (including frozen prices), tool calls
+and messages, each paginated by 20 with independent next offsets; pass
 `--offset N` to continue. `--json` preserves the structured statistics.
+
+```sh
+pot usage --assistant ASSISTANT-ID --group-by model
+pot usage --ask REQUEST-ID --group-by stage
+pot usage --model MODEL-ID --provider PROVIDER-ID --group-by date --json
+```
+
+`--group-by` accepts `model` (default), `stage`, `assistant`, `task`, or `date`.
+`--ask` filters the recorded request correlation and can be combined with an
+assistant filter. It does not create a separate ledger. Model groups retain
+provider and profile identity. Stages are `assistant_processing`, `task_execution`,
+`assistant_result`, `compaction`, or `unknown` for unattributed history.
+
+Prices come automatically from the local models.dev directory: an exact supplier
+quote takes precedence, then an identifiable model's original provider is used.
+Provider identity uses the saved gateway directory binding, never its display name.
+Unknown or ambiguous model IDs remain unpriced; bare family names such as `opus`
+do not select a version. Complete Claude version IDs accept directory punctuation
+variants such as `claude-opus-4.6` and `claude-opus-4-6` when unique.
+
+No separate price file is required. The bundled directory supplies offline prices;
+the existing daily refresh retains the last valid cache on failure. `--details`
+shows supplier/origin matching; `--details --json` includes the frozen source,
+directory provider/model, cost-version hash, catalog timestamp, rates and tiers.
+Refreshes affect new reservations only, never existing request prices.
+
+USD estimates include cached input reads/writes and context tiers selected from
+actual normalized input tokens (strictly above the tier threshold). Missing usage
+needed for a different cache rate remains unknown. Unsupported dimensions, such as
+separately priced reasoning, audio or unknown tier types, retain an unpriced status
+and explanation rather than applying a base price. These are catalog estimates,
+not invoices or subscription allocations. Origin fallback may differ from the
+actual third-party supplier's contract.
+
+
 
 These commands use the authenticated private Runtime socket. Operator query
 routes are not published by the browser service. Other everyday commands select

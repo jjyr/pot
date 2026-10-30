@@ -13,6 +13,7 @@ import (
 )
 
 type experimentOptions struct {
+	Request, GroupBy                                             string
 	Model, Effort, TaskModel, TaskEffort, Provider, TaskProvider string
 	Command                                                      string
 	Root                                                         string
@@ -74,6 +75,10 @@ func parseExperimentOptions(args []string, in io.Reader) (experimentOptions, err
 			case "task-provider":
 				opts.TaskProvider = val
 			}
+		case "ask":
+			opts.Request = val
+		case "group-by":
+			opts.GroupBy = val
 		case "root":
 			opts.Root = val
 		case "assistant":
@@ -104,7 +109,7 @@ func parseExperimentOptions(args []string, in io.Reader) (experimentOptions, err
 
 	isValueFlag := func(name string) bool {
 		switch name {
-		case "root", "assistant", "task", "turn", "from", "to", "timezone", "offset", "model", "effort", "task-model", "task-effort", "provider", "task-provider":
+		case "ask", "group-by", "root", "assistant", "task", "turn", "from", "to", "timezone", "offset", "model", "effort", "task-model", "task-effort", "provider", "task-provider":
 			return true
 		}
 		return false
@@ -181,7 +186,7 @@ func parseExperimentOptions(args []string, in io.Reader) (experimentOptions, err
 	}
 
 	if isAsk {
-		for _, flag := range []string{"task", "turn", "from", "to", "timezone"} {
+		for _, flag := range []string{"ask", "group-by", "task", "turn", "from", "to", "timezone"} {
 			if seen[flag] {
 				return opts, fmt.Errorf("--%s is only valid for usage", flag)
 			}
@@ -193,7 +198,7 @@ func parseExperimentOptions(args []string, in io.Reader) (experimentOptions, err
 			return opts, fmt.Errorf("--offset is only valid for usage")
 		}
 	} else {
-		for _, flag := range []string{"model", "effort", "task-model", "task-effort", "provider", "task-provider"} {
+		for _, flag := range []string{"effort", "task-model", "task-effort", "task-provider"} {
 			if seen[flag] {
 				return opts, fmt.Errorf("--%s is only valid for ask", flag)
 			}
@@ -208,6 +213,14 @@ func parseExperimentOptions(args []string, in io.Reader) (experimentOptions, err
 		}
 	}
 
+	switch opts.GroupBy {
+	case "", "model", "stage", "assistant", "task", "date":
+	default:
+		return opts, fmt.Errorf("invalid --group-by")
+	}
+	if opts.Request != "" && !core.Identifier(opts.Request) {
+		return opts, fmt.Errorf("invalid --ask")
+	}
 	if opts.Assistant != "" && opts.Task != "" {
 		return opts, fmt.Errorf("--assistant and --task are mutually exclusive")
 	}

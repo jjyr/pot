@@ -74,7 +74,7 @@ It is not permission to fold future released histories.
 | `runner` | Retired `runner.sqlite` | Inactive local-run import format; old pre-reset files remain unsupported |
 | `conversation` | Each conversation database | Messages, context, configuration, steering and pending instruction-file exports |
 | `machines` | `machines.sqlite` | Autonomous signing identity, labels and archived membership records |
-| `usage` | `usage.sqlite` | Requests, routing, allowances, tools and compactions |
+| `usage` | `usage.sqlite` | Requests, routing, accounting/price snapshots, allowances, tools and compactions |
 | `operations` | `operations.sqlite` | Operation receipts and scope/input bindings |
 
 Kind is explicit, independent of filenames. Services sharing a file must select

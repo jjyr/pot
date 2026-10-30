@@ -8,6 +8,7 @@ import (
 	"github.com/jjyr/pot/internal/nodeidentity"
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/tasks"
+	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/modelprotocol"
@@ -298,7 +299,14 @@ func (s *Service) prepareTask(ctx context.Context, r tasks.Run) (tasks.Prepared,
 	}
 	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: l.TaskID, Turn: l.RunID, Generation: l.Generation, DefaultTarget: l.ExecutionTarget, ApprovalOwner: l.AssistantID, Task: l.TaskID, Spec: config, Usage: s.Usage, UsageScope: l.TaskID, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Credentials: s, Product: s.productDispatchBound(l.AssistantID, l.TaskID, l.RunID, l.Generation, true)}
 	feedback := &taskFeedback{s: s, launch: l}
-	model := &ModelSession{Registry: s.Providers, Usage: s.Usage, Spec: config, Scope: l.TaskID, Turn: l.RunID, Generation: l.Generation, Role: "task", Claim: feedback.claimModel}
+	root, err := s.taskExperimentRoot(ctx, l.AssistantID, l.TaskID)
+	if err != nil {
+		return tasks.Prepared{}, err
+	}
+	if l.InputID != "" {
+		root = ""
+	}
+	model := &ModelSession{Directory: s.Profiles.directory, Attribution: usage.Attribution{Assistant: l.AssistantID, Task: l.TaskID, Request: root, Stage: "task_execution"}, Registry: s.Providers, Usage: s.Usage, Spec: config, Scope: l.TaskID, Turn: l.RunID, Generation: l.Generation, Role: "task", Claim: feedback.claimModel}
 	ports := &executionPorts{model: model, compaction: func(ctx context.Context, raw json.RawMessage) error {
 		return s.taskCompaction(ctx, l.TaskID, l.RunID, raw)
 	}}

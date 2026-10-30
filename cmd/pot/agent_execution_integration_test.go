@@ -28,7 +28,7 @@ func TestAskUsesRealSocketStatusAndConversationSubscriptions(t *testing.T) {
 	defer os.RemoveAll(root)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"socket reply\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"socket reply\"},\"finish_reason\":\"stop\"}]}\n\ndata: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"prompt_tokens_details\":{\"cached_tokens\":30}}}\n\ndata: [DONE]\n\n")
 	}))
 	defer provider.Close()
 	manager, _ := execution.New("local", "boot", execution.DefaultLimits())
@@ -42,7 +42,7 @@ func TestAskUsesRealSocketStatusAndConversationSubscriptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, err := service.Profiles.Save(ctx, control.SaveProfile{RequestID: "profile", ProfileID: "profile", Name: "Fixture", Model: "model", Endpoint: provider.URL, Protocol: "openai_chat", APIKey: "fixture", MaxOutputTokens: 100})
+	profile, err := service.Profiles.Save(ctx, control.SaveProfile{RequestID: "profile", ProfileID: "profile", Name: "Fixture", Model: "gpt-4.1", Endpoint: provider.URL, Protocol: "openai_chat", APIKey: "fixture", MaxOutputTokens: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,4 +73,16 @@ func TestAskUsesRealSocketStatusAndConversationSubscriptions(t *testing.T) {
 	if result.State != "completed" || !result.Terminal || result.ConversationCursor == 0 || len(result.Messages) != 1 || result.Messages[0].Text != "socket reply" {
 		t.Fatalf("%+v", result)
 	}
+	out.Reset()
+	if err = experimentCommand(ctx, []string{"usage", "--root", root, "--assistant", owner.ID, "--ask", result.RequestID, "--group-by", "model", "--details", "--json"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var report control.ExperimentUsage
+	if err = json.Unmarshal(out.Bytes(), &report); err != nil || report.Accounting.Total.Requests != 1 || report.Accounting.Total.USD != "0.000315000000000" || !report.Accounting.Total.Complete || len(report.Accounting.Records) != 1 {
+		t.Fatalf("%s %v", out.String(), err)
+	}
+	if report.Accounting.Records[0].Price.Source != "models.dev" || report.Accounting.Records[0].Price.Match != "origin_fallback" {
+		t.Fatal(report.Accounting.Records)
+	}
+
 }

@@ -5,10 +5,11 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import subprocess
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 DESTINATION = ROOT / "resources/model-directory.json"
-FIELDS = ("name", "limit", "modalities", "tool_call", "provider", "status", "type")
+FIELDS = ("name", "limit", "modalities", "tool_call", "provider", "status", "type", "cost")
 LOGOS = (
     "openai",
     "anthropic",
@@ -63,7 +64,13 @@ def main():
     logos = previous.get("logos", {})
     with ThreadPoolExecutor(max_workers=8) as pool:
         logos.update({key: value for key, value in pool.map(logo, LOGOS) if value})
-    snapshot = {"providers": providers, "logos": logos, "etag": None}
+    snapshot = {
+        "providers": providers,
+        "logos": logos,
+        "etag": None,
+        "pricing_version": 1,
+        "updated_at": int(time.time() * 1000),
+    }
     temporary = DESTINATION.with_suffix(".tmp")
     temporary.write_text(json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")) + "\n")
     temporary.replace(DESTINATION)
