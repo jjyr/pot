@@ -1137,3 +1137,12 @@ button.communication-task-endpoint:focus-visible{outline:2px solid var(--primary
 .message-pending[hidden] { display:none; }
 
 .assistant-model-section{min-width:0}.model-parameters>h4{font-size:14px;margin:20px 0 14px;font-weight:500}
+
+.model-picker { position:relative; min-width:0; width:100%; }
+.model-picker > input.control { width:100%; min-width:0; padding-right:36px; }
+.model-picker-toggle { position:absolute; right:1px; top:1px; bottom:1px; width:32px; border:0; border-radius:var(--radius); background:transparent; color:var(--muted); cursor:pointer; }
+.model-picker-toggle:disabled { cursor:default; opacity:.5; }
+.model-picker-toggle:focus-visible { outline:2px solid var(--primary); outline-offset:-3px; }
+.model-options { position:absolute; z-index:40; top:calc(100% + 4px); left:0; right:0; max-height:240px; overflow:auto; border:1px solid var(--input-border); border-radius:var(--radius); background:var(--surface); color:var(--text); box-shadow:0 4px 16px #0002; }
+.model-options [role=option] { padding:8px 10px; overflow-wrap:anywhere; cursor:pointer; }
+.model-options [role=option]:hover,.model-options [aria-selected=true] { background:var(--secondary); }
