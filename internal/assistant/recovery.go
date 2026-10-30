@@ -14,6 +14,7 @@ import (
 // RecoveryState is an internal service snapshot, never a client-supplied proof.
 // Its digest fences a decision against an exact original checkpoint and turn.
 type RecoveryState struct {
+	BaseSpecHash     string
 	RequestID        string
 	UserMessageID    string
 	Generation       uint64
@@ -48,7 +49,14 @@ func (c *Conversation) Recovery(ctx context.Context) (*RecoveryState, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &RecoveryState{RequestID: c.recovery.Request.RequestID, UserMessageID: c.recovery.UserMessageID, Generation: c.recovery.Generation, BootID: c.recovery.BootID, CheckpointHash: hash, Context: raw, Config: c.thread.Config, CleanupConfirmed: exists && proof == cleanupProof(c.recovery)}, nil
+	config := c.thread.Config
+	if c.options.ResolveTurnConfig != nil {
+		config, err = c.options.ResolveTurnConfig(ctx, c.recovery.Request.RequestID, config)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &RecoveryState{BaseSpecHash: c.thread.Config.SpecHash, RequestID: c.recovery.Request.RequestID, UserMessageID: c.recovery.UserMessageID, Generation: c.recovery.Generation, BootID: c.recovery.BootID, CheckpointHash: hash, Context: raw, Config: config, CleanupConfirmed: exists && proof == cleanupProof(c.recovery)}, nil
 }
 func cleanupProof(turn *savedTurn) string {
 	raw, _ := json.Marshal([]any{turn.Owner, turn.Request.RequestID, turn.Generation, turn.BootID})
@@ -72,7 +80,7 @@ func (c *Conversation) ReconcileRecovery(ctx context.Context, state RecoveryStat
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed || !c.blocked || c.turn != nil || c.recovery == nil || c.thread == nil || c.recovery.Request.RequestID != state.RequestID || c.recovery.UserMessageID != state.UserMessageID || c.recovery.Generation != state.Generation || c.recovery.BootID != state.BootID || c.thread.Generation != state.Generation || c.thread.Config.SpecHash != state.Config.SpecHash {
+	if c.closed || !c.blocked || c.turn != nil || c.recovery == nil || c.thread == nil || c.recovery.Request.RequestID != state.RequestID || c.recovery.UserMessageID != state.UserMessageID || c.recovery.Generation != state.Generation || c.recovery.BootID != state.BootID || c.thread.Generation != state.Generation || c.thread.Config.SpecHash != state.BaseSpecHash {
 		return errors.New("original conversation recovery identity changed")
 	}
 	raw, err := c.store.LoadContext(ctx)

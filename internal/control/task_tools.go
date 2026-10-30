@@ -92,6 +92,11 @@ func (s *Service) productDispatchBound(owner, executionOwner, turn string, gener
 			if call.Name == "set_task_dispositions" && owner != executionOwner {
 				return nil, errors.New("task disposition requires the owning assistant")
 			}
+			if call.Name == "create_task" {
+				if err := s.bindExperimentTask(ctx, owner, turn, id); err != nil {
+					return nil, err
+				}
+			}
 			result, err := s.productCall(ctx, owner, id, call.Name, call.Arguments)
 			if err != nil {
 				return nil, err

@@ -52,7 +52,7 @@ type Breakdown struct {
 }
 
 func Bounds(q Query, atMS int64) (start, stop int64, first, last string, err error) {
-	if q.Offset < 0 || q.Offset > 1000000 || len(q.Scope) > 128 {
+	if q.Offset < 0 || q.Offset > 1000000 || len(q.Scope) > 128 || len(q.Turn) > 128 {
 		return 0, 0, "", "", fmt.Errorf("invalid usage query")
 	}
 	if q.Timezone == "" {
@@ -123,9 +123,9 @@ func stageTotals(ctx context.Context, db queryDB, q Query, start, stop int64) ([
 COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),COUNT(*),
 MIN(r.input IS NOT NULL),MIN(r.output IS NOT NULL),MIN(r.input IS NOT NULL AND r.cache_reported=1)
 FROM requests r LEFT JOIN request_routes rt ON rt.request_id=r.id
-WHERE (?='' OR r.scope=?) AND r.at>=? AND r.at<? AND r.state<>'rejected'
+WHERE (?='' OR r.scope=?) AND r.at>=? AND r.at<? AND r.state<>'rejected' AND (?='' OR r.turn_id=?)
 GROUP BY `+agentRoleExpr+`,`+stageExpr+` ORDER BY 1,2`,
-		q.Scope, q.Scope, start, stop)
+		q.Scope, q.Scope, start, stop, q.Turn, q.Turn)
 	if err != nil {
 		return nil, err
 	}
@@ -147,18 +147,18 @@ const toolAggregateColumns = `COUNT(*),COALESCE(SUM(failed),0),
  COALESCE(SUM(argument_bytes),0),COALESCE(SUM(bytes),0),
  COALESCE(SUM(call_estimated_tokens),0),COALESCE(SUM(result_estimated_tokens),0),
  COALESCE(MIN(call_estimated_tokens IS NOT NULL),0),COALESCE(MIN(result_estimated_tokens IS NOT NULL),0)`
-const toolAggregateFilter = ` FROM tools WHERE (?='' OR scope=?) AND at>=? AND at<?`
+const toolAggregateFilter = ` FROM tools WHERE (?='' OR scope=?) AND at>=? AND at<? AND (?='' OR turn_id=?)`
 
 func toolAggregateDest(v *ActivityTools) []any {
 	return []any{&v.Calls, &v.Failed, &v.Unfinished, &v.DurationMS, &v.ArgumentBytes, &v.ResultBytes, &v.CallEstimatedTokens, &v.ResultEstimatedTokens, &v.CallsKnown, &v.ResultsKnown}
 }
 func activityTools(ctx context.Context, db queryDB, q Query, start, stop int64) (ActivityTools, error) {
 	var v ActivityTools
-	err := db.QueryRowContext(ctx, "SELECT "+toolAggregateColumns+toolAggregateFilter, q.Scope, q.Scope, start, stop).Scan(toolAggregateDest(&v)...)
+	err := db.QueryRowContext(ctx, "SELECT "+toolAggregateColumns+toolAggregateFilter, q.Scope, q.Scope, start, stop, q.Turn, q.Turn).Scan(toolAggregateDest(&v)...)
 	return v, err
 }
 func toolEstimateGroups(ctx context.Context, db queryDB, q Query, start, stop int64) ([]ToolEstimateGroup, error) {
-	rows, err := db.QueryContext(ctx, "SELECT name,agent,"+toolAggregateColumns+toolAggregateFilter+` GROUP BY name,agent ORDER BY COALESCE(SUM(call_estimated_tokens),0)+COALESCE(SUM(result_estimated_tokens),0) DESC,name,agent`, q.Scope, q.Scope, start, stop)
+	rows, err := db.QueryContext(ctx, "SELECT name,agent,"+toolAggregateColumns+toolAggregateFilter+` GROUP BY name,agent ORDER BY COALESCE(SUM(call_estimated_tokens),0)+COALESCE(SUM(result_estimated_tokens),0) DESC,name,agent`, q.Scope, q.Scope, start, stop, q.Turn, q.Turn)
 	if err != nil {
 		return nil, err
 	}

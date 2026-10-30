@@ -49,6 +49,54 @@ On disconnect, pending calls are rejected. Sent calls have unknown outcomes; cal
 
 Subscription ACK and heartbeat do not imply business readiness; a valid initial snapshot or change map is required. In production, persisted projections await IndexedDB commit before being treated as ready; preview has no IndexedDB.
 
+## Agent execution status
+
+Private operator clients can subscribe to
+`/api/v1/execution-status?assistant_id=OWNER&request_id=REQUEST` on the existing
+socket. This is a request-scoped execution tree projection, not an assistant's
+lifetime state. The event name is `execution_status`; its payload is
+`protocol.AgentExecutionStatus`:
+
+```json
+{
+  "boot_id": "BOOT",
+  "conversation_id": "OWNER",
+  "conversation_cursor": 42,
+  "assistant_id": "OWNER",
+  "request_id": "REQUEST",
+  "message_id": "INPUT",
+  "state": "running",
+  "terminal": false,
+  "reply_ids": ["REPLY"],
+  "turns": ["REQUEST"],
+  "assistant": {"id": "OWNER", "state": "completed", "active_tools": []},
+  "tasks": [{"id": "TASK", "run_id": "RUN", "state": "running", "active_tools": ["exec_command"]}]
+}
+```
+
+The ACK precedes an initial full snapshot. Committed conversation, Task, mailbox,
+approval and tool-state changes trigger coalesced snapshots; identical content is
+suppressed, including cursor-only changes from token output. Tool arguments,
+tool output, reply bodies and token usage are absent. Replies stay on the existing
+conversation subscription. `reply_ids` lists completed nonempty replies in
+conversation order; `turns` includes related result-handling turns. Task states
+retain the existing Task phase names, with pause/remote-wait overlays.
+
+Aggregate `completed`, `failed`, `cancelled` and `interrupted` are terminal.
+Waiting, approval, pause and unknown states are nonterminal. A terminal snapshot
+does **not** close the subscription or generate an `end` frame. Consumers choose
+whether to wait through blocked states and when to unsubscribe. `end` concerns
+subscription availability or errors only; it is never proof of execution success.
+
+A consumer waiting for all replies must match `boot_id` and `conversation_id`,
+wait until its conversation cursor is at least `conversation_cursor`, and obtain
+all `reply_ids`. A bounded conversation reset can omit older replies; use the
+existing history resource's `around` selector to hydrate those IDs. A cursor from
+another boot cannot satisfy the barrier. Event IDs are boot/sequence markers
+within a subscription, not replay cursors. Reconnection starts with fresh
+snapshots. The CLI subscribes to both streams on one socket and unsubscribes
+before disconnecting after its exit policy is satisfied.
+
 ## Scope Boundaries
 
 - Browser UI JSON HTTP business endpoints are removed. HTTP remains for auth (login/status/logout), binaries, and static assets.

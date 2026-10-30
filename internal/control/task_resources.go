@@ -28,7 +28,13 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 		return tasks.Selection{}, err
 	}
 	var spec core.ResolvedSpec
-	if r.Profile != nil || r.Model != nil {
+	forced, err := s.experimentTaskConfig(ctx, owner, r.RequestID)
+	if err != nil {
+		return tasks.Selection{}, err
+	}
+	if forced != nil {
+		spec = *forced
+	} else if r.Profile != nil || r.Model != nil {
 		thread, err := c.Thread(ctx)
 		if err != nil || thread == nil {
 			return tasks.Selection{}, errors.New("assistant model is not configured")

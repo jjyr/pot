@@ -80,7 +80,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		switch args[0] {
 		case "access":
 			return accessCommand(ctx, args[1:], output)
-		case "chat", "tasks", "config", "doctor", "open", "service":
+		case "ask", "usage", "tasks", "config", "doctor", "open", "service":
 			return userCommand(ctx, args, output)
 		}
 	}
@@ -99,7 +99,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		return err
 	}
 	if len(args) == 0 || args[0] != "preview" {
-		return errors.New("usage: pot init|serve|status|api [-root PATH]; pot preview [-port 17702]")
+		return errors.New("usage: pot ask TEXT | usage [--assistant ID | --task ID]; pot init|serve|status|api [-root PATH]; pot preview [-port 17702]")
 	}
 	flags := flag.NewFlagSet("preview", flag.ContinueOnError)
 	flags.SetOutput(output)

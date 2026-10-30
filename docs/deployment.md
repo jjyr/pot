@@ -186,7 +186,7 @@ accepted at creation, and terminal bytes are never stored in product databases,
 transcripts or usage records.
 
 ```sh
-pot chat -root "$HOME/.pot-control" "Investigate the build"
+pot ask -root "$HOME/.pot-control" "Investigate the build"
 pot tasks list -root "$HOME/.pot-control"
 pot tasks show TASK-ID -root "$HOME/.pot-control"
 pot tasks interrupt TASK-ID -root "$HOME/.pot-control"
@@ -195,8 +195,80 @@ pot doctor -root "$HOME/.pot-control"
 pot config get agent -root "$HOME/.pot-control"
 ```
 
-These commands select the first active local assistant by default. Use
-`-assistant ASSISTANT-ID` to select a specific assistant from the node's directory.
+`pot ask` submits to an existing local assistant using the same conversation,
+configuration and task delegation as the Web UI. It connects to the running
+instance; it does not start a separate agent. With exactly one local assistant,
+selection is automatic; otherwise pass `--assistant ID`. Existing conversation
+context is retained. Each invocation submits a new message (queued if busy).
+`pot ask -` reads a prompt from stdin; `--no-wait` returns the acceptance IDs.
+The default waits for the assistant, associated tasks and their result handling.
+Replies go to stdout; identities and progress go to stderr. `--json` emits one
+structured result. Approval, pause, failure and uncertain states return a nonzero
+exit status. Ctrl-C stops waiting without cancelling submitted work.
+Execution progress and conversation replies arrive as two subscriptions on one
+`pot.v1` WebSocket, without periodic status queries. `ask` waits for the
+conversation stream to reach the execution snapshot's boot/cursor and for all
+referenced replies before unsubscribing. Reconnects obtain fresh snapshots;
+omitted replies in a bounded history window are loaded through the history
+resource. Replies are deduplicated by message ID. Transport reconnection is
+bounded to three retries and never resubmits the prompt. Use `pot usage` for
+model, task and background-result usage.
+
+Model overrides are request-local:
+
+```sh
+pot ask "Investigate the build" --model MAIN-MODEL --effort high \
+  --task-model TASK-MODEL --task-effort low
+```
+
+The four flags are independent; omitted values inherit the saved assistant or
+task-default configuration. Use `--provider ID` and `--task-provider ID` to
+select another configured Provider (the profile ID used by assistant settings);
+otherwise the respective existing Provider is used. With only a Provider
+override, its default model is selected. `--effort default` or
+`--task-effort default` clears the inherited effort and leaves it to the
+Provider. Other accepted effort names are `none`, `minimal`, `low`, `medium`,
+`high`, `xhigh`, and `max`; support depends on the model/Provider. Pot validates
+configuration and protocol before accepting the message. The local model
+directory does not enumerate per-model effort support; any further Provider
+rejection is reported without silently substituting settings.
+
+The assistant's frozen configuration also applies when it processes results
+from tasks created by this request, including replacement tasks after retries.
+Explicit task overrides fix the task model/effort selection and take precedence
+over the assistant's tool arguments. They require local task execution; remote
+targets are rejected when these overrides cannot be applied. Existing unrelated
+tasks are not reconfigured. Saved assistant and Provider settings remain unchanged.
+Experiment snapshots and task associations persist in `tasks.sqlite`.
+Queued inputs and result batches with different experiment identities execute
+separately so that one experiment cannot select another request's model.
+
+
+```sh
+pot ask --assistant ASSISTANT-ID "Investigate the build"
+printf '%s' "Investigate the build" | pot ask --assistant ASSISTANT-ID - --json
+pot usage
+pot usage --assistant ASSISTANT-ID --from 2026-10-01 --to 2026-10-31
+pot usage --task TASK-ID --details
+pot usage --assistant ASSISTANT-ID --turn REQUEST-ID --json
+```
+
+`pot usage` defaults to today's global local-ledger usage in Asia/Shanghai.
+`--from` and `--to` are inclusive dates and must be supplied together;
+`--timezone` selects their time zone. Assistant and task filters are mutually
+exclusive; assistant scope excludes child task model usage. `--turn` requires
+one of these scopes. Actual model tokens, per-tool content estimates, and
+communication counts/content estimates are separate; estimates must not be added
+to actual usage. Missing measurements remain unknown. Remote execution usage
+is unavailable locally. Communication records have no precise turn attribution
+and are omitted for a turn filter. `--details` adds individual tool calls and
+messages, each paginated by 20 with independent next offsets; pass
+`--offset N` to continue. `--json` preserves the structured statistics.
+
+These commands use the authenticated private Runtime socket. Operator query
+routes are not published by the browser service. Other everyday commands select
+the first active local assistant by default; use `-assistant ASSISTANT-ID` to
+select a specific assistant.
 
 Configuration sections are `providers`, `agent`, `routing`, `usage-policy` and
 `instructions`. `config set SECTION JSON_FILE` uses the same revision checks as

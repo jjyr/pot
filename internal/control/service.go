@@ -239,6 +239,10 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 	options := assistant.ConversationOptions{ReplyCommitted: func(m protocol.Message) { s.publishReply(id, m) }, InitialWelcome: welcome, InitialIntent: intent, Context: s.ctx, Owner: id, RuntimeID: s.options.RuntimeID, BootID: s.options.BootID, Manager: s.options.Manager, InitialSpec: initial, InitialRules: rules, RefreshConfiguration: s.refreshAssistantConfiguration, OnFinished: func(ctx context.Context, r protocol.SendMessage, result execution.Result) error {
 		return s.finishAgentDelivery(ctx, id, r, result)
 	}}
+	options.ResolveTurnConfig = func(ctx context.Context, request string, base core.ResolvedSpec) (core.ResolvedSpec, error) {
+		return s.experimentTurnConfig(ctx, id, request, base)
+	}
+	options.BatchKey = func(ctx context.Context, request string) (string, error) { return s.experimentRoot(ctx, id, request) }
 	options.IdlePolicy = s.idleCompactPolicy
 	options.OnResumeStarting = func(ctx context.Context, request protocol.SendMessage) error {
 		if !strings.HasPrefix(request.RequestID, "pot-result-") {

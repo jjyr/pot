@@ -36,10 +36,13 @@ type RunOptions struct {
 	Settle             func(context.Context) error
 }
 type ConversationOptions struct {
-	ReplyCommitted func(protocol.Message)
-	ProjectUI      func(context.Context, []protocol.UIMessage) error
-	IdlePolicy     func(context.Context, core.Thread) (IdleCompactionPolicy, error)
-	CompactGate    func(context.Context, func() error) error
+	// Request-local configuration and batching; callbacks must not reenter this conversation.
+	ResolveTurnConfig func(context.Context, string, core.ResolvedSpec) (core.ResolvedSpec, error)
+	BatchKey          func(context.Context, string) (string, error)
+	ReplyCommitted    func(protocol.Message)
+	ProjectUI         func(context.Context, []protocol.UIMessage) error
+	IdlePolicy        func(context.Context, core.Thread) (IdleCompactionPolicy, error)
+	CompactGate       func(context.Context, func() error) error
 
 	Context                                  context.Context
 	Owner, ConversationID, RuntimeID, BootID string
@@ -936,6 +939,15 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 		return execution.Result{Phase: execution.Failed, Err: loadErr}
 	}
 	thread := *threadPointer
+	baseSpecHash := thread.Config.SpecHash
+	if c.options.ResolveTurnConfig != nil {
+		var err error
+		thread.Config, err = c.options.ResolveTurnConfig(ctx, request.RequestID, thread.Config)
+		if err != nil {
+			c.mu.Unlock()
+			return execution.Result{Phase: execution.Failed, Err: err}
+		}
+	}
 	resuming := c.turn.Resuming
 	// Resume admission has already verified the original checkpoint and cleanup.
 	// Restore its receiver claim before any resumed model or tool can run,
@@ -965,7 +977,7 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 	if strings.HasPrefix(request.RequestID, "pot-result-") {
 		options.Execution.Role = core.Summary
 	}
-	binding := &turnFeedback{conversation: c, thread: thread, request: request, options: options, gate: core.NewEventGate(thread.Generation, request.RequestID), toolMessages: map[string]string{}}
+	binding := &turnFeedback{baseSpecHash: baseSpecHash, conversation: c, thread: thread, request: request, options: options, gate: core.NewEventGate(thread.Generation, request.RequestID), toolMessages: map[string]string{}}
 	cleanup := func(ctx context.Context, execution core.ExecutionContext, abort bool) error {
 		if err := options.Cleanup(ctx, execution, abort); err != nil {
 			return err

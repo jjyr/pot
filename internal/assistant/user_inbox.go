@@ -84,6 +84,14 @@ func (c *Conversation) startNextUserLocked(ctx context.Context) error {
 // anchor request remains the execution identity; individual receipts stay intact.
 func (c *Conversation) aggregateUsersLocked(ctx context.Context) error {
 	next := *c.turn
+	batchKey := ""
+	if c.options.BatchKey != nil {
+		var err error
+		batchKey, err = c.options.BatchKey(ctx, next.Request.RequestID)
+		if err != nil {
+			return err
+		}
+	}
 	next.Inputs = append([]protocol.SendMessage(nil), c.turn.Inputs...)
 	next.UserMessages = append([]string(nil), c.turn.UserMessages...)
 	if len(next.Inputs) == 0 {
@@ -120,6 +128,16 @@ func (c *Conversation) aggregateUsersLocked(ctx context.Context) error {
 			return errors.New("queued user identity changed")
 		}
 		if item.message != next.UserMessageID {
+			if c.options.BatchKey != nil {
+				key, e := c.options.BatchKey(ctx, item.request.RequestID)
+				if e != nil {
+					rows.Close()
+					return e
+				}
+				if key != batchKey {
+					break
+				}
+			}
 			if len(item.request.Attachments) > 0 || len(next.Request.Attachments) > 0 {
 				break
 			}

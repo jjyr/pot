@@ -18,7 +18,7 @@ func (app *Application) Stream(ctx context.Context, path string, receive func(lo
 		return protocol.APIError{Code: "not_found", Message: "stream not found"}
 	}
 	switch u.Path {
-	case "/api/v1/events", "/api/v1/changes", "/api/v1/lifecycle":
+	case "/api/v1/events", "/api/v1/changes", "/api/v1/lifecycle", "/api/v1/execution-status":
 	default:
 		return protocol.APIError{Code: "not_found", Message: "stream not found"}
 	}
@@ -29,6 +29,20 @@ func (app *Application) Stream(ctx context.Context, path string, receive func(lo
 		return protocol.APIError{Code: "control_unavailable", Message: "control unavailable"}
 	}
 	switch u.Path {
+	case "/api/v1/execution-status":
+		owner, request := u.Query().Get("assistant_id"), u.Query().Get("request_id")
+		if !core.Identifier(owner) || !core.Identifier(request) {
+			return protocol.APIError{Code: "invalid_request", Message: "execution subscription requires assistant_id and request_id"}
+		}
+		sequence := 0
+		return app.Control.StreamAgentExecution(ctx, owner, request, func(status protocol.AgentExecutionStatus) error {
+			sequence++
+			raw, err := json.Marshal(status)
+			if err != nil {
+				return err
+			}
+			return receive(localui.Event{Type: "execution_status", ID: app.BootID + ":" + strconv.Itoa(sequence), Data: raw})
+		})
 	case "/api/v1/events":
 		return app.streamConversationEvents(ctx, u, receive)
 	case "/api/v1/changes":

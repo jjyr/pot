@@ -15,6 +15,9 @@ import (
 )
 
 type turnFeedback struct {
+	// Fence against the saved assistant configuration; thread.Config may be a
+	// request-local execution snapshot.
+	baseSpecHash string
 	conversation *Conversation
 	thread       core.Thread
 	request      protocol.SendMessage
@@ -26,7 +29,11 @@ type turnFeedback struct {
 
 func (f *turnFeedback) checkLocked() error {
 	c := f.conversation
-	if c.turn == nil || c.thread == nil || c.turn.Owner != f.thread.Owner || c.turn.Generation != f.thread.Generation || c.thread.Config.SpecHash != f.thread.Config.SpecHash || c.turn.Request.RequestID != f.request.RequestID || c.turn.BootID != c.options.BootID {
+	base := f.baseSpecHash
+	if base == "" {
+		base = f.thread.Config.SpecHash
+	}
+	if c.turn == nil || c.thread == nil || c.turn.Owner != f.thread.Owner || c.turn.Generation != f.thread.Generation || c.thread.Config.SpecHash != base || c.turn.Request.RequestID != f.request.RequestID || c.turn.BootID != c.options.BootID {
 		return errors.New("stale assistant feedback binding")
 	}
 	return nil

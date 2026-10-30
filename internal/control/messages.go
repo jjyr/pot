@@ -150,7 +150,19 @@ func (s *Service) deliverNotifications(ctx context.Context, owner string) {
 	var ids []string
 	var payload []any
 	size := 2 // JSON array delimiters.
+	batchKey := ""
 	for _, notice := range notices {
+		key := ""
+		if notice.Result != nil {
+			key, err = s.taskExperimentRoot(ctx, owner, notice.Result.TaskID)
+			if err != nil {
+				return
+			}
+		}
+		if len(ids) > 0 && key != batchKey {
+			break
+		}
+		batchKey = key
 		var item any
 		switch notice.Kind {
 		case "task_result":

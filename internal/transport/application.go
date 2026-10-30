@@ -92,6 +92,9 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	if a.Maintenance != nil && a.Maintenance() && path != "/api/v1/runtime" && path != "/api/v1/control" {
 		return nil, protocol.APIError{Code: "update_maintenance"}
 	}
+	if result, err, handled := a.operatorExperimentCall(ctx, method, u, r); handled {
+		return result, err
+	}
 	if path == "/api/v1/about" && method == "GET" {
 		if a.About == nil {
 			return nil, errors.New("product information unavailable")

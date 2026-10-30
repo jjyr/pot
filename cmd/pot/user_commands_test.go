@@ -43,7 +43,7 @@ func TestUserCLIUsesAuthenticatedLocalRuntimeAndAssistantScope(t *testing.T) {
 	}
 	defer socket.Close(context.Background())
 	for _, explicit := range []bool{false, true} {
-		for _, command := range [][]string{{"doctor"}, {"tasks", "list"}, {"config", "get", "routing"}, {"config", "get", "agent"}} {
+		for _, command := range [][]string{{"usage", "--json"}, {"usage", "--details", "--json"}, {"doctor"}, {"tasks", "list"}, {"config", "get", "routing"}, {"config", "get", "agent"}} {
 			var out bytes.Buffer
 			args := append(append([]string{}, command...), "-root", root)
 			if explicit {

@@ -64,6 +64,26 @@ func (c *Conversation) Configuration(ctx context.Context) (ConfigurationState, e
 	}
 	return c.configurationViewLocked(value)
 }
+
+// NextConfiguration snapshots editable intent together with the configuration
+// which the next accepted turn will inherit, including a pending UI change.
+func (c *Conversation) NextConfiguration(ctx context.Context) (ConfigurationState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	state, err := c.configurationLocked(ctx)
+	if err != nil {
+		return ConfigurationState{}, err
+	}
+	view, err := c.configurationViewLocked(state)
+	if err != nil {
+		return view, err
+	}
+	if state.PendingSpec != nil {
+		view.Config = state.PendingSpec
+	}
+	return view, nil
+}
+
 func (c *Conversation) configurationReceiptLocked(ctx context.Context, id, hash string) (*ConfigurationState, error) {
 	var oldHash, body string
 	err := c.store.DB().QueryRowContext(ctx, "SELECT input_hash,response FROM assistant_configuration_requests WHERE id=?", id).Scan(&oldHash, &body)

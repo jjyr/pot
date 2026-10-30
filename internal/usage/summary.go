@@ -11,6 +11,7 @@ import (
 )
 
 type Query struct {
+	Turn     string `json:"turn"`
 	Days     int    `json:"days"`
 	Start    string `json:"start"`
 	End      string `json:"end"`

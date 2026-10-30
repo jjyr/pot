@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/serverconfig"
 	"github.com/jjyr/pot/internal/transport"
@@ -28,6 +27,9 @@ import (
 // userCommand keeps every effect in the authenticated Runtime APIs. A CLI
 // process never opens an independently writable product database.
 func userCommand(ctx context.Context, args []string, out io.Writer) error {
+	if len(args) > 0 && (args[0] == "ask" || args[0] == "usage") {
+		return experimentCommand(ctx, args, os.Stdin, out, os.Stderr)
+	}
 	root, owner := "", ""
 	positionals := []string{}
 	literal := false
@@ -73,29 +75,6 @@ func userCommand(ctx context.Context, args []string, out io.Writer) error {
 		return userAPI(ctx, root, owner, method, path, body)
 	}
 	switch args[0] {
-	case "chat":
-		if len(args) < 2 || strings.TrimSpace(strings.Join(args[1:], " ")) == "" {
-			return errors.New("usage: pot chat [-root PATH] [-assistant ID] TEXT")
-		}
-		if owner == "" {
-			data, err := api("GET", "/api/v1/assistants", nil)
-			if err != nil {
-				return err
-			}
-			var definitions []assistant.Definition
-			if err := json.Unmarshal(data, &definitions); err != nil {
-				return err
-			}
-			if len(definitions) == 0 {
-				return errors.New("assistant unavailable")
-			}
-			owner = definitions[0].ID
-		}
-		value, err := api("POST", "/api/v1/messages", protocol.SendMessage{RequestID: storage.ID(), ConversationID: owner, Text: strings.Join(args[1:], " ")})
-		if err != nil {
-			return err
-		}
-		return printUserJSON(out, value)
 	case "tasks":
 		if len(args) < 2 {
 			return errors.New("usage: pot tasks list|show ID|interrupt ID|cancel ID")

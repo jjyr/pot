@@ -45,6 +45,13 @@ func (s *Service) createTaskFrom(ctx context.Context, owner string, from protoco
 	if request.Target != nil {
 		target = *request.Target
 	}
+	forced, err := s.experimentTaskConfig(ctx, owner, request.RequestID)
+	if err != nil {
+		return protocol.TaskInfo{}, err
+	}
+	if forced != nil && target != self {
+		return protocol.TaskInfo{}, errors.New("experiment task model overrides require local execution")
+	}
 	r := agentlink.TaskRequest{Target: target, RequestID: request.RequestID, From: from, Text: request.Text, Workspace: request.Workspace.ProjectDir}
 	if target == self && from.Kind == "assistant" {
 		r.Configuration = &request
