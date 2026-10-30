@@ -12,6 +12,7 @@ import {createCommunication} from './communication.mjs';
 import {agentSource} from './connection-visuals.mjs';
 import {taskIdentities,addressKey} from '../state/task-identity.mjs';
 import {communicationParticipant} from './communication-participant.mjs';
+import {reconcile} from './reconcile.mjs';
 const n=(tag,cls='',text)=>{const node=document.createElement(tag);node.className=cls;if(text!==undefined)node.textContent=text;return node;};
 const pretty=value=>typeof value==='string'?value:JSON.stringify(value??null,null,2);
 const LIMIT=24000;
@@ -129,8 +130,9 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
       }else if(first){
         identities.push(communicationParticipant(first.from,{resolveIdentity:resolveMessageIdentity,locale}),n('span','work-message-direction','→'),communicationParticipant(first.to,{resolveIdentity:resolveMessageIdentity,locale}));
       }
-      target.replaceChildren(label,...identities);
-      if(model.count>1)target.append(n('span','work-message-count',t('messageCount').replace('{count}',model.count.toLocaleString(locale()))));
+      const next=target.cloneNode(false);next.append(label,...identities);
+      if(model.count>1)next.append(n('span','work-message-count',t('messageCount').replace('{count}',model.count.toLocaleString(locale()))));
+      reconcile(target,next);
       });
     }else if(script){preparedText(title,'tool-call:title',t('script'));excerpt.hidden=true;preparedText(excerpt,'tool-call:excerpt','');}
     title.title=title.textContent;

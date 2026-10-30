@@ -9,10 +9,10 @@ async (page,{origin=new URL(page.url()).origin,browser=page.context().browser()}
       mobile.on('pageerror',error=>errors.push(error.message));
       await mobile.route('**/directory-fixture*',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="stylesheet" href="/styles.css"><main id="app"></main></html>'}));
       await mobile.goto(origin+'/directory-fixture?conversation=alpha&locale=en&theme=light');
-      await mobile.evaluate(async()=>{
+      await mobile.evaluate(async(width)=>{
         document.documentElement.dataset.platform='browser';localStorage.setItem('pot-system-notifications-browser-v1','false');
         const {mountApp}=await import('/components/ui.js');
-        const f=window.directoryFixture={scope:{space:'local',owner:'alpha'},delay:0,long:false,frames:[],clicks:0,refreshes:0};let change;
+        const f=window.directoryFixture={scope:{space:'local',owner:'alpha'},delay:0,long:width===390,frames:[],clicks:0,refreshes:0};let change;
         const snapshot=()=>({kind:'reset',runtime_id:'directory-fixture',boot_id:'boot',owner_id:JSON.stringify(['local',f.scope.owner]),conversation_id:f.scope.owner,cursor:'1',running:false,turn_id:null,replies:[],messages:Array.from({length:f.long?80:2},(_,index)=>({id:'message-'+index,sequence:String(index+1),role:index%2?'assistant':'user',...(index%2?{reply_to:'message-'+(index-1)}:{}),text:'Synthetic conversation '+index+'. '+'Directory navigation retains this conversation. '.repeat(8),status:'complete'})),history:{before:'1',after:f.long?'80':'2',has_more:false,has_newer:false}});
         const client={production:true,chatCacheName:'directory-fixture-'+crypto.randomUUID(),runtime:{runtime_id:'directory-fixture',boot_id:'boot'},scope:()=>({...f.scope}),setScope:value=>Object.assign(f.scope,value),changes:callback=>{change=callback;return()=>{};},subscribe(receive,status){const timer=setTimeout(()=>{const value=snapshot();status('connected');receive(value);f.deliveredCount=value.messages.length;f.ready=true;},0);return()=>clearTimeout(timer);},async request(path){
           const name=new URL(path,location.href).pathname;
@@ -25,7 +25,7 @@ async (page,{origin=new URL(page.url()).origin,browser=page.context().browser()}
         f.measure=()=>{const directory=root.querySelector('.assistant-directory'),header=root.querySelector('.titlebar'),r=root.getBoundingClientRect(),d=directory.getBoundingClientRect(),s=getComputedStyle(root);return {edge:root.classList.contains('is-edge-back'),open:root.classList.contains('show-directory'),visible:getComputedStyle(directory).display!=='none',top:d.top,left:d.left,right:d.right,expectedTop:r.top+parseFloat(s.paddingTop)+header.getBoundingClientRect().height,expectedLeft:r.left+parseFloat(s.paddingLeft),expectedRight:r.right-parseFloat(s.paddingRight),scroll:root.querySelector('.assistant-list').scrollTop,search:root.querySelector('.assistant-search').value};};
         f.sample=()=>{f.frames=[];f.clicks=0;const tick=()=>{f.frames.push(f.measure());f.frame=requestAnimationFrame(tick);};f.frame=requestAnimationFrame(tick);};
         f.stop=()=>{cancelAnimationFrame(f.frame);return {frames:f.frames,clicks:f.clicks,final:f.measure()};};
-      });
+      },width);
       await mobile.waitForFunction(()=>directoryFixture.ready);
       const geometry=(frames,label)=>{
         assert(frames.length>0,label+': measured visible frames');

@@ -14,22 +14,41 @@ function coalesce(previous,next) {
 }
 
 export function createChatSync({cache,key,context=()=>({}),committed,failed,delay=16,host=globalThis}) {
-  let pending=[],flight=null,timer,closed=false;
+  let pending=[],flight=null,timer,closed=false,terminalError=null;
+  function terminate(reason){
+    terminalError=reason;closed=true;pending=[];host.clearTimeout(timer);timer=undefined;
+  }
+  function fail(reason){
+    pending=[];
+    if(closed)return;
+    let handled;
+    try{handled=failed(reason);}catch(error){terminate(error);return Promise.reject(error);}
+    return Promise.resolve(handled).catch(error=>{terminate(error);throw error;});
+  }
   function drain(){
+    if(terminalError)return Promise.reject(terminalError);
     host.clearTimeout(timer);timer=undefined;
     if(flight)return flight;
     if(!pending.length)return Promise.resolve();
     const frames=pending;pending=[];
-    flight=cache.writeFrames(key,frames,context()).then(snapshot=>{
+    flight=Promise.resolve().then(()=>cache.writeFrames(key,frames,context())).then(snapshot=>{
       if(snapshot&&!closed)return committed(snapshot,frames.flatMap(frame=>frame.messages));
-    },reason=>{pending=[];if(!closed)failed(reason);}).finally(()=>{flight=null;if(pending.length&&!closed)schedule();});
+    }).catch(reason=>{
+      if(terminalError)throw terminalError;
+      return fail(reason);
+    }).finally(()=>{flight=null;if(pending.length&&!closed)schedule();});
+    flight.catch(()=>{});
     return flight;
   }
   function schedule(){if(timer===undefined&&!flight)timer=host.setTimeout(drain,delay);}
-  async function flush(){host.clearTimeout(timer);timer=undefined;while(flight||pending.length)await drain();}
+  async function flush(){
+    if(terminalError)throw terminalError;
+    host.clearTimeout(timer);timer=undefined;
+    while(flight||pending.length){await drain();if(terminalError)throw terminalError;}
+  }
   return {
     push(frame){
-      if(closed)return;
+      if(closed||terminalError)return;
       const previous=pending.at(-1),merged=previous&&coalesce(previous,frame);
       if(merged)pending[pending.length-1]=merged;else pending.push(frame);
       // A reset supersedes pending older projections and invalidates their
@@ -37,12 +56,21 @@ export function createChatSync({cache,key,context=()=>({}),committed,failed,dela
       if(frame.kind==='reset')pending=[frame];
       const messages=pending.flatMap(value=>value.messages);
       if(messages.length>512||messages.reduce((bytes,message)=>bytes+messageBytes(message),0)>32*1024*1024){
-        closed=true;pending=[];host.clearTimeout(timer);failed(Error('chat_cache_backpressure'));return;
+        closed=true;pending=[];host.clearTimeout(timer);
+        let handled;
+        try{handled=failed(Error('chat_cache_backpressure'));}catch(error){terminate(error);return;}
+        Promise.resolve(handled).catch(error=>terminate(error));
+        return;
       }
       if(frame.replies.some(reply=>['completed','failed','cancelled','unknown'].includes(reply.state))||frame.messages.some(message=>message.status==='failed'))drain();else schedule();
     },
     flush,
     retire(){closed=true;return flush();},
-    close(){closed=true;host.clearTimeout(timer);pending=[];return flight||Promise.resolve();},
+    close(){
+      if(terminalError)return Promise.reject(terminalError);
+      closed=true;host.clearTimeout(timer);pending=[];
+      if(flight)return flight.then(()=>{if(terminalError)throw terminalError;});
+      return Promise.resolve();
+    },
   };
 }

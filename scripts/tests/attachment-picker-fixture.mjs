@@ -17,7 +17,7 @@ export async function attachmentPickerFixture(sourceOrigin,{durableReceipts=fals
   const url=new URL(req.url,'http://fixture'),p=url.pathname,name=/picker-case=([^;]+)/.exec(req.headers.cookie||'')?.[1]||'manual',s=get(name),owner=url.searchParams.get('assistant_id')||'alpha';
   let body;if(req.method==='POST'){let raw='';for await(const chunk of req)raw+=chunk;body=JSON.parse(raw||'{}');}
   if(p==='/fixture/control'){
-   for(const key of ['image','pdf','permission','holdInitial','holdSend','holdUploads','receipt','running','conversation','uploadFailure','continuation','messages','holdContinue','continueError','references','rejectSend','acceptSend','dropAfterAccept','dropBeforeAccept','receiptForbidden','hideAssistant'])if(key in body)s[key]=body[key];
+   for(const key of ['image','pdf','permission','holdInitial','holdSend','holdUploads','receipt','running','conversation','uploadFailure','continuation','messages','holdContinue','continueError','references','rejectSend','acceptSend','dropAfterAccept','dropBeforeAccept','receiptForbidden','hideAssistant','avatar'])if(key in body)s[key]=body[key];
    if(body.releaseContinue){s.releaseContinue?.();s.releaseContinue=null;}
    if(body.releaseSends)for(const entry of (s.heldSends||[]).splice(0)){json(entry.res,{message_id:entry.message_id,duplicate:entry.duplicate});s.trace.push({kind:'post-response',owner:entry.owner,request_id:entry.message_id,duplicate:entry.duplicate});}
    if(body.releaseUploads){for(const release of s.held.splice(0))release();}
@@ -68,7 +68,7 @@ export async function attachmentPickerFixture(sourceOrigin,{durableReceipts=fals
    if(s.holdUploads)await new Promise(resolve=>s.held.push(resolve));
    return json(res,item||{});
   }
-  if(p.startsWith('/api/'))return json(res,p==='/api/v1/runtime'?{runtime_id:'picker-control',boot_id:'picker-boot'}:p==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Synthetic Space',kind:'local',connected:true,control_id:'picker-control'}]}:p==='/api/v1/assistants'?['alpha','beta'].filter(id=>!s.hideAssistant||id!=='alpha').map(id=>({id,name:'Synthetic '+id,revision:s.revision,capabilities:s.permission?caps:{...caps,operations:['chat.read','chat.subscribe']}})):p==='/api/v1/assistants/bootstrap'?{assistant:null}:p==='/api/v1/snapshot'?frame(s,owner):p==='/api/v1/permissions'?{pending:[],policy:{machines:{}}}:{items:[],total:0,cursor:0,has_more:false});
+  if(p.startsWith('/api/'))return json(res,p==='/api/v1/runtime'?{runtime_id:'picker-control',boot_id:'picker-boot'}:p==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Synthetic Space',kind:'local',connected:true,control_id:'picker-control'}]}:p==='/api/v1/assistants'?['alpha','beta'].filter(id=>!s.hideAssistant||id!=='alpha').map(id=>({id,name:'Synthetic '+id,revision:s.revision,avatar:s.avatar,capabilities:s.permission?caps:{...caps,operations:['chat.read','chat.subscribe']}})):p==='/api/v1/assistants/bootstrap'?{assistant:null}:p==='/api/v1/snapshot'?frame(s,owner):p==='/api/v1/permissions'?{pending:[],policy:{machines:{}}}:{items:[],total:0,cursor:0,has_more:false});
   const response=await fetch(sourceOrigin+req.url);res.writeHead(response.status,Object.fromEntries(response.headers));Readable.fromWeb(response.body).pipe(res);
  }catch(error){json(res,{message:error.stack},500);}});
  const fixtureWS=await installFixtureWebSocket(server);

@@ -13,14 +13,18 @@ export function createInitialChatLayout({history, layout, position = ()=>{}, rea
   }
   function start(){
     cancel();
-    const run={frame:0,previous:null,expired:false};current=run;
+    const run={frame:0,previous:null,expired:false,kickQueued:false,checking:false};
+    current=run;
     const active=()=>current===run;
     const schedule=()=>{if(active()&&!run.frame)run.frame=view.requestAnimationFrame(check);};
     const pending=()=>[...history.querySelectorAll(resources)].filter(node=>node.getBoundingClientRect().height>0&&!node.closest('.initial-layout-slot,.prepared-frame')&&node.dataset.state==='loading');
     const geometry=()=>JSON.stringify([history.scrollTop,history.scrollHeight,history.clientWidth,history.clientHeight,
       ...[...history.querySelectorAll('article.message,[data-scroll-anchor]')].map(node=>{const box=node.getBoundingClientRect();return [node.dataset.scrollAnchor,box.top,box.height];})]);
-    function check(){
-      run.frame=0;if(!active()||!ready())return;
+    function measure(){
+      run.frame=0;
+      const firstMicrotaskCheck=run.previous===null&&run.kickQueued;
+      run.kickQueued=false;
+      if(!active()||!ready())return;
       layout();
       run.observer.takeRecords();
       if(!active())return;
@@ -46,6 +50,7 @@ export function createInitialChatLayout({history, layout, position = ()=>{}, rea
       position();
       layout();
       run.observer.takeRecords();
+      if(!active())return;
       if(!ready()){run.previous=null;return;}
       if(pending().length){run.previous=null;schedule();return;}
       const next=geometry();
@@ -53,10 +58,36 @@ export function createInitialChatLayout({history, layout, position = ()=>{}, rea
       // After the resource deadline, allow one final measured commit and expose
       // the current viewport; subsequent live changes use normal scroll intent.
       if(next!==run.previous&&(!run.expired||!run.deadlineMeasured)){
-        run.previous=next;run.deadlineMeasured=run.expired;schedule();return;
+        run.previous=next;run.deadlineMeasured=run.expired;
+        schedule();return;
+      }
+      if(firstMicrotaskCheck){
+        // The first microtask measurement must never reveal in the same frame;
+        // always require a fresh requestAnimationFrame verification pass.
+        schedule();return;
       }
       cancel();reveal();
     }
+    function check(){
+      if(!active()||run.checking)return;
+      run.checking=true;
+      try{measure();}finally{run.checking=false;}
+    }
+    run.kick=function(){
+      if(!active())return;
+      if(run.checking)return;
+      if(run.kickQueued)return;
+      if(run.previous!==null)return;
+      run.kickQueued=true;
+      view.queueMicrotask(()=>{
+        if(!active())return;
+        if(!run.kickQueued)return;
+        if(run.checking)return;
+        if(run.previous!==null)return;
+        if(run.frame){view.cancelAnimationFrame(run.frame);run.frame=0;}
+        check();
+      });
+    };
     run.observer=new MutationObserver(schedule);
     run.observer.observe(history,{subtree:true,childList:true,attributes:true,attributeFilter:['data-state','hidden','aria-busy']});
     run.resize=new ResizeObserver(schedule);run.resize.observe(history);
@@ -64,5 +95,13 @@ export function createInitialChatLayout({history, layout, position = ()=>{}, rea
     document.fonts?.ready.then(schedule);
     schedule();
   }
-  return {start,cancel,get pending(){return !!current;}};
+  function preparedCommit(){
+    const run=current;
+    if(!run)return;
+    if(run.previous!==null)return;
+    if(run.checking)return;
+    if(run.kickQueued)return;
+    run.kick();
+  }
+  return {start,cancel,preparedCommit,get pending(){return !!current;}};
 }

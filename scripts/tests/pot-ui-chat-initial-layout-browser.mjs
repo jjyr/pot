@@ -37,11 +37,26 @@ try{
   const geometry=()=>{const h=history();return JSON.stringify([h.scrollTop,h.scrollHeight,...[...h.querySelectorAll('article.message')].map(row=>[row.dataset.messageId,row.getBoundingClientRect().y,row.getBoundingClientRect().height])]);};
   const first=geometry();for(let i=0;i<12;i++)await frame();
   check(geometry()===first&&history().scrollHeight-history().clientHeight-history().scrollTop<2,'First visible history keeps its measured rows and final Latest offset');
-  await select('alpha');await wait(()=>pending(scope.owner).length===1);for(let i=0;i<4;i++)await frame();
+  // Repeat-selecting the same assistant must preserve the live DOM, article/image nodes and attachment lease without issuing new requests.
+  const repeatArticle=history().querySelector('article.message');
+  const repeatImage=history().querySelector('img');
+  const repeatResource=history().querySelector('pot-resource');
+  const repeatLease=leases.findLast(entry=>entry.owner===scope.owner&&entry.active);
+  const repeatReleaseCount=releases.length;const repeatPendingCount=pending(scope.owner).length;const repeatGeometry=geometry();
+  await select('alpha');for(let i=0;i<8;i++)await frame();
+  check(repeatArticle?.isConnected&&repeatImage?.isConnected&&repeatResource?.isConnected&&history().querySelector('article.message')===repeatArticle&&history().querySelector('img')===repeatImage&&history().querySelector('pot-resource')===repeatResource,'Repeat-selecting the same assistant preserves live article, image and resource nodes');
+  check(leases.findLast(entry=>entry.owner===scope.owner&&entry.active)===repeatLease&&repeatLease.active,'Repeat-selecting the same assistant keeps the same active attachment lease');
+  check(releases.length===repeatReleaseCount&&pending(scope.owner).length===repeatPendingCount&&visible(),'Repeat-selecting the same assistant issues no additional attachment requests or pending preparation');
+  check(geometry()===repeatGeometry,'Repeat-selecting the same assistant keeps visible history geometry stable');
+  await select('beta');await wait(()=>pending('beta').length===1);for(let i=0;i<4;i++)await frame();
   check(!visible(),'Returning through the directory prepares newly mounted historical images again');
+  await releaseVisible('beta');await wait(visible);
+  await select('alpha');await wait(()=>pending(scope.owner).length===1);for(let i=0;i<4;i++)await frame();
+  check(!visible(),'Coming back to alpha prepares its historical image again');
   await releaseVisible(scope.owner);await wait(visible);
   history().dispatchEvent(new WheelEvent('wheel',{deltaY:-300,bubbles:true}));history().scrollTop-=300;history().dispatchEvent(new Event('scroll'));for(let i=0;i<4;i++)await frame();
   const top=history().getBoundingClientRect().top,anchor=[...history().querySelectorAll('article.message')].find(row=>row.getBoundingClientRect().bottom>top),anchorID=anchor.dataset.messageId,anchorY=anchor.getBoundingClientRect().y;
+  await select('beta');await wait(()=>pending('beta').length===1);await releaseVisible('beta');await wait(visible);
   await select('alpha');await wait(()=>pending(scope.owner).length===1);await releaseVisible(scope.owner);await wait(visible);
   const restored=[...history().querySelectorAll('article.message')].find(row=>row.dataset.messageId===anchorID);
   check(restored&&Math.abs(restored.getBoundingClientRect().y-anchorY)<1,'Historical reading keeps its original anchor through provisional image heights');
