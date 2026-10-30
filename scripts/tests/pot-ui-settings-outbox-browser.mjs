@@ -80,7 +80,8 @@ try{
       await config({failSave:false,hold:['snapshot'],release:'all',phase:'running',change:true});
       await page.waitForFunction(()=>{const input=document.querySelector('input[list][aria-label="Model"],input[list][aria-label="模型"]');return input&&!input.disabled;});
       await page.getByLabel(locale==='en'?'Model':'模型',{exact:true}).fill('synthetic-next');
-      await save.click();await page.locator('.editor-form').waitFor({state:'hidden'});
+      await save.click();await page.getByText(t('settings.saved'),{exact:true}).waitFor();
+      await page.getByRole('button',{name:locale==='en'?'Cancel':'取消',exact:true}).click();await page.locator('.editor-form').waitFor({state:'hidden'});
       const saved=await config();check(saved.state.model==='synthetic-next'&&saved.state.pending,'running saves next configuration without ending execution '+width);
       // Snapshot reads are held at the network; cached chat and local input
       // remain usable. The queued payloads must not acquire settings fields.

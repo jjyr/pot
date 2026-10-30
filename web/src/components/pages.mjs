@@ -188,7 +188,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
   }
   function suspendEditor(){if(editor){editor.scroll=host.scrollTop;editor.focus=innerWidth>=720&&editor.root.contains(document.activeElement)?document.activeElement:null;editorParents.push(editor);editor=null;}}
   const editorAuthorityReady=()=>!editor?.capability||!client.supports||client.supports(editor.capability,editor.session.context);
-  function renderEditor(label, initial, definitions, save, {returnChat=false,capturedScope,capability='',submitLabel=tr('Save','保存'),editableWhilePending:pendingEdits}={}) {
+  function renderEditor(label, initial, definitions, save, {returnChat=false,capturedScope,capability='',submitLabel=tr('Save','保存'),editableWhilePending:pendingEdits,stayAfterSave=false}={}) {
     captureView();viewReady=false;
     pageView?.queue.close();pageView=null;closeTaskList();gate.close();
     const captured=captureConfigurationScope(client,capturedScope||scope()), caller=route || 'settings';
@@ -205,6 +205,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     }
     const cancel=action(tr('Cancel','取消'),()=>lifecycle.cancel?lifecycle.cancel():back());const submit=action(submitLabel,()=>form.requestSubmit(),{primary:true});
     submit.classList.add('busy-control');footer.append(cancel,submit);form.append(fields,status,footer);root.append(form);
+    form.addEventListener('input',()=>{if(status.dataset.errorKey==='settings.saved'){status.textContent='';delete status.dataset.errorKey;}});
     editor={session,caller,returnChat,capability,root,form,controls,lifecycle,label,returnUsageOwner:usageOwner?{...usageOwner}:null,id:uid()};
     // All configuration steps share the Add assistant navigation entry.
     history[caller==='add-assistant'?'replaceState':'pushState']({...history.state,potEditor:editor.id},'',location.href);heading(label);
@@ -232,7 +233,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
         if(editor?.session!==session||disposed||!configurationIdentityCurrent(client,captured))throw Object.assign(Error('Configuration identity changed'),{uiKey:'identityChanged'});
         session.settle(true,attempt.values);
         if(lifecycle.opensCreatedChat){if(!lifecycle.creationCurrent()){lifecycle.creationRetired=true;throw Object.assign(Error('Creation identity changed'),{uiKey:'identityChanged'});}await lifecycle.afterSave(saved);Promise.resolve().then(()=>changed(saved)).catch(()=>{});}
-        else{try{await changed(saved);}catch{}if(session.dirty){status.className='hint';status.setAttribute('role','status');status.dataset.errorKey='settings.savedDraftRemaining';status.replaceChildren(n('span','',translate(locale(),'settings.savedDraftRemaining')));}else if(lifecycle.afterSave)await lifecycle.afterSave(saved);else await back();}
+        else{try{await changed(saved);}catch{}if(session.dirty){status.className='hint';status.setAttribute('role','status');status.dataset.errorKey='settings.savedDraftRemaining';status.replaceChildren(n('span','',translate(locale(),'settings.savedDraftRemaining')));}else if(lifecycle.afterSave)await lifecycle.afterSave(saved);else if(stayAfterSave){status.className='hint';status.setAttribute('role','status');status.dataset.errorKey='settings.saved';status.replaceChildren(n('span','',translate(locale(),'settings.saved')));}else await back();}
       } catch(reason) {if(lifecycle.opensCreatedChat&&!lifecycle.creationCurrent())lifecycle.creationRetired=true;session.settle(false);const key=reason.uiKey||'settings.saveFailed';status.dataset.errorKey=key;status.replaceChildren(n('span','',translate(locale(),key)));const diagnostic=reason.diagnostic||(!reason.uiKey&&reason.message);if(diagnostic){const details=n('details','detail-disclosure');details.append(n('summary','',translate(locale(),'agentLinks.diagnostics')),n('pre','',diagnostic));status.append(details);}}
       finally {submit.removeAttribute('aria-busy');if(!editableWhilePending)for(const [control,value]of disabled)control.disabled=value||!!lifecycle.creationRetired;cancel.disabled=false;submit.disabled=!!lifecycle.creationRetired;if(lifecycle.opensCreatedChat){lifecycle.locale?.();if(lifecycle.creationRetired)form.querySelector('.assistant-runtime-summary button').disabled=true;}lifecycle.settled?.();lifecycle.refreshDelete?.();}
     };
@@ -346,7 +347,8 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
         const signature=JSON.stringify(selection);
         if(selectionChanged&&selection&&signature!==sections.initialSelection){await ensureAuthority(['assistant.configure']);const saved=await domains.directory.configure(captured,{request_id:context.request_id,expected_generation:sections.generation,expected_revision:sections.configurationRevision,selection});generation=saved.generation;configurationRevision=saved.revision;initialSelection=signature;const fields=Object.fromEntries(selectionFields.map(key=>[key,values[key]]));Object.assign(initial,fields);session.acknowledge(fields);}
         if(sections.instructionsReady&&values.text!==baseline.text){await ensureAuthority(['assistant.configure']);const saved=await domains.directory.saveInstructions(captured,{text:values.text,revision:sections.rulesRevision});rulesRevision=saved.revision;initial.text=values.text;session.acknowledge({text:values.text});}
-      },{returnChat:true,capturedScope:captured,capability:'assistant.configure'});
+      },{returnChat:true,capturedScope:captured,capability:'assistant.configure',stayAfterSave:true});
+      form.form.classList.add('assistant-settings-editor');
       const controls=form.controls,session=form.session;
       form.lifecycle.captureSave=()=>({configurationReady,instructionsReady,initial:structuredClone(initial),selection:selectValue(session.values),initialSelection,generation,configurationRevision,rulesRevision});
       form.lifecycle.requiredCapabilities=(values,sections)=>{

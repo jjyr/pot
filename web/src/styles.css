@@ -1146,3 +1146,8 @@ button.communication-task-endpoint:focus-visible{outline:2px solid var(--primary
 .model-options { position:absolute; z-index:40; top:calc(100% + 4px); left:0; right:0; max-height:240px; overflow:auto; border:1px solid var(--input-border); border-radius:var(--radius); background:var(--surface); color:var(--text); box-shadow:0 4px 16px #0002; }
 .model-options [role=option] { padding:8px 10px; overflow-wrap:anywhere; cursor:pointer; }
 .model-options [role=option]:hover,.model-options [aria-selected=true] { background:var(--secondary); }
+
+.assistant-settings-editor .assistant-delete,.assistant-settings-editor .editor-actions { border-top: 0; }
+.assistant-settings-editor .busy-control { padding-inline-end: 12px; width: auto; }
+.assistant-settings-editor .busy-control[aria-busy="true"] { color: transparent; }
+.assistant-settings-editor .busy-control[aria-busy="true"]::after { inset-inline-end: calc(50% - 8px); border-top-color: white; }

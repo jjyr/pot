@@ -249,7 +249,7 @@ an old context into the replacement node.
 | Back / Cancel, unchanged | Restore the caller |
 | Back / Cancel, changed | Offer Keep editing or Discard changes; discard restores the caller |
 | Other in-app navigation, changed | Use the same guard, then open the selected destination |
-| Save acknowledged | Restore the captured caller; Chat AI setup retains its return-to-chat behavior |
+| Save acknowledged | Local assistant settings stay open with saved feedback; other editors restore the captured caller, including Chat AI setup |
 | Save fails | Keep the editor and draft available for correction or recovery |
 
 Back, ⌘[, narrow edge Back and browser Back within the active editor session use
