@@ -16,8 +16,8 @@ async page=>{
     if(path==='/api/v1/about')return {};
     if(path==='/api/v1/providers/check')return new Promise((resolve,reject)=>f.checks.push({body:options.body,resolve,reject}));
     if(path==='/api/v1/providers/test')f.tests.push(options.body);
-    const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(options.body),signal:options.signal});
-    const result=await response.json();if(!response.ok)throw Error(result.message||JSON.stringify(result));return result;
+    const { getBusinessSocket } = await import('/adapters/ws-client.mjs');
+    return await getBusinessSocket().request(path, { method: 'POST', body: options.body, signal: options.signal });
    }};
    f.pages=createPages({client,chatVisible:()=>false,host:document.querySelector('.workspace > .page-host'),approvalHost:document.createElement('div'),chatApprovalHost:document.createElement('section'),locale:()=> 'zh-CN',notify:()=>{},changed:()=>{},titleChanged:()=>{},openChat:()=>{}});
    await f.pages.setupAI();
@@ -54,7 +54,12 @@ async page=>{
   await page.getByRole('button',{name:'使用匹配格式',exact:true}).click();assert(await page.getByLabel('请求格式',{exact:true}).inputValue()==='openai_responses','Mismatch offers explicit protocol correction');
   await page.getByLabel('API 地址',{exact:true}).fill(state.base);await page.getByLabel('请求格式',{exact:true}).selectOption('openai_chat');
   await page.waitForFunction(()=>document.querySelector('.provider-endpoint-preview')?.textContent.includes('/chat/completions'));
-  await page.getByRole('button',{name:'保存',exact:true}).click();await page.getByText('Save deliberately rejected',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'保存',exact:true}).click();const rejected = page.locator('.editor-form details').filter({ hasText: 'Save deliberately rejected' }).first();
+await rejected.locator('pre').filter({ hasText: 'Save deliberately rejected' }).waitFor({ state: 'attached' });
+if (!(await rejected.evaluate(el => el.open))) {
+  await rejected.locator('summary').click();
+}
+await rejected.locator('pre').filter({ hasText: 'Save deliberately rejected' }).waitFor({ state: 'visible' });
   assert(await page.evaluate(()=>providerFixture.saves[0].model==='isolated-model'&&providerFixture.saves[0].name==='My gateway'),'Save remains available while discovery is pending');
   const pending=await page.evaluate(()=>providerFixture.checks.length-1);await page.getByRole('button',{name:'取消',exact:true}).click();await page.getByRole('button',{name:'放弃更改',exact:true}).click();
   await page.evaluate(index=>providerFixture.checks[index].resolve(providerFixture.catalog(['after-leave'])),pending);assert(await page.getByRole('option',{name:'after-leave',exact:true}).count()===0,'Leaving disposes background discovery');

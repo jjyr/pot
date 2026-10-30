@@ -65,6 +65,7 @@ function projectProcesses(messages,activeTurn){
 
 // Presentation only: receipts stay unchanged, and ownership never crosses turns.
 export function projectScriptRuns(messages,{activeTurn=null}={}){
+  const sourceKeys=messages.map(message=>message.viewKey||message.id);
   messages=projectProcesses(messages,activeTurn);
   const forest=toolForest(messages),runs=new Map(),jobs=new Map(),waits=new Set();
   const descendants=entry=>entry.children.flatMap(child=>[child.message.tool,...descendants(child)]);
@@ -90,8 +91,11 @@ export function projectScriptRuns(messages,{activeTurn=null}={}){
   }
   // All surviving calls stay in transcript order. The shared work-record window
   // owns the only visible group; parent_id remains evidence, never a second list.
-  return messages.filter(message=>!waits.has(message)).map(message=>{
+  const rows=messages.filter(message=>!waits.has(message)).map(message=>{
     const run=runs.get(message);
     return run?{...message,tool:{...message.tool,...run.state,script:{...run.state,calls:run.calls,output:run.output}}}:message;
   });
+  const visible=new Set(rows.map(row=>row.viewKey||row.id));
+  const suppressedKeys=sourceKeys.filter(key=>!visible.has(key));
+  return {rows,suppressedKeys};
 }

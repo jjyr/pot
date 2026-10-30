@@ -149,9 +149,9 @@ workspace. See [Secrets](secrets.md) and [Task workspaces](task-workspaces.md).
 
 For public access, put a TLS-terminating reverse proxy on the server in front of
 the loopback port and set `POT_WEB_ORIGIN=https://pot.example.com`. Preserve the
-original `Host` and `Origin`, forward streaming responses without buffering and
-allow long-running SSE requests. Serve the gateway at the origin root, not under
-a URL prefix. Only the proxy should be reachable publicly. The configured HTTPS
+original `Host` and `Origin`, allow WebSocket upgrades and long-lived
+connections, and keep external MCP streaming unbuffered. Serve the gateway at
+the origin root, not under a URL prefix. Only the proxy should be reachable publicly. The configured HTTPS
 origin makes session cookies Secure; forwarding HTTP internally does not disable
 session authentication or same-origin checks. Publishing an unencrypted listener
 on a public interface is not an installation default.

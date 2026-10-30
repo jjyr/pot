@@ -1,30 +1,41 @@
-// Only this adapter knows about the Wails runtime. Product components share the
-// same client contract with the HTTP/SSE browser host.
-import {Call, Events} from '/wails/runtime.js';
+import {Call} from '/wails/runtime.js';
+import {createWSSession} from './ws-client.mjs';
 
 const service = 'github.com/jjyr/pot/internal/desktop.PreviewService';
-const invoke = (method, ...args) => Call.ByName(`${service}.${method}`, ...args);
+
+function invoke(method, ...args) {
+  return Call.ByName(service + '.' + method, ...args);
+}
 
 export function createDesktopClient() {
+  const socket = createWSSession({ desktop: true,
+    endpoint: () => invoke('Transport'),
+  });
+
+  window.addEventListener('pagehide', (event) => {
+    if (!event.persisted) {
+      socket.close();
+    }
+  });
+
   return {
-    snapshot: ({signal} = {}) => {
-      if (signal?.aborted) return Promise.reject(signal.reason);
-      const pending = invoke('Snapshot');
-      const abort = () => pending.cancel();
-      signal?.addEventListener('abort', abort, {once: true});
-      return pending.finally(() => signal?.removeEventListener('abort', abort));
-    },
-    send: request => invoke('Send', request),
-    cancel: request => invoke('Cancel', request),
+    scope: () => ({}),
+    snapshot: (options) => socket.request('/api/preview/snapshot', options),
+    send: (body) =>
+      socket.request('/api/preview/messages', {method: 'POST', body}),
+    cancel: (body) =>
+      socket.request('/api/preview/cancel', {method: 'POST', body}),
     openMain: () => invoke('OpenMain'),
-    subscribe(onSnapshot, onStatus = () => {}) {
-      const stop = Events.On('preview:snapshot', event => onSnapshot(event.data));
-      // Read after subscribing; reducers reject a snapshot older than an event.
-      let active = true;
-      invoke('Snapshot').then(value => {
-        if (active) { onSnapshot(value); onStatus('connected'); }
-      }).catch(() => { if (active) onStatus('offline'); });
-      return () => { active = false; stop(); };
-    },
+    subscribe: (onSnapshot, onStatus = () => {}) =>
+      socket.subscribe('/api/preview/events', {
+        events: {
+          snapshot: (event) => {
+            const value = JSON.parse(event.data);
+            return () => onSnapshot(value);
+          },
+        },
+        onStatus,
+      }),
+    close: () => socket.close(),
   };
 }

@@ -1,5 +1,6 @@
 // Isolated production HTTP/SSE + UI shell. All identities, models and keys are synthetic.
 import {createServer} from 'node:http';
+import {installFixtureWebSocket} from './helpers/ws-server.mjs';
 import {resolve,extname} from 'node:path';
 import {readFile} from 'node:fs/promises';
 import {shellAssets} from './pwa-shell.mjs';
@@ -83,6 +84,7 @@ const server=createServer(async(req,res)=>{try{
  let file=shell.files.get(path==='/'?'/index.html':path.replace(/^\/web\/src/,''));if(file&&extname(path==='/'?'/index.html':path)==='.html')file=Buffer.from(file.toString()+'<script src="/__monitor.js"></script>');if(!file){res.writeHead(404).end();return;}
  res.writeHead(200,{'Cache-Control':'no-store','Content-Type':({'.js':'text/javascript','.mjs':'text/javascript','.css':'text/css','.html':'text/html','.json':'application/json','.svg':'image/svg+xml','.ttf':'font/ttf','.png':'image/png','.webmanifest':'application/manifest+json'})[extname(path==='/'?'/index.html':path)]||'application/octet-stream'});res.end(file);
 }catch(error){json(res,{code:'synthetic_fixture_error',message:error.message},500);}});
-await new Promise(done=>server.listen(0,'127.0.0.1',done));console.log('http://127.0.0.1:'+server.address().port);
+await new Promise(done=>server.listen(0,'127.0.0.1',done));const fixtureWS=await installFixtureWebSocket(server);console.log('http://127.0.0.1:'+server.address().port);
 const heartbeat=setInterval(()=>{for(const stream of streams.keys())stream.write(': heartbeat\n\n');},5000);
-const stop=()=>{clearInterval(heartbeat);for(const stream of streams.keys())stream.end();for(const item of held.splice(0))item.send();server.closeAllConnections();server.close();};process.on('SIGTERM',stop);process.on('SIGINT',stop);
+const stop=async()=>{clearInterval(heartbeat);for(const stream of streams.keys())stream.end();for(const item of held.splice(0))item.send();await fixtureWS.close();
+server.closeAllConnections();server.close();};process.on('SIGTERM',stop);process.on('SIGINT',stop);

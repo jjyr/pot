@@ -107,7 +107,7 @@ export function createSendConfirmation({state,client,changed,accepted,rejected=(
       if(suspended||!online()){unknown(op);return;}
       check(op,false,true);
     },
-    // A matching persisted SSE frame may confirm before the POST response.
+    // A matching persisted WS event may confirm before the command response.
     confirmed(receipt){const op=operations.get(receipt);if(op){stop(op);accepted(receipt);}},
     recover(receipt){const op=operations.get(receipt);if(op)return check(op,true);},
     resume(){

@@ -8,6 +8,8 @@ import {createMemoryProjectionStore} from '../../web/src/state/projection-store.
 import {createProvidersDomain} from '../../web/src/state/domains/providers.mjs';
 import {createPages} from '../../web/src/components/pages.mjs';
 import {createProductionClient,mutationTopics} from '../../web/src/adapters/production.mjs';
+import {installWSFixture} from './helpers/ws-fixture.mjs';
+import {getBusinessSocket} from '../../web/src/adapters/ws-client.mjs';
 
 installDOM();
 {const source=new Element('button');source.className='clone-probe';source.dataset.viewKey='identity';source.style.width='12px';source.textContent='Label';source.onclick=()=>{};const shallow=source.cloneNode(false),deep=source.cloneNode(true);assert.equal(shallow.children.length,0);assert.equal(deep.textContent,'Label');assert.equal(deep.getAttribute('data-view-key'),'identity');assert.equal(deep.onclick,undefined);assert.notEqual(deep.children[0],source.children[0]);deep.style.width='20px';assert.equal(source.style.width,'12px');assert.equal(source.children[0].parentNode,source);}
@@ -22,17 +24,38 @@ const button=(root,key)=>root.querySelectorAll('button').find(node=>node.dataset
 try{
  assert.equal(mutationTopics('/api/v1/extensions/mcp/oauth/begin'),null,'authorization handoff changes no catalogue projection');
  assert(mutationTopics('/api/v1/extensions/mcp/oauth/complete').includes('extensions'),'accepted OAuth credentials still invalidate the catalogue');
- // Actual browser transport ownership (a synthetic EventSource, no browser or
- // network): opening is insufficient, boot/generation and idle retirement fence
- // health. Native has no equivalent proof and therefore retains fallback.
+ // Actual browser transport ownership in a synthetic WS and shared
+ // desktop/browser lifecycle (no browser or network): opening is insufficient,
+ // boot/generation and idle retirement fence health.
  {
-  const previousFetch=globalThis.fetch,previousSource=globalThis.EventSource,sources=[];
+  const previousFetch=globalThis.fetch;
+  const fixture=installWSFixture();
   globalThis.fetch=async()=>new Response(JSON.stringify({runtime_id:'fixture',boot_id:'boot'}));
-  globalThis.EventSource=class extends EventTarget{static CLOSED=2;constructor(){super();this.readyState=1;sources.push(this);}close(){this.readyState=2;}emit(boot){const event=new Event('changed');Object.assign(event,{data:JSON.stringify({topics:{permissions:1}}),lastEventId:boot+':1'});this.dispatchEvent(event);}};
   const client=await createProductionClient({resourceStorage:createMemoryProjectionStore()}),stop=client.changes(()=>{},{space:'one'});
-  assert.equal(client.changesHealthy('one'),false);sources[0].emit('boot');assert.equal(client.changesHealthy('one'),true);assert.equal(client.changesHealthy('two'),false);
-  client.connectionGeneration++;assert.equal(client.changesHealthy('one'),false);client.connectionGeneration--;client.runtime.boot_id='other';assert.equal(client.changesHealthy('one'),false);client.runtime.boot_id='boot';
-  await advance(45000);assert.equal(client.changesHealthy('one'),false,'idle retirement cannot leave a remembered healthy flag');stop();client.resources.clear();globalThis.fetch=previousFetch;globalThis.EventSource=previousSource;
+  try{
+    await fixture.flush();
+    assert.ok(fixture.sockets[0],'changes transport must open a websocket');
+    assert.equal(client.changesHealthy('one'),false);
+    fixture.emit('/changes','changed',{topics:{permissions:1}},'boot:1');
+    await fixture.flush();
+    assert.equal(client.changesHealthy('one'),true);
+    assert.equal(client.changesHealthy('two'),false);
+    client.connectionGeneration++;
+    assert.equal(client.changesHealthy('one'),false);
+    client.connectionGeneration--;
+    client.runtime.boot_id='other';
+    assert.equal(client.changesHealthy('one'),false);
+    client.runtime.boot_id='boot';
+    await advance(45000);
+    await fixture.flush();
+    assert.equal(client.changesHealthy('one'),false,'idle retirement cannot leave a remembered healthy flag');
+  }finally{
+    stop();
+    client.resources.clear();
+    try{getBusinessSocket()?.close();}catch{}
+    fixture.restore();
+    globalThis.fetch=previousFetch;
+  }
   evidence.permissions.transportHealth={acceptedFrameRequired:true,scopeBootGenerationFence:true,idleRetired:true};
  }
  // Two consumers share one slow catalog read. OAuth fallback never overlaps

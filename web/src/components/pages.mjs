@@ -1,6 +1,6 @@
 import {createRetainedSection,mergeEditorProjection} from '../state/retained-section.mjs';
 import {bindModelInput} from './model-input.mjs';
-import {resourceAuthorityCurrent} from '../state/resource-authority.mjs';
+import {resourceAuthority,resourceAuthorityCurrent} from '../state/resource-authority.mjs';
 import {captureUsageWait} from '../state/usage-wait.mjs';
 import {domainsFor} from '../state/domains/index.mjs';
 import {mergeTaskHistory} from '../state/task-repository.mjs';
@@ -53,6 +53,13 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
   let filter = {taskScope:'active', taskQuery:'', taskPhase:'', listOwner:'', scheduleQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageScope:'all', usageSpace:'all',usageRange:usageRange(),usageYear:Number(usageToday().slice(0,4)),settingsTab:'general'};
   let pendingApprovals=[],approvalFresh=false,notificationSettings=null;
   const domains=domainsFor(client),releaseDomains=domains.retain(),taskDomain=domains.tasks,ownerDisclosures=new Map();
+  let stopDirectoryAuthority=null;
+  try {
+    if(client.production)stopDirectoryAuthority=domains.directory.watch(()=>{
+      if(disposed||editor||route!=='add-assistant'||!assistantStartRefresh)return;
+      try{assistantStartRefresh().catch(()=>{});}catch{}
+    })||null;
+  } catch {}
   const providerAllowanceMemory=new Map(),toolMemory=new Map(),usageOffsets=new Map(),approvalCards=new Map(),taskNames=new Map();
   const chatApprovals=createChatApprovals({host:chatApprovalHost,locale,visible:chatVisible,deferred:true});
   const cached = new Map(),machineDrafts=new Map(),editorParents=[],taskDrafts=new Map(),taskDraftVersions=new Map();
@@ -237,7 +244,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     const current=editor,taskReturn=taskView?.returnTo||taskOrigin,returnToConversation=!editor&&usageOwner;
     if(!await leave({toParent:true}))return false;
     if(skipPicker&&editorParents.at(-1)?.kind==='picker')editorParents.pop();
-    if(editorParents.length){editor=editorParents.pop();host.replaceChildren(editor.root);heading(editor.label);editor.lifecycle.locale?.();history.replaceState({...history.state,potEditor:editor.id},'',location.href);host.scrollTop=editor.scroll||0;editor.focus?.focus({preventScroll:true});return true;}
+    if(editorParents.length){editor=editorParents.pop();host.replaceChildren(editor.root);heading(editor.label);editor.lifecycle.locale?.();history.replaceState({...history.state,potEditor:editor.id},'',location.href);host.scrollTop=editor.scroll||0;editor.focus?.focus({preventScroll:true});try{await editor.lifecycle?.resume?.();}catch{}return true;}
     if(returnToConversation&&usageOwner.returnTask){const task=usageOwner.returnTask,returnTo=usageOwner.taskReturn;usageOwner=null;route='tasks';routeChanged('tasks');const state={potRoute:'tasks',potScope:{space:task._space_id,owner:task.assistant_id},potTask:task,potTaskReturn:returnTo};history.replaceState(state,'',location.href);await taskDetail(task,{recordHistory:false,returnTo});return true;}
     if(!current&&taskReturn?.route==='chat'){const target=taskReturn.scope;usageOwner=null;detailParent=false;route='';history.replaceState({potRoute:'chat',potScope:target,potDirectory:false},'',location.href);await openChat(target);return true;}
     if(returnToConversation){usageOwner=null;const state={...history.state,potRoute:'chat'};delete state.potUsage;history.replaceState(state,'',location.href);openChat();return true;}
@@ -308,15 +315,34 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
         {name:'text',label:translate(locale(),'assistant.personality'),kind:'textarea',help:translate(locale(),'assistant.personalityHelp')},
       ],async(values,context,session,sections)=>{
         const baseline=sections.initial,selection=sections.configurationReady?sections.selection:null;
+        const ensureAuthority = async (operations = ['assistant.configure']) => {
+          if (editor?.session !== session || disposed || !configurationIdentityCurrent(client, captured)) {
+            throw Object.assign(Error('Configuration identity changed'), { uiKey: 'identityChanged' });
+          }
+          if (!client.production) return;
+          if (client.onlineReady === false) {
+            throw Object.assign(Error('Startup not ready'), { uiKey: 'startup.local' });
+          }
+          if (client.operationScopeReady?.(captured) === false) {
+            await domains.directory.refresh();
+            if (editor?.session !== session || disposed || !configurationIdentityCurrent(client, captured)) {
+              throw Object.assign(Error('Configuration identity changed'), { uiKey: 'identityChanged' });
+            }
+          }
+          if (client.onlineReady === false || client.operationScopeReady?.(captured) === false) {
+            throw Object.assign(Error('Startup not ready'), { uiKey: 'startup.local' });
+          }
+          if (!operations.some(op => client.supports?.(op, captured) !== false)) throw Object.assign(Error('Capability unavailable'), { uiKey: 'agentLinks.capabilityUnavailable' });
+        };
         const selectionFields=['profile_id','model','context_window','max_output_tokens','reasoning_effort','task_profile_id','task_model'];
         const selectionChanged=selectionFields.some(key=>JSON.stringify(values[key])!==JSON.stringify(baseline[key]));
         if(selectionChanged&&!sections.configurationReady||values.text!==baseline.text&&!sections.instructionsReady)throw Object.assign(Error('Settings not confirmed'),{uiKey:'assistant.settingsLoadFailed'});
         if(selectionChanged&&(!selection||!values.model.trim()))throw Object.assign(Error('Provider and model required'),{uiKey:'settings.providerRequired'});
         if(selectionChanged&&values.task_profile_id&&!values.task_model.trim())throw Object.assign(Error('Task model required'),{uiKey:'assistant.taskModelRequired'});
-        if(values.name!==baseline.name||values.avatar!==baseline.avatar){const saved=await domains.directory.update(captured,definition.id,{name:values.name,...(values.avatar!==baseline.avatar?{avatar:values.avatar}:{}),revision});revision=saved.revision;initial.name=values.name;initial.avatar=values.avatar;session.acknowledge({name:values.name,avatar:values.avatar});}
+        if(values.name!==baseline.name||values.avatar!==baseline.avatar){await ensureAuthority(['assistant.configure','assistant.profile']);const saved=await domains.directory.update(captured,definition.id,{name:values.name,...(values.avatar!==baseline.avatar?{avatar:values.avatar}:{}),revision});revision=saved.revision;initial.name=values.name;initial.avatar=values.avatar;session.acknowledge({name:values.name,avatar:values.avatar});}
         const signature=JSON.stringify(selection);
-        if(selectionChanged&&selection&&signature!==sections.initialSelection){const saved=await domains.directory.configure(captured,{request_id:context.request_id,expected_generation:sections.generation,expected_revision:sections.configurationRevision,selection});generation=saved.generation;configurationRevision=saved.revision;initialSelection=signature;const fields=Object.fromEntries(selectionFields.map(key=>[key,values[key]]));Object.assign(initial,fields);session.acknowledge(fields);}
-        if(sections.instructionsReady&&values.text!==baseline.text){const saved=await domains.directory.saveInstructions(captured,{text:values.text,revision:sections.rulesRevision});rulesRevision=saved.revision;initial.text=values.text;session.acknowledge({text:values.text});}
+        if(selectionChanged&&selection&&signature!==sections.initialSelection){await ensureAuthority(['assistant.configure']);const saved=await domains.directory.configure(captured,{request_id:context.request_id,expected_generation:sections.generation,expected_revision:sections.configurationRevision,selection});generation=saved.generation;configurationRevision=saved.revision;initialSelection=signature;const fields=Object.fromEntries(selectionFields.map(key=>[key,values[key]]));Object.assign(initial,fields);session.acknowledge(fields);}
+        if(sections.instructionsReady&&values.text!==baseline.text){await ensureAuthority(['assistant.configure']);const saved=await domains.directory.saveInstructions(captured,{text:values.text,revision:sections.rulesRevision});rulesRevision=saved.revision;initial.text=values.text;session.acknowledge({text:values.text});}
       },{returnChat:true,capturedScope:captured,capability:'assistant.configure'});
       const controls=form.controls,session=form.session;
       form.lifecycle.captureSave=()=>({configurationReady,instructionsReady,initial:structuredClone(initial),selection:selectValue(session.values),initialSelection,generation,configurationRevision,rulesRevision});
@@ -412,6 +438,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       });
       const refreshLocale=form.lifecycle.locale;form.lifecycle.locale=()=>{refreshLocale();for(const status of [loadingStatus,rulesStatus]){if(status.dataset.sectionState==='error'){status.querySelector('span').textContent=translate(locale(),'assistant.settingsLoadFailed');status.querySelector('button').textContent=translate(locale(),'retry');}}if(pendingHint)pendingHint.textContent=translate(locale(),'assistant.configurationPending');};
       form.lifecycle.providersInvalidated=()=>{configurationReady=false;configurationSection.load();};
+      form.lifecycle.resume=()=>Promise.all([configurationSection.load(),instructionsSection.load()]);
       await Promise.all([configurationSection.load(),instructionsSection.load()]);
     }catch(reason){if(gate.current(token)&&!disposed){assistantLoad={definition,scope:captured,root:loading,error:reason};renderAssistantLoad();}}
   }
@@ -577,7 +604,7 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
     const section=form.form.querySelector('.page-section h2');if(section)section.dataset.providerI18n='allowances';
     if(monitorFailure){const warning=n('p','inline-error',t('allowanceLoadFailed'));warning.dataset.providerI18n='allowanceLoadFailed';form.form.querySelector('.editor-fields').append(warning);}
     const availabilityWarning=n('p','inline-error',t('unavailable'));availabilityWarning.dataset.providerI18n='unavailable';availabilityWarning.hidden=type.available!==false;form.form.prepend(availabilityWarning);if(type.available===false)form.form.querySelector('.primary').disabled=true;
-    form.lifecycle.cancel=()=>back({skipPicker:true});form.lifecycle.afterSave=async saved=>{await back({skipPicker:true});await editor?.lifecycle.providersChanged?.(saved);if(onboarding){await leave();await localAssistantEditor();}};
+    form.lifecycle.cancel=()=>back({skipPicker:true});form.lifecycle.afterSave=async saved=>{const parent=[...editorParents].reverse().find(value=>value.kind!=='picker')||null;await back({skipPicker:true});if(editor!==parent)return;await parent?.lifecycle.providersChanged?.(saved);if(editor!==parent)return;if(onboarding){await leave();await localAssistantEditor();}};
     const set=(name,value)=>{controls.get(name).value=value??'';session.set(name,value);},showModel=()=>{controls.get('model').closest('.form-row').hidden=!!controls.get('model_selection').value;};
     function limitsFor(modelID){const entry=discovered.find(value=>value.id===modelID),base=modelDefaults(snapshot,providerID,modelID);return entry?{context:entry.context_window||base.context,input:entry.max_input||base.input,output:Math.min(entry.max_output||base.output,(entry.context_window||base.context)-1)}:base;}
     let limitsModel=initial.model;
@@ -730,8 +757,14 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       onSend:async text=>{
         const version=taskDraftVersions.get(draftKey),submittedTask=commandTask();
         await taskAction('task.input',()=>taskDomain.sendInput(submittedTask,fileScope,text));
-        if(!submittedTask._valid())return false;
+        // Completion guard: the acknowledged command's own invalidation temporarily revokes
+        // freshness, so this check must not consult view.fresh or operationScopeReady.
+        // Reconcile the captured draft map even offscreen when the submitted identity/run
+        // still matches and text/version are unchanged; only the live resourceAuthority
+        // and view authority/run checks gate reconciliation here.
+        if(view.record.run_id!==submittedTask.run_id||view.authority!==submittedTask._authority||resourceAuthority(client,fileScope)!==submittedTask._authority)return false;
         if(taskDrafts.get(draftKey)===text&&taskDraftVersions.get(draftKey)===version)taskDrafts.delete(draftKey);
+        if(!current())return false;
 
       },
       onStop:()=>taskAction('task.interrupt',()=>taskDomain.interrupt(commandTask(),fileScope)),
@@ -1369,6 +1402,6 @@ export function createPages({updates,onApprovalsChanged=()=>{},client, host, app
       if(taskView)return refreshTaskEvents();
 
     },
-    dispose(){assistantCatalogLoad?.close();releaseDomains();extensionUI?.dispose();stopResources?.();notificationSettings?.dispose();for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle?.dispose?.();disposed=true;clearInterval(approvalTimer);closeTaskList();closeTaskView();approvalQueue?.close();pageView?.queue.close();gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
+    dispose(){assistantCatalogLoad?.close();stopDirectoryAuthority?.();stopDirectoryAuthority=null;releaseDomains();extensionUI?.dispose();stopResources?.();notificationSettings?.dispose();for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle?.dispose?.();disposed=true;clearInterval(approvalTimer);closeTaskList();closeTaskView();approvalQueue?.close();pageView?.queue.close();gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
   };
 }

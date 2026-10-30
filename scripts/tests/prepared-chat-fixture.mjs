@@ -1,4 +1,5 @@
 import {createServer} from 'node:http';
+import {installFixtureWebSocket} from './helpers/ws-server.mjs';
 import {Readable} from 'node:stream';
 import {createHash} from 'node:crypto';
 import {messageRevision} from '../../web/src/state/resource-bytes.mjs';
@@ -104,6 +105,8 @@ export async function preparedChatFixture(sourceOrigin,{workRecords=false,resour
   if(path.startsWith('/api/'))return json(res,path==='/api/v1/runtime'?{runtime_id:'interaction-control',boot_id:'interaction-boot'}:path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Synthetic Space',kind:'local',connected:true,control_id:'interaction-control'}]}:path==='/api/v1/assistants/bootstrap'?{assistant:null}:path==='/api/v1/snapshot'?frame(owner):path==='/api/v1/permissions'?{pending:[],policy:{machines:{}}}:{items:[],total:0,cursor:0,has_more:false});
   const response=await fetch(sourceOrigin+req.url);res.writeHead(response.status,Object.fromEntries(response.headers));Readable.fromWeb(response.body).pipe(res);
  }catch(error){res.writeHead(500,{'content-type':'application/json'});res.end(JSON.stringify({message:error.stack}));}});
- await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
- return {origin:'http://127.0.0.1:'+server.address().port,trace,close:async()=>{for(const release of [...held,...images,...previewHeld])release();for(const stream of streams)stream.res.end();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}};
+ const fixtureWS=await installFixtureWebSocket(server);
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ return {origin:'http://127.0.0.1:'+server.address().port,trace,close:async()=>{for(const release of [...held,...images,...previewHeld])release();for(const stream of streams)stream.res.end();await fixtureWS.close();
+server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}};
 }

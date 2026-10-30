@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/jjyr/pot/internal/hooks"
+	"github.com/jjyr/pot/internal/localui"
 	"github.com/jjyr/pot/internal/pwapush"
 	"github.com/jjyr/pot/internal/systemnotifications"
 	"github.com/jjyr/pot/internal/testutil"
@@ -47,25 +48,33 @@ func notificationHarness(t *testing.T) notificationFixture {
 			w.WriteHeader(401)
 			return
 		}
-		if r.URL.Path != "/api/v1/lifecycle" {
+		if r.URL.Path != "/api/v1/ws" {
 			t.Error("notification consumer scanned business resources", r.URL.Path)
 			w.WriteHeader(404)
 			return
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		authority, _ := json.Marshal(hooks.Authority{Control: "node", Boot: "boot", Owners: []hooks.Owner{{ID: "alpha", Name: "Alpha", Boot: "boot", Control: "node", Space: "node"}}})
-		fmt.Fprintf(w, "event: authority\ndata: %s\n\n", authority)
-		w.(http.Flusher).Flush()
-		for {
-			select {
-			case <-r.Context().Done():
-				return
-			case e := <-updates:
-				data, _ := json.Marshal(e)
-				fmt.Fprintf(w, "event: lifecycle\ndata: %s\n\n", data)
-				w.(http.Flusher).Flush()
-			}
-		}
+		localui.ServeWebSocket(w, r, localui.SocketOptions{
+			Caller: localui.Functions{Events: func(ctx context.Context, path string, receive func(localui.Event) error) error {
+				if path != "/api/v1/lifecycle" {
+					return fmt.Errorf("unexpected events path %q", path)
+				}
+				authority, _ := json.Marshal(hooks.Authority{Control: "node", Boot: "boot", Owners: []hooks.Owner{{ID: "alpha", Name: "Alpha", Boot: "boot", Control: "node", Space: "node"}}})
+				if err := receive(localui.Event{Type: "authority", Data: authority}); err != nil {
+					return err
+				}
+				for {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case e := <-updates:
+						data, _ := json.Marshal(e)
+						if err := receive(localui.Event{Type: "lifecycle", Data: data}); err != nil {
+							return err
+						}
+					}
+				}
+			}},
+		})
 	}))
 	t.Cleanup(upstream.Close)
 	config := NewConfig()
@@ -103,6 +112,9 @@ func notificationHarness(t *testing.T) notificationFixture {
 	invoke := func(path string, body any, cookie *http.Cookie, origin string) *httptest.ResponseRecorder {
 		t.Helper()
 		data, _ := json.Marshal(body)
+		if strings.HasPrefix(path, "/api/") {
+			return invokeSocket(t, server, "POST", path, data, cookie, origin)
+		}
 		r := httptest.NewRequest("POST", "http://localhost"+path, bytes.NewReader(data))
 		if cookie != nil {
 			r.AddCookie(cookie)

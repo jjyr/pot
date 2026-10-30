@@ -1,3 +1,5 @@
+import { installWSFixture } from './helpers/ws-fixture.mjs';
+installWSFixture();
 import assert from 'node:assert/strict';
 import {createSettingsAccess,captureConfigurationScope,configurationIdentityCurrent,configurationRoute} from '../../web/src/state/settings-access.mjs';
 import {createEditorSession} from '../../web/src/state/editor.mjs';

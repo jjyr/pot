@@ -18,6 +18,7 @@ import {messageIdentities,resolveMessageRenderIdentity,messageRenderIssuer} from
 import {updateMarkdown} from './markdown.mjs';
 import {toolForest} from '../state/tool-calls.mjs';
 import {projectScriptRuns} from '../state/script-runs.mjs';
+import {createProjectionLifetime} from '../state/projection-lifetime.mjs';
 import {projectTaskMessages} from '../state/task-transcript.mjs';
 import {createWorkRecordWindow} from './work-record-window.mjs';
 import {copyFeedback} from './motion.mjs';
@@ -48,6 +49,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   const dialog=n('dialog','preferences product-actions task-actions');dialog.setAttribute('aria-label',tr('Task actions','任务操作'));root.append(dialog);
   let fresh=false,record=initial,state,inputs=[],approvals=[],unavailable=false,connectionError='',storageError=false,busy=false,historyBusy=false,disposed=false,frame=0,menuMode='actions',menuSignature='',draftVersion=0;
   let forest,projection,downloadFailure,historyFailure,historyAbort,historyAttempt='',historyRun='',historyFrame=0,unmatchedApprovals=[],approvalGeneration=0,cacheTruncated=false,catchingUp=false;
+  const projectionLifetime=createProjectionLifetime();
   function renderDownloadFailure(target,failure){
     const open=downloadNotice.querySelector('details')?.open||false;target.hidden=!failure;target.replaceChildren();
     if(!failure)return;
@@ -168,7 +170,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   }
   function renderTranscript(){
     if(!state)return;
-    if(!projection){const rows=projectScriptRuns(projectTaskMessages(state,inputs,record,{offline:unavailable||!!connectionError}),{activeTurn:active()?[...state.tools.values()].at(-1)?.tool.turn_id:null});projection={rows,forest:toolForest(rows)};}
+    if(!projection){const rawRows=projectTaskMessages(state,inputs,record,{offline:unavailable||!!connectionError});const projected=projectScriptRuns(rawRows,{activeTurn:active()?[...state.tools.values()].at(-1)?.tool.turn_id:null});const rows=projected.rows;const ephemeralKeys=rawRows.flatMap(row=>String(row.viewKey||"").startsWith("resource:")||row.id==='task-result'||row.id==='task-error'||row.id==='task-activity'||(row.input&&!state.inputs.has(row.input.request_id))?[row.viewKey||row.id]:[]);const lifetime=projectionLifetime.update(rows,{sourceMessages:rawRows,suppressedKeys:projected.suppressedKeys,ephemeralKeys});projection={rows,forest:toolForest(rows),suppressedKeys:lifetime.suppressedKeys,ephemeralKeys:lifetime.ephemeralKeys};}
     const {rows}=projection;forest=projection.forest;
     const parents=new Map(rows.flatMap(message=>{const parent=message.tool?.parent_id&&forest.byID.get(message.tool.turn_id+':'+message.tool.parent_id)?.message;return parent?[[message.id,parent.id]]:[];}));
     const goalText=record.request?.text||initial.request?.text||'',expanded=goalOpen;
@@ -187,13 +189,13 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
       target.open=expanded;target.querySelector('.task-goal-preview').textContent=goalText.replace(/\s+/g,' ');
       if(expanded)updateMarkdown(target.querySelector('.task-goal-body'),goalText,{downloadFile,acquireFileImage,renderSlot:'task-goal'});
     }}];
-    const rendered=rows.map(message=>({...message,viewKey:message.id,...(message.tool?{approval:structuredClone(approvalFor(message.tool))||null}:{})}));
+    const rendered=rows.map(message=>({...message,viewKey:message.viewKey||message.id,...(message.tool?{approval:structuredClone(approvalFor(message.tool))||null}:{})}));
     for(const message of rendered)if(message.tool)liveTools.get(message.id)?.prepareApproval(message.approval);
     const identities=messageIdentities(client).snapshot(scope);
     const machineLabels=Object.fromEntries(rendered.flatMap(message=>[message.tool?.target?.runtime_id,message.approval?.request?.machine_id]).filter(Boolean).map(id=>[id,machinePresentation(client).label(id,scope,locale())]));
     const senders=(client.assistants||[]).filter(item=>item.space_id===scope.space).map(item=>({id:item.id,name:item.name}));
     const canConfigure=can('assistant.configure');
-    transcriptWindow.setMessages(rendered,{parents,regions,afterCommit:()=>{if(transcriptWindow.prepared)history.style.visibility='';},layoutEpoch:[locale(),record.info,unavailable,connectionError,identities,machineLabels,senders,canConfigure],renderContext:{forest,record,unavailable,connectionError,identities,machineLabels,senders,canConfigure}});
+    transcriptWindow.setMessages(rendered,{parents,regions,suppressedKeys:projection.suppressedKeys,ephemeralKeys:projection.ephemeralKeys,afterCommit:()=>{if(transcriptWindow.prepared)history.style.visibility='';},layoutEpoch:[locale(),record.info,unavailable,connectionError,identities,machineLabels,senders,canConfigure],renderContext:{forest,record,unavailable,connectionError,identities,machineLabels,senders,canConfigure}});
     latest.hidden=transcriptWindow.following;scheduleHistory();
   }
   function renderMenu(force=false){
@@ -226,7 +228,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     update(next){
       if(disposed)return;
       projection=null;
-      if(next.catchingUp!==undefined)catchingUp=next.catchingUp;if(next.storageError!==undefined)storageError=next.storageError;if(next.fresh!==undefined)fresh=next.fresh;cacheTruncated=!!(next.state?.cache_truncated||next.record?.cache_truncated||next.cacheTruncated);const nextRun=next.record?.run_id||task.id;if(nextRun!==historyRun){if(historyRun){draftVersion++;transcriptWindow.reset();}historyAbort?.abort();historyAbort=null;historyBusy=false;historyFailure=null;historyAttempt='';historyRun=nextRun;showHistoryStatus();}if(next.record)record=next.record;messageIdentities(client).rememberTasks([record.info||task]);if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
+      if(next.catchingUp!==undefined)catchingUp=next.catchingUp;if(next.storageError!==undefined)storageError=next.storageError;if(next.fresh!==undefined)fresh=next.fresh;cacheTruncated=!!(next.state?.cache_truncated||next.record?.cache_truncated||next.cacheTruncated);const nextRun=next.record?.run_id||task.id;if(nextRun!==historyRun){if(historyRun){draftVersion++;transcriptWindow.reset();projectionLifetime.reset();}historyAbort?.abort();historyAbort=null;historyBusy=false;historyFailure=null;historyAttempt='';historyRun=nextRun;showHistoryStatus();}if(next.record)record=next.record;messageIdentities(client).rememberTasks([record.info||task]);if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
       updateIdentity();renderStage();renderTranscript();scheduleFollow();updateComposer();renderMenu();
     },
     openMenu(){menuMode='actions';menuSignature='';renderMenu(true);dialog.showModal();},

@@ -1,8 +1,9 @@
 import {createRenderSnapshots,renderSnapshot} from './render-snapshot.mjs';
+import {mergeConversationRows} from '../state/stable-message-rows.mjs';
 import {translate} from '../locales/messages.mjs';
 import {preparedResourcesCurrent,commitPreparedResources,finishPreparedNative,cancelPreparedNative,currentPreparedRender,withPreparedRender,createPreparedRender,createPreparationBudget,createPreparationSurface,settlePreparedTree,preparedLayoutRect,framePreparedElement,retirePreparedDeadlines,consumePreparationSurrogates,rememberPreparedLayout,freezePreparedLayout,releasePreparedLayout} from './prepared-render.mjs';
 import {moveConversationNode} from './conversation-dom.mjs';
-import {Virtualizer, observeElementRect, defaultRangeExtractor} from '../vendor/tanstack-virtual-core.mjs';
+import {Virtualizer, observeElementRect} from '../vendor/tanstack-virtual-core.mjs';
 import {createConversationController} from './conversation-controller.mjs';
 
 // The controller owns intent and compensation; this adapter commits its measured
@@ -33,30 +34,12 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     const message=sources.get(record),members=[message?.id,...(message?.members||[]).map(member=>member.id)].filter(id=>id&&!retained.has(id));
     retirePreparedDeadlines(deadlines,members);
   }
-  function navigationIndex() {
-    if(controller?.following)return rows.length-1;
-    const id=controller?.destination?.id||controller?.anchor?.id;
-    let index=indexesByID.get(id)??indexesByKey.get(id);
-    if(index===undefined)for(const parent of controller?.visibilityPath.keys()||[])if(indexesByID.has(parent)){index=indexesByID.get(parent);break;}
-    // A saved primary anchor may have been evicted while another captured
-    // anchor is still cached. Mount that known local row for initial positioning
-    // instead of leaving the prepared viewport at the previous chat's offset.
-    if(index===undefined)for(const anchor of controller?.position?.anchors||[]){const key=anchor.key.startsWith('message:')?anchor.key.slice(8):anchor.key;if(indexesByKey.has(key)){index=indexesByKey.get(key);break;}}
-    return index??-1;
-  }
+
   function invalidate(){if(!closed&&!suspended&&!frame)frame=scroller.ownerDocument.defaultView.requestAnimationFrame(()=>{frame=0;update();});}
   function pinnedIndexes(range) {
-    const indexes = new Set(defaultRangeExtractor(range)), selection = getSelection();
-    // A navigation target must exist before the first paint, even while the
-    // native scroll event still reports the previous conversation's offset.
-    // A reset, history trim or reorder can move/remove the target. Resolve its
-    // identity in the current list before passing an index to TanStack.
-    const index=navigationIndex();
-    if(index>=0&&index<range.count)for(const i of defaultRangeExtractor({...range,startIndex:index,endIndex:index}))indexes.add(i);
-    for (const record of mounted.values()) {
-      if (record.row.contains(document.activeElement) || selection?.rangeCount && !selection.isCollapsed && (record.row.contains(selection.anchorNode) || record.row.contains(selection.focusNode))) {const index=indexesByKey.get(record.row.dataset.windowKey);if(index!==undefined)indexes.add(index);}
-    }
-    return [...indexes].filter(index=>index>=0&&index<rows.length).sort((a,b)=>a-b);
+    // Pot append/prepend: keep every loaded row allocated so viewport
+    // scrolling never recycles a live row's DOM across the boundary.
+    return Array.from({length:range.count},(_,i)=>i);
   }
   const virtualizer = new Virtualizer({
     count: 0, getScrollElement:()=>scroller,
@@ -137,7 +120,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     try{drawRows();}finally{host.style.minHeight=minHeight;}
   }
   function drawRows() {
-    const items = virtualizer.getVirtualItems(), selected = new Set(items.map(item=>item.key));
+const items = virtualizer.getMeasurements(), selected = new Set(items.map(item=>item.key));
     const retainedMembers=new Set(items.flatMap(item=>[rows[item.index].id,...(rows[item.index].members||[]).map(member=>member.id)]));
     const layout = []; let offset=0, spacerIndex=0;
     for(const item of items){
@@ -162,6 +145,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
         retirePreparedDeadlines(deadlines,[message.id,...(message.members||[]).map(member=>member.id),...removed],record.row,message.id);
       }
       if(!record){layout.push({gap:item.size});offset=item.end-margin;continue;}
+      record.row.toggleAttribute('data-conversation-suppressed',!!message.presentationSuppressed);
       sources.set(record,message);
       record.row.dataset.windowKey=item.key;record.row.dataset.virtualIndex=String(item.index);
       // Stable reading identity belongs to the list contract, including callers
@@ -183,20 +167,39 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       else{element=part.record.row;mounted.set(element.dataset.windowKey,part.record);}
       elements.push(element);
     }
-    const focused=elements.find(element=>element.parentNode===host&&element.contains(document.activeElement));
-    if(focused){
-      // Atomic moves can synchronously scroll a focused row into view. Keep
-      // that original row in place and arrange its neighbors around it; the
-      // conversation controller remains the only geometry scroll writer.
-      const retained=new Set(elements);
-      for(const element of [...host.children])if(!retained.has(element))element.remove();
-      let before=null;
-      for(let index=elements.length-1;index>=0;index--){const element=elements[index];if(element!==focused&&(element.parentNode!==host||element.nextSibling!==before))moveConversationNode(host,element,before);before=element;}
-    }else{
-      let index=0;
-      for(const element of elements){if(host.children[index]!==element)moveConversationNode(host,element,host.children[index]||null);index++;}
-      while(host.children.length>index)host.lastElementChild.remove();
+const desired = new Set(elements);
+const current = [...host.children].filter((child) => desired.has(child));
+const retained = elements.filter((child) => child.parentNode === host);
+
+if (
+  current.length !== retained.length ||
+  current.some((child, index) => child !== retained[index])
+) {
+  throw new Error('Message window reconciliation mismatch: retained children differ in identity or order');
+}
+
+for (const child of [...host.children]) {
+  if (!desired.has(child)) {
+    host.removeChild(child);
+  }
+}
+
+for (let index = 0; index < elements.length; index++) {
+  const element = elements[index];
+  if (element.parentNode === host) continue;
+  if (element.isConnected && !element.closest('[data-preparation-surface]')) {
+    throw new Error('Cannot move connected element outside preparation surface');
+  }
+  let before = null;
+  for (let next = index + 1; next < elements.length; next++) {
+    const candidate = elements[next];
+    if (candidate.parentNode === host) {
+      before = candidate;
+      break;
     }
+  }
+  moveConversationNode(host, element, before);
+}
   }
   // All sizes enter through a prepared transaction. Live ResizeObserver entries
   // must never replace the geometry of an unprepared content revision.
@@ -269,37 +272,12 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     });
     return {changed,valid};
   }
-  function preparationTarget(next){
-    if(controller?.following)return next.length-1;
-    const id=controller?.destination?.id||controller?.anchor?.id;
-    const key=controller?.position?.anchors?.[0]?.key?.replace(/^message:/,'');
-    return Math.max(0,next.findIndex(message=>message.id===id||message.viewKey===key||message.members?.some(member=>member.id===id)));
-  }
+
   function selectedPreparation(current){
-    const next=current.rows,target=preparationTarget(next);
-    // This is the complete loaded collection, not a viewport forecast. Every
-    // missing revision is measured before any of its offsets can be published.
-    const missing=[];
-    next.forEach((message,index)=>{if(!current.sizes.has(message.viewKey))missing.push(index);});
-    if(missing.length){
-      current.indexed=false;
-      // Preserve the actual ready destination cohort across measurement batches.
-      // Numeric entries for other rows survive disposal of their candidate DOM.
-      const retained=next.flatMap((message,index)=>current.jobs.get(message.viewKey)?.measurement?[index]:[]).sort((a,b)=>Math.abs(a-target)-Math.abs(b-target)).slice(0,64);
-      return [...retained,...missing.sort((a,b)=>Math.abs(a-target)-Math.abs(b-target)).slice(0,96-retained.length)];
-    }
+    // Pot append/prepend: all candidate rows are admitted at once and every
+    // candidate job is retained across measurement batches.
     current.indexed=true;
-    const size=message=>current.sizes.get(message.viewKey);
-    const start=next.slice(0,target).reduce((sum,message)=>sum+size(message),margin),total=next.reduce((sum,message)=>sum+size(message),margin);
-    let offset=scroller.scrollTop;
-    if(controller?.following)offset=Math.max(0,total-scroller.clientHeight);
-    else if(controller?.anchor)offset=Math.max(0,start-controller.anchor.offset);
-    const range=new Virtualizer({count:next.length,getScrollElement:()=>null,getItemKey:index=>next[index].viewKey,estimateSize:index=>size(next[index]),initialRect:{width:scroller.clientWidth,height:scroller.clientHeight},initialOffset:offset,overscan:12,scrollMargin:margin,scrollToFn:()=>{}});
-    const indexes=new Set(range.getVirtualItems().map(item=>item.index));
-    if(next.length)for(let index=Math.max(0,target-12);index<=Math.min(next.length-1,target+12);index++)indexes.add(index);
-    const selection=getSelection();
-    for(const [key,record]of mounted)if(record.row.contains(document.activeElement)||selection?.rangeCount&&!selection.isCollapsed&&(record.row.contains(selection.anchorNode)||record.row.contains(selection.focusNode))){const index=next.findIndex(message=>message.viewKey===key);if(index>=0)indexes.add(index);}
-    return [...indexes].sort((a,b)=>a-b);
+    return Array.from({length:current.rows.length},(_,i)=>i);
   }
   function signature(message){
     const path=controller?.visibilityPath,destination=controller?.destination;
@@ -323,7 +301,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     }
     if(next!==undefined){
       requestedOptions=options||requestedOptions;
-      const captured=snapshots.capture(next,requestedOptions.renderContext);
+      const captured=snapshots.capture(mergeConversationRows(requested,next,{suppressedKeys:requestedOptions.suppressedKeys,ephemeralKeys:requestedOptions.ephemeralKeys}),requestedOptions.renderContext);
       requested=captured.rows;requestedRevision=captured.revision;renderContextSnapshot=captured.context;
       const keys=new Map();for(const message of requested){const prior=presentationKeys.get(message.viewKey),value=renderSnapshot(requestedOptions.presentationKey?.(message),prior?.value);keys.set(message.viewKey,prior&&Object.is(value,prior.value)?prior:{value,revision:++presentationSerial});}presentationKeys=keys;
       for(const key of rowRevisions.keys())if(!keys.has(key))rowRevisions.delete(key);
@@ -352,7 +330,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     // Intent can pin a new identity without changing messages. Resolve that
     // range before deciding whether every entering node is already prepared.
     virtualizer.setOptions({...virtualizer.options,rangeExtractor:range=>pinnedIndexes(range)});
-    const liveItems=virtualizer.getVirtualItems();
+const liveItems=virtualizer.getMeasurements();
     if(!flight&&requestedRevision===committedRevision&&!layoutReframe&&
       (liveItems.length||!requested.length)&&liveItems.every(item=>mounted.get(item.key)?.preparedSignature===signature(rows[item.index]))&&
       (requestedOptions.regions||[]).every(region=>regionRevisions.get(region.key)===layoutEpoch+':'+region.revision)){
@@ -406,7 +384,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
         context.nativePresentationChanged=nativePresentationChanged;
         const start=measuredStart(current,index);if(start!==undefined)context.liveTop=()=>scroller.getBoundingClientRect().top+margin+start-scroller.scrollTop;
         job={message,signature:stamp,surface,context};current.jobs.set(key,job);
-        job.record=withPreparedRender(context,message.id,()=>render(message,undefined));context.root=job.record.row;job.record.row.preparedContext=context.connectionContext;surface.host.append(job.record.row);
+        job.record=withPreparedRender(context,message.id,()=>render(message,undefined));context.root=job.record.row;job.record.row.preparedContext=context.connectionContext;job.record.row.toggleAttribute('data-conversation-suppressed',!!message.presentationSuppressed);surface.host.append(job.record.row);
         job.wait=settlePreparedTree(job.record.row,context,{valid:()=>!closed&&flight===current&&layoutEpoch===current.epoch,layout:()=>withPreparedRender(context,message.id,()=>render(message,job.record))});
         job.wait.promise.then(measurement=>{if(flight!==current||closed)return;job.measurement=measurement;current.sizes.set(key,measurement.size);current.measurements.set(key,{signature:stamp,measurement});invalidate();}).catch(reason=>rejectPreparation(reason,current));
       }
@@ -433,7 +411,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     heights.clear();for(const [key,size]of current.sizes)heights.set(key,size);
     for(const job of current.regions.values()){
       for(const [element,clone]of job.context.frames){const box=clone.getBoundingClientRect();framePreparedElement(element,box.height,element.matches('pot-message-file[data-block="false"]')?box.width:undefined);}
-      job.context.phase='commit';commitPreparedResources(job.context);finishPreparedNative(job.context,{commit:true});consumePreparationSurrogates(job.surface.host);
+      job.context.phase='commit';commitPreparedResources(job.context);finishPreparedNative(job.context,{commit:true});
       const attributes=new Set(['hidden','disabled','open',...[...job.region.host.attributes,...job.surface.host.attributes].map(attribute=>attribute.name).filter(name=>name.startsWith('aria-'))]);
       for(const attribute of attributes){if(job.surface.host.hasAttribute(attribute))job.region.host.setAttribute(attribute,job.surface.host.getAttribute(attribute));else job.region.host.removeAttribute(attribute);}
       if(job.region.commit)job.region.commit(job.surface.host);
@@ -441,6 +419,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
         const preparedNodes=[...job.surface.host.childNodes];for(const node of preparedNodes)moveConversationNode(job.region.host,node);
         for(const node of [...job.region.host.childNodes])if(!preparedNodes.includes(node))node.remove();
       }
+      consumePreparationSurrogates(job.region.host);
       job.region.didCommit?.();job.context.phase='live';
       job.region.host.preparedContext=job.context.connectionContext;
       retirePreparedDeadlines(deadlines,[job.region.key],job.region.host,job.region.key);
@@ -492,7 +471,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     const environment=currentPreparedRender();if(!environment)return;measuredOptions.beforeCommit?.();
     for(const message of rows){const record=mounted.get(message.viewKey);if(record){withPreparedRender(environment.context,message.id,()=>record.commit?.());record.preparing=false;}}
     measuredOptions.afterCommit?.();
-  },reset(){committedRevision=null;releaseLayout();clearLoading();discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();deadlines.clear();geometry.clear();rowRevisions.clear();revealedRows.clear();snapshots.clear();renderContextSnapshot=undefined;presentationKeys.clear();requested=[];requestedRevision=-1;requestedOptions={};regionRevisions.clear();controller?.reset();},get prepared(){return prepared();},suspend(){
+  },reset(){committedRevision=null;releaseLayout();clearLoading();discardPreparation();cancelAnimationFrame(frame);frame=0;preparationError=false;for(const record of mounted.values()){virtualizer.observer.unobserve(record.row);dispose(record);}mounted.clear();indexesByKey.clear();indexesByID.clear();heights.clear();rows=[];for(const spacer of spacers)spacer.remove();spacers.length=0;virtualizer.elementsCache.clear();virtualizer.itemSizeCache.clear();virtualizer.setOptions({...virtualizer.options,count:0});for(const presentation of [...nativePresentations])presentation.cancel();deadlines.clear();geometry.clear();rowRevisions.clear();revealedRows.clear();snapshots.clear();renderContextSnapshot=undefined;presentationKeys.clear();requested=[];requestedRevision=-1;requestedOptions={};regionRevisions.clear();controller?.reset();},get prepared(){return prepared();},suspend(){
     suspended=true;releaseLayout();clearLoading();discardPreparation();for(const presentation of [...nativePresentations])presentation.cancel();
     cancelAnimationFrame(frame);frame=0;
     owner?.suspend();

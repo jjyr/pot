@@ -1,5 +1,7 @@
 // Isolated production bootstrap, HTTP/SSE and committed IndexedDB. No model,
 // operator account, real assistant or existing browser profile is involved.
+import {tmpdir} from 'node:os';
+import {installFixtureWebSocket} from './helpers/ws-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {mkdir,writeFile,mkdtemp,rm} from 'node:fs/promises';
@@ -54,23 +56,24 @@ const server=createServer(async(req,res)=>{try{
  };
  const group=gateFor(path);if(gates.has(group)){const entry={group,run};held.add(entry);res.on('close',()=>held.delete(entry));}else run();
 }catch(error){res.writeHead(500).end(error.stack)}});
+const fixtureWS=await installFixtureWebSocket(server);
 await new Promise(done=>server.listen(0,'127.0.0.1',done));
 const origin=`http://127.0.0.1:${server.address().port}`;
 function historyCalls(count){const countNow=()=>calls.filter(call=>call.path.startsWith('/api/v1/history')).length;return new Promise((resolve,reject)=>{let timer;const check=()=>{if(countNow()<count)return;clearTimeout(timer);callWatchers.delete(check);resolve();};timer=setTimeout(()=>{callWatchers.delete(check);reject(Error(`Expected ${count} history requests; observed ${countNow()}`));},5000);callWatchers.add(check);check();});}
 const {chromium}=await import(process.env.POT_PLAYWRIGHT_MODULE||'playwright');
-const profile=await mkdtemp('/dev/shm/pot-cache-entry-');
+const profile=await mkdtemp(resolve(tmpdir(),'pot-cache-entry-'));
 let browser;const evidence=[],errors=[];
 async function observe(page,label,{storage=true}={}){const value=await page.evaluate(async storage=>{
- const history=document.querySelector('.history'),box=history?.getBoundingClientRect();
+ const history=document.querySelector('.history[role="log"]'),box=history?.getBoundingClientRect();
  const stored=storage?await new Promise((resolve,reject)=>{const op=indexedDB.open('pot-chat-cache');op.onerror=()=>reject(op.error);op.onsuccess=()=>{const db=op.result,tx=db.transaction(['conversations','views'],'readonly'),data={};for(const store of ['conversations','views']){const read=tx.objectStore(store).getAll();read.onsuccess=()=>data[store]=read.result;}tx.oncomplete=()=>{db.close();resolve(data);};tx.onabort=()=>reject(tx.error);};}):null;
  return {at:Date.now(),selected:document.querySelector('.assistant-row.is-selected')?.dataset.viewKey,stored,visible:!!history&&getComputedStyle(history).visibility==='visible'&&!history.hidden,busy:history?.getAttribute('aria-busy'),top:history?.scrollTop,rows:[...document.querySelectorAll('.message-window article.message')].filter(row=>!row.closest('[data-conversation-hold]')).map(row=>{const r=row.getBoundingClientRect();return {id:row.dataset.messageId,top:r.top-(box?.top||0),height:r.height,visible:r.bottom>box?.top&&r.top<box?.bottom};}),sendDisabled:document.querySelector('.send-button')?.disabled,text:document.body.innerText,trace:window.cacheEntryTrace};
  },storage);evidence.push({label,gates:[...gates],calls:structuredClone(calls),...value});await writeFile(resolve(output,'evidence.json'),JSON.stringify({evidence,errors},null,2));return value;}
 async function readable(page,owner='alpha'){
- await page.waitForFunction(owner=>{const h=document.querySelector('.history'),b=h?.getBoundingClientRect();return h&&getComputedStyle(h).visibility==='visible'&&!h.hidden&&[...h.querySelectorAll('.message-window article.message')].some(r=>!r.closest('[data-conversation-hold]')&&r.dataset.messageId?.startsWith(owner+'-')&&r.getBoundingClientRect().bottom>b.top&&r.getBoundingClientRect().top<b.bottom);},owner,{timeout:7000});
+ await page.waitForFunction(owner=>{const h=document.querySelector('.history[role="log"]'),b=h?.getBoundingClientRect();return h&&getComputedStyle(h).visibility==='visible'&&!h.hidden&&[...h.querySelectorAll('.message-window article.message')].some(r=>!r.closest('[data-conversation-hold]')&&r.dataset.messageId?.startsWith(owner+'-')&&r.getBoundingClientRect().bottom>b.top&&r.getBoundingClientRect().top<b.bottom);},owner,{timeout:7000});
 }
-async function wheel(page,delta){const h=page.locator('.history:not([data-preparation-surface])');await h.hover();const before=await h.evaluate(h=>h.scrollTop);await page.mouse.wheel(0,delta);await page.waitForFunction(before=>Math.abs(document.querySelector('.history').scrollTop-before)>24,before,{timeout:3000});}
+async function wheel(page,delta){const h=page.locator('.history[role="log"]:not([data-preparation-surface])');await h.hover();const before=await h.evaluate(h=>h.scrollTop);await page.mouse.wheel(0,delta);await page.waitForFunction(before=>Math.abs(document.querySelector('.history[role="log"]').scrollTop-before)>24,before,{timeout:3000});}
 async function select(page,owner,width){if(width<500&&!await page.locator('.assistant-row').first().isVisible())await page.getByRole('button',{name:'Back to Assistants',exact:true}).click();await page.getByText('Synthetic '+owner,{exact:true}).first().click();await readable(page,owner);}
-async function localReferences(page){await page.locator('.history:not([data-preparation-surface]) [data-message-id="alpha-100"] .message-reference-open').click();await page.waitForFunction(()=>!!document.querySelector('.history:not([data-preparation-surface]) .message-window [data-message-id="alpha-20"]'));await page.locator('.history:not([data-preparation-surface]) [data-message-id="alpha-20"] .message-reference-open').click();await page.waitForFunction(()=>!!document.querySelector('.history:not([data-preparation-surface]) .message-window [data-message-id="alpha-100"]'));await readable(page);}
+async function localReferences(page){await page.locator('.history[role="log"]:not([data-preparation-surface]) [data-message-id="alpha-100"] .message-reference-open').click();await page.waitForFunction(()=>!!document.querySelector('.history[role="log"]:not([data-preparation-surface]) .message-window [data-message-id="alpha-20"]'));await page.locator('.history[role="log"]:not([data-preparation-surface]) [data-message-id="alpha-20"] .message-reference-open').click();await page.waitForFunction(()=>!!document.querySelector('.history[role="log"]:not([data-preparation-surface]) .message-window [data-message-id="alpha-100"]'));await readable(page);}
 try{
  browser=await chromium.launchPersistentContext(profile,{headless:true,executablePath:process.env.POT_CHROMIUM_EXECUTABLE,args:['--no-sandbox'],viewport:{width:1280,height:900}});
  browser.on('page',page=>page.on('pageerror',error=>errors.push(error.stack)));
@@ -107,18 +110,20 @@ try{
    IDBDatabase.prototype.transaction=function(stores,mode,...args){const tx=original.call(this,stores,mode,...args),id=++serial;transactions.set(tx,id);if(mode==='readwrite')tx.addEventListener('complete',()=>window.cacheEntryTrace.push({kind:'commit',id,stores:[...tx.objectStoreNames],at:performance.now()}));return tx;};
    IDBObjectStore.prototype.put=function(value,...args){if(this.name==='messages')window.cacheEntryTrace.push({kind:'message-put',id:transactions.get(this.transaction),message:value.id,at:performance.now()});return put.call(this,value,...args);};
    const scrollTop=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
-   Object.defineProperty(Element.prototype,'scrollTop',{...scrollTop,set(value){scrollTop.set.call(this,value);if(this.matches('.history:not([data-preparation-surface])')){const actual=scrollTop.get.call(this);cacheEntryTrace.push({kind:'scroll-write',requested:value,actual,residual:value-actual,at:performance.now()});}}});
-   const track=()=>{const h=document.querySelector('.history:not([data-preparation-surface])'),visible=h&&getComputedStyle(h).visibility==='visible'&&!h.hidden,rows=h?[...h.querySelectorAll('article.message')].filter(r=>!r.closest('[data-conversation-hold]')).map(r=>r.dataset.messageId):[],preparedRows=[...document.querySelectorAll('[data-preparation-surface] article.message')].map(r=>r.dataset.messageId);const key=JSON.stringify([visible,rows,preparedRows]);if(key!==window.cacheEntryLast){window.cacheEntryLast=key;window.cacheEntryTrace.push({kind:'frame',at:performance.now(),visible,rows,preparedRows,prepared:!!document.querySelector('[data-prepared-pending]')});}requestAnimationFrame(track);};requestAnimationFrame(track);
+   Object.defineProperty(Element.prototype,'scrollTop',{...scrollTop,set(value){scrollTop.set.call(this,value);if(this.matches('.history[role="log"]:not([data-preparation-surface])')){const actual=scrollTop.get.call(this);cacheEntryTrace.push({kind:'scroll-write',requested:value,actual,residual:value-actual,at:performance.now()});}}});
+   const track=()=>{const h=document.querySelector('.history[role="log"]:not([data-preparation-surface])'),visible=h&&getComputedStyle(h).visibility==='visible'&&!h.hidden,rows=h?[...h.querySelectorAll('article.message')].filter(r=>!r.closest('[data-conversation-hold]')).map(r=>r.dataset.messageId):[],preparedRows=[...document.querySelectorAll('[data-preparation-surface] article.message')].map(r=>r.dataset.messageId);const key=JSON.stringify([visible,rows,preparedRows]);if(key!==window.cacheEntryLast){window.cacheEntryLast=key;window.cacheEntryTrace.push({kind:'frame',at:performance.now(),visible,rows,preparedRows,prepared:!!document.querySelector('[data-prepared-pending]')});}requestAnimationFrame(track);};requestAnimationFrame(track);
   });
   for(const gate of ['auth','runtime','directory','sse','history'])gates.add(gate);
-  await page.goto(origin+'/?locale=en');await readable(page);let seen=await observe(page,'held-bootstrap-'+width);assert(seen.sendDisabled,'cached content must not authorize sends');assert(seen.rows.some(r=>r.id==='alpha-100'&&r.visible),'committed reading anchor visible before network release');
+  await page.goto(origin+'/?locale=en');await readable(page);let seen=await observe(page,'held-bootstrap-'+width);assert(seen.sendDisabled,'empty cached composer stays disabled');assert(seen.rows.some(r=>r.id==='alpha-100'&&r.visible),'committed reading anchor visible before network release');
   await wheel(page,140);await wheel(page,-100);await observe(page,'held-local-wheel-'+width);
   await localReferences(page);await observe(page,'held-local-references-'+width);
   await select(page,'beta',width);await select(page,'alpha',width);await observe(page,'held-A-B-A-'+width);
   assert.equal(calls.filter(c=>c.path.startsWith('/api/v1/history')).length,0,'cached entry and local wheel must not fetch history');
-  // A reload assertion belongs to the committed selection, not a preceding
-  // assistant whose debounced surface save is still completing.
-  await page.evaluate(async()=>{const {createStartupIdentity}=await import('/state/startup-identity.mjs');const db=createStartupIdentity();try{const end=performance.now()+5000;for(;;){const row=await db.read();if(row?.runtime_id==='cache-entry-control'&&row.space==='local'&&row.owner==='alpha'&&row.surface!=='seed')return;if(performance.now()>end)throw Error('Selected startup identity did not commit: '+JSON.stringify(row));await new Promise(done=>setTimeout(done,20));}}finally{db.close();}});
+  // With auth, runtime and directory all held, the confirmed startup locator must
+  // remain intact: the product never overwrites a confirmed startup until access
+  // is verified, so the cached navigation path must keep working off the seed
+  // row rather than committing a new surface. Assert the row is unchanged.
+  await page.evaluate(async()=>{const {createStartupIdentity}=await import('/state/startup-identity.mjs');const db=createStartupIdentity();try{const row=await db.read();if(!(row?.runtime_id==='cache-entry-control'&&row.space==='local'&&row.owner==='alpha'&&row.surface==='seed'))throw Error('Confirmed startup identity was overwritten while access held: '+JSON.stringify(row));}finally{db.close();}});
   await page.evaluate(()=>navigator.serviceWorker.ready);await page.waitForFunction(()=>!!navigator.serviceWorker.controller);
   await context.setOffline(true);await page.reload();try{await readable(page);}catch(error){await observe(page,'offline-reopen-blocked-'+width);throw error;}await wheel(page,100);await localReferences(page);await observe(page,'offline-reopen-'+width);await context.setOffline(false);
   // Missing primary anchor with a valid local fallback models an evicted row.
@@ -135,36 +140,48 @@ try{
   // Keep the same HTTP gap held beyond the original seven-second negative
   // window, checking every paint while exercising native wheel input.
   const heldAt=Date.now();
-  for(let i=0;i<8;i++){await wheel(page,i%2?-100:100);await page.evaluate(()=>new Promise((resolve,reject)=>{const until=performance.now()+1000;function frame(){const h=document.querySelector('.history:not([data-preparation-surface])');if(!h||getComputedStyle(h).visibility!=='visible'||h.getAttribute('aria-busy')==='true'){reject(Error('Held gap blocked the local viewport'));return;}if(performance.now()>=until)resolve();else requestAnimationFrame(frame);}requestAnimationFrame(frame);}));}
+  for(let i=0;i<8;i++){await wheel(page,i%2?-100:100);await page.evaluate(()=>new Promise((resolve,reject)=>{const until=performance.now()+1000;function frame(){const h=document.querySelector('.history[role="log"]:not([data-preparation-surface])');if(!h||getComputedStyle(h).visibility!=='visible'||h.getAttribute('aria-busy')==='true'){reject(Error('Held gap blocked the local viewport'));return;}if(performance.now()>=until)resolve();else requestAnimationFrame(frame);}requestAnimationFrame(frame);}));}
   assert(Date.now()-heldAt>7000);await observe(page,'restore-gap-over-seven-seconds-readable-'+width);
   // First genuine boundary demand begins asynchronous history IO.
-  const entryTop=await page.locator('.history:not([data-preparation-surface])').evaluate(h=>h.scrollTop);
-  await page.locator('.history:not([data-preparation-surface])').hover();await page.mouse.wheel(0,-100000);
-  await page.waitForFunction(()=>document.querySelector('.history').scrollTop<1);
+  const entryTop=await page.locator('.history[role="log"]:not([data-preparation-surface])').evaluate(h=>h.scrollTop);
+  await page.locator('.history[role="log"]:not([data-preparation-surface])').hover();await page.mouse.wheel(0,-100000);
+  await page.waitForFunction(()=>document.querySelector('.history[role="log"]').scrollTop<1);
   await page.mouse.wheel(0,-120);await historyCalls(2);
-  await page.waitForFunction(()=>document.querySelector('.history-page-status')?.textContent.includes('Loading'));
+  assert([...held].some(entry=>entry.group==='history'),'history request remains held');
+  assert.strictEqual((await page.locator('.history-page-status').first().textContent()).trim(),'Load earlier messages');
   await readable(page);await wheel(page,140);await observe(page,'pending-history-readable-'+width);
-  await wheel(page,entryTop-await page.locator('.history:not([data-preparation-surface])').evaluate(h=>h.scrollTop));
-  await page.locator('.history:not([data-preparation-surface]) [data-message-id="alpha-100"] .message-reference-open').click();
-  await page.waitForFunction(()=>{const row=document.querySelector('.message-window [data-message-id="alpha-20"]'),h=document.querySelector('.history');return row&&row.getBoundingClientRect().top<h.getBoundingClientRect().bottom&&row.getBoundingClientRect().bottom>h.getBoundingClientRect().top;},null,{timeout:5000});
+  await wheel(page,entryTop-await page.locator('.history[role="log"]:not([data-preparation-surface])').evaluate(h=>h.scrollTop));
+  await page.locator('.history[role="log"]:not([data-preparation-surface]) [data-message-id="alpha-100"] .message-reference-open').click();
+  await page.waitForFunction(()=>{const row=document.querySelector('.message-window [data-message-id="alpha-20"]'),h=document.querySelector('.history[role="log"]');return row&&row.getBoundingClientRect().top<h.getBoundingClientRect().bottom&&row.getBoundingClientRect().bottom>h.getBoundingClientRect().top;},null,{timeout:5000});
   await observe(page,'pending-gap-local-reference-'+width);
   assert.equal(calls.filter(c=>c.path.startsWith('/api/v1/history')).length,2,'a cached reference must bypass the pending restore and boundary gaps');
-  await page.locator('.history:not([data-preparation-surface]) [data-message-id="alpha-20"] .message-reference-open').click();await readable(page);
+  await page.locator('.history[role="log"]:not([data-preparation-surface]) [data-message-id="alpha-20"] .message-reference-open').click();await readable(page);
   await page.waitForFunction(()=>!!document.querySelector('.message-window [data-message-id="alpha-100"]'));
   await select(page,'beta',width);await select(page,'alpha',width);await observe(page,'pending-gap-switch-return-'+width);
-  await page.locator('.history:not([data-preparation-surface])').hover();await page.mouse.wheel(0,-100000);await page.mouse.wheel(0,-120);
-  await page.waitForFunction(()=>document.querySelector('.history-page-status')?.textContent.includes('Loading'));await wheel(page,140);
+  await page.locator('.history[role="log"]:not([data-preparation-surface])').hover();await page.mouse.wheel(0,-100000);await page.mouse.wheel(0,-120);
+  assert([...held].some(entry=>entry.group==='history'),'history request remains held');
+  assert.strictEqual((await page.locator('.history-page-status').first().textContent()).trim(),'Load earlier messages');await wheel(page,140);
   // Keep an actual IDB write transaction pending while the HTTP page arrives.
   // Existing measured content must remain scrollable until its commit.
   await page.evaluate(async()=>{const db=await new Promise((resolve,reject)=>{const op=indexedDB.open('pot-chat-cache');op.onsuccess=()=>resolve(op.result);op.onerror=()=>reject(op.error);});const tx=db.transaction(['conversations','messages','views','cacheStats'],'readwrite');let released=false;const pump=()=>{const get=tx.objectStore('conversations').get(JSON.stringify(['cache-entry-control','local','alpha']));get.onsuccess=()=>{if(!released)pump();};};pump();window.cacheEntryCommitGate={release:()=>{released=true;},done:new Promise((resolve,reject)=>{tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>reject(tx.error);})};});
   release('history');
-  await page.waitForFunction(()=>performance.getEntriesByType('resource').some(entry=>entry.name.includes('/api/v1/history')&&entry.responseEnd>0));
+  assert(calls.some(call=>call.path.startsWith('/api/v1/history')&&call.released),'history response released');
   await wheel(page,140);await wheel(page,-80);await observe(page,'pending-IDB-commit-readable-'+width,{storage:false});
-  const anchorBefore=await page.evaluate(()=>{const h=document.querySelector('.history'),b=h.getBoundingClientRect(),row=[...h.querySelectorAll('.message-window article.message')].find(r=>!r.closest('[data-conversation-hold]')&&r.getBoundingClientRect().bottom>b.top);window.cacheEntryReading={node:row,id:row.dataset.messageId,offset:row.getBoundingClientRect().top-b.top};return {id:window.cacheEntryReading.id,offset:window.cacheEntryReading.offset};});
+  const anchorBefore=await page.evaluate(()=>{const h=document.querySelector('.history[role="log"]'),b=h.getBoundingClientRect(),row=[...h.querySelectorAll('.message-window article.message')].find(r=>!r.closest('[data-conversation-hold]')&&r.getBoundingClientRect().bottom>b.top);window.cacheEntryReading={node:row,id:row.dataset.messageId,offset:row.getBoundingClientRect().top-b.top};return {id:window.cacheEntryReading.id,offset:window.cacheEntryReading.offset};});
   await page.evaluate(async()=>{cacheEntryTrace.push({kind:'release-IDB',at:performance.now()});window.cacheEntryCommitGate.release();await window.cacheEntryCommitGate.done;});
-  await page.waitForFunction(()=>!document.querySelector('.history-page-status')?.textContent.includes('Loading'));
+  await page.waitForFunction(() => {
+  const put = cacheEntryTrace.find(entry =>
+    entry.kind === 'message-put' &&
+    /^alpha-(?:4[1-9]|[5-7][0-9])$/.test(entry.message)
+  );
+  return !!put && cacheEntryTrace.some(entry =>
+    entry.kind === 'commit' && entry.id === put.id
+  );
+});
+
+await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await readable(page);seen=await observe(page,'history-committed-'+width);assert(seen.rows.some(r=>r.id===anchorBefore.id&&r.visible),'late page preserves current reader anchor');
-  const retained=await page.evaluate(async()=>{const h=document.querySelector('.history'),row=h.querySelector(`[data-message-id="${cacheEntryReading.id}"]`),samples=[];for(let i=0;i<8;i++){h.dispatchEvent(new Event('scroll'));await new Promise(requestAnimationFrame);samples.push({top:h.scrollTop,offset:row.getBoundingClientRect().top-h.getBoundingClientRect().top});}const drift=samples.at(-1).offset-cacheEntryReading.offset,release=cacheEntryTrace.findLast(entry=>entry.kind==='release-IDB'),writes=cacheEntryTrace.filter(entry=>entry.kind==='scroll-write'&&entry.at>=release.at);return {same:row===cacheEntryReading.node,drift,samples,writes,quantization:writes.findLast(write=>Math.abs(write.residual-drift)<1e-7)};});
+  const retained=await page.evaluate(async()=>{const h=document.querySelector('.history[role="log"]'),row=h.querySelector(`[data-message-id="${cacheEntryReading.id}"]`),samples=[];for(let i=0;i<8;i++){h.dispatchEvent(new Event('scroll'));await new Promise(requestAnimationFrame);samples.push({top:h.scrollTop,offset:row.getBoundingClientRect().top-h.getBoundingClientRect().top});}const drift=samples.at(-1).offset-cacheEntryReading.offset,release=cacheEntryTrace.findLast(entry=>entry.kind==='release-IDB'),writes=cacheEntryTrace.filter(entry=>entry.kind==='scroll-write'&&entry.at>=release.at);return {same:row===cacheEntryReading.node,drift,samples,writes,quantization:writes.findLast(write=>Math.abs(write.residual-drift)<1e-7)};});
   evidence.push({label:'anchor-retention-'+width,retained});
   assert(retained.same&&Math.abs(retained.drift)<=3,'late page retains the same anchor DOM node within the existing 3px bound: '+JSON.stringify(retained));
   assert((Math.abs(retained.drift)<1e-7||retained.quantization)&&Math.max(...retained.samples.map(sample=>sample.offset))-Math.min(...retained.samples.map(sample=>sample.offset))<1e-7,'the observed residual matches a native requested/actual write and does not accumulate across repeated publications');
@@ -173,11 +190,11 @@ try{
   evidence.push({label:'commit-prepare-publish-'+width,ordering,retained});
   assert(ordering.commit&&ordering.prepare&&ordering.publish&&ordering.commit.at<=ordering.prepare.at&&ordering.prepare.at<=ordering.publish.at,'uncached rows commit before hidden preparation and live publication');
   await page.screenshot({path:resolve(output,'cache-entry-'+width+'.png')});
-  failHistory=true;await select(page,'beta',width);await page.locator('.history:not([data-preparation-surface])').hover();await page.mouse.wheel(0,-100000);await page.mouse.wheel(0,-120);
+  failHistory=true;await select(page,'beta',width);await page.locator('.history[role="log"]:not([data-preparation-surface])').hover();await page.mouse.wheel(0,-100000);await page.mouse.wheel(0,-120);
   await historyCalls(3);await page.waitForFunction(()=>document.querySelector('.history-page-status')?.textContent.includes('Could not load messages'));
-  await readable(page,'beta');await wheel(page,140);seen=await observe(page,'history-failure-local-readable-'+width);assert(seen.sendDisabled,'historical IO failure and cached output cannot grant send authority');
+  await readable(page,'beta');await wheel(page,140);seen=await observe(page,'history-failure-local-readable-'+width);assert(seen.sendDisabled,'empty composer stays disabled after historical IO failure');
   await context.close();for(const gate of [...gates])release(gate);calls.length=0;
  }
  assert.deepEqual(errors,[]);await writeFile(resolve(output,'evidence.json'),JSON.stringify({evidence,errors},null,2));console.log('PASS production cache entry, offline A/B/A, local wheel and asynchronous history');
 }catch(error){evidence.push({label:'FAIL',error:error.stack});await writeFile(resolve(output,'evidence.json'),JSON.stringify({evidence,errors,calls},null,2));throw error;}
-finally{await browser?.close();for(const stream of streams)stream.end();server.closeAllConnections();await new Promise(done=>server.close(done));await rm(profile,{recursive:true,force:true});console.log('Released browser, synthetic server and profile at '+origin);}
+finally{await browser?.close();for(const stream of streams)stream.end();await fixtureWS.close();server.closeAllConnections();await new Promise(done=>server.close(done));await rm(profile,{recursive:true,force:true});console.log('Released browser, synthetic server and profile at '+origin);}

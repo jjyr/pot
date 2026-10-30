@@ -2,6 +2,8 @@ import {createMemoryProjectionStore} from '../../web/src/state/projection-store.
 import assert from 'node:assert/strict';
 import {registerHooks} from 'node:module';
 import {createProductionClient} from '../../web/src/adapters/production.mjs';
+import {installWSFixture} from './helpers/ws-fixture.mjs';
+installWSFixture();
 import {createDisplayResources,resourcePresentation,projectResourceMessages} from '../../web/src/state/display-resources.mjs';
 import {projectChatReplies} from '../../web/src/state/chat-replies.mjs';
 import {resourcePreviewKind} from '../../web/src/components/resource-view.mjs';
@@ -48,7 +50,7 @@ globalThis.fetch=async url=>{requests.push(String(url));return {ok:true,status:2
 globalThis.document={createElement:()=>({click(){anchors.push({...this});},remove(){}}),body:{append(){}}};
 globalThis.resourceDownloadNativeCall=async(method,...args)=>{
   nativeCalls.push({method,args});
-  return method.endsWith('.Call')?{runtime_id:'fixture'}:method.endsWith('.AssistantReads')?[]:true;
+  return method.endsWith('.Call')?{runtime_id:'fixture'}:method.endsWith('.AssistantReads')?[]:method.endsWith('.Transport')?{url:'ws://localhost/api/v1/ws',token:'fixture'}:true;
 };
 const hooks=registerHooks({resolve(specifier,context,next){
   if(specifier==='/wails/runtime.js')return {url:'data:text/javascript,export const Call={ByName:(...args)=>globalThis.resourceDownloadNativeCall(...args)};',shortCircuit:true};

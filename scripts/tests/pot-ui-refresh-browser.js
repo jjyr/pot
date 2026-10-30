@@ -23,6 +23,8 @@ async page=>{
     }
     const url=new URL(path,location.origin),name=url.pathname;
     if(name==='/api/v1/runtime')return {runtime_id:f.machines[0].runtime_id,host:{hostname:f.machines[0].name,tags:f.machines[0].tags}};
+    if(name==='/api/v1/spaces')return {active_space_id:'local',items:f.serverSpaces};
+    if(name==='/api/v1/assistants')return f.serverAssistants.filter(item=>item.space_id===options.space);
     if(name==='/api/v1/agent-links')return {items:f.links};
     if(name==='/api/v1/permissions')return {policy:f.policy,pending:f.approvals};
     if(name==='/api/v1/providers')return f.providers;
@@ -34,11 +36,12 @@ async page=>{
     if(name==='/api/v1/usage/providers')return {providers:[]};
     return {items:[]};
    };
-   f.client={desktop:true,runtime:{boot_id:'fixture'},spaces:[{id:'local',control_id:'host',name:'Local',kind:'local',connected:true}],assistants:[{id:'a',name:'Assistant',space_id:'local',control_id:'host',capabilities:{version:1,operations:['schedules.manage','assistant.usage','approvals.manage','task.list','task.read','chat.read','chat.send']}}],scope:()=>({space:'local',owner:'a'}),request:(path,options={})=>{
+   f.client={desktop:true,runtime:{runtime_id:'host',boot_id:'fixture'},spaces:[{id:'local',control_id:'host',name:'Local',kind:'local',connected:true}],assistants:[{id:'a',name:'Assistant',space_id:'local',control_id:'host',capabilities:{version:1,operations:['schedules.manage','assistant.usage','approvals.manage','task.list','task.read','chat.read','chat.send']}}],scope:()=>({space:'local',owner:'a'}),request:(path,options={})=>{
     f.calls.push({path,options});if(options.method&&f.holdMutations)return new Promise((resolve,reject)=>f.pendingMutations.push({path,options,resolve,reject}));
     if(!options.method&&f.hold&&path.startsWith(f.hold))return new Promise((resolve,reject)=>f.pending.push({path,options,resolve,reject}));
     try{return Promise.resolve(structuredClone(f.response(path,options)));}catch(error){return Promise.reject(error);}
    }};
+   f.serverSpaces=structuredClone(f.client.spaces);f.serverAssistants=structuredClone(f.client.assistants);
    f.release=()=>{for(const call of f.pending.splice(0))call.resolve(structuredClone(f.response(call.path,call.options)));};
    f.pages=createPages({chatApprovalHost:document.querySelector('.chat-approvals'),chatVisible:()=>true,client:f.client,host:document.querySelector('main'),approvalHost:document.querySelector('.approval-host'),locale:()=> 'en',notify:message=>f.notices.push(message),changed:()=>{},titleChanged:()=>{},openChat:()=>{}});
    await f.pages.show('usage');
@@ -94,7 +97,7 @@ async page=>{
   await page.evaluate(async()=>{const f=refreshFixture;f.history=document.querySelector('tbody tr');f.runButton=document.querySelector('.page-card button');f.runs[0].state='complete';await f.pages.refresh(['schedules']);});
   assert(await page.evaluate(()=>refreshFixture.history===document.querySelector('tbody tr')&&refreshFixture.history.textContent.includes('Complete')&&refreshFixture.runButton===document.querySelector('.page-card button')),'Schedule history updates in place');
   assert(await page.getByRole('button',{name:'Confirm removal',exact:true}).count()===1,'Background updates retain the removal confirmation');
-  await page.evaluate(async()=>{const f=refreshFixture;f.approvals=[{id:'approval',request:{owner:'a',call_id:'call',turn:'turn',machine_id:'host',tool:'exec_command',args:{cmd:'pwd'}}}];await f.pages.permissions();document.querySelector('.approval-card').open=true;f.approvalButton=document.querySelector('.approval-actions button');f.approvalButton.focus();await f.pages.permissions();});
+  await page.evaluate(async()=>{const f=refreshFixture;f.approvals=[{id:'approval',request:{owner:'a',call_id:'call',turn:'turn',machine_id:'host',tool:'exec_command',args:{cmd:'pwd'}}}];await f.pages.permissions();f.pages.approvalRegion().render(document.querySelector('.chat-approvals'));document.querySelector('.approval-card').open=true;f.approvalButton=document.querySelector('.approval-actions button');f.approvalButton.focus();await f.pages.permissions();f.pages.approvalRegion().render(document.querySelector('.chat-approvals'));});
   assert(await page.evaluate(()=>refreshFixture.approvalButton===document.querySelector('.approval-actions button')&&document.activeElement===refreshFixture.approvalButton),'Repeated permission reads retain the same approval action');
   await page.evaluate(()=>{refreshFixture.hold='/api/v1/schedules';refreshFixture.pages.refresh(['schedules']);refreshFixture.retired=refreshFixture.pending.splice(0);refreshFixture.hold='';});
   await page.evaluate(()=>refreshFixture.pages.show('usage'));await page.locator('.usage-total strong').filter({hasText:/^22$/}).waitFor();
@@ -107,7 +110,7 @@ async page=>{
    f.selection={space:'local',owner:'a'};f.client.scope=()=>({...f.selection});f.client.setScope=value=>f.selection={...value};f.client.production=true;
    f.client.notificationStatus=async()=>({enabled:true,permission:'denied'});f.client.notificationView=async()=>{};
    const withPages=f.response;f.response=(path,options)=>path.startsWith('/api/v1/tasks/outcomes')?{items:[],cursor:0,has_more:false}:withPages(path,options);
-   f.snapshot={runtime_id:'fixture',boot_id:'fixture',owner_id:'local/a',conversation_id:'chat',cursor:'1',running:false,turn_id:null,messages:[{id:'reply',role:'assistant',text:'Ready',status:'complete'}]};
+   f.snapshot={runtime_id:'host',boot_id:'fixture',owner_id:JSON.stringify(['local','a']),conversation_id:'chat',cursor:'1',running:false,turn_id:null,messages:[{id:'reply',role:'assistant',text:'Ready',status:'complete'}],replies:[]};
    f.client.snapshot=()=>Promise.resolve(structuredClone(f.snapshot));f.client.subscribe=(receive,status)=>{f.receive=receive;status('connected');queueMicrotask(()=>receive(structuredClone(f.snapshot)));return ()=>{};};f.client.changes=receive=>{f.changes=receive;return ()=>{};};
    const {mountApp}=await import('/components/ui.js');f.unmount=mountApp(root,f.client);
   });

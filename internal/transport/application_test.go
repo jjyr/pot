@@ -3,8 +3,10 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/control"
+	"github.com/jjyr/pot/internal/localui"
 	product "github.com/jjyr/pot/internal/runtime"
 	"github.com/jjyr/pot/internal/secrets"
 	"io"
@@ -141,17 +143,15 @@ func TestSocketProductCreateEventsAuthAndRestart(t *testing.T) {
 	}
 	streamctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	request, _ := http.NewRequestWithContext(streamctx, "GET", "http://runtime/api/v1/events?assistant_id="+definition["id"].(string), nil)
-	request.Header.Set("Authorization", "Bearer "+endpoint.Token)
-	response, err := client.Do(request)
-	if err != nil {
+	sentinel := errors.New("conversation event")
+	err = localui.NewLocalHTTPClient(client, endpoint.Token, "").Stream(streamctx, "/api/v1/events?assistant_id="+definition["id"].(string), func(event localui.Event) error {
+		if event.Type == "conversation" {
+			return sentinel
+		}
+		return nil
+	})
+	if !errors.Is(err, sentinel) {
 		t.Fatal(err)
-	}
-	buf := make([]byte, 1024)
-	n, err := response.Body.Read(buf)
-	response.Body.Close()
-	if err != nil || !strings.Contains(string(buf[:n]), "event: conversation") {
-		t.Fatal(string(buf[:n]), err)
 	}
 	if err = s.Close(ctx); err != nil {
 		t.Fatal(err)

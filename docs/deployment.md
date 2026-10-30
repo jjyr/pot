@@ -2,7 +2,8 @@
 
 Pot has one Go backend with two hosts: `pot serve` runs standalone Runtime; the
 macOS Wails App composes its local Runtime in process. The App's main window and
-tray use direct bindings and the shared frontend. An independent
+tray use an authenticated loopback WebSocket and the shared frontend; native
+bindings provide desktop capabilities and transport bootstrap. An independent
 `web-ui-server` process publishes browser access to one explicitly selected
 local node. See [Architecture](architecture.md) for ownership and failure rules.
 

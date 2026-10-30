@@ -14,7 +14,7 @@ async page=>{
   const client={production:true,desktop:true,runtime:{runtime_id:'reply-runtime',boot_id:'boot'},scope:()=>({...context}),setScope:value=>Object.assign(context,value),
    snapshot:async()=>structuredClone(context.owner==='other'?{...empty,owner_id:JSON.stringify(['local','other']),conversation_id:'other'}:fixture.snapshot),
    send:request=>{fixture.requests.push(request);return new Promise((resolve,reject)=>{fixture.resolveSend=resolve;fixture.rejectSend=reject;});},
-   cancel:async()=>{},changes:()=>{fixture.changeSubscriptions++;return ()=>{};},
+   cancel:async()=>{},changes:()=>{fixture.changeSubscriptions++;return ()=>{};},sendReceipt:async(request,scope)=>{if(fixture.holdReceipt)return new Promise(()=>{});return {runtime_id:'reply-runtime',owner_id:scope.owner,request_id:request.request_id,conversation_id:request.conversation_id,user_message_id:request.user_message_id||'',retry_user_message_id:request.retry_user_message_id||'',state:'unconfirmed'};},
    subscribe:(deliver,status)=>{fixture.deliver=deliver;fixture.status=status;fixture.subscriptions++;status('connected');queueMicrotask(async()=>deliver(await client.snapshot()));return ()=>{};},
    request:async path=>{
     if(path==='/api/v1/spaces')return {active_space_id:'local',items:[{id:'local',control_id:'reply-runtime',name:'Local',kind:'local',connected:true}]};
@@ -35,11 +35,14 @@ async page=>{
  });
  await page.waitForFunction(()=>document.querySelector('#pot-composer')&&!document.querySelector('#pot-composer').disabled);
  await page.locator('#pot-composer').fill('你好');await page.locator('#pot-composer').press('Enter');
- await page.getByText('发送中…',{exact:true}).waitFor();
- assert(await page.locator('.role-assistant').count()===1,'Sending immediately creates one assistant bubble');
- await page.evaluate(()=>{replyFixture.bubble=document.querySelector('.is-activity .reply-bubble');replyFixture.user=document.querySelector('.role-user');const request=replyFixture.requests[0];replyFixture.input={id:'input',request_id:request.request_id,role:'user',text:request.text,status:'accepted'};replyFixture.publish({messages:[replyFixture.input],running:true,turn_id:'input'});});
+await page.waitForFunction(()=>replyFixture.requests.length===1&&document.querySelector('#pot-composer').value==='');
+ await page.locator('.history[role="log"] .message-pending').waitFor();
+ assert(await page.locator('.role-assistant').count()===0,'No assistant bubble until receiver confirms running');
+ await page.evaluate(()=>{replyFixture.user=document.querySelector('.role-user');const request=replyFixture.requests[0];replyFixture.input={id:'input',request_id:request.request_id,role:'user',text:request.text,status:'accepted'};replyFixture.publish({messages:[replyFixture.input],running:true,turn_id:'input'});});
  await page.getByText('思考中',{exact:true}).waitFor();
- assert(await page.evaluate(()=>document.querySelector('.is-activity .reply-bubble')===replyFixture.bubble&&document.querySelector('.role-user')===replyFixture.user),'SSE acceptance adopts the optimistic nodes');
+ await page.evaluate(()=>{replyFixture.bubble=document.querySelector('.is-activity .reply-bubble');});
+ assert(await page.evaluate(()=>document.querySelector('.role-user')===replyFixture.user),'WS acceptance retains the user node');
+assert(await page.evaluate(()=>document.querySelector('.is-activity .reply-bubble')===replyFixture.bubble),'WS acceptance adopts the optimistic activity bubble');
  await page.evaluate(()=>replyFixture.resolveSend({message_id:'input',duplicate:false}));
  await page.waitForFunction(()=>document.querySelector('#pot-composer').value==='');
  await page.evaluate(()=>replyFixture.publish({messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'streaming',text:'你好！'}]}));
@@ -57,9 +60,9 @@ async page=>{
  assert(!await page.locator('.connection-status').isVisible(),'Failure is not duplicated below the composer');
  assert(await page.locator('.reply-bubble button').count()===1,'Failure exposes one main action');
  assert(await page.locator('#pot-composer').inputValue()==='保留新草稿','Failure keeps newly typed text');
- await page.getByText('错误详情',{exact:true}).click();await page.getByText('model provider returned HTTP 404',{exact:true}).waitFor();
+ const failureDetails=page.locator('.history[role="log"]:not([data-preparation-surface]) .reply-error-details'); await failureDetails.locator(':scope > summary').click(); await page.waitForFunction(()=>document.querySelector('.history[role="log"]:not([data-preparation-surface]) .reply-error-details')?.open); await failureDetails.getByText('model provider returned HTTP 404',{exact:true}).waitFor();
  await page.evaluate(()=>replyFixture.publish({}));
- assert(await page.locator('.reply-error-details').evaluate(node=>node.open),'Snapshot refresh retains the expanded diagnostic');
+ assert(await failureDetails.evaluate(node=>node.open),'Snapshot refresh retains the expanded diagnostic');
  await page.getByRole('button',{name:'检查 AI 配置',exact:true}).click();
  await page.getByText('已配置的提供商',{exact:true}).waitFor();
  await page.getByRole('button',{name:'聊天',exact:true}).click();
@@ -77,7 +80,7 @@ async page=>{
  await page.emulateMedia({reducedMotion:'no-preference'});
  await page.evaluate(()=>replyFixture.active={node:document.querySelector('.is-activity .reply-status'),line:document.querySelector('.is-activity .reply-status-title'),height:document.querySelector('.is-activity').getBoundingClientRect().height});
  await page.evaluate(()=>replyFixture.status('offline'));
- await page.locator('.connection-status').getByText('实时连接已中断，正在重新连接…',{exact:true}).waitFor();
+ await page.locator('.connection-status').getByRole('button',{name:'实时连接已中断，正在重新连接…',exact:true}).waitFor();
  await page.locator('.is-activity .reply-status').getByText('连接中断，正在确认状态',{exact:true}).waitFor();
  assert(await page.evaluate(()=>{const row=document.querySelector('.is-activity');return row.querySelector('.reply-status')===replyFixture.active.node&&row.querySelector('.reply-status-title')===replyFixture.active.line&&Math.abs(row.getBoundingClientRect().height-replyFixture.active.height)<0.5;}),'Reconnecting preserves the nonterminal status identity and frame');
  assert(await page.locator('.reply-bubble.is-failed').count()===0,'An interrupted connection does not declare the reply failed');
@@ -103,7 +106,7 @@ async page=>{
   // window must replace both subscriptions and fetch the terminal snapshot.
   replyFixture.snapshot=replyFixture.project({...replyFixture.snapshot,messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'complete',text:'切回后同步完成'}],running:false,turn_id:null});
  });
- await page.locator('.connection-status').getByText('实时连接已中断，正在重新连接…',{exact:true}).waitFor();
+ await page.locator('.connection-status').getByRole('button',{name:'实时连接已中断，正在重新连接…',exact:true}).waitFor();
  await page.locator('.is-activity .reply-status').getByText('连接中断，正在确认状态',{exact:true}).waitFor();
  await page.evaluate(()=>{window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));});
  await page.getByText('切回后同步完成',{exact:true}).waitFor();
@@ -121,20 +124,31 @@ async page=>{
  await page.locator('.assistant-row').filter({hasText:'Pot'}).click();
  await page.getByText('切回后同步完成',{exact:true}).waitFor();
  assert(await page.locator('#pot-composer').inputValue()==='保留新草稿','Owner navigation restores its own draft');
- await page.locator('#pot-composer').fill('测试发送错误');await page.locator('#pot-composer').press('Enter');
- await page.getByText('发送中…',{exact:true}).waitFor();
+ await page.evaluate(()=>{replyFixture.beforeRejected=replyFixture.requests.length;});
+ await page.locator('#pot-composer').fill('测试发送错误');
+ await page.locator('#pot-composer').press('Enter');
+ await page.waitForFunction(n=>replyFixture.requests.length===n,await page.evaluate(()=>replyFixture.beforeRejected+1));
+ assert(await page.locator('#pot-composer').inputValue()==='','Send commits and clears the composer locally');
+ await page.getByRole('button',{name:'已保存的消息',exact:true}).click();
  await page.evaluate(()=>{const error=Error('Request was rejected');error.status=409;replyFixture.rejectSend(error);});
- await page.getByText('回复失败',{exact:true}).waitFor();
- assert(await page.locator('#pot-composer').inputValue()==='测试发送错误','A rejected send preserves its draft');
+ await page.locator('.outbox-dialog .history:not([data-preparation-surface]) .outbox-status').filter({hasText:'消息未被接收，内容已保留。'}).waitFor();
+ assert(await page.locator('.outbox-dialog').getByText('测试发送错误',{exact:true}).count()>=1,'Rejected content is retained in Saved messages');
+ assert(await page.locator('.history[role="log"] .is-activity').count()===0,'Rejected send adds no failed assistant activity');
  const retryID=await page.evaluate(()=>replyFixture.requests.at(-1).request_id);
  await page.getByRole('button',{name:'重试',exact:true}).click();
- await page.getByText('发送中…',{exact:true}).waitFor();
+ await page.waitForFunction(n=>replyFixture.requests.length===n,await page.evaluate(()=>replyFixture.beforeRejected+2));
  assert(await page.evaluate(()=>replyFixture.requests.at(-1).request_id)===retryID,'Rejected-send retry retains its original receipt identity');
- assert(await page.locator('.role-user').count()===2,'Retry does not add another optimistic user message');
+ await page.getByRole('button',{name:'关闭',exact:true}).click();
+ assert(await page.locator('.history[role="log"] .role-user').count()===2,'Retry does not add another optimistic user message');
+ await page.evaluate(()=>{replyFixture.holdReceipt=true;});
  await page.evaluate(()=>replyFixture.rejectSend(Error('Connection closed')));
- await page.getByText('上一条消息可能已被接受，请先确认后再发送。',{exact:true}).waitFor();
- assert(await page.getByRole('button',{name:'发送',exact:true}).isDisabled(),'Unknown acceptance keeps the next send locked until confirmation');
+ await page.getByRole('button',{name:'已保存的消息',exact:true}).click();
+ await page.locator('.outbox-dialog .history:not([data-preparation-surface]) .outbox-status').filter({hasText:'正在核对接收结果…'}).waitFor();
  assert(await page.getByRole('button',{name:'重试',exact:true}).count()===0,'Unknown send outcomes offer state reconciliation instead of resending');
+ await page.getByRole('button',{name:'关闭',exact:true}).click();
+ await page.locator('#pot-composer').fill('New local draft');
+ assert(await page.getByRole('button',{name:'发送',exact:true}).isEnabled(),'Outbox permits local enqueue after unknown outcome');
+ assert(await page.evaluate(()=>replyFixture.requests.length)===await page.evaluate(()=>replyFixture.beforeRejected+2),'Unknown outcome did not replay absent receipt');
   await page.evaluate(async()=>{
     const {createReplyBubble}=await import('/components/reply.mjs');
     const {renderMarkdown}=await import('/components/markdown.mjs');

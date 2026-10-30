@@ -26,7 +26,8 @@ Chat / tasks / schedules / agent tools
 
 Each node owns its assistants, models, credentials, workspaces, permissions,
 resources, usage and task execution. The local operator API uses a private Unix
-socket; App uses native bindings. An independent browser service publishes
+socket; App uses an authenticated loopback WebSocket for business calls and
+native bindings for desktop capabilities. An independent browser service publishes
 session-authenticated access to one local node. Peer connections grant
 collaboration capabilities, never remote operator access or credentials.
 
@@ -128,6 +129,10 @@ launches or new delegations. SQLite schemas and upgrades belong to
 [Database migrations](database-migrations.md).
 
 ## Transport and presentation
+
+Browser and desktop business calls and subscriptions use the shared
+[UI WebSocket protocol](ui-transport.md). Wails supplies the connection bootstrap
+and native capabilities; it does not expose business call or subscription bindings.
 
 The existing browser publication forwards a fixed MCP/OAuth surface through the
 private Control socket. MCPAccess verifies each external credential and keeps

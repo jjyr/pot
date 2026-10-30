@@ -76,8 +76,8 @@ async (page,{origin=new URL(page.url()).origin,witness}={})=>{
     await page.locator('.history:not([data-preparation-surface]) [data-message-id="m240"]').waitFor();
     await settle();
     await page.mouse.move(width-35,400);
-    const {steps,worstDrift:worst,worstSample,maxMounted}=await witness({page,sample:()=>page.evaluate(()=>continuity.sample()),wheel:async delta=>{await wheel(delta);return page.evaluate(()=>continuity.sample());},width,ids:Array.from({length:19},(_,i)=>i+221),label:'Chat',bounded:80});
-    assert(maxMounted<80,`${width}px retains virtualization`);
+    const {steps,worstDrift:worst,worstSample,maxMounted}=await witness({page,sample:()=>page.evaluate(()=>continuity.sample()),wheel:async delta=>{await wheel(delta);return page.evaluate(()=>continuity.sample());},width,ids:Array.from({length:19},(_,i)=>i+221),label:'Chat',retainedCount:80});
+    assert(maxMounted===80,`${width}px retains every loaded row through traversal`);
     assert(await page.evaluate(()=>continuity.reads)===0,`${width}px traversal does not fetch or reorder the stored page`);
     const persisted=await page.evaluate(()=>continuity.persisted());
     assert(persisted.length===80&&persisted.every((value,index)=>Number(value)===161+index),`${width}px stored messages stay complete and ordered`);
@@ -107,12 +107,12 @@ async (page,{origin=new URL(page.url()).origin,witness}={})=>{
     await page.locator('.latest-button').click();await settle();
     current=await page.evaluate(()=>continuity.sample());assert(current.height-current.viewport-current.top<=2,`${width}px Latest reveals the loaded image`);
     await page.evaluate(()=>continuity.nested());
-    const group=page.locator('.history:not([data-preparation-surface]) .work-record-group[data-anchor-message-id="m242"]');await group.waitFor();
-    assert(await group.getAttribute('data-sequence')==='242'&&await group.getAttribute('data-sequence-before')==='242'&&await group.getAttribute('data-sequence-after')==='274','A collapsed group represents one native record and exposes its exact member range');
-    await group.locator(':scope > details > summary').click();await page.locator('.history:not([data-preparation-surface]) [data-message-id="m242"]').waitFor();await settle();
+    const group=page.locator('.history:not([data-preparation-surface]) .work-record-group[data-message-id="m242"]');await group.waitFor();
+    assert(await group.evaluate(node=>node.parentElement.classList.contains('message-window')) && await group.getAttribute('data-sequence')==='242','Flat group leader preserves original sequence and parent');
+    await group.locator(':scope > .work-record-prefix > .work-record-summary').click();await page.locator('.history:not([data-preparation-surface]) [data-message-id="m242"]').waitFor();await settle();
     const parent=page.locator('.history:not([data-preparation-surface]) [data-message-id="m242"]').locator('details.tool-call > summary').first();
     await parent.click();await settle();
-    assert(await group.locator('.work-record-body article.message').count()===33,`${width}px grouped nested tools retain all native members`);
+    const groupKey=await group.getAttribute('data-work-group');assert(groupKey!==null,`${width}px grouped nested tools expose a work group key`);const members=page.locator(`.history:not([data-preparation-surface]) .message-window > article.message[data-work-group="${groupKey}"]`);assert(await members.count()===33,`${width}px grouped nested tools retain all native members`);
     await page.mouse.move(width-35,400);
     let nestedPrevious=await page.evaluate(()=>continuity.sample()),nestedWorst=0,nestedWorstSample=null;
     for(let step=0;step<40;step++){
@@ -130,7 +130,7 @@ async (page,{origin=new URL(page.url()).origin,witness}={})=>{
       }
       nestedPrevious=next;
     }
-    const childID=await group.locator('.work-record-body article.message').last().getAttribute('data-message-id');
+    const childID=await members.last().getAttribute('data-message-id');
     const child=page.locator(`.history [data-message-id="${childID}"]`).locator('details.tool-call').first();
     await child.locator(':scope > summary').click();await settle();
     assert((await child.locator('.tool-body').textContent()).includes('Nested output.'),`${width}px expanding a child reveals its long output`);

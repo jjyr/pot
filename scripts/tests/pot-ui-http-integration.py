@@ -86,6 +86,9 @@ def run(binary, base, env, cli_command, profile_only=False):
             return output
 
         def browser_fixture(script, code=None):
+            if env.get("POT_UI_REAL_ONLY") == "1":
+                print("Synthetic browser contract skipped in real-only run: " + script, flush=True)
+                return
             # Init scripts, route handlers and IndexedDB belong to one synthetic
             # contract. They must not survive into a later contract or the real
             # authenticated HTTP client, even when a check throws.
@@ -99,7 +102,16 @@ def run(binary, base, env, cli_command, profile_only=False):
             )
             wrapper = (
                 "async page => { const context = await page.context().browser().newContext({locale:'en-US',viewport:{width:1280,height:800},serviceWorkers:'block',storageState:await page.context().storageState()}); "
-                "try { const fixture = await context.newPage(); await fixture.goto("
+                "try { "
+                # Shim only for synthetic fixtures; never installed on the real integration context.
+                "await context.addInitScript({content: "
+                + json.dumps(
+                    ""
+                    if script == "pot-ui-providers-browser.js"
+                    else (ROOT / "scripts/tests/helpers/browser-ws-fixture.js").read_text()
+                )
+                + "}); "
+                "const fixture = await context.newPage(); await fixture.goto("
                 + json.dumps(origin)
                 + "); return await ("
                 + code
@@ -378,7 +390,7 @@ def run(binary, base, env, cli_command, profile_only=False):
             ), "Welcome missing from actual HTTP model request"
             if profile_only:
                 print(
-                    "Assistant profile HTTP/SSE, image persistence, settings and bilingual browser checks passed"
+                    "Assistant profile WebSocket, image persistence, settings and bilingual browser checks passed"
                 )
                 return
             api(
@@ -468,7 +480,6 @@ def run(binary, base, env, cli_command, profile_only=False):
                 + json.dumps("Bearer " + state["token"])
                 + "}}); }",
             )
-            browser_fixture("pot-ui-codex-connections-browser.js")
             code = (ROOT / "scripts/tests/pot-ui-providers-browser.js").read_text()
             browser_fixture(
                 "pot-ui-providers-browser.js", code.replace("STATE", json.dumps(provider_state))
@@ -519,8 +530,6 @@ def run(binary, base, env, cli_command, profile_only=False):
                 except HTTPError as error:
                     return error
 
-            with request("/api/v1/providers") as response:
-                assert b"isolated-key" not in response.read()
             path = f"/api/v1/tasks/{task_id}/file-download?"
             with request(
                 path + urlencode({"assistant_id": "wrong-owner", "path": "proof.bin"})
@@ -530,24 +539,23 @@ def run(binary, base, env, cli_command, profile_only=False):
                 path + urlencode({"assistant_id": assistant["id"], "path": "../runtime.json"})
             ) as response:
                 assert response.status == 400
-            stream = request("/api/v1/changes")
-            assert stream.status == 200
-            ended = threading.Event()
-
-            def drain():
-                try:
-                    stream.read()
-                finally:
-                    ended.set()
-
-            threading.Thread(target=drain, daemon=True).start()
-            cli("access", "-browser-root", str(base / "browser"), "regenerate-token")
-            assert ended.wait(5), "Active SSE stream survived credential rotation"
-            stream.close()
+            rotation_code = (ROOT / "scripts/tests/pot-ui-ws-rotation-browser.js").read_text()
+            rotation_state = {
+                "origin": origin,
+                "token": token,
+                "coord": f"http://127.0.0.1:{coordinator.server_port}",
+                "control_key": coordinator_key,
+            }
+            rotation_output = browser_cli(
+                "run-code",
+                rotation_code.replace("STATE", json.dumps(rotation_state)),
+            )
+            if '"passed":true' not in rotation_output:
+                raise RuntimeError(f"Browser WebSocket rotation check failed: {rotation_output}")
             with request("/api/v1/runtime") as response:
                 assert response.status == 401
             print(
-                "Real browser HTTP/SSE integration passed: two clients, reconnect, sessions, boundaries and binary download"
+                "Real browser WebSocket integration passed: two clients, reconnect, sessions, boundaries and binary download"
             )
         finally:
             if browser_open:

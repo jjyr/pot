@@ -48,13 +48,14 @@ export async function taskContinuity(page,{origin}) {
 // One controller contract; Chat and Task supply their actual DOM samples and
 // trusted wheel input. Task uses a smaller desktop integration dataset; the
 // phone Chat trace owns the intensive mixed/async/nested geometry coverage.
-export async function witnessMessages({page,sample,wheel,width,ids,limit=160,label,bounded}){
+export async function witnessMessages({page,sample,wheel,width,ids,limit=160,label,bounded,retainedCount}){
   let previous=await sample(),worstDrift=0,worstSample,steps=0,maxMounted=0;
   const initialRequests=previous.requests,seen={up:new Set(),down:new Set()};
   const witness=(state,direction)=>state.visible.forEach(row=>{if(Math.min(row.bottom,state.viewport)-Math.max(row.top,0)>=24)seen[direction].add(Number(row.sequence));});
   for(const direction of ['up','down'])for(let step=0;step<limit;step++){
     witness(previous,direction);const delta=direction==='up'?-36:36,next=await wheel(delta);steps++;
     const common=previous.visible.find(row=>next.visible.some(item=>item.id===row.id));
+    if(retainedCount!==undefined)assert.equal(next.mounted,retainedCount,'Existing loaded rows stay mounted during every wheel step');
     const state={label,width,direction,step,delta,previous,next};
     await page.evaluate(state=>{window.wheelFrames||=[];wheelFrames.push(state);if(wheelFrames.length>2)wheelFrames.shift();},state);
     assert.ok(common,`${label} skipped its visible interval: `+JSON.stringify(state));
@@ -68,6 +69,7 @@ export async function witnessMessages({page,sample,wheel,width,ids,limit=160,lab
   }
   for(const direction of ['up','down'])for(const id of ids)assert.ok(seen[direction].has(id),`${label} ${width}px ${direction}: message ${id} was never readable`);
   if(initialRequests!==undefined)assert.equal(previous.requests,initialRequests,'Local traversal must not replay events');
-  assert.ok(maxMounted<bounded,'Retain bounded message DOM');
+  if(retainedCount!==undefined)assert.equal(maxMounted,retainedCount,'Retain every loaded message DOM row');
+  else assert.ok(maxMounted<bounded,'Retain bounded message DOM');
   return {steps,worstDrift,worstSample,maxMounted};
 }

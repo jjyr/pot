@@ -53,6 +53,7 @@ else {
         if(fixtures[name]){const result=await fixture(page,server.origin,name,fixtures[name]);if(name==='cached-loading.html')return {...result,firstCacheReturn:await page.evaluate(()=>window.cachedFirstReturnEvidence),cacheReturn:await page.evaluate(()=>window.cachedScopeReturnEvidence)};return name==='chat-cache-ui.html'?{...result,readiness:await page.evaluate(()=>window.cacheViewportEvidence)}:result;}
         if(name==='scroll-components')return fixture(page,server.origin,'chat-scroll.html?contract=window','DONE scrolling checks');
         if(name==='task-continuity')return taskContinuity(page,{origin:server.origin});
+        if(name==='retained-chat'){await page.route('**/retained-chat-regression',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><meta charset="utf-8">'}));await page.goto(server.origin+'/retained-chat-regression');return page.evaluate(async()=>{const {runRetainedChatBrowser}=await import('/scripts/tests/retained-chat-browser.mjs');return runRetainedChatBrowser();});}
         if(name==='task-history')return taskHistoryBrowser(page,{origin:server.origin});
         if(name==='task-history-edges')return taskHistoryEdges(page,{origin:server.origin});
         if(name==='switching'){

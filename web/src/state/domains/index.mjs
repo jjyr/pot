@@ -9,9 +9,9 @@ import {createExtensionsDomain} from './extensions.mjs';
 const clients=new WeakMap();
 export function domainsFor(client){
   const current=clients.get(client);if(current&&current.resources===client.resources)return current;
-  current?.dispose();const ownsResources=!client.resources,ownsRead=!client.read;client.resources ||= createResourceReads(client);client.read ||= (path,options)=>client.resources.read(path,options);const resources=client.resources,queries=createQueryRegistry(resources),commands=createCommands(client),context={resources,queries,commands};
+  current?.dispose();const ownsResources=!client.resources,ownsRead=!client.read;client.resources ||= createResourceReads(client);client.read ||= (path,options)=>client.resources.read(path,options);const resources=client.resources,queries=createQueryRegistry(resources),commands=createCommands(client),context={resources,queries,commands},directory=createDirectoryDomain(client,context);
   let consumers=0,closed=false;
-  const result={resources,retain(){consumers++;let active=true;return()=>{if(active){active=false;if(!--consumers)result.dispose();}};},chat:createChatDomain(client),directory:createDirectoryDomain(client,context),tasks:createTasksDomain(client,context),schedules:createSchedulesDomain(client,context),providers:createProvidersDomain(client,context),
+  const result={resources,retain(){consumers++;let active=true;return()=>{if(active){active=false;if(!--consumers)result.dispose();}};},chat:createChatDomain(client),directory,tasks:createTasksDomain(client,{...context,directory}),schedules:createSchedulesDomain(client,{...context,directory}),providers:createProvidersDomain(client,context),
     extensions:createExtensionsDomain(client,context),
     changed(topics,source={}){if(source.reset||source.boot||topics.includes('spaces'))result.tasks.clear();return resources.invalidate(topics,source);},
     dispose(){if(closed)return;closed=true;clients.delete(client);queries.dispose();commands.dispose();result.directory.dispose();result.chat.dispose();result.tasks.dispose();result.extensions.dispose();if(ownsResources){resources.clear();if(client.resources===resources){delete client.resources;if(ownsRead)delete client.read;}}},

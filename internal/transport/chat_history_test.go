@@ -152,7 +152,7 @@ func TestHistoryHTTPBoundsAndScope(t *testing.T) {
 	}
 }
 
-// Opt-in disposable real HTTP/SSE host for the shared browser fixture. It never
+// Opt-in disposable real HTTP/WS host for the shared browser fixture. It never
 // opens product roots, installs providers or emits native notifications.
 func TestHistoryBrowserFixture(t *testing.T) {
 	urlFile := os.Getenv("POT_HISTORY_FIXTURE_URL_FILE")

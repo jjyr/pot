@@ -1,4 +1,5 @@
 import {waitForOutbox as disk} from './outbox-persistence-browser.mjs';
+import {installFixtureWebSocket} from './helpers/ws-server.mjs';
 import {waitForDraftSaved} from './draft-persistence-browser.mjs';
 // Isolated production bootstrap + real SW/IndexedDB/SSE. No Control, account,
 // model, product root, Push registration or browser profile is used.
@@ -82,9 +83,10 @@ const server=createServer(async(req,res)=>{try{
  if(!file){res.writeHead(404).end();return;}
  res.setHeader('Cache-Control','no-store');res.setHeader('Content-Type',({'.js':'text/javascript','.mjs':'text/javascript','.css':'text/css','.html':'text/html','.json':'application/json','.webmanifest':'application/manifest+json','.ttf':'font/ttf','.png':'image/png','.svg':'image/svg+xml'})[extname(path==='/'?'/index.html':path)]||'application/octet-stream');res.end(file);
 }catch(error){res.writeHead(500).end(error.message)}});
+const fixtureWS=await installFixtureWebSocket(server);
 await new Promise(done=>server.listen(Number(process.env.POT_COLD_PORT||0),'127.0.0.1',done));
 const origin=`http://127.0.0.1:${server.address().port}`;
-if(process.argv.includes('--serve')){console.log(origin);process.on('SIGTERM',()=>{closeStreams();server.closeAllConnections();server.close()});}
+if(process.argv.includes('--serve')){console.log(origin);process.on('SIGTERM',async()=>{closeStreams();await fixtureWS.close();server.closeAllConnections();server.close()});}
 else{
  const {chromium}=await import(process.env.POT_PLAYWRIGHT_MODULE||'playwright');
  const browser=await chromium.launch({headless:true,executablePath:process.env.POT_CHROMIUM_EXECUTABLE,args:['--no-sandbox']});
@@ -221,5 +223,5 @@ else{
   const pages=await Promise.all(browser.contexts().flatMap(context=>context.pages()).map(async page=>({url:page.url(),dom:await page.evaluate(()=>({text:document.body.innerText,errors:window.potErrors?.logs(),online:navigator.onLine,editor:document.querySelector('textarea.composer-input')?.value,root:document.querySelector('#app')?.className,history:[...document.querySelectorAll('.history[role="log"]:not([data-preparation-surface])')].map(h=>({hidden:h.hidden,busy:h.getAttribute('aria-busy'),visibility:getComputedStyle(h).visibility,top:h.scrollTop,extent:h.scrollHeight,rows:[...h.querySelectorAll('article.message')].map(row=>row.dataset.messageId)}))})).catch(reason=>({error:reason.message}))})));
   await writeFile(resolve(output,'failure.json'),JSON.stringify({error:error.stack,pages,results,errors,calls},null,2));console.error(error);process.exitCode=1;
  }
- finally{await browser.close();closeStreams();server.closeAllConnections();await new Promise(done=>server.close(done));}
+ finally{await browser.close();closeStreams();await fixtureWS.close();server.closeAllConnections();await new Promise(done=>server.close(done));}
 }

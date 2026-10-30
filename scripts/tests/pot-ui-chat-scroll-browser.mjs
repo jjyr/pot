@@ -3,6 +3,7 @@
 import {mountApp} from '../../web/src/components/ui.js';
 import {createMessageWindow} from '../../web/src/components/message-window.mjs';
 import {createToolCall} from '../../web/src/components/tool-call.mjs';
+import {resolveReadingPosition} from '../../web/src/components/reading-position.mjs';
 
 const root=document.querySelector('#app'),results=document.querySelector('#results');
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -56,21 +57,21 @@ document.querySelector('#capture').onclick=async()=>{const h=history();scroll(h.
 async function componentChecks(){
   const scroller=document.createElement('div'),host=document.createElement('div'),live=new Set();
   scroller.style.cssText='position:fixed;left:-20000px;top:0;width:600px;height:240px;overflow:auto';host.className='message-window';scroller.append(host);document.body.append(scroller);
-  const rows=Array.from({length:240},(_,i)=>({id:`bounded-${i}`,viewKey:`bounded-${i}`,role:'user'})),heights=new Map(rows.map(row=>[row.viewKey,136]));
-  const windowed=createMessageWindow({scroller,host,heights,requestRender:()=>{},render(item,existing){if(existing)return existing;const row=document.createElement('article');row.className='message';row.style.cssText='height:120px;overflow:hidden;white-space:pre';row.textContent='Synthetic retained text. '.repeat(12000);const entry={row};live.add(entry);return entry;},dispose(entry){entry.row.remove();live.delete(entry);}});
+  const rows=Array.from({length:24},(_,i)=>({id:`bounded-${i}`,viewKey:`bounded-${i}`,role:'user'})),heights=new Map(rows.map(row=>[row.viewKey,136]));
+  const windowed=createMessageWindow({scroller,host,heights,requestRender:()=>{},render(item,existing){if(existing)return existing;const row=document.createElement('article');row.className='message';row.style.cssText='height:120px;overflow:hidden;white-space:pre';row.textContent='Synthetic retained text. '.repeat(120);const entry={row};live.add(entry);return entry;},dispose(entry){entry.row.remove();live.delete(entry);}});
+  const prepared=async()=>{for(let n=0;n<120;n++){await frame();if(windowed.prepared)return;}throw Error('Component rows did not prepare');};
   try{
+    windowed.setMessages(rows);await prepared();
     for(let i=0;i<3;i++){
-      scroller.scrollTop=i*1300;windowed.setMessages(rows);
-      const cached=[...live].filter(entry=>!entry.row.isConnected);
-      if(cached.length)throw Error('A retired message DOM remained cached in memory');
+      scroller.scrollTop=i*1300;windowed.setMessages(rows);await prepared();
+      check(live.size===rows.length,'all existing rows remain mounted during traversal');
     }
-    check(true,'retired message DOM is released throughout long traversal');
-    windowed.setMessages([]);check(live.size===0,'data/owner retirement disposes every mounted row');
-    const payload='x'.repeat(1100000),heavy=rows.map(row=>({...row,text:payload}));
-    windowed.setMessages(heavy);scroller.scrollTop=8000;windowed.setMessages(heavy);
+    windowed.reset();check(live.size===0,'explicit reset disposes every mounted row');
+    const payload='x'.repeat(11000),heavy=rows.map(row=>({...row,text:payload}));
+    windowed.setMessages(heavy);await prepared();scroller.scrollTop=8000;windowed.setMessages(heavy);await prepared();
     check([...live].every(entry=>entry.row.isConnected),'large deferred message payloads do not retain detached DOM');
-    windowed.setMessages([]);
-    windowed.setMessages(rows);windowed.close();check(live.size===0,'closing the window releases every mounted row');
+    windowed.reset();
+    windowed.setMessages(rows);await prepared();windowed.close();check(live.size===0,'closing the window releases every mounted row');
   }finally{windowed.close();scroller.remove();}
   const call=createToolCall(),tool={id:'mutable',name:'fixture_tool',phase:'running',args:{},output:[{text:'initial output'}]};
   document.body.append(call.element);call.element.open=true;call.update({tool});
@@ -86,50 +87,130 @@ async function componentChecks(){
 
 }
 
-// Exercise the shared adapter's Chat contract independently of server paging.
+// Regression: stable append/prepend mounting must never detach existing rows.
 async function virtualizerChecks(){
   const scroller=document.createElement('div'),host=document.createElement('div');
   scroller.style.cssText='position:fixed;left:-20000px;top:0;width:600px;height:240px;overflow:auto;overflow-anchor:none';
   host.className='message-window';scroller.append(host);document.body.append(scroller);
-  let rows=Array.from({length:160},(_,index)=>({id:`anchor-${index}`,viewKey:`anchor-${index}`,role:'user',height:80+index%4*35}));
+  const makeRow=index=>({id:`anchor-${index}`,viewKey:`anchor-${index}`,role:'user',sequence:String(index+100),height:80+index%4*35});
+  let rows=Array.from({length:160},(_,index)=>makeRow(index));
   let windowed,renderFrame=0;
+  const originals=new Set();
+  let orderBefore=[];
+  const originalParents=new Map();
+  const removed=[];
+  const observer=new MutationObserver(mutations=>{
+    for(const mutation of mutations){
+      for(const node of mutation.removedNodes){
+        if(node.nodeType!==1)continue;
+        if(originals.has(node)){removed.push(node);continue;}
+        if(node.querySelector&&[...originals].some(row=>node.contains(row)))removed.push(node);
+      }
+    }
+  });
+  observer.observe(host,{childList:true,subtree:true});
+  const anchorIndex=80;
+  let anchorToken;
   windowed=createMessageWindow({scroller,host,requestRender:()=>{if(!renderFrame)renderFrame=requestAnimationFrame(()=>{renderFrame=0;windowed.setMessages(rows);});},render(item,record){
-    if(!record){const row=document.createElement('article');row.className='message';row.append(document.createElement('button'));record={row};}
-    record.row.style.height=`${item.height}px`;record.row.dataset.messageId=item.id;return record;
+    if(!record){
+      const row=document.createElement('article');row.className='message';row.dataset.messageId=item.id;
+      const button=document.createElement('button');button.type='button';button.textContent='focus';
+      const span=document.createElement('span');span.textContent=`row ${item.id} ${item.sequence}`;
+      row.append(button,span);
+      if(item.id===`anchor-${anchorIndex}`){
+        anchorToken=crypto.randomUUID();
+        const frameEl=document.createElement('iframe');
+        frameEl.srcdoc=`<input id="probe" value="kept"><script>window.token=${JSON.stringify(anchorToken)};</script>`;
+        row.append(frameEl);
+      }
+      record={row,span,button};
+    }
+    record.row.style.height=`${item.height}px`;
+    record.row.dataset.messageId=item.id;
+    return record;
   },dispose:record=>record.row.remove()});
+  const assertOriginals=()=>{
+    for(const row of originals){const parent=row.parentElement;check(!!parent&&parent.isConnected,'original row has connected parent');check(parent===originalParents.get(row),'original row retains original parent');const id=row.dataset.messageId;check(host.querySelector(`[data-message-id="${id}"]`)===row,'original row identity preserved via host query');}
+    const current=[...host.querySelectorAll('article')];
+    const filtered=current.filter(row=>originals.has(row));
+    check(filtered.length===orderBefore.length,'all originals present after mutation');
+    check(filtered.every((row,index)=>row===orderBefore[index]),'original relative row order preserved');
+    check(removed.length===0,'no original row subtree removed');
+  };
   const settled=async()=>{for(let attempt=0;attempt<90;attempt++){await frame();if(windowed.prepared&&!renderFrame){await frame();if(windowed.prepared&&!renderFrame)return;}}throw Error('Prepared virtual range did not settle');};
-  const visible=()=>[...host.querySelectorAll('article')].find(row=>{const box=row.getBoundingClientRect(),top=scroller.getBoundingClientRect().top;return box.bottom>top&&box.top<top+scroller.clientHeight;});
   const offset=row=>row.getBoundingClientRect().top-scroller.getBoundingClientRect().top;
-  const move=async top=>{scroller.dispatchEvent(new KeyboardEvent('keydown',{key:'PageUp',bubbles:true}));scroller.scrollTop=top;scroller.dispatchEvent(new Event('scroll'));await settled();};
+  const endDistance=()=>scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop;
   try{
-    windowed.scrollToLatest();windowed.setMessages(rows);await settled();
-    check(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop<2,'TanStack opens a dynamic-height list at its end');
-    await move(scroller.scrollHeight*.45);const saved=visible(),savedOffset=offset(saved);
-    rows=[...Array.from({length:30},(_,index)=>({id:`prepend-${index}`,viewKey:`prepend-${index}`,role:'user',height:110+index%3*20})),...rows];
+    windowed.locate({id:`anchor-${anchorIndex}`});windowed.setMessages(rows);await settled();
+    const anchor=host.querySelector(`[data-message-id="anchor-${anchorIndex}"]`);
+    check(!!anchor,'initial historical anchor is mounted');
+    const scrollerRect=scroller.getBoundingClientRect(),anchorRect=anchor.getBoundingClientRect();
+    check(anchorRect.top<scrollerRect.bottom&&anchorRect.bottom>scrollerRect.top&&anchorRect.left<scrollerRect.right&&anchorRect.right>scrollerRect.left,'initial historical anchor is visible in scroller');
+    const anchorOffset=offset(anchor);
+    const parent=anchor.parentElement;
+  anchor.dataset.scrollAnchor = 'message:' + anchor.dataset.messageId;
+  const result = resolveReadingPosition(scroller, {
+    top: 0,
+    anchors: [{key: 'reply:obsolete-input', offset: 7}],
+    anchor: {id: anchor.dataset.messageId, sequence: '180', offset: 7},
+  });
+check(result.anchor?.key===anchor.dataset.scrollAnchor,'saved legacy key resolves by durable message id');
+check(Math.abs(result.top-(scroller.scrollTop+offset(anchor)-7))<=1,'saved native id restores original offset');
+    orderBefore=[...host.querySelectorAll('article')];
+    for(const row of orderBefore){originals.add(row);originalParents.set(row,row.parentElement);}
+
+    const prepend=Array.from({length:30},(_,index)=>({id:`prepend-${index}`,viewKey:`prepend-${index}`,role:'user',sequence:String(70+index),height:110}));
+    rows=[...prepend,...rows];windowed.setMessages(rows);await settled();
+    check(anchor.isConnected&&anchor.parentElement===parent,'prepend retains anchor identity and parent');
+    check(Math.abs(offset(anchor)-anchorOffset)<=2,`prepend preserves anchor viewport offset (${anchorOffset} → ${offset(anchor)})`);
+    assertOriginals();
+
+    const button=anchor.querySelector('button');
+    button.focus({preventScroll:true});
+    const span=anchor.querySelector('span');
+    const range=document.createRange();range.selectNodeContents(span);
+    const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);
+    const selectedText=selection.toString();
+    check(selectedText.length>0,'selection text is nonempty');
+    const iframe=anchor.querySelector('iframe');
+    for(let attempt=0;attempt<90&&!(iframe.contentWindow?.token&&iframe.contentDocument?.querySelector('#probe'));attempt++)await frame();
+    const tokenBefore=iframe.contentWindow?.token;
+    const inputBefore=iframe.contentDocument?.querySelector('#probe')?.value;
+    check(tokenBefore===anchorToken,'iframe token initialized before mutation');
+    check(inputBefore==='kept','iframe input initialized before mutation');
+    iframe.contentDocument.querySelector('#probe').value='edited';
+
+    rows=rows.map(row=>row.id===`anchor-${anchorIndex}`?{...row,height:row.height+120,phase:'streaming'}:row);
     windowed.setMessages(rows);await settled();
-    check(saved.isConnected&&Math.abs(offset(saved)-savedOffset)<2,`historical prepend preserves the keyed visible message (${savedOffset} → ${offset(saved)})`);
-    const focused=visible();focused.querySelector('button').focus({preventScroll:true});await move(scroller.scrollTop+5000);
-    check(focused.isConnected&&focused.contains(document.activeElement),'focused message remains mounted outside the virtual range');
-    rows=[{id:'focused-prepend',viewKey:'focused-prepend',role:'user',height:150},...rows];windowed.setMessages(rows);await settled();
-    check(focused.isConnected&&focused.contains(document.activeElement),'prepending history retains focus by message key after indexes shift');
-    document.activeElement.blur();windowed.scrollToLatest();windowed.setMessages(rows);await settled();
-    rows=rows.map((row,index)=>index===rows.length-1?{...row,height:row.height+300}:row);windowed.setMessages(rows);await settled();
-    check(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop<2,'streaming row growth keeps an end-pinned viewport at the end');
-    await move(scroller.scrollTop-1000);const reading=visible(),readingOffset=offset(reading);
-    rows=[...rows,{id:'appended',viewKey:'appended',role:'user',height:180}];windowed.setMessages(rows);await settled();
-    check(reading.isConnected&&Math.abs(offset(reading)-readingOffset)<2,'appended output does not pull a historical reader to the end');
-    const targetID=rows.at(-1).id;
-    windowed.setMessages(rows);windowed.locate({id:targetID});await settled();
-    rows=[...rows].reverse();windowed.setMessages(rows);await settled();
-    check(!!host.querySelector(`[data-message-id="${targetID}"]`),'reordering rows preserves the retained navigation target');
-    rows=rows.slice(0,24);windowed.setMessages(rows);await settled();
-    check(!!host.querySelector(`[data-message-id="${targetID}"]`),'trimming history resolves a retained navigation target by message identity');
+    check(anchor.isConnected&&anchor.parentElement===parent,'stream height update retains anchor identity');
+    check(selection.toString()===selectedText,'stream update preserves selected text');
+    check(document.activeElement===button,'stream update preserves focused button');
+    check(iframe.contentWindow?.token===tokenBefore,'stream update preserves iframe token');
+    check(iframe.contentDocument?.querySelector('#probe')?.value==='edited','stream update preserves edited iframe input value');
+    assertOriginals();
+
+    scroller.dispatchEvent(new KeyboardEvent('keydown',{key:'PageUp',bubbles:true}));
+    scroller.scrollTop=Math.max(0,scroller.scrollTop-500);
+    scroller.dispatchEvent(new Event('scroll'));await settled();
+    const reader=anchor;const readerOffset=offset(reader);
+    rows=[...rows,{id:'anchor-300',viewKey:'anchor-300',role:'user',sequence:'300',height:180}];windowed.setMessages(rows);await settled();
+    check(reader.isConnected&&Math.abs(offset(reader)-readerOffset)<=2,'paused append preserves historical reader offset');
+    assertOriginals();
+
     windowed.scrollToLatest();windowed.setMessages(rows);await settled();
-    rows=rows.slice(-2);windowed.setMessages(rows);await settled();
-    check(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop<2,'an end target follows the current list after it shrinks');
-    windowed.setMessages(rows);windowed.locate({id:targetID});await settled();
-    rows=[];windowed.setMessages(rows);await settled();
-    rows=[{id:'replacement',viewKey:'replacement',role:'user',height:180}];windowed.setMessages(rows);await settled();
-    check(!!host.querySelector('[data-message-id="replacement"]'),'a removed target cannot break an empty or replacement window');
-  }finally{cancelAnimationFrame(renderFrame);windowed.close();scroller.remove();}
+    rows=[...rows,{id:'anchor-301',viewKey:'anchor-301',role:'user',sequence:'301',height:180}];windowed.setMessages(rows);await settled();
+    rows=rows.map((row,index)=>index===rows.length-1?{...row,height:row.height+200}:row);windowed.setMessages(rows);await settled();
+    check(endDistance()<=2,'latest follows append and stream row growth');
+    assertOriginals();
+
+    for(const top of [0,scroller.scrollHeight/2,scroller.scrollHeight,0]){scroller.scrollTop=top;scroller.dispatchEvent(new Event('scroll'));await settled();}
+    check(host.querySelectorAll('article').length===rows.length,'far scrolling keeps every existing row mounted');
+    assertOriginals();
+
+    observer.disconnect();
+    windowed.reset();
+    rows=[{id:'replacement',viewKey:'replacement',role:'user',sequence:'999',height:180}];windowed.setMessages(rows);await settled();
+    check(!!host.querySelector('[data-message-id="replacement"]'),'replacement after explicit reset mounts fresh rows');
+    check(!anchor.isConnected,'explicit reset disconnects previous rows');
+  }finally{observer.disconnect();cancelAnimationFrame(renderFrame);windowed.close();scroller.remove();}
 }

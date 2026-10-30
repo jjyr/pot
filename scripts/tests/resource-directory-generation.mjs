@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import {installWSFixture} from './helpers/ws-fixture.mjs';
+installWSFixture();
 import {registerHooks} from 'node:module';
 import {createProductionClient} from '../../web/src/adapters/production.mjs';
 import {createMemoryProjectionStore} from '../../web/src/state/projection-store.mjs';
@@ -9,7 +11,7 @@ registerHooks({resolve(specifier,context,next){return specifier==='/wails/runtim
 const deferred=()=>{let resolve;return{promise:new Promise(done=>resolve=done),resolve:value=>resolve(value)};};
 const originalFetch=globalThis.fetch;
 try{
-  globalThis.fakeNative={call:async()=> '[]',on:()=>()=>{}};
+  globalThis.fakeNative={call:async(name)=> name.endsWith('.Transport')?{url:'ws://localhost/api/v1/ws',token:'fixture'}:[]};
   globalThis.fetch=async()=>new Response('[]',{headers:{'Content-Type':'application/json'}});
   for(const desktop of [true,false]){
     for(const retirement of ['startup','directory-authority']){
@@ -47,7 +49,7 @@ for(const desktop of [true,false]){
   const retire=copies.retire.bind(copies);copies.retire=async(...args)=>{await retire(...args);retireCount++;};
   let oldRequest=false;
   const response=path=>{path=path.split('?')[0];if(path==='/api/v1/spaces')return{items:[{id:'local',control_id:'control',connected:true}],active_space_id:'local'};if(path==='/api/v1/assistants')return oldRequest?[]:[{id:'alice',capabilities:{version:1,operations:['chat.read','chat.send']}}];if(path==='/api/v1/runtime')return{runtime_id:'control',boot_id:'boot'};if(path==='/api/v1/agent-links')return{items:[]};throw Error(path);};
-  globalThis.fakeNative={call:async(name,method,path)=>JSON.stringify(response(path)),on:()=>()=>{}};
+  globalThis.fakeNative={call:async(name)=> name.endsWith('.Transport')?{url:'ws://localhost/api/v1/ws',token:'fixture'}:[]};
   globalThis.fetch=async path=>new Response(JSON.stringify(response(path)),{headers:{'Content-Type':'application/json'}});
   const client=await createProductionClient({desktop,startupIdentity:{runtime_id:'control',boot_id:'boot'},resourceStorage:storage,resourceCopies:copies});client.confirmStartup({runtime_id:'control',boot_id:'boot'});client.setScope({space:'local',owner:'alice'});
   const queries=createQueryRegistry(client.resources),commands=createCommands(client),directory=createDirectoryDomain(client,{resources:client.resources,queries,commands});

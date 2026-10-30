@@ -51,7 +51,8 @@ func TestNotificationRegistrationCannotOutliveAuthority(t *testing.T) {
 				request.AddCookie(cookie)
 				response := httptest.NewRecorder()
 				done := make(chan struct{})
-				go func() { defer close(done); server.ServeHTTP(response, request) }()
+				originalConfig := config
+				go func() { defer close(done); server.notificationRoute(response, request, originalConfig) }()
 				select {
 				case <-blocked.entered:
 				case <-time.After(testutil.Timeout(t, 2*time.Second)):

@@ -11,8 +11,8 @@ web/src: shell, pages, composer, drafts, configuration, navigation
                               | production client
                +--------------+----------------+
                |                               |
-         Wails bindings                  same-origin HTTP/SSE
-       Go desktop service                 browser server
+     native Transport bootstrap        same-origin HTTP
+       + /api/v1/ws (pot.v1)           + /api/v1/ws (pot.v1)
       local node + Agent Link peers       one local node
 ```
 
@@ -58,7 +58,7 @@ fallback described below. The component loads the pinned, bundled Pele ESM
 module only when a diagram enters the document; no CDN is needed.
 
 Each `pot-mermaid` element owns its Pele mount and destroys it on disconnection,
-including when a message is recycled or its diagram source changes. Appended
+when its owning view closes or its diagram source changes. Appended
 reply text reparses only the final Markdown block; completed paragraphs, code,
 tables, image previews and diagrams retain their nodes and local state. A late module load
 cannot mount a detached or superseded element. Container resizing and pending
@@ -140,7 +140,7 @@ own reading intent. Closing one leaves shared history IO available to another;
 retire, scope change and deletion fence late publication and cache resurrection.
 
 Chat and Task output use one preparation path for new output, history pages,
-cached initial content, virtual remounts and expanded work records. A candidate
+cached initial content and expanded work records. A candidate
 renders in a connected, inert surface outside the live history, with the actual
 column width, captured data and renderer props. Recursive component readiness,
 image decoding and font readiness precede measurement. The candidate's border
@@ -152,20 +152,16 @@ updates and pagination keep the history visible.
 
 A window measures the entire loaded collection before registering its canvas;
 unknown rows never enter the index with estimated heights. Initial measurement
-uses cohorts of up to 96 rows, retaining up to 64 ready destination candidates
-between cohorts. Other candidates release their DOM and leases after measurement,
-leaving numeric geometry. The final candidate set covers the measured viewport,
-12-row overscan, navigation destination and native focus/selection pins. A viewport
-containing more than 96 very short rows can therefore require more than 96 final
-candidates; this does not retain offscreen DOM for the entire loaded collection.
-At most 32 component loads run concurrently across the window and its regions.
+uses cohorts of up to 96 rows. The complete loaded collection retains its prepared
+candidates until publication and its durable rows thereafter; offscreen scrolling
+does not recycle them. At most 32 component loads run concurrently across the window and its regions.
 It retains one running snapshot and the newest pending revision, so
 continuous tokens do not indefinitely replace an otherwise publishable batch.
 Width, font, locale, scope and navigation changes retire incompatible candidates.
 Identity profiles, Task mappings/titles, reference source text, inline approvals
 and machine labels join captured renderer props and invalidate the appropriate
-layout generation. Task geometry also belongs to its request scope, issuing
-Control and boot; changing that ownership retires its old resource DOM.
+layout generation. Task geometry belongs to its request scope and issuing Control. Explicit scope
+or run changes retire its resource DOM; an ordinary reconnect preserves it.
 Changed children and scalar text enter the live view from their connected
 candidate. Stable native containers and unchanged content can remain in place;
 commit does not reconstruct new content from strings. Each hidden presentation
@@ -249,14 +245,11 @@ scrolling, leases and diagram instances. Surfaces retire after the actual nodes
 have transferred. Atomic DOM moves are preferred; the fallback restores focus
 and selection and defers disconnect cleanup to distinguish a move from removal.
 Real removal retires the component generation and releases its resources.
-Virtual range commits keep the root containing the current focus in place and
-order its measured neighbors around it. Moving that focused root can make the
-browser scroll it into view even during an atomic DOM move; it must not override
-the conversation controller's newer reading destination. Focus and the physical
-root order remain intact without another scroll writer.
-Only a root already parented directly by the live host can stay in place. A newly
-prepared root enters from its connected surface even if a native child has focus;
-it cannot serve as a live-host insertion reference before that transfer.
+Durable message roots keep their parent and relative order after publication.
+New prepared wrappers enter their final live location before retained native
+children replace their surrogates. Live originals never enter a preparation
+surface. Focus and selection therefore remain attached to the same message rows
+without another scroll writer.
 
 One conversation controller chooses the geometry correction for the entire
 batch; nested adapters never write the native scroller. Its context snapshots
@@ -301,7 +294,7 @@ copies inside the repository. Production never falls back to a volatile store
 when IndexedDB fails.
 
 ```text
-HTTP / native / SSE / successful mutation
+WebSocket response / event / successful mutation
                   |
           repository + reducer
                   |
@@ -470,13 +463,15 @@ opening from Tasks makes Back return to the list. Nested Task Usage and browser
 Back/Forward preserve this origin.
 
 [`adapters/production.mjs`](../web/src/adapters/production.mjs) captures the owner
-and local presentation scope before every request. Desktop calls Go through Wails
-and receives
-`pot:snapshot`, `pot:subscription`, `pot:changed` and `pot:read` events. Browser
-uses same-origin fetch and EventSource. The Go desktop service owns window/tray
-lifecycle, the native file save dialog and desktop viewing. Browser adapters own
-authentication, installation, notifications and browser downloads. App window
-close hides the window while the local Runtime continues; Quit stops it.
+and local presentation scope before every request and delegates wire transport to
+the shared [`adapters/ws-client.mjs`](../web/src/adapters/ws-client.mjs). Desktop
+uses the native `Transport()` binding for its loopback URL and token, then opens
+`/api/v1/ws` with the `pot-token.<token>` subprotocol; the browser uses its
+same-origin session cookie. Both exchange `pot.v1` request/response and
+subscription frames. Desktop retains `pot:read` for native attention preferences. The Go desktop service owns window/tray lifecycle, the native
+file save dialog and desktop viewing. Browser adapters own authentication,
+installation, notifications and browser downloads. App window close hides the
+window while the local Runtime continues; Quit stops it.
 
 The App does not publish or configure the browser endpoint. Browser access belongs
 to the standalone server and its operator controls; see [Deployment](deployment.md).
@@ -542,17 +537,21 @@ Conversation and Task stream contracts are in [UI events](ui-events.md).
 
 Chat and Task transcripts share `components/work-record-window.mjs` and
 `state/work-records.mjs`. Consecutive process records in one stream/turn use one
-collapsed Work records disclosure: tool operations and messages are counted
+flat Work records grouping: tool operations and messages are counted
 separately. Its single summary line includes the first two communication
 counterparts' profile avatars or existing Task identity marks, with an overflow
 count. Full-address identity owns deduplication; the current actor is omitted.
 Missing profile images use the shared person icon, never a provider logo.
-Expanding reveals all counterparts and the original mixed timeline. Each record
+Each original message keeps its row and native identity. A permanent prefix slot
+on the leader holds the summary. Folding hides mounted members rather than moving
+them into another container; approval rows remain visible. Expanding reveals all
+counterparts and the original mixed timeline. Each record
 opens its own body/result, with raw parameters and code in secondary Call details.
 
 Tools, Task creation/management, ordinary peer messages and normal compaction
 can share a group. Prose, user inputs, deliveries/presentations, a new turn,
-unknown/stopped execution, failed compaction and actual approvals remain boundaries.
+unknown/stopped execution and failed compaction remain boundaries. Approvals stay
+accessible within their group without changing the row parent.
 Task live status, user-facing result reports, artifacts and approval controls keep
 their existing independent locations. Tool failures stay in the timeline and also
 mark the collapsed summary. The activity line uses tool-category metadata only,
@@ -569,18 +568,13 @@ count. Missing IDs never trigger text-based deduplication. Raw facts and model
 history remain unchanged. Acceptance is not delivery or completion; receive is not
 read. No group elapsed total is calculated by summing concurrent calls.
 
-The adapter retains group keys by membership and reading anchor, and original
-record nodes across append, prepend and splits. Disclosure state survives virtual
-recycling within the existing conversation-scoped memory; it is not a persisted
-history field. A collapsed group exposes one real member's native message ID and
-sequence as its reading representative, plus the exact first/last native sequence
-of its current members. Appending/prepending retains a valid representative;
-clipping or splitting selects a member still in that group. A fresh projection
-prefers the saved native reading ID, so restoration can resolve the header alias
-even when the virtual group key changes. The range does not make all collapsed
-members readable. These fields are derived only in the UI; saved positions reuse
-the existing native anchor fields and raw message records stay unchanged.
-The existing virtualizer/controller alone owns scrolling. Task
+The adapter retains group disclosure state in conversation-scoped memory. Group
+metadata changes in place; original rows keep their identity, parent and relative
+order across append, prepend and status changes. Poll and receipt suppression
+hides previously mounted rows without deleting source history. Saved positions
+use native message IDs and offsets; restoring a hidden target expands its group.
+The persisted view and message formats do not change. The conversation controller
+alone owns scrolling. Task
 inputs whose API provides only a scalar sender keep their existing independent
 reference/guidance projection rather than inventing a full endpoint. Adapters
 without individual tool or plan events do not acquire synthesized progress.
@@ -674,7 +668,7 @@ remain independent; native preference/authorization history stays in the private
 Business owners publish full lifecycle facts after their authoritative writes
 commit. `internal/hooks.Feed` is the shared, typed, process-local subscription
 boundary; each subscriber receives its own events. The authenticated owner
-`/api/v1/lifecycle` SSE connection transports the complete fact across processes.
+`/api/v1/lifecycle` WebSocket subscription transports the complete fact across processes.
 It does not send a topic hint followed by catalogue, outcome or permission GETs.
 `internal/systemnotifications` converts those facts to bounded notifications,
 persists their IDs/content and offers independent consumers. It has no Push
@@ -684,7 +678,7 @@ sender, subscription, permission, device registration or local/Push branch.
 Task terminal transaction / pending approval / eligible reply commit
                               |
                     typed lifecycle facts
-             /api/v1/lifecycle (authenticated SSE)
+             /api/v1/lifecycle (authenticated WS)
                               |
                  notification selection + event log
                    independent subscriptions
@@ -777,7 +771,7 @@ off removes only that device. Chat subscribe/attach/recovery is independent.
 
 A live page is required for local browser delivery. Native consumption continues
 while windows are hidden and stops on Quit. The backend Push consumer continues
-with closed/suspended pages; it does not rely on page SSE/timers or silent Push.
+with closed/suspended pages; it does not rely on page subscriptions/timers or silent Push.
 
 ### Push installation and operation
 

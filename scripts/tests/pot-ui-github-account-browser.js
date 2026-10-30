@@ -14,8 +14,16 @@ async page=>{
    const fields=['repositories','reasons','subject_types','threads'].map(key=>({key,label:'pluginNotifications.'+key,...(key==='reasons'?{options:[{value:'mention',label:'pluginNotifications.reason.mention'},{value:'team_mention',label:'pluginNotifications.reason.team_mention'},{value:'custom_reason'}]}:{})}));
    const notifications={items:[{id:'github',settings:{revision:1,subscriptions:[binding],fields}}],assistants:[{id:'first',name:'Pot'},{id:'second',name:'Second'}]};
    const data={items:[integration],notifications};
-   const update=createIntegrations({root,signal:controller.signal,locale:()=>locale,scope:{space:'fixture-control'},refresh:async()=>update(data),request:async(path,options)=>{
-    assert(options.space==='fixture-control','Requests stay in this Control');writes.push({path,...options});
+   const view=createIntegrations({root,signal:controller.signal,locale:()=>locale,scope:{space:'fixture-control'},request:async(path,options)=>{
+    assert(options.space==='fixture-control','Requests stay in this Control');
+    if((!options.method||options.method==='GET')&&path==='/api/v1/integrations'){return structuredClone({items:[integration]});}
+    if(path==='/api/v1/plugin-notifications'){
+     const snapshot=structuredClone(notifications);
+     const gh=snapshot.items.find(item=>item.id==='github');
+     if(gh&&gh.settings&&integration.account){gh.settings.account_id=integration.account.identity.id;}
+     return snapshot;
+    }
+    writes.push({path,...options});
     if(options.method==='DELETE'){delete integration.account;integration.status='disconnected';return {};}
     assert(path==='/api/v1/plugin-notifications/github'&&options.method==='POST','Subscriptions use the plugin MCP gateway');
     await new Promise(resolve=>{release=resolve;});
@@ -24,19 +32,20 @@ async page=>{
     assert(options.body.tool==='update_subscription'&&args.id===binding.id&&args.revision===binding.revision,'Draft retains subscription identity and revision');
     assert(args.account_id===account.identity.id&&!!args.request_id,'Mutation binds the account and idempotency identity');
     Object.assign(binding,args,{revision:binding.revision+1});notifications.items[0].settings.revision++;
-    return notifications;
+    return structuredClone({...notifications,operation:{subscription_id:binding.id}});
    }});
+   const update=async()=>view.refresh();
    const input=label=>root.querySelector(`[aria-label="${label}"]`);
    const change=(element,value,event='input')=>{element.value=value;element.dispatchEvent(new Event(event,{bubbles:true}));};
    const tick=()=>new Promise(resolve=>setTimeout(resolve,0)),toggle=()=>root.querySelector('.integration-toggle');
-   const save=()=>[...root.querySelectorAll('button')].find(button=>/保存通知设置|Save notification settings/.test(button.textContent));
-   update(data);
+   const save=()=>[...root.querySelectorAll('button')].find(button=>/保存通知设置|Save notification settings|重试上次保存|Retry previous save/.test(button.textContent));
+   await update(data);
    assert(toggle().getAttribute('aria-expanded')==='false'&&root.querySelector('#github-account-settings').hidden,'Initially collapsed');
    assert(toggle().textContent.includes('Active subscriptions: 1'),'Healthy summary counts enabled subscriptions');
    toggle().click();assert(!input('Process existing notifications on the next check')&&!input('Other reasons (API values, comma separated)'),'Removed host notification controls stay absent');assert(toggle().getAttribute('aria-expanded')==='true'&&!root.querySelector('#github-account-settings').hidden,'One click expands settings');
    assert(input('custom_reason').checked,'Plugin-supplied existing reasons survive');
    const repo=input('Repositories values (comma separated)');repo.focus();change(repo,'jjyr/pot, jjyr/test');
-   binding.filters.repositories=['background/change'];update(data);
+   binding.filters.repositories=['background/change'];await update(data);
    assert(repo===document.activeElement&&repo.value==='jjyr/pot, jjyr/test','Background data preserves dirty input and focus');
    locale='zh-CN';window.dispatchEvent(new Event('pot:locale'));
    assert(repo===document.activeElement&&repo.value==='jjyr/pot, jjyr/test'&&repo.getAttribute('aria-label').includes('仓库'),'Locale changes preserve controls, focus and draft');
@@ -55,19 +64,19 @@ async page=>{
    change(input('Notification reasons'),'selected','change');save().click();release();await tick();
    assert(writes.at(-1).body.arguments.filters.reasons.length===0,'An empty selection matches none; it cannot become unrestricted');
    assert(Object.keys(writes.at(-1).body.arguments.filters).sort().join(',')==='reasons,repositories,subject_types,threads','All four plugin filters remain explicit');
-   binding.status='permission';update(data);
+   binding.status='permission';await update(data);
    assert(toggle().querySelector('[data-error="true"]')&&root.textContent.includes('GitHub denied notification access'),'Permission failure remains actionable');
-   binding.status='assistant_missing';update(data);assert(root.textContent.includes('Choose an assistant in this Control'),'Missing target is actionable');
-   binding.status='waiting_assistant';update(data);assert(root.textContent.includes('Create an assistant in this Control'),'Waiting for an assistant is explicit');
+   binding.status='assistant_missing';await update(data);assert(root.textContent.includes('Choose an assistant in this Control'),'Missing target is actionable');
+   binding.status='waiting_assistant';await update(data);assert(root.textContent.includes('Create an assistant in this Control'),'Waiting for an assistant is explicit');
    [...root.querySelectorAll('button')].find(button=>button.textContent==='Log out').click();await tick();
    assert(!root.querySelector('.integration-toggle')&&!root.querySelector('#github-account-settings'),'Sign out removes account settings');
-   integration.login={id:'fixture',status:'pending',authorization_url:'https://example.invalid',user_code:'FIXTURE-CODE'};update(data);
+   integration.login={id:'fixture',status:'pending',authorization_url:'https://example.invalid',user_code:'FIXTURE-CODE'};await update(data);
    assert(root.querySelector('.integration-code').textContent==='FIXTURE-CODE'&&root.querySelector('.integration-authorization a'),'Device flow stays visible');
-   integration.account={...account,identity:{id:'different',username:'other'}};integration.status='connected';delete integration.login;update(data);
+   integration.account={...account,identity:{id:'different',username:'other'}};integration.status='connected';delete integration.login;await update(data);
    assert(toggle().getAttribute('aria-expanded')==='false','A new account starts collapsed');
-   integration.account=account;binding.filters.repositories=['jjyr/pot'];update(data);toggle().click();
+   integration.account=account;binding.filters.repositories=['jjyr/pot'];await update(data);toggle().click();
    change(input('Repositories values (comma separated)'),'old/draft');save().click();
-   binding.filters.repositories=['new/account'];integration.account={...account,identity:{id:'third',username:'third'}};update(data);release();await tick();
+   binding.filters.repositories=['new/account'];integration.account={...account,identity:{id:'third',username:'third'}};await update(data);release();await tick();
    assert(toggle().getAttribute('aria-expanded')==='false'&&input('Repositories values (comma separated)').value==='new/account','A late save cannot acknowledge another account draft');
    controller.abort();return 'Account disclosure, plugin subscription filters, revision, retry, locale and account lifecycle passed';
   });

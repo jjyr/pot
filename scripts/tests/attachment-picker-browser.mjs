@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {mkdir} from 'node:fs/promises';
 import {attachmentPickerFixture} from './attachment-picker-fixture.mjs';
+import {waitForOutbox} from './outbox-persistence-browser.mjs';
 
 const file={name:'synthetic.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP438DwHwAGgAJ/EEwb4QAAAABJRU5ErkJggg==','base64')};
 export async function attachmentPickerBrowser(browser,{sourceOrigin,baseline=false,captureDir}={}){
@@ -8,7 +9,7 @@ export async function attachmentPickerBrowser(browser,{sourceOrigin,baseline=fal
  const scenario=async(name,run,{clock=false}={})=>{
   const context=await browser.newContext({viewport:{width:390,height:852}}),page=await context.newPage(),errors=[];
   await context.addCookies([{name:'picker-case',value:name,url:fixture.origin}]);if(clock)await page.clock.install();
-  await context.addInitScript(()=>{window.streams=[];const Native=EventSource;window.EventSource=class extends Native{constructor(url,options){super(url,options);window.streams.push(this);}};});
+  await context.addInitScript(()=>{window.streams=[];window.pickerDirectory=null;const Native=WebSocket;window.WebSocket=class extends Native{constructor(...args){super(...args);this.__requests=new Map();const onMessage=event=>{try{const frame=JSON.parse(event.data);if(frame?.type==='response'&&frame.id&&this.__requests.has(frame.id)){const path=this.__requests.get(frame.id);if(path==='/api/v1/assistants'&&Array.isArray(frame.result))window.pickerDirectory=frame.result;this.__requests.delete(frame.id);}}catch{}};this.addEventListener('message',onMessage);}send(data){try{const frame=JSON.parse(data);if(frame?.type==='subscribe'&&frame.id&&frame.path)window.streams.push({id:frame.id,path:frame.path,socket:this});if(frame?.type==='request'&&frame.id&&frame.path)this.__requests.set(frame.id,new URL(frame.path,location.href).pathname);}catch{}return super.send(data);}};});
   page.on('pageerror',e=>errors.push(e.message));
   const control=async body=>{const r=await context.request.post(fixture.origin+'/fixture/control',{data:body});assert(r.ok());};
   const evidence=async()=>await(await context.request.get(fixture.origin+'/fixture/state')).json();
@@ -29,7 +30,7 @@ export async function attachmentPickerBrowser(browser,{sourceOrigin,baseline=fal
  try{
   await scenario('connecting-picker-return',async({page,control,evidence,sample,ready,choose,uploaded,visibility,marks})=>{
    const chooser=await choose();await visibility('hidden');await control({holdInitial:true});await page.clock.setSystemTime((await page.evaluate(()=>Date.now()))+60000);await visibility('visible');
-   await page.waitForFunction(()=>window.streams.filter(s=>new URL(s.url).pathname==='/api/v1/events').length>=2&&!document.querySelector('.connection-status')?.classList.contains('is-connected'));
+   await page.waitForFunction(()=>window.streams.filter(s=>new URL(s.path,location.href).pathname==='/api/v1/events').length>=2&&!document.querySelector('.connection-status')?.classList.contains('is-connected'));
    await chooser.setFiles(file);await page.waitForFunction(()=>document.querySelector('input[type=file]')?.files.length===1||!!document.querySelector('.attachment-card'));
    marks.push({phase:'returned-connecting',ui:await sample()});assert.equal((await evidence()).trace.filter(t=>t.kind==='upload').length,0);assert.equal(await page.locator('.attachment-card').count(),baseline?0:1);
    if(captureDir){await mkdir(captureDir,{recursive:true});await page.screenshot({path:captureDir+'/picker-phone-'+(baseline?'before':'after')+'.png'});}
@@ -38,8 +39,8 @@ export async function attachmentPickerBrowser(browser,{sourceOrigin,baseline=fal
   },{clock:true});
   await scenario('permission-picker-return',async({page,control,evidence,sample,choose,uploaded,marks,connectionsBefore})=>{
    const chooser=await choose();await control({permission:false,directory:true});
-   await page.locator('#pot-composer').fill('Permission probe');await page.waitForFunction(()=>document.querySelector('.send-button').disabled);
-   await chooser.setFiles(file);marks.push({phase:'permission-unavailable',ui:await sample()});assert.equal(await page.locator('.attachment-card').count(),baseline?0:1);assert.equal((await evidence()).trace.filter(t=>t.kind==='upload').length,0);
+   await page.locator('#pot-composer').fill('Permission probe');await page.waitForFunction(()=>Array.isArray(window.pickerDirectory)&&window.pickerDirectory.every(a=>!a.capabilities||!Array.isArray(a.capabilities.operations)||!a.capabilities.operations.includes('chat.send')));
+   await chooser.setFiles(file);marks.push({phase:'permission-unavailable',ui:await sample()});assert.equal(await page.locator('.attachment-card').count(),baseline?0:1);assert.match(await page.locator('.attachment-hint').textContent(),/waiting/i);assert.equal((await evidence()).trace.filter(t=>t.kind==='upload').length,0);
    await control({permission:true,directory:true});if(!baseline)await uploaded();else await page.waitForFunction(()=>!document.querySelector('.attachment-plus').disabled);
    marks.push({phase:'permission-restored',ui:await sample()});assert.equal((await evidence()).trace.filter(t=>t.kind==='upload').length,baseline?0:3);assert.equal((await evidence()).trace.filter(t=>t.kind==='sse-open'&&t.path==='/api/v1/events').length,connectionsBefore);
   });
@@ -53,7 +54,7 @@ export async function attachmentPickerBrowser(browser,{sourceOrigin,baseline=fal
   if(!baseline){
    await scenario('upload-failure-retry',async({page,control,evidence,choose,uploaded,sample,marks})=>{
     await control({uploadFailure:true});await(await choose()).setFiles(file);await page.getByRole('button',{name:'Retry',exact:true}).waitFor();
-    assert.match(await page.locator('.attachment-hint').textContent(),/failed/);assert(await page.locator('.send-button').isDisabled());marks.push(await sample());
+    assert.match(await page.locator('.attachment-hint').textContent(),/failed/);await page.waitForFunction(()=>!document.querySelector('.send-button').disabled);assert.equal(await page.locator('.attachment-card.has-error').count(),1);assert.equal(await page.locator('.attachment-card').count(),1);assert.equal((await evidence()).trace.filter(t=>t.kind==='post').length,0);marks.push(await sample());
     await control({uploadFailure:false,running:true,publish:true});await page.getByRole('button',{name:'Retry',exact:true}).click();await uploaded();
     const uploads=(await evidence()).trace.filter(t=>t.kind==='upload');assert.equal(uploads.length,4);assert.equal(new Set(uploads.map(t=>t.id)).size,1);marks.push(await sample());
    });
@@ -79,12 +80,31 @@ export async function attachmentPickerBrowser(browser,{sourceOrigin,baseline=fal
      return results;
     }));
    });
+   await scenario('unsupported-submission-retained',async({page,control,evidence,choose,uploaded,marks,sample})=>{
+    await(await choose()).setFiles(file);await uploaded();await control({image:false,publish:true});await page.waitForFunction(()=>document.querySelector('.attachment-card')?.classList.contains('is-incompatible'));
+    await page.locator('.send-button').click();
+    const {rows,files}=await waitForOutbox(page,([rows,,files])=>rows.length===1&&rows[0].state==='failed'&&rows[0].problem==='attachmentUnsupported'&&files.length===1);assert.equal(rows.length,1);assert.equal(files.length,1);assert.equal(files[0].size,file.buffer.length);
+    assert.equal((await evidence()).trace.filter(t=>t.kind==='post').length,0);marks.push({phase:'unsupported-retained',ui:await sample(),idb:rows});
+   });
+   await scenario('permission-submission-retained',async({page,control,evidence,choose,marks,sample})=>{
+    await control({permission:false,directory:true});await page.waitForFunction(()=>Array.isArray(window.pickerDirectory)&&window.pickerDirectory.every(a=>!a.capabilities||!Array.isArray(a.capabilities.operations)||!a.capabilities.operations.includes('chat.attachments')));
+    await page.locator('#pot-composer').fill('Retained probe');await page.waitForFunction(()=>{const b=document.querySelector('.attachment-menu button');return b&&!b.disabled;});
+    const chooser=await choose();await chooser.setFiles(file);await page.waitForFunction(()=>document.querySelector('.attachment-card'));assert.match(await page.locator('.attachment-hint').textContent(),/waiting/i);
+    await page.locator('.send-button').click();
+    const {rows,files}=await waitForOutbox(page,([rows,,files])=>rows.length===1&&rows[0].state==='failed'&&rows[0].problem==='permission'&&files.length===1);assert.equal(rows.length,1);assert.equal(files.length,1);assert.equal(files[0].size,file.buffer.length);
+    const e=await evidence();assert.equal(e.trace.filter(t=>t.kind==='upload').length,0);assert.equal(e.trace.filter(t=>t.kind==='post').length,0);marks.push({phase:'permission-retained',ui:await sample(),idb:rows});
+   });
    await scenario('pending-send-snapshot',async({page,control,evidence,choose,uploaded,marks,sample})=>{
     await(await choose()).setFiles(file);await uploaded();await control({holdSend:true,running:true,publish:true});await page.locator('.send-button').click();
-    await page.waitForFunction(async()=> (await(await fetch('/fixture/state')).json()).rows.length===1);
-    await page.getByRole('button',{name:'Remove attachment',exact:true}).click();await(await choose()).setFiles({...file,name:'new.png'});await uploaded();
-    await control({receipt:true});await page.waitForFunction(()=>document.querySelector('.connection-status').classList.contains('is-connected'));
-    assert.equal(await page.locator('.attachment-name').textContent(),'new.png');const e=await evidence();assert.equal(e.rows.length,1);assert.equal(e.trace.filter(t=>t.kind==='post').length,1);assert.equal(e.trace.filter(t=>t.kind==='upload'&&t.action==='remove').length,0);assert.notEqual(e.rows[0].body.attachments[0].name,'new.png');marks.push(await sample());
+    await page.evaluate(async()=>{const start=performance.now();while(performance.now()-start<12000){const r=await(await fetch('/fixture/state')).json();if(r.rows.length===1)return;await new Promise(res=>requestAnimationFrame(res));}throw new Error('timeout waiting for rows length 1');});
+
+    await page.waitForFunction(() => document.querySelectorAll('.attachment-card').length === 0);
+    assert.equal(await page.locator('.attachment-card').count(),0);
+    await(await choose()).setFiles({...file,name:'new.png'});await uploaded();
+    await control({receipt:true,releaseSends:true});
+    await waitForOutbox(page,([rows])=> rows.length===1&&rows[0].state==='accepted');
+    assert.equal(await page.locator('.attachment-name').textContent(),'new.png');
+    const e=await evidence();assert.equal(e.rows.length,1);assert.equal(e.trace.filter(t=>t.kind==='post').length,1);assert.equal(e.trace.filter(t=>t.kind==='upload'&&t.action==='remove').length,0);assert.equal(e.rows[0].body.attachments[0].name,'synthetic.png');marks.push(await sample());
    });
    await scenario('owner-cancel-and-late-uploads',async({page,control,evidence,choose,uploaded,switchOwner,marks,sample})=>{
     const chooser=await choose();await switchOwner('beta');await chooser.setFiles(file);assert.equal(await page.locator('.attachment-card').count(),0);assert.match(await page.locator('.attachment-hint').textContent(),/cancelled/);assert.equal((await evidence()).trace.filter(t=>t.kind==='upload').length,0);
@@ -98,7 +118,7 @@ export async function attachmentPickerBrowser(browser,{sourceOrigin,baseline=fal
    });
    await scenario('limits-unsupported-and-locale',async({page,control,evidence,choose,uploaded,marks,sample})=>{
     await(await choose()).setFiles([file,{name:'large.png',mimeType:'image/png',buffer:Buffer.alloc(8*1024*1024)}]);await uploaded();assert.match(await page.locator('.attachment-hint').textContent(),/8 MiB/);
-    await control({image:false,publish:true});await page.waitForFunction(()=>document.querySelector('.attachment-card').classList.contains('is-incompatible'));assert.match(await page.locator('.attachment-hint').textContent(),/does not support images/);assert(await page.locator('.send-button').isDisabled());
+    await control({image:false,publish:true});await page.waitForFunction(()=>document.querySelector('.attachment-card').classList.contains('is-incompatible'));assert.match(await page.locator('.attachment-hint').textContent(),/does not support images/);await page.waitForFunction(()=>!document.querySelector('.send-button').disabled);assert.equal(await page.locator('.attachment-card').count(),1);assert.equal((await evidence()).trace.filter(t=>t.kind==='post').length,0);
     await page.evaluate(()=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:'zh-CN'}})));assert.match(await page.locator('.attachment-hint').textContent(),/不支持图片/);assert.match(await page.locator('.attachment-hint').textContent(),/8 MiB/);assert.equal(await page.getByRole('button',{name:'移除附件',exact:true}).count(),1);
     await page.getByRole('button',{name:'移除附件',exact:true}).click();
     await control({image:true,publish:true});await page.waitForFunction(()=>!document.querySelector('.attachment-menu button').disabled);

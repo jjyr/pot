@@ -11,11 +11,14 @@ async page=>{
    f.capabilities={version:1,scope:'owner',operations:['chat.read','chat.send','chat.subscribe','assistant.configure','assistant.usage','approvals.manage','task.read','task.list','task.cancel','task.interrupt','task.control','task.events','task.input','task.archive','task.outcomes','task.files','schedules.manage']};
    f.items=Array.from({length:12},(_,index)=>({id:String(index),title:'分析任务 '+(index+1),phase:'running',assistant_id:'a',updated_at_ms:100-index}));
    f.client={spaces:[{id:'local',control_id:'fixture-node',name:'本机'}],assistants:[{id:'a',space_id:'local',control_id:'fixture-node',name:'项目助手',capabilities:f.capabilities}],runtime:{boot_id:'fixture'},scope:()=>({space:'local',owner:'a'}),request:(path,options={})=>{
+    if(path==='/api/v1/spaces')return Promise.resolve({active_space_id:'local',items:structuredClone(f.client.spaces)});
+    if(path==='/api/v1/assistants')return Promise.resolve(structuredClone(f.client.assistants));
+    if(path==='/api/v1/agent-links')return Promise.resolve({items:[]});
     if(path==='/api/v1/runtime')return Promise.resolve({runtime_id:'fixture-machine',host:{hostname:'fixture.local',ip_addresses:['192.168.1.24']}});
     if(path.includes('/permissions'))return Promise.resolve({items:[]});
     if(/^\/api\/v1\/tasks\/[^/]+$/.test(path)&&f.detailRecord)return Promise.resolve({...structuredClone(f.detailRecord),capabilities:f.capabilities});
     if(path.endsWith('/messages'))return Promise.resolve({items:[]});
-    if(path.includes('/events?'))return Promise.resolve({events:[],cursor:0});
+    if(path.includes('/events?'))return Promise.resolve({events:[],cursor:0,run_id:'fixture-run'});
     return new Promise((resolve,reject)=>{const call={path,options,resolve,reject};f.calls.push(call);f.pending.push(call);});
    }};
    f.reply=()=>{for(const call of f.pending.splice(0))call.resolve({items:structuredClone(f.items),counts:{active:f.items.length}});};
@@ -50,7 +53,7 @@ async page=>{
   for(let attempt=0;attempt<2;attempt++){
    await page.evaluate(async()=>{const f=taskFixture;f.refresh=f.pages.refresh(['tasks']);for(const call of f.pending.splice(0))call.reject(Error('Offline fixture'));await f.refresh;});
   }
-  assert(await page.evaluate(()=>taskFixture.row.isConnected&&taskFixture.row.disabled&&document.querySelectorAll('.space-availability').length===1),'Failed refreshes retain cached rows and one stale warning');
+  assert(await page.evaluate(()=>taskFixture.row.isConnected&&!taskFixture.row.disabled&&document.querySelectorAll('.space-availability').length===1&&taskFixture.row.textContent.includes('刷新失败，继续显示之前加载的数据。')),'Failed refreshes retain cached rows and one stale warning');
   await page.evaluate(async()=>{const f=taskFixture;f.refresh=f.pages.refresh(['tasks']);f.reply();await f.refresh;});
   assert(await page.evaluate(()=>!taskFixture.row.disabled&&!document.querySelector('.space-availability')),'Recovery clears stale state');
   await page.evaluate(async()=>{const f=taskFixture;f.focused=f.rows.querySelectorAll('.task-row')[11];f.focused.focus();f.items[11].updated_at_ms=1000;f.refresh=f.pages.refresh(['tasks']);f.reply();await f.refresh;});
@@ -73,13 +76,13 @@ async page=>{
   await page.evaluate(()=>{for(const call of taskFixture.retired)call.resolve({items:[{id:'stale',title:'过期任务'}]});});
   assert(await page.getByRole('button',{name:'当前筛选任务',exact:true}).count()===1&&await page.getByRole('button',{name:'过期任务',exact:true}).count()===0,'Late responses cannot repaint the new view');
   // The same task ID on another assistant remains a distinct row and owner.
-  await page.evaluate(async()=>{const f=taskFixture;f.client.assistants.push({id:'b',space_id:'local',control_id:'fixture-node',name:'第二助手'});f.refresh=f.pages.refresh(['assistants']);for(const call of f.pending.splice(0))call.resolve({items:['a','b'].map(owner=>({...f.items[0],assistant_id:owner,title:'助手 '+owner})),total:2,counts:{active:2}});await f.refresh;});
+  await page.evaluate(async()=>{const f=taskFixture;f.client.assistants.push({id:'b',space_id:'local',control_id:'fixture-node',name:'第二助手',capabilities:f.capabilities});f.refresh=f.pages.refresh(['assistants']);for(const call of f.pending.splice(0))call.resolve({items:['a','b'].map(owner=>({...f.items[0],assistant_id:owner,title:'助手 '+owner})),total:2,counts:{active:2}});await f.refresh;});
   assert(await page.locator('.task-row').count()===2,'Row identity includes assistant identity');
   await page.getByRole('button',{name:'助手 b',exact:true}).click();
   await page.evaluate(()=>{taskFixture.pages.refresh(['tasks']);});
-  await page.waitForFunction(()=>taskFixture.pending.length===1);
+  try{await page.waitForFunction(()=>taskFixture.pending.length===1);}catch(err){const d=await page.evaluate(()=>({paths:taskFixture.pending.map(x=>x.path),owners:taskFixture.pending.map(x=>x.options&&x.options.owner)}));throw new Error('pending length mismatch: '+JSON.stringify(d),{cause:err});}
   assert(await page.evaluate(()=>taskFixture.pending.length===1&&taskFixture.pending[0].options.owner==='b'&&!taskFixture.pending[0].options.signal?.aborted),'Changes during detail loading do not navigate back to the list');
-  await page.evaluate(()=>{taskFixture.detailRecord={capabilities:taskFixture.capabilities,info:{phase:'running'},request:{text:'目标'}};taskFixture.pending.shift().resolve(taskFixture.detailRecord);});
+  await page.evaluate(()=>{taskFixture.detailRecord={run_id:'fixture-run',capabilities:taskFixture.capabilities,info:{id:'current',assistant_id:'b',phase:'running'},request:{text:'目标'}};taskFixture.pending.shift().resolve(taskFixture.detailRecord);});
   await page.getByLabel('任务追加',{exact:true}).waitFor();
   await page.getByLabel('任务追加',{exact:true}).fill('保留任务指导');
   await page.evaluate(async()=>{taskFixture.guidance=document.querySelector('textarea');taskFixture.detailRecord.info.phase='complete';taskFixture.detailRecord.result={text:'完成结果'};await taskFixture.pages.refresh(['tasks']);});

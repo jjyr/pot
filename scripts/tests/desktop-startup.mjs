@@ -4,17 +4,20 @@ import {setImmediate as turn} from 'node:timers/promises';
 import {readFileSync} from 'node:fs';
 import {completeStartup,validStartup} from '../../web/src/state/startup-identity.mjs';
 import {readDesktopStartup} from '../../web/src/adapters/production.mjs';
+import {installWSFixture} from './helpers/ws-fixture.mjs';
+import {getBusinessSocket} from '../../web/src/adapters/ws-client.mjs';
 
 registerHooks({load(url,context,next){if(process.env.POT_STARTUP_BASELINE&&url.includes('/web/src/app.js?native-startup='))return {format:'module',source:readFileSync(process.env.POT_STARTUP_BASELINE,'utf8'),shortCircuit:true};return next(url,context);},resolve(specifier,context,next){
   const fixtures={'./components/ui.js':'app-ui.mjs','./state/startup-identity.mjs':'app-store.mjs','./adapters/access.mjs':'app-access.mjs'};
   const fixture=specifier==='/wails/runtime.js'?'runtime.mjs':context.parentURL?.includes('/web/src/app.js')?fixtures[specifier]:null;
   return fixture?{url:new URL('./fixtures/native-bridge/'+fixture,import.meta.url).href,shortCircuit:true}:next(specifier,context);
 }});
+const fixture=installWSFixture();
 const locator={schema_version:1,key:'last',runtime_id:'control',boot_id:'boot-1',space:'control',owner:'assistant',surface:'main'};
 assert.equal(completeStartup(locator),true);
 for(const key of ['runtime_id','boot_id','space','owner','surface'])assert.equal(completeStartup({...locator,[key]:''}),false,`Desktop requires ${key}`);
 assert.equal(validStartup({...locator,owner:'',space:'',surface:''}),true,'Existing v1 runtime-only records keep their persisted format');
-const originalTimeout=globalThis.setTimeout,originalClear=globalThis.clearTimeout,originalError=console.error;
+  const originalTimeout=globalThis.setTimeout,originalClear=globalThis.clearTimeout,originalError=console.error,originalFetch=globalThis.fetch;
 const traces=[];
 let scenarioNumber=0;
 class Element {
@@ -26,8 +29,16 @@ class Element {
   remove(){this.isConnected=false;}
 }
 async function scenario(name,saved,run){
+  fixture.sockets.at(-1)?.close();
   const timers=new Map(),calls=[],mounts=[],saves=[],errors=[],events=[];let timerID=0;
   const state={name,mode:'offline',runtime:{runtime_id:'control',boot_id:'boot-1'},calls,mounts,saves,events};
+  globalThis.fetch=async(input,init={})=>{
+    const url=typeof input==='string'?input:input.url;
+    if(!url.endsWith('/api/v1/runtime'))throw Error('synthetic unexpected fetch '+url);
+    if(state.mode==='offline')throw Error('synthetic local Control unavailable');
+    if(state.mode==='hang')return new Promise(resolve=>{state.resolveRuntime=raw=>resolve(new Response(raw));});
+    return new Response(JSON.stringify(state.runtime));
+  };
   globalThis.setTimeout=(fn,ms)=>{const id=++timerID;timers.set(id,{fn,ms});return id;};globalThis.clearTimeout=id=>timers.delete(id);
   console.error=(...args)=>errors.push(args.map(value=>value?.message||String(value)));
   globalThis.window=new EventTarget();
@@ -39,10 +50,7 @@ async function scenario(name,saved,run){
     const method=name.split('.').at(-1);calls.push({method,args});
     if(state.mode==='offline')throw Error('synthetic local Control unavailable');
     if(method==='AssistantReads'){if(state.mode==='reads-failed')throw Error('synthetic reads unavailable');return [];}
-    if(method==='Call'){
-      if(state.mode==='hang')return new Promise(resolve=>{state.resolveRuntime=resolve;});
-      return JSON.stringify(state.runtime);
-    }
+    if(method==='Transport')return {url:'ws://localhost/api/v1/ws',token:'fixture'};
   }};
   globalThis.startupScenario={store:{async read(){return saved;},async save(runtime,scope={},surface=''){const value={schema_version:1,key:'last',runtime_id:runtime.runtime_id||runtime.id,boot_id:runtime.boot_id||'',space:scope.space||'',owner:scope.owner||'',surface};saves.push(value);saved=value;return value;},async clear(){saved=null;},close(){events.push('store closed');}},mount(_root,client){mounts.push(client);events.push(['mount',client.runtime.runtime_id,client.onlineReady]);client.onStartupConfirmed?.(()=>events.push(['confirmed',client.onlineReady,client.connectionGeneration,client.runtime.boot_id]));return()=>events.push('disposed');}};
   try{
@@ -56,7 +64,7 @@ try{
   await scenario('complete cached identity, unavailable local Control',locator,async state=>{
     assert.equal(state.mounts.length,1);const client=state.mounts[0];
     assert.equal(client.onlineReady,false);assert.equal(client.operationsReady,false);assert.equal(client.sessionReady(locator),false);
-    assert.deepEqual(state.calls.map(value=>value.method),['Call'],'Retained client must not await AssistantReads before mounting');
+    assert.deepEqual(state.calls.map(value=>value.method),['Transport'],'Retained client must not await AssistantReads before mounting');
     await assert.rejects(client.transport('/api/v1/messages',{method:'POST',body:{request_id:'synthetic'}}),error=>error.code==='startup_unconfirmed');
     await client.rememberStartup({space:'control',owner:'other'},'main');assert.equal(state.saves.length,0,'An offline selection cannot overwrite a confirmed locator');
     state.mode='online';await client.revalidateStartup();
@@ -85,7 +93,8 @@ try{
   });
   // The exported identity read obeys cancellation even when a native binding
   // never settles and offers no cancel method.
+  fixture.sockets.at(-1)?.close();
   const abort=new AbortController();globalThis.fakeNative.call=()=>new Promise(()=>{});
   const hanging=readDesktopStartup({signal:abort.signal});await turn();abort.abort();await assert.rejects(hanging,error=>error.name==='AbortError');
   console.log(JSON.stringify({scenarios:traces},null,2));
-}finally{globalThis.setTimeout=originalTimeout;globalThis.clearTimeout=originalClear;console.error=originalError;}
+}finally{getBusinessSocket({desktop:true}).close();fixture.restore();globalThis.setTimeout=originalTimeout;globalThis.clearTimeout=originalClear;console.error=originalError;globalThis.fetch=originalFetch;}

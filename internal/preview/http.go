@@ -1,82 +1,25 @@
 package preview
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
 	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
-	"time"
+	"strings"
+
+	"github.com/jjyr/pot/internal/localui"
 )
 
 // Handler is a loopback-only developer fixture. Production browser auth and
 // Control routes are deliberately not implemented by this preview transport.
 func Handler(service *Service, assets fs.FS) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/preview/snapshot", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, service.Snapshot())
-	})
-	mux.HandleFunc("POST /api/preview/messages", func(w http.ResponseWriter, r *http.Request) {
-		var request SendRequest
-		if !decode(w, r, &request) {
+	mux.HandleFunc("GET /api/preview/ws", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Origin") == "" {
+			http.Error(w, "Preview requires the same origin", http.StatusForbidden)
 			return
 		}
-		receipt, err := service.Send(request)
-		if err != nil {
-			writeJSON(w, HTTPStatus(err), asError(err))
-			return
-		}
-		writeJSON(w, http.StatusAccepted, receipt)
-	})
-	mux.HandleFunc("POST /api/preview/cancel", func(w http.ResponseWriter, r *http.Request) {
-		var request CancelRequest
-		if !decode(w, r, &request) {
-			return
-		}
-		if err := service.Cancel(request); err != nil {
-			writeJSON(w, HTTPStatus(err), asError(err))
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]bool{"accepted": true})
-	})
-	mux.HandleFunc("GET /api/preview/events", func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := w.(http.Flusher); !ok {
-			http.Error(w, "Streaming unavailable", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("X-Accel-Buffering", "no")
-		controller := http.NewResponseController(w)
-		updates, stop := service.Subscribe()
-		defer stop()
-		keepalive := time.NewTicker(5 * time.Second)
-		defer keepalive.Stop()
-		for {
-			_ = controller.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			select {
-			case <-r.Context().Done():
-				return
-			case <-service.ctx.Done():
-				return
-			case snapshot := <-updates:
-				data, err := json.Marshal(snapshot)
-				if err != nil {
-					return
-				}
-				if _, err = fmt.Fprintf(w, "event: snapshot\ndata: %s\n\n", data); err != nil {
-					return
-				}
-			case <-keepalive.C:
-				if _, err := io.WriteString(w, ": keepalive\n\n"); err != nil {
-					return
-				}
-			}
-			if controller.Flush() != nil {
-				return
-			}
-		}
+		localui.ServeWebSocket(w, r, localui.SocketOptions{Caller: SocketCaller(service)})
 	})
 	mux.Handle("GET /", http.FileServerFS(assets))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -105,30 +48,10 @@ func Handler(service *Service, assets fs.FS) http.Handler {
 			http.Error(w, "Cross-site preview access denied", http.StatusForbidden)
 			return
 		}
+		if (r.URL.Path == "/api/preview" || strings.HasPrefix(r.URL.Path, "/api/preview/")) && r.URL.Path != "/api/preview/ws" {
+			http.NotFound(w, r)
+			return
+		}
 		mux.ServeHTTP(w, r)
 	})
-}
-
-func decode(w http.ResponseWriter, r *http.Request, target any) bool {
-	if r.Header.Get("Content-Type") != "application/json" {
-		writeJSON(w, http.StatusUnsupportedMediaType, &Error{"invalid_request", "Expected application/json"})
-		return false
-	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 65536))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		writeJSON(w, http.StatusBadRequest, &Error{"invalid_request", "Invalid preview request"})
-		return false
-	}
-	if decoder.Decode(new(any)) != io.EOF {
-		writeJSON(w, http.StatusBadRequest, &Error{"invalid_request", "Expected a single request"})
-		return false
-	}
-	return true
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
 }

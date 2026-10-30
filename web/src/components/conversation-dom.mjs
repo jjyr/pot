@@ -1,4 +1,4 @@
-export function moveConversationNode(host,child,before=null){
+export function moveConversationNode(host,child,before=null){if(child.isConnected&&!child.closest?.('[data-preparation-surface]')&&(host.nodeType===1?host:host.parentElement)?.closest?.('[data-preparation-surface]'))throw Error('Live conversation node cannot enter preparation');
   if(child.parentNode===host&&child.nextSibling===before)return;
   // Keep explicit selection endpoints too: browser implementations of atomic
   // moves differ in how they retain a range across a native details subtree.

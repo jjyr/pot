@@ -26,13 +26,13 @@ func TestCommittedApprovalStreamAndOwnerRevocation(t *testing.T) {
 	}
 	handler := Handler(app, "private")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/lifecycle" {
+		if r.URL.Path != "/api/v1/ws" {
 			t.Error("notification scanned business resources", r.URL.Path)
 		}
 		handler.ServeHTTP(w, r)
 	}))
 	defer server.Close()
-	response, err := server.Client().Get(server.URL + "/api/v1/lifecycle")
+	response, err := server.Client().Get(server.URL + "/api/v1/ws")
 	if err != nil {
 		t.Fatal(err)
 	}

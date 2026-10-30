@@ -5,7 +5,7 @@ import {createTaskRepository,assertTaskEventRun} from '../task-repository.mjs';
 import {createTaskPages} from '../task-pages.mjs';
 import {createTaskTranscript} from '../task-transcript.mjs';
 import {supportsCapability} from '../agent-links.mjs';
-export function createTasksDomain(client,{resources,queries,commands,transcriptRepository}){
+export function createTasksDomain(client,{resources,queries,commands,transcriptRepository,directory}){
   let transcript=transcriptRepository,closed=false;const catchupTimers=new Map(),confirmedRuns=new Map();const transcripts=()=>transcript ||= createTaskRepository(client),pages=createTaskPages(client);
   const current=()=>{if(closed)throw new DOMException('Domain disposed','AbortError');};
   const path=id=>'/api/v1/tasks/'+encodeURIComponent(id),ref=(task,scope)=>JSON.stringify([scope.space,scope.owner,task.id,task.run_id]);
@@ -40,7 +40,7 @@ export function createTasksDomain(client,{resources,queries,commands,transcriptR
       }
       return {data:{authority,record,state,catchingUp,inputs:Array.isArray(inputs)?inputs:inputs.items||[],inputsTruncated:!!inputs.cache_truncated,unavailable:!!jobs[1].value?.unavailable,storageError,connectionError,fresh:freshness==='fresh'&&!failures.length&&!catchingUp&&!jobs[1].value?.unavailable},freshness:failures.length?'stale':catchingUp||jobs[1].value?.unavailable?'retained':freshness,lastConfirmed:resources.state(record)?.lastConfirmed};
     }catch(error){throw Object.assign(error,{storage:storageError});}
-  },{paths:[path(task.id),path(task.id)+'/messages'],topics:['tasks','runner','spaces'],space:scope.space,owner:scope.owner,publishIntermediate:true});};
+  },{paths:[path(task.id),path(task.id)+'/messages'],topics:['tasks','runner','spaces'],space:scope.space,owner:scope.owner,publishIntermediate:true,subscribe:notify=>{let authority=resourceAuthority(client,scope,resources),ready=client.operationScopeReady?.(scope)!==false;return directory?.watch(()=>{if(closed)return;const nextAuthority=resourceAuthority(client,scope,resources),nextReady=client.operationScopeReady?.(scope)!==false;if(nextAuthority===authority&&nextReady===ready)return;authority=nextAuthority;ready=nextReady;detail(task,scope).invalidate();if(ready)notify();})||(()=>{});}});};
   const active=scope=>queries.define('active-tasks:'+JSON.stringify(scope),async force=>{const items=[];let offset=0,stale=false;const seen=new Set();do{if(seen.has(offset))throw Error('task_pagination');seen.add(offset);const value=await resources.read('/api/v1/tasks/query?'+new URLSearchParams({scope:'active',limit:50,offset}),{...scope,authoritative:force});stale ||= resources.state(value)?.freshness!=='fresh';items.push(...(value.items||[]));offset=value.next_offset;}while(offset!=null);return {data:items.filter(task=>['queued','running','waiting','waiting_approval'].includes(task.phase)).map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner,_stale:stale})),freshness:stale?'retained':'fresh'};},{paths:['/api/v1/tasks/query'],topics:['tasks'],space:scope.space,owner:scope.owner});
   const command=(scope,task,operation,input,send,options)=>{
     const authority=task._authority||resourceAuthority(client,scope,resources);

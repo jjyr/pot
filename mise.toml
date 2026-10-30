@@ -138,13 +138,13 @@ run = "python scripts/go-notices --output .local/licenses/go-dependencies.txt ./
 [tasks."test:ui"]
 description = "Verify shared DOM composer and production owner-scoped state contracts"
 depends = ["test:ui-fluid", "test:assistant-creation", "test:ui-native"]
-run = ["node --test scripts/tests/ui-regression-plan.test.mjs", "node scripts/tests/pot-ui-service-worker.mjs", "node scripts/tests/pot-ui-preferences.mjs", "node --test pkg/mcp/node_runtime.test.mjs", "node scripts/tests/pot-ui-updates.mjs", "node scripts/tests/pot-ui-extensions.mjs", "node scripts/tests/local-form-concurrency.mjs", "node scripts/tests/local-refresh-scheduling.mjs", "node scripts/tests/changes-generation.mjs", "node scripts/tests/pot-ui-history.mjs", "node scripts/tests/pot-ui-scroll-input.mjs", "node scripts/tests/pot-ui-chat-sync.mjs", "node scripts/tests/pot-ui-event-stream.mjs", "node scripts/tests/pot-ui-resource-cache.mjs", "node scripts/tests/pot-ui-domains.mjs", "node scripts/tests/pot-ui-query-resource-refresh.mjs", "node scripts/tests/cache-reading-p1.mjs", "node scripts/tests/pot-ui-display-resources.mjs", "node scripts/tests/resource-bytes-adapter.mjs", "node scripts/tests/resource-directory-generation.mjs", "node scripts/tests/pot-ui-topology.mjs", "node scripts/tests/pot-ui-agent-links.mjs", "node scripts/tests/pot-ui-state.mjs", "node scripts/tests/pot-ui-schedule-probe.mjs", "node scripts/tests/pot-ui-send-confirmation.mjs", "node scripts/tests/chat-outbox-dispatch.mjs", "node scripts/tests/outbox-terminal-identity.mjs", "node scripts/tests/pot-ui-production-state.mjs", "node scripts/tests/pot-ui-settings-access.mjs", "node scripts/tests/pot-ui-provider-plugins.mjs", "node scripts/tests/pot-ui-usage.mjs", "node scripts/tests/script-runs.mjs", "node scripts/tests/work-records.mjs", "node scripts/tests/pot-ui-notifications.mjs", "node scripts/tests/pot-ui-github-subscriptions.mjs", "node --test plugins/github/*.test.mjs", "node scripts/tests/pot-ui-attachments.mjs", "node scripts/tests/pot-ui-file-images.mjs", "node scripts/tests/pot-ui-message-files.mjs", "node scripts/tests/pot-ui-references.mjs", "node scripts/tests/pot-ui-message-identities.mjs", "node scripts/tests/pot-ui-communication.mjs", "node scripts/tests/pot-ui-composer-selectors.mjs", "node scripts/tests/web-errors.js"]
+run = ["node --test scripts/tests/ui-regression-plan.test.mjs", "node scripts/tests/pot-ui-service-worker.mjs", "node scripts/tests/pot-ui-preferences.mjs", "node --test pkg/mcp/node_runtime.test.mjs", "node scripts/tests/pot-ui-updates.mjs", "node scripts/tests/pot-ui-extensions.mjs", "node scripts/tests/local-form-concurrency.mjs", "node scripts/tests/assistant-editor-resume.mjs", "node scripts/tests/local-refresh-scheduling.mjs", "node scripts/tests/changes-generation.mjs", "node scripts/tests/pot-ui-history.mjs", "node scripts/tests/retained-chat.mjs", "node scripts/tests/stable-message-rows.mjs", "node scripts/tests/projection-lifetime.mjs", "node scripts/tests/pot-ui-scroll-input.mjs", "node scripts/tests/pot-ui-chat-sync.mjs", "node scripts/tests/ws-client.mjs", "node scripts/tests/browser-ws-fixture.mjs", "node scripts/tests/ws-lifecycle.mjs", "node scripts/tests/pot-ui-resource-cache.mjs", "node scripts/tests/pot-ui-domains.mjs", "node scripts/tests/schedules-domain-contract.mjs", "node scripts/tests/pot-ui-query-resource-refresh.mjs", "node scripts/tests/cache-reading-p1.mjs", "node scripts/tests/pot-ui-display-resources.mjs", "node scripts/tests/resource-bytes-adapter.mjs", "node scripts/tests/resource-directory-generation.mjs", "node scripts/tests/pot-ui-topology.mjs", "node scripts/tests/pot-ui-agent-links.mjs", "node scripts/tests/pot-ui-state.mjs", "node scripts/tests/pot-ui-schedule-probe.mjs", "node scripts/tests/pot-ui-send-confirmation.mjs", "node scripts/tests/chat-outbox-dispatch.mjs", "node scripts/tests/outbox-terminal-identity.mjs", "node scripts/tests/pot-ui-production-state.mjs", "node scripts/tests/pot-ui-settings-access.mjs", "node scripts/tests/pot-ui-provider-plugins.mjs", "node scripts/tests/pot-ui-usage.mjs", "node scripts/tests/script-runs.mjs", "node scripts/tests/work-records.mjs", "node scripts/tests/pot-ui-notifications.mjs", "node scripts/tests/pot-ui-github-subscriptions.mjs", "node --test plugins/github/*.test.mjs", "node scripts/tests/pot-ui-attachments.mjs", "node scripts/tests/pot-ui-file-images.mjs", "node scripts/tests/pot-ui-message-files.mjs", "node scripts/tests/pot-ui-references.mjs", "node scripts/tests/pot-ui-message-identities.mjs", "node scripts/tests/pot-ui-communication.mjs", "node scripts/tests/pot-ui-composer-selectors.mjs", "node scripts/tests/web-errors.js"]
 
 
 
 
 [tasks."test:ui-native"]
-description = "Verify retained desktop startup and native subscription routing without a WebView"
+description = "Verify retained desktop startup and shared WebSocket routing without a WebView"
 run = ["node scripts/tests/desktop-startup.mjs", "node scripts/tests/native-subscription.mjs", "node scripts/tests/native-bridge-integration.mjs"]
 
 [tasks."test:executor"]
@@ -164,7 +164,7 @@ description = "Verify prepared conversation output, native aliases and touch geo
 run = ["node scripts/tests/render-snapshot.mjs", "node scripts/tests/prepared-group-intent-browser.mjs", "node scripts/tests/prepared-communication-context-browser.mjs", "node scripts/tests/prepared-controller-browser.mjs", "node scripts/tests/prepared-resources-browser.mjs", "node scripts/tests/prepared-chat-browser.mjs", "node scripts/tests/prepared-history-resources-browser.mjs", "node scripts/tests/prepared-group-alias-browser.mjs", "node scripts/tests/prepared-touch-browser.mjs", "node scripts/tests/chat-stability-browser.mjs", "node scripts/tests/chat-composer-focus-browser.mjs", "node scripts/tests/chat-layout-regression-browser.mjs", "node scripts/tests/resource-silent-loading-browser.mjs", "node scripts/tests/assistant-model-input-browser.mjs", "node scripts/tests/assistant-task-default-browser.mjs", "node scripts/tests/page-loading-browser.mjs", "node scripts/tests/loading-feedback-browser.mjs", "node scripts/tests/image-preview-browser.mjs"]
 
 [tasks."test:settings-browser"]
-description = "Verify settings reads, drafts and writes independently of assistant activity with synthetic HTTP/SSE"
+description = "Verify settings reads, drafts and writes independently of assistant activity with synthetic WebSocket services"
 run = "node scripts/tests/pot-ui-settings-independent-browser.mjs"
 
 [tasks."test:ui-local-first"]
@@ -196,7 +196,7 @@ description = "Verify GitHub background polling and durable assistant delivery"
 run = ["node --test plugins/github/*.test.mjs", "go test -race ./internal/assistant ./internal/control -run 'TestPlugin|TestGitHubPlugin' -count=1"]
 
 [tasks."test:pwa-cold-start"]
-description = "Verify local-first browser startup using isolated HTTP/SSE, IndexedDB and a real Service Worker"
+description = "Verify local-first browser startup using isolated WebSockets, IndexedDB and a real Service Worker"
 run = ["node scripts/tests/pot-ui-cold-start-browser.mjs", "node scripts/tests/pot-ui-reconnect-authority-browser.mjs", "node scripts/tests/directory-status-recovery-browser.mjs"]
 
 [tasks."test:pwa"]
@@ -279,7 +279,7 @@ xcrun swiftc -module-cache-path .local/icons/modules resources/app/PotIcon.swift
 """
 
 [tasks."test:ui-http-integration"]
-description = "Opt-in real local browser/HTTP/SSE integration (cached Playwright CLI and browser required)"
+description = "Opt-in real local browser/WebSocket integration (cached Playwright CLI and browser required)"
 run = "python scripts/tests/ui-http-suite.py"
 
 [tasks."test:public-api"]
@@ -307,11 +307,11 @@ description = "Trusted wheel continuity, mixed/nested heights and reading anchor
 run = "node scripts/tests/ui-regressions.mjs --group scroll"
 
 [tasks."test:ui-chat-position"]
-description = "Send and assistant-switch position contracts with isolated HTTP/SSE and IndexedDB"
+description = "Send and assistant-switch position contracts with isolated WebSockets and IndexedDB"
 run = "node scripts/tests/chat-scroll-http-browser.mjs"
 
 [tasks."test:ui-assistant-create"]
-description = "Phone assistant creation with isolated HTTP/SSE, IndexedDB and trusted touch"
+description = "Phone assistant creation with isolated WebSockets, IndexedDB and trusted touch"
 run = "node scripts/tests/assistant-create-mobile-browser.mjs"
 
 [tasks."test:ui-chat-activity"]
@@ -339,7 +339,7 @@ description = "Real IndexedDB integrity, read volume, namespace and transaction 
 run = "node scripts/tests/ui-regressions.mjs --group storage"
 
 [tasks."test:ui-regressions"]
-description = "All deterministic browser regression groups; HTTP/SSE qualification is separate"
+description = "All deterministic browser regression groups; authenticated gateway qualification is separate"
 run = "node scripts/tests/ui-regressions.mjs"
 
 [tasks."test:ui-memory"]

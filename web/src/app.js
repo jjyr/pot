@@ -1,7 +1,8 @@
 import {mountApp} from './components/ui.js';
 import {createBrowserClient} from './adapters/browser.js';
 import {ensureBrowserAccess, installPWA} from './adapters/access.mjs';
-import {APIError, createProductionClient, readDesktopStartup} from './adapters/production.mjs';
+import {createProductionClient, readDesktopStartup} from './adapters/production.mjs';
+import {readBusinessStartup,confirmBusinessAccess} from './adapters/ws-client.mjs';
 import {createStartupIdentity,completeStartup} from './state/startup-identity.mjs';
 import {storedPreference} from './state/preferences.mjs';
 import {translate} from './locales/messages.mjs';
@@ -55,13 +56,11 @@ async function verify(force=false,resetScope=false){
     if(desktop){({runtime,readBaselines}=await readDesktopStartup({signal:abort.signal}));}
     else{
       access=await ensureBrowserAccess(root,{signal:abort.signal,onSetup:()=>{if(ticket!==verification||stopped)return;dispose();client?.resources?.clear();client=null;identity=null;store?.clear().catch(()=>{});notice.remove();}});
-      const response=await fetch('/api/v1/runtime',{credentials:'same-origin',signal:abort.signal});
-      runtime=await response.json().catch(()=>null);
       if(ticket!==verification||stopped)return;
-      if(!response.ok){
-        if(response.status===404&&!identity){const preview=createBrowserClient(),snapshot=await preview.snapshot();if(snapshot.runtime_id==='pot-ui-preview'){mount(preview);notice.remove();return;}}
-        throw new APIError(response.status,runtime);
-      }
+      if(access?.authenticated===true)confirmBusinessAccess();
+      if(access===null&&!identity){const preview=createBrowserClient(),snapshot=await preview.snapshot();if(snapshot.runtime_id==='pot-ui-preview'){mount(preview);notice.remove();return;}}
+      runtime=(await readBusinessStartup({signal:abort.signal})).runtime;
+      if(ticket!==verification||stopped)return;
     }
     if(ticket!==verification||stopped)return;
     if(!(runtime?.runtime_id||runtime?.id))throw Error('Runtime identity unavailable');

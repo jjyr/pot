@@ -10,7 +10,7 @@ const start=source.indexOf('  function readHistory(query,options={}){');
 const end=source.indexOf('  async function jumpToMessage(',start);
 assert(start>=0&&end>start,'the UI history request boundary must be present');
 const createUI=new Function('environment',`
-  const {state,chatSession,client,currentChatPosition,onPublish,onRestore}=environment;
+  const {state,chatSession,client,currentChatPosition,onPublish,onRestore,messageWindow={following:false}}=environment;
   let disposed=false,epoch=1,historyGeneration=0,historyRequests=new Map(),
     historyDemand=null,historyLoading=false,historyFailure='',historyLatency=200,
     chatRestore=null,historyAbort=new AbortController();
@@ -45,7 +45,7 @@ async function scenario({restore=false,latest=false,retire=false,boundary=false}
     for(let i=0;i<20;i++)await Promise.resolve();
     assert.equal(calls,1,'one page still uses exactly one shared network request');
     if(retire){ui.retire();await session.retire();}
-    gate.resolve(page(latest?160:60));
+    gate.resolve(boundary?{...page(99),messages:Array.from({length:40},(_,i)=>message(60+i)),history:{before:'60',after:'99',has_more:true,has_newer:true}}:page(latest?160:60));
     const [oldResult,newResult]=await Promise.all([first,second]);
     if(retire){assert.equal(newResult,false);assert.deepEqual(published,[]);}
     else if(boundary){assert.equal(oldResult,true);assert.equal(newResult,true);assert.equal(published.length,1);}
@@ -62,4 +62,40 @@ await scenario({restore:true});
 await scenario({latest:true});
 await scenario({retire:true});
 await scenario({boundary:true});
-console.log('History intents: same-query re-navigation, initial-restore supersession, Latest, same-consumer dedup, shared network flight, retired session and boundary reads passed');
+async function latestFollowup({pause=false,noProgress=false}={}){
+  const initial={...seed,_latest:'160',history:{...seed.history,has_newer:true}};
+  const messageWindow={following:true},calls=[],published=[];let probes=0;
+  const client={production:false,runtime:{runtime_id:seed.runtime_id},onlineReady:true,subscribe:()=>()=>{},snapshot:async()=>initial,history:async q=>{
+    calls.push(q);
+    if(q.after==='100'&&noProgress)return page(100);
+    if(q.after==='100')return {...page(160),_latest:'161',messages:Array.from({length:60},(_,i)=>message(101+i)),history:{before:'101',after:'160',has_more:true,has_newer:true}};
+    if(q.after==='160')return {...page(161),_latest:'161',history:{before:'161',after:'161',has_more:false,has_newer:false}};
+    probes++;
+    return probes===1?{...page(160),_latest:'160',history:{...page(160).history,has_newer:true}}:{...page(161),_latest:'161',history:{before:'161',after:'161',has_more:false,has_newer:false}};
+  }};
+  const state={snapshot:initial},domain=createChatDomain(client),session=domain.open({owner:'a'},{context:()=>({anchor:'100'})});
+  session.watch({});await session.refresh();session.expose();
+  const ui=createUI({state,chatSession:session,client,messageWindow,currentChatPosition:()=>true,onPublish:snapshot=>{published.push(snapshot.history.after);if(pause)messageWindow.following=false;},onRestore:()=>{}});
+  try{
+    const result=await ui.readHistory({}, {around:true,positionTicket:{epoch:1,generation:1}});
+    if(noProgress){
+      assert.equal(result,false);
+      assert.deepEqual(published,[]);
+      for(let i=0;i<20;i++)await Promise.resolve();
+      assert.equal(probes,1);
+    }else if(pause){
+      for(let i=0;i<20;i++)await Promise.resolve();
+      assert.deepEqual(published,['160']);
+      assert.equal(probes,1);
+    }else{
+      await until(()=>published.at(-1)==='161');
+      assert.deepEqual(published,['160','161']);
+      assert.equal(probes,2);
+      assert.equal(calls.filter(q=>q.after==='160').length,1);
+    }
+  }finally{ui.retire();await session.close();domain.dispose();}
+}
+await latestFollowup();
+await latestFollowup({pause:true});
+await latestFollowup({noProgress:true});
+console.log('History intents: same-query re-navigation, initial-restore supersession, Latest, same-consumer dedup, shared network flight, retired session, boundary reads and Latest follow-up streaming passed');
