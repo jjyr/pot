@@ -32,29 +32,29 @@ export function createChatDomain(client){
 const deliver=async(value,received=value.messages,options={live:true})=>{
   const version=generation;
   const check=()=>{current();if(version!==generation)throw new DOMException('Delivery superseded','AbortError');};
-  check();
   let presentation=value;
-  if(received.length){
-    let rows;
-    try{
-      rows=cache?await stored(cache.readMessages(key,received.map(row=>row.id),{identity:value,validate:check})):received;
+  let shown;
+  try{
+    check();
+    if(received.length){
+      const rows=cache?await stored(cache.readMessages(key,received.map(row=>row.id),{identity:value,validate:check})):received;
       check();
-    }catch(reason){
-      if(reason.name==='AbortError')return;
-      await observer.failed?.(reason);return;
+      const entries=new Map(value.messages.map(message=>[message.id,message]));
+      for(const row of rows){
+        if(!row)continue;
+        const old=entries.get(row.id);
+        if(!old||row.version>=old.version)entries.set(row.id,old&&!old.context_only?{...row,context_only:false}:row);
+      }
+      presentation={...value,messages:[...entries.values()].sort((a,b)=>{const x=BigInt(a.sequence||0),y=BigInt(b.sequence||0);return x<y?-1:x>y?1:0;})};
     }
-    const entries=new Map(value.messages.map(message=>[message.id,message]));
-    for(const row of rows){
-      if(!row)continue;
-      const old=entries.get(row.id);
-      if(!old||row.version>=old.version)entries.set(row.id,old&&!old.context_only?{...row,context_only:false}:row);
-    }
-    presentation={...value,messages:[...entries.values()].sort((a,b)=>{const x=BigInt(a.sequence||0),y=BigInt(b.sequence||0);return x<y?-1:x>y?1:0;})};
+    const view=retain(value,{presentation});
+    check();
+    shown=await present(view,check);
+    check();
+  }catch(reason){
+    if(reason.name==='AbortError')return;
+    throw reason;
   }
-  const view=retain(value,{presentation});
-  check();
-  const shown=await present(view,check);
-  check();
   await observer.snapshot?.(shown,received,options);
 };
     const present=async(serverView,check=current)=>{

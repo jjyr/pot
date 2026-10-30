@@ -14,10 +14,14 @@ try{
    await page.waitForFunction(()=>window.workRecordsFixture);
    if(width<720)await page.locator('.assistant-row').first().click();
    await page.evaluate(()=>workRecordsFixture.prepare());
-   await page.waitForFunction(()=>document.querySelector('.history:not([data-preparation-surface]) .work-record-summary'));
+   await page.waitForFunction(()=>document.querySelector('.history:not([data-preparation-surface]) .work-record-group .work-record-summary'));
    await page.waitForFunction(()=>{const history=document.querySelector('.history:not([data-preparation-surface])');return getComputedStyle(history).visibility==='visible'&&!history.hasAttribute('aria-busy');});
-   await page.locator('.history:not([data-preparation-surface]) .work-record-summary').first().scrollIntoViewIfNeeded();
-   const participants=await page.evaluate(()=>{const summary=document.querySelector('.history:not([data-preparation-surface]) .work-record-summary'),counts=summary.querySelector('.work-record-counts'),people=summary.querySelector('.work-record-participants');return {visible:[...people.children].filter(n=>n.classList.contains('work-participant')&&n.checkVisibility()).length,total:people.querySelectorAll('.work-participant').length,gap:people.getBoundingClientRect().left-counts.getBoundingClientRect().right,sameLine:Math.abs(people.getBoundingClientRect().top-counts.getBoundingClientRect().top)<10};});
+   const leaderSummary=page.locator('.history:not([data-preparation-surface]) .work-record-group .work-record-summary');
+   await leaderSummary.waitFor({state:'visible'});
+   await leaderSummary.scrollIntoViewIfNeeded();
+   const participants=await leaderSummary.evaluate(summary=>{const counts=summary.querySelector('.work-record-counts'),people=summary.querySelector('.work-record-participants');return {visible:[...people.children].filter(n=>n.classList.contains('work-participant')&&n.checkVisibility()).length,total:people.querySelectorAll('.work-participant').length,gap:people.getBoundingClientRect().left-counts.getBoundingClientRect().right,sameLine:Math.abs(people.getBoundingClientRect().top-counts.getBoundingClientRect().top)<10};});
+   assert.equal(participants.total,4,'Fixture exposes four communication counterparts');
+   assert.equal(participants.visible,4,'Fixture shows all four communication counterparts');
    if(!baseline){assert.equal(participants.visible,participants.total,'Every communication counterpart is visible');if(participants.sameLine)assert(participants.gap<=20,'Counterparts follow communication count');}
    await page.screenshot({path:`${output}/work-${width}-${locale}-${baseline?'before':'after'}.png`});
    // An expired preparation deadline must never apply the document's minimum

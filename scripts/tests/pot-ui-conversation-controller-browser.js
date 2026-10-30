@@ -14,24 +14,45 @@ async (page,{origin=new URL(page.url()).origin}={})=>{
     const {createMessageWindow}=await import('/components/message-window.mjs');
     const {readingAnchor}=await import('/components/reading-position.mjs');
     const scroller=document.querySelector('.controlled-history'),host=scroller.querySelector('.message-window'),writes=[],states=[],inputs=[];
-    let rows=Array.from({length:100},(_,index)=>({id:'r'+index,viewKey:'r'+index,role:'assistant',height:80+index%5*20,text:'Synthetic message '+index})),phase='initial',restoreCalls=0;
+    let rows=Array.from({length:100},(_,index)=>({id:'r'+index,viewKey:'r'+index,sequence:index+9,role:'assistant',height:80+index%5*20,text:'Synthetic message '+index})),phase='initial',restoreCalls=0;
     const descriptor=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
     Object.defineProperty(scroller,'scrollTop',{get(){return descriptor.get.call(this);},set(top){const from=descriptor.get.call(this);descriptor.set.call(this,top);if(Math.abs(this.scrollTop-from)>.5)writes.push({phase,from,to:this.scrollTop,height:this.scrollHeight,kind:new Error().stack.includes('applyScrollAdjustment')?'geometry':'navigation'});}});
     // Known initial sizes isolate one controlled delta from unrelated estimate
     // rebases. The later inserted row deliberately has no cached measurement.
     const heights=new Map(rows.map(message=>[message.viewKey,message.height+8]));
-    const list=createMessageWindow({scroller,host,heights,scrolled:delta=>inputs.push({phase,delta}),requestRender:()=>list.setMessages(rows),render(message,old){const record=old||{row:document.createElement('article')};record.row.className='message controlled-row';record.row.dataset.sequence=message.id.slice(1);record.row.style.height=message.wrap?'auto':message.height+'px';record.row.textContent=message.text;return record;},dispose:record=>record.row.remove()});
+    const list=createMessageWindow({scroller,host,heights,scrolled:delta=>inputs.push({phase,delta}),requestRender:()=>list.setMessages(rows),render(message,old){const record=old||{row:document.createElement('article')};record.row.className='message controlled-row';record.row.dataset.sequence=String(message.sequence ?? '');record.row.style.height=message.wrap?'auto':message.height+'px';record.row.textContent=message.text;return record;},dispose:record=>record.row.remove()});
     list.subscribeReading(state=>states.push({phase,state,anchor:readingAnchor(scroller)}));list.setMessages(rows);
     const row=id=>host.querySelector(`[data-message-id="${id}"]`);
+    const originalRows=rows;
     const sample=()=>({top:scroller.scrollTop,height:scroller.scrollHeight,offset:row('r40')?.getBoundingClientRect().top-scroller.getBoundingClientRect().top,anchor:readingAnchor(scroller),state:list.snapshot(),mounted:host.querySelectorAll('article').length});
     window.controllerScene={list,scroller,writes,states,inputs,sample,
-      phase(value){phase=value;},restore(){restoreCalls++;list.restore({mode:'reading',position:{top:0,anchors:[{key:'message:r40',offset:0}],anchor:{id:'r40',offset:0,sequence:'40'}}});},get restoreCalls(){return restoreCalls;},
+      phase(value){phase=value;},restore(){restoreCalls++;list.restore({mode:'reading',position:{top:0,anchors:[{key:'message:r40',offset:0}],anchor:{id:'r40',offset:0,sequence:'49'}}});},get restoreCalls(){return restoreCalls;},
       grow(amount,{immutable=false,layout=true}={}){const index=rows.findIndex(item=>item.id==='r38');if(immutable)rows=rows.map((item,i)=>i===index?{...item,height:item.height+amount}:item);else{rows[index].height+=amount;row('r38').style.height=rows[index].height+'px';}if(layout)list.setMessages(rows);},
       repeat(){for(let i=0;i<5;i++)list.setMessages(rows);},
-      insert(){const index=rows.findIndex(item=>item.id==='r39');rows=[...rows.slice(0,index),{id:'inserted',viewKey:'inserted',role:'assistant',height:1500,text:'A newly mounted long row'},...rows.slice(index)];list.setMessages(rows);},
-      prepend(){rows=[...Array.from({length:8},(_,i)=>({id:'old'+i,viewKey:'old'+i,role:'user',height:70,text:'Earlier '+i})),...rows];list.setMessages(rows);},
-      reorder(){const anchor=rows.find(item=>item.id==='r40'),others=rows.filter(item=>item!==anchor).reverse(),index=Math.floor(others.length/2);rows=[...others.slice(0,index),anchor,...others.slice(index)];list.setMessages(rows);},
-      trim(){rows=rows.filter(item=>['r40','r41'].includes(item.id));list.setMessages(rows);},
+      insert(){const next=[{id:'inserted',viewKey:'inserted',sequence:8,role:'assistant',height:1500,text:'A newly mounted long row'},...rows];list.setMessages(next);rows=next;},
+      prepend(){const next=[...Array.from({length:8},(_,i)=>({id:'old'+i,viewKey:'old'+i,sequence:i,role:'user',height:70,text:'Earlier '+i})),...rows];list.setMessages(next);rows=next;},
+      rejectInvalid(){const evidence=[];
+        const snapshot=()=>({nodes:Array.from(host.querySelectorAll('article')),top:scroller.scrollTop,mode:list.snapshot().mode});
+        const before=snapshot();
+        const interior=[...rows.slice(0,rows.findIndex(item=>item.id==='r40')),{id:'gap',viewKey:'gap',role:'assistant',height:90,text:'No sequence between r39 and r40'},...rows.slice(rows.findIndex(item=>item.id==='r40'))];
+        let rejected=false;try{list.setMessages(interior);}catch(error){rejected=/History must bridge|Interior sequence|Durable rows must strictly increase|Incoming durable sequence out of order/.test(error.message);if(!rejected)throw error;}
+        if(!rejected)throw Error('Interior sequence insertion without durable continuity was accepted');
+        const afterInterior=snapshot();if(afterInterior.top!==before.top||afterInterior.nodes.length!==before.nodes.length||afterInterior.nodes.some((node,index)=>node!==before.nodes[index]))throw Error('Rejected interior insertion mutated retained rows or scroll position');
+        evidence.push({case:'interior-bridge',top:afterInterior.top,nodeCount:afterInterior.nodes.length});
+        const reversed=[...rows].reverse();
+        let reversedRejected=false;try{list.setMessages(reversed);}catch(error){reversedRejected=/History must bridge|Interior sequence|Durable rows must strictly increase|Incoming durable sequence out of order/.test(error.message);if(!reversedRejected)throw error;}
+        if(!reversedRejected)throw Error('Reversed durable order was accepted');
+        const afterReversed=snapshot();if(afterReversed.top!==before.top||afterReversed.nodes.length!==before.nodes.length||afterReversed.nodes.some((node,index)=>node!==before.nodes[index]))throw Error('Rejected reversed order mutated retained rows or scroll position');
+        const outOfOrder=rows.map((item,index)=>index===rows.length-1?{...item,sequence:0}:item);
+        let outOfOrderRejected=false;try{list.setMessages(outOfOrder);}catch(error){outOfOrderRejected=/History must bridge|Interior sequence|Durable rows must strictly increase|Incoming durable sequence out of order/.test(error.message);if(!outOfOrderRejected)throw error;}
+        if(!outOfOrderRejected)throw Error('Out-of-order durable suffix was accepted');
+        const afterOutOfOrder=snapshot();if(afterOutOfOrder.top!==before.top||afterOutOfOrder.nodes.length!==before.nodes.length||afterOutOfOrder.nodes.some((node,index)=>node!==before.nodes[index]))throw Error('Rejected out-of-order durable row mutated retained rows or scroll position');
+        evidence.push({case:'reversed-order',top:afterReversed.top,nodeCount:afterReversed.nodes.length},{case:'suffix-out-of-order',top:afterOutOfOrder.top,nodeCount:afterOutOfOrder.nodes.length});
+        return evidence;},
+      subset(){const retained=rows.filter(item=>['r40','r41'].includes(item.id));list.setMessages(retained);},
+      resetShort(){list.reset();rows=originalRows.filter(item=>['r40','r41'].includes(item.id));list.setMessages(rows);list.restore({mode:'reading',position:{top:0,anchors:[{key:'message:r40',offset:0}],anchor:{id:'r40',offset:0,sequence:String(rows[0].sequence)}}});},
+      appendLatest(){const next=[...rows,{id:'latest',viewKey:'latest',sequence:109,role:'assistant',height:90,text:'A newly appended durable row'}];list.setMessages(next);rows=next;},
+
       wrap(){const item=rows.find(item=>item.id==='r38');rows=rows.map(row=>row===item?{...item,wrap:true,text:'A wrapping synthetic line. '.repeat(90)}:row);list.setMessages(rows);},
     };
   });
@@ -105,11 +126,41 @@ async (page,{origin=new URL(page.url()).origin}={})=>{
   assert(await page.evaluate(()=>controllerScene.list.destination===null),'Real input interrupts explicit target navigation');
   const reading=await sample();await page.evaluate(()=>controllerScene.repeat());await settle();assert(Math.abs((await sample()).offset-reading.offset)<=.6,'No stale target command replays after input');
   await page.evaluate(()=>controllerScene.restore());await settle();await offset(0);
-  await phase('reorder');await page.evaluate(()=>controllerScene.reorder());await settle();await offset(0);
-  await phase('trim');await page.evaluate(()=>controllerScene.trim());await settle();
-  const trimmed=await sample();assert(trimmed.state.mode==='reading','Geometry clamping at the boundary does not enable following');
-  assert(trimmed.top===0&&trimmed.offset===30,'A short trimmed list clamps at zero; the header makes the original zero offset unreachable');
-  assert(trimmed.mounted===2,'Trimming retires removed rows');
+  await phase('rejection');
+  const rejectionEvidence=await page.evaluate(()=>controllerScene.rejectInvalid());
+  await settle();await offset(0);
+  await phase('subset');
+  await page.evaluate(()=>{window.subsetNodes=[...document.querySelectorAll('.message-window article')];controllerScene.subset();});await settle();
+  const subsetCount=await page.evaluate(()=>document.querySelectorAll('.message-window article').length);
+  assert(subsetCount===109,'Subset preserves every durable row count: '+subsetCount);
+  await page.evaluate(()=>{
+    const now=[...document.querySelectorAll('.message-window article')];
+    if(now.length!==window.subsetNodes.length)throw Error('Subset changed originals length');
+    for(let i=0;i<now.length;i++){if(now[i]!==window.subsetNodes[i])throw Error('Subset changed original article identity/order at '+i);}
+  });
+  await offset(0);
+  await phase('appendLatest');
+  await page.evaluate(()=>{window.appendNodes=[...document.querySelectorAll('.message-window article')];controllerScene.appendLatest();});await settle();
+  const appendState=await page.evaluate(()=>{
+    const now=[...document.querySelectorAll('.message-window article')];
+    if(now.length!==window.appendNodes.length+1)throw Error('appendLatest article count mismatch');
+    for(let i=0;i<window.appendNodes.length;i++){if(now[i]!==window.appendNodes[i])throw Error('appendLatest changed original identity/order at '+i);}
+    const last=now[now.length-1];
+    return {lastId:last?.dataset?.messageId ?? last?.getAttribute('data-message-id') ?? '',nodes:now.length};
+  });
+  assert(appendState.lastId==='latest','appendLatest appends latest as last row: '+appendState.lastId);
+  await offset(0);
+  await phase('resetShort');
+  await page.evaluate(()=>{window.preResetNodes=[...document.querySelectorAll('.message-window article')];controllerScene.resetShort();});await settle();
+  await page.evaluate(()=>{
+    const now=[...document.querySelectorAll('.message-window article')];
+    if(now.length!==2)throw Error('resetShort mounted count should be 2, got '+now.length);
+    for(const old of window.preResetNodes){if(old.isConnected)throw Error('resetShort left an old article connected');}
+    for(const node of now){if(window.preResetNodes.includes(node))throw Error('resetShort reused an old article identity');}
+  });
+  const trimmed=await sample();assert(trimmed.state.mode==='reading','Explicit reset retains reading mode rather than enabling following');
+  assert(trimmed.top===0&&trimmed.offset===30,'Explicit reset clamps at zero; the header makes the original zero offset unreachable');
+  assert(trimmed.mounted===2,'Explicit reset retires removed rows');
   await phase('boundary without movement');await page.locator('.controlled-history:not([data-preparation-surface])').focus();
   await page.keyboard.press('ArrowUp');await page.waitForTimeout(220);await page.evaluate(()=>controllerScene.repeat());await settle();
   const boundary=await sample();
@@ -118,5 +169,5 @@ async (page,{origin=new URL(page.url()).origin}={})=>{
   assert((await sample()).state.mode==='latest'&&(await page.evaluate(()=>controllerScene.writes.length))===0,'No-movement input at Latest retires without a geometry write');
   assert(errors.length===0,errors.join('; '));
   await page.evaluate(()=>controllerScene.list.close());
-  return {passed:true,timeline,restores,boundary:{top:trimmed.top,expectedTop:0,offset:trimmed.offset,expectedOffset:30,height:trimmed.height,mode:trimmed.state.mode},errors};
+  return {passed:true,timeline,restores,rejectionEvidence,subsetCount,appendState,boundary:{top:trimmed.top,expectedTop:0,offset:trimmed.offset,expectedOffset:30,height:trimmed.height,mode:trimmed.state.mode},errors};
 }
