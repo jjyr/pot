@@ -1,5 +1,6 @@
 import {createChatCache} from '../chat-cache.mjs';
 import {createChatSync} from '../chat-sync.mjs';
+import {recordTarget} from '../chat-record-store.mjs';
 import {mergeUIFrame,mergeHistoryPage} from '../chat-history.mjs';
 import {retainCommittedChat} from '../retained-chat.mjs';
 import {validSnapshot} from '../conversation.mjs';
@@ -17,6 +18,7 @@ export function createChatDomain(client){
     scope={space:scope.space||'',owner:scope.owner||''};
     const key=keyFor(scope),cache=storage(),abort=new AbortController();
     let snapshot=null,displayed=null,exposed=false,observer={},sync,receive=()=>{},stopTransport=()=>{},stopCommits=()=>{},generation=0,retired=false,ended=false,writes=Promise.resolve(),closing,ownWrites=0;
+    let presented=null,presentationToken=0,visibleRecords=new Set(),visibleIdentity='',mounts=new Map(),min=0n,max=-1n;
     const current=()=>{if(closed||retired||ended||abort.signal.aborted)throw new DOMException('Chat session retired','AbortError');};
     const commitContext=()=>{const {anchor,position}=context();return {anchor,position,surface,window:snapshot?.messages.map(message=>({id:message.id,context_only:!!message.context_only}))};};
     const commit=work=>{ownWrites++;return stored(work()).finally(()=>ownWrites--);};
@@ -51,11 +53,78 @@ const deliver=async(value,received=value.messages,options={live:true})=>{
   }
   const view=retain(value,{presentation});
   check();
-  await observer.snapshot?.(view,received,options);
+  const shown=await present(view,check);
+  check();
+  await observer.snapshot?.(shown,received,options);
 };
+    const present=async(serverView,check=current)=>{
+      check();
+      const version=generation;
+      const token=++presentationToken;
+      if(!cache){
+        presented=serverView;
+        return serverView;
+      }
+      const identity=JSON.stringify([serverView.runtime_id,serverView.owner_id,serverView.conversation_id]);
+      const same=identity===visibleIdentity;
+      const baseMounts=same?mounts:new Map();
+      const baseMin=same?min:0n;
+      const baseMax=same?max:-1n;
+      const retainedIDs=same?[...visibleRecords]:[];
+      const validate=()=>{check();if(version!==generation||token!==presentationToken)throw new DOMException('Presentation superseded','AbortError');};
+      const read=await stored(cache.readRecords(key,serverView,{validate,retainedRecordIDs:retainedIDs}));
+      validate();
+      if(!read||!Array.isArray(read.messages)||!validSnapshot(read))throw new Error('Invalid committed chat records');
+      if(!recordTarget(key,serverView)){presented=read;return presented;}
+      const rows=read.messages;
+      const suppressedIDs=new Set(read.suppressedRecordIDs||[]);
+      const seen=new Set();
+      for(const row of rows){
+        if(!row||typeof row.record_id!=='string'||!row.record_id||seen.has(row.record_id))throw new Error('invalid record_id');
+        seen.add(row.record_id);
+      }
+      const mountRows=rows.filter(row=>!row.context_only||row.role==='tool');
+      const knownIndices=[];
+      for(let i=0;i<mountRows.length;i++)if(baseMounts.has(mountRows[i].record_id))knownIndices.push(i);
+      for(let k=1;k<knownIndices.length;k++){
+        if(!(baseMounts.get(mountRows[knownIndices[k]].record_id)>baseMounts.get(mountRows[knownIndices[k-1]].record_id)))throw new Error('mount order breach');
+      }
+      const first=knownIndices.length?knownIndices[0]:mountRows.length;
+      const last=knownIndices.length?knownIndices[knownIndices.length-1]:-1;
+      for(let i=first;i<=last;i++){
+        if(!baseMounts.has(mountRows[i].record_id))throw new Error('interior contract breach');
+      }
+      const prefixCount=knownIndices.length?first:0;
+      const newMap=new Map(baseMounts);
+      let newMin=baseMin;
+      let newMax=baseMax;
+      for(let i=0;i<mountRows.length;i++){
+        const id=mountRows[i].record_id;
+        if(newMap.has(id))continue;
+        if(knownIndices.length&&i<first)newMap.set(id,baseMin-BigInt(first-i));
+        else newMap.set(id,++newMax);
+      }
+      newMin=baseMin-BigInt(prefixCount);
+      const messages=rows.map(row=>{
+        const proposed=newMap.get(row.record_id);
+        if(proposed===undefined)return row;
+        return {...row,mount_order:String(proposed)};
+      });
+      const nextVisible=new Set();
+      for(const row of mountRows)if(!suppressedIDs.has(row.record_id))nextVisible.add(row.record_id);
+      validate();
+      visibleIdentity=identity;
+      mounts=newMap;
+      min=newMin;
+      max=newMax;
+      visibleRecords=nextVisible;
+      presented={...read,messages};
+      return presented;
+    };
     const expose=()=>{
-      if(!displayed)return;
-      if(displayed.messages.some(message=>!message.context_only))exposed=true;
+      const source=presented||displayed;
+      if(!source)return;
+      if(source.messages.some(message=>!message.context_only))exposed=true;
     };
     function stop(){generation++;stopTransport();stopTransport=()=>{};stopCommits();stopCommits=()=>{};}
     const readRemote=query=>{
@@ -65,7 +134,7 @@ const deliver=async(value,received=value.messages,options={live:true})=>{
     };
     const session={
       hasHistory:typeof client.history==='function',
-      async query(){current();let saved=cache?await stored(cache.read(key,surface)):null;if(cache&&!saved?.view&&initialSurface)saved=await stored(cache.read(key,initialSurface));current();if(saved)retain(saved.snapshot);return saved?{...saved,snapshot:displayed}:saved;},
+      async query(){current();let saved=cache?await stored(cache.read(key,surface)):null;if(cache&&!saved?.view&&initialSurface)saved=await stored(cache.read(key,initialSurface));current();if(saved)retain(saved.snapshot);if(!saved)return saved;const shown=await present(displayed,current);current();return {...saved,snapshot:shown};},
       expose,
 async history(query,{around=false,cachedOnly=false,signal,valid=()=>true,currentPosition=()=>true}={}){
   const version=generation;
@@ -81,14 +150,15 @@ async history(query,{around=false,cachedOnly=false,signal,valid=()=>true,current
 // pages cannot skip unknown intervals; require contiguous bridge between isolated page history and requested q range
 if(q.before&&!(BigInt(value.history.before||0)<BigInt(q.before)&&BigInt(value.history.after||0)>=BigInt(q.before)-1n))throw Error('history_gap');
 if(q.after&&!(BigInt(value.history.after||0)>BigInt(q.after)&&BigInt(value.history.before||0)<=BigInt(q.after)+1n))throw Error('history_gap');
-    return retain(value,{replace,direction:q.before?'before':q.after?'after':'stream'});
+    const retained=retain(value,{replace,direction:q.before?'before':q.after?'after':'stream'});
+    return await present(retained,check);
   };
   check();
   if(!snapshot||!session.hasHistory||!currentPosition())return null;
   if(!(around&&exposed))return page(query,around);
   const targetId=query.around;
-  if(targetId&&displayed?.messages.some(message=>message.id===targetId&&!message.context_only))return displayed;
-  if(!targetId&&!displayed?.history?.has_newer)return displayed;
+  if(targetId&&displayed?.messages.some(message=>message.id===targetId&&!message.context_only))return await present(displayed,check);
+  if(!targetId&&!displayed?.history?.has_newer)return await present(displayed,check);
   let probe=cache?await stored(cache.readPage(key,query,{validate:check})):null;
   check();
   if(!probe){if(cachedOnly)return null;probe=await readRemote(query);check();}
@@ -99,10 +169,10 @@ if(q.after&&!(BigInt(value.history.after||0)>BigInt(q.after)&&BigInt(value.histo
   if(target===null)return null;
   while(currentPosition()){
     check();
-    if(targetId&&displayed?.messages.some(message=>message.id===targetId&&!message.context_only))return displayed;
+    if(targetId&&displayed?.messages.some(message=>message.id===targetId&&!message.context_only))return await present(displayed,check);
     const first=displayed?.history?.before==null?null:BigInt(displayed.history.before);
     const last=displayed?.history?.after==null?null:BigInt(displayed.history.after);
-    if(!targetId&&last!==null&&last>=target)return displayed;
+    if(!targetId&&last!==null&&last>=target)return await present(displayed,check);
     if(first!==null&&last!==null&&target>=first&&target<=last)throw Error('history_gap');
     const direction=first===null||target<first?'before':'after';
     const boundary=displayed?.history?.[direction];

@@ -9,9 +9,10 @@ export const groups = {
   connection: ['chat-stream-recovery','chat-directory-activity'],
   approvals: ['linked-approvals','patch-approvals'],
   usage: ['usage-empty','usage-unknown','usage-partial','usage-trend'],
-  storage: ['chat-cache-read-volume.html', 'chat-cache.html', 'projection-store.html', 'chat-cache-ui.html', 'cached-loading.html','assistant-drafts-storage.html'],
+  storage: ['chat-records-storage.html', 'chat-cache-read-volume.html', 'chat-cache.html', 'projection-store.html', 'chat-cache-ui.html', 'cached-loading.html','assistant-drafts-storage.html'],
 };
 export const fixtures = {
+  'chat-records-storage.html':'DONE canonical chat records',
   'work-record-navigation.html':'ALL CHECKS PASSED',
   'assistant-drafts-storage.html':'DONE assistant draft storage',
   'chat-initial-layout.html': 'DONE initial Chat layout',

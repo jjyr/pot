@@ -29,7 +29,7 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
   const lifecycleInputs=new Set((snapshot?.replies||[]).map(reply=>reply.input_id));
   let currentInput='';
   for(const message of messages){
-    if((message.role==='user'&&!message.steering)||message.role==='system'&&!message.compaction){
+    if(!message.local_only&&((message.role==='user'&&!message.steering)||(message.role==='system'&&!message.compaction))){
       inputs.set(message.id,message);currentInput=message.id;
       anchors.set(message.id,positions.get(message.id));turnInputs.set(message.request_id||message.id,message.id);
     }
@@ -44,14 +44,15 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
     if(message.role==='system'&&message.request_id?.startsWith('pot-result-')&&!message.correspondence?.length)continue;
     if(routineTaskDisposition(message))continue;
     const inputRequest=message.request_id||(message.role==='user'&&message.steering?message.accepted_request_id:undefined);
-    const row={...message,viewKey:inputRequest?`input:${inputRequest}`:message.id};
+    const fallbackViewKey=inputRequest?`input:${inputRequest}`:message.id;
+    const row={...message,viewKey:message.viewKey||fallbackViewKey};
     if(message.role==='system'&&message.correspondence?.length){
       // Receipt details are a disclosure row, never ordinary user/assistant prose.
       // The authoritative system input stays unchanged in the model transcript.
       row.role='tool';row.text='';row.tool={id:message.id,turn_id:message.request_id,name:'receive_message',args:{messages:message.correspondence},phase:'completed',started_at_ms:message.created_at_ms,finished_at_ms:message.created_at_ms};
     }
     if(message.role==='assistant'){
-      row.viewKey=message.id;
+      row.viewKey=message.viewKey||message.id;
       const input=inputs.get(replyInputs.get(message.id));
       // Empty model rounds do not own activity. Only the receiver lifecycle
       // owns that frame, including between tool completion and the next round.

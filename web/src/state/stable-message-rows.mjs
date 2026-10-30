@@ -1,5 +1,12 @@
 const sequenceOf = (row) => {
   if (row === null || typeof row !== 'object') return null;
+  if (row.record_id !== undefined && row.record_id !== null) {
+    const mount = row.mount_order;
+    if (typeof mount !== 'string' || !/^-?(0|[1-9][0-9]*)$/.test(mount)) {
+      throw new Error('Invalid mount_order for canonical row ' + String(row.record_id));
+    }
+    try { return BigInt(mount); } catch { throw new Error('Invalid mount_order for canonical row ' + String(row.record_id)); }
+  }
   const sequence = row.sequence;
   let value;
   if (typeof sequence === 'number') {

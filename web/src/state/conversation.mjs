@@ -45,7 +45,7 @@ export function acceptSnapshot(state, snapshot, epoch, {committed=false,received
   // events may not silently navigate the user into another owner's conversation.
   if (previous && (ownerKey(previous) !== ownerKey(snapshot) || previous.boot_id !== snapshot.boot_id)) return false;
   if (previous && BigInt(snapshot.cursor) < BigInt(previous.cursor)) return false;
-  if (previous && snapshot.cursor === previous.cursor && snapshot.kind !== 'reset') return false;
+  if(previous && snapshot.cursor === previous.cursor && snapshot.kind !== 'reset' && !committed) return false;
   if(!committed)snapshot = mergeUIFrame(previous, snapshot, state.uiAnchor);
   else if(previous){
     // Disk reads clone records. Reuse unchanged active rows so a token update
@@ -54,15 +54,19 @@ export function acceptSnapshot(state, snapshot, epoch, {committed=false,received
     snapshot={...snapshot,messages:snapshot.messages.map(message=>{
       const value=old.get(message.id);
       if(!value||value.sequence!==message.sequence||!!value.context_only!==!!message.context_only)return message;
+      if(message.record_id!==undefined||value.record_id!==undefined){
+        const same=value.record_id===message.record_id&&value.record_revision===message.record_revision&&value.id===message.id&&value.sequence===message.sequence&&!!value.context_only===!!message.context_only&&value.viewKey===message.viewKey&&value.mount_order===message.mount_order&&value.local_only===message.local_only&&value.delivery?.revision===message.delivery?.revision;
+        return same?value:message;
+      }
       return message.version!==undefined&&value.version===message.version||message.version===undefined&&JSON.stringify(value)===JSON.stringify(message)?value:message;
     })};
   }
   state.snapshot = snapshot;
   const key=ownerKey(snapshot),pending=state.pending.get(key),send=state.sends.get(key);
-  for(const message of receivedMessages)if(message.request_id){const receipt=JSON.stringify([key,message.request_id]);state.seenRequests.delete(receipt);state.seenRequests.add(receipt);}
+  for(const message of receivedMessages)if(message.request_id&&!message.local_only){const receipt=JSON.stringify([key,message.request_id]);state.seenRequests.delete(receipt);state.seenRequests.add(receipt);}
   while(state.seenRequests.size>256)state.seenRequests.delete(state.seenRequests.values().next().value);
-  if(send&&(state.seenRequests.has(JSON.stringify([key,send.request.request_id]))||snapshot.messages.some(message=>message.request_id===send.request.request_id)))state.sends.delete(key);
-  if(pending && receivedMessages.some(message=>messageConfirmsSend(message,pending)))settleSend(state,pending,true);
+  if(send&&(state.seenRequests.has(JSON.stringify([key,send.request.request_id]))||snapshot.messages.some(message=>!message.local_only&&message.request_id===send.request.request_id)))state.sends.delete(key);
+  if(pending && receivedMessages.some(message=>!message.local_only&&messageConfirmsSend(message,pending)))settleSend(state,pending,true);
   return true;
 }
 

@@ -1,5 +1,6 @@
 import {enqueueOutbox} from './chat-outbox-store.mjs';
 import {createIndexedStore,idbRequest} from './indexed-store.mjs';
+import {recordStores,recordCacheKey} from './chat-record-store.mjs';
 
 export function assistantDraftKey(client,scope){
   const control=(client.spaces||[]).find(space=>space.id===scope.space)?.control_id||client.runtime?.runtime_id;
@@ -9,6 +10,7 @@ export function assistantDraftKey(client,scope){
 
 export function createDraftStore(options={}){
   const store=createIndexedStore(options),tails=new Map();
+  const channel=globalThis.BroadcastChannel?new BroadcastChannel('pot-chat-commits:'+(options.name||'pot-chat-cache')):null;channel?.unref?.();
   const serial=(key,work)=>{const next=(tails.get(key)||Promise.resolve()).catch(()=>{}).then(work);tails.set(key,next);next.finally(()=>{if(tails.get(key)===next)tails.delete(key);}).catch(()=>{});return next;};
   return {
     read(key){return serial(key,()=>store.transaction(['composerDrafts','composerFiles'],'readonly',async tx=>{
@@ -23,8 +25,8 @@ export function createDraftStore(options={}){
       if(record)tx.objectStore('composerDrafts').put({...record,key,schema_version:1});
       else tx.objectStore('composerDrafts').delete(key);
     }));},
-    enqueue(key,value,files){return serial(key,()=>store.transaction(['composerDrafts','composerFiles','chatOutbox','chatOutboxFiles'],'readwrite',tx=>enqueueOutbox(tx,key,value,files)));},
+    enqueue(key,value,files){return serial(key,async()=>{const sequence=await store.transaction(['composerDrafts','composerFiles',...recordStores],'readwrite',tx=>enqueueOutbox(tx,key,value,files));channel?.postMessage(recordCacheKey(value.target));return sequence;});},
     remove(key){return this.write(key,null);},
-    close(){Promise.allSettled([...tails.values()]).finally(()=>store.close());},
+    close(){Promise.allSettled([...tails.values()]).finally(()=>{channel?.close();store.close();});},
   };
 }

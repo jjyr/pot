@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>chat-records-storage fixtures</title>
+</head>
+<body>
+<pre id="results"></pre>
+<script type="module">
+import { chatRecordsStorage, chatRecordTransactions, chatRecordContextHistory } from '../chat-records-storage.mjs';
+const out = document.getElementById('results');
+function report(line) {
+  out.textContent += line + '\n';
+}
+try {
+  await chatRecordsStorage(report);
+  await chatRecordTransactions(report);
+  await chatRecordContextHistory(report);
+  report('DONE canonical chat records');
+} catch (err) {
+  report('FAIL ' + (err && err.stack ? err.stack : String(err)));
+}
+</script>
+</body>
+</html>

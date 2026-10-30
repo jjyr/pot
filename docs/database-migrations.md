@@ -300,3 +300,10 @@ configuration counters, request hashes and prepared Task snapshots are preserved
 
 `ui-cache/0011_task_parameters` invalidates assistant configuration projections
 that previously omitted Task parameters, leaving drafts and transcripts intact.
+
+`ui-cache/0012_chat_records` gives submitted and synchronized messages a shared
+chat-record identity. It transfers submitted content and original Blobs into
+`chatRecords` and `chatRecordFiles`, and converts outbox entries into delivery
+jobs referencing those records. Existing delivery states survive without
+dispatch. Locally owned records are protected from business-cache clearing;
+server-only records follow history retention. See [Chat outbox](chat-outbox.md).

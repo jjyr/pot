@@ -15,14 +15,25 @@ try{
       await page.route('**/__terminal_idb.html',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><title>Synthetic terminal identity checks</title>'}));
       await page.goto(source.origin+'/__terminal_idb.html');
       const results=await page.evaluate(async version=>{
-        const {createIndexedStore,idbRequest}=await import('/state/indexed-store.mjs');
         const {createChatOutboxStore}=await import('/state/chat-outbox-store.mjs');
         const {createChatOutbox}=await import('/state/chat-outbox.mjs');
+        const {createDraftStore}=await import('/state/draft-store.mjs');
         const makeTarget=owner=>{const target={host:'synthetic-host',control:'synthetic-control',space:'synthetic-space',owner,conversation:'synthetic-conversation'};return {...target,key:JSON.stringify(Object.values(target))};};
         const remove=name=>{if(!name.startsWith('p6dda-terminal-'))throw Error('Not an owned synthetic database');return new Promise((done,reject)=>{const op=indexedDB.deleteDatabase(name);op.onsuccess=done;op.onerror=()=>reject(op.error);op.onblocked=()=>reject(Error('Synthetic deletion blocked'));});};
         const seed=async(name,id,owner,state='queued')=>{
-          const db=createIndexedStore({name}),target=makeTarget(owner),row={schema_version:1,state,revision:1,started:state==='accepted',claim:null,projection_pending:state==='accepted',target,request:{request_id:id,conversation_id:target.conversation,text:id}};
-          const sequence=await db.transaction(['chatOutbox','chatOutboxFiles'],'readwrite',async tx=>{const sequence=await idbRequest(tx.objectStore('chatOutbox').add(row));tx.objectStore('chatOutboxFiles').put({target:target.key,request:id,id:'synthetic-file',blob:new Blob(['Synthetic original for '+id])});return sequence;});db.close();return {...row,sequence};
+          const target=makeTarget(owner),draftKey=JSON.stringify([target.control,target.space,target.owner]);
+          const drafts=createDraftStore({name}),storage=createChatOutboxStore({name});
+          try{
+            const sequence=await drafts.enqueue(draftKey,{target,request:{request_id:id,conversation_id:target.conversation,text:id,attachments:[{id:'synthetic-file'}],references:[]}},[{id:'synthetic-file',blob:new Blob(['Synthetic original for '+id])}]);
+            if(state==='accepted'){
+              await storage.claim(sequence,'seed',100,50);
+              await storage.update(sequence,'seed',{state:'accepted',started:true,projection_pending:true,claim:null});
+            }
+            const rows=version==='before'?await storage.list():await storage.listSaved();
+            const row=rows.find(entry=>entry.request.request_id===id);
+            if(!row)throw Error('Seeded row not found');
+            return {...row,sequence};
+          }finally{drafts.close();storage.close();}
         };
         const results=[];
         for(const action of ['cancel','accepted']){
@@ -37,7 +48,8 @@ try{
               await worker.cancel(old);
             }else if(version==='before')await storage.releaseFiles(old.sequence);
             else await storage.releaseFiles(old);
-            const current=(await storage.list())[0],files=await storage.files(fresh.target.key,fresh.request.request_id);
+            const currentRows=version==='before'?await storage.list():await storage.listSaved();
+            const current=currentRows[0],files=await storage.files(fresh.target.key,fresh.request.request_id);
             results.push({action,name,reusedSequence:old.sequence,oldTarget:old.target,newTarget:current.target,newRequest:current.request.request_id,state:current.state,projection_pending:current.projection_pending,originals:files.length});
           }finally{worker?.close();storage?.close();await remove(name);}
         }

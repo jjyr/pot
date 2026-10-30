@@ -5,7 +5,6 @@ import {createProductionClient} from '../../web/src/adapters/production.mjs';
 import {createMemoryProjectionStore} from '../../web/src/state/projection-store.mjs';
 import {createChatOutbox} from '../../web/src/state/chat-outbox.mjs';
 import {outboxTarget,outboxIdentityKey} from '../../web/src/state/chat-outbox-store.mjs';
-import {projectOutboxRows} from '../../web/src/state/chat-outbox-projection.mjs';
 
 const clone=structuredClone,scope={space:'space',owner:'a'},caps={version:1,operations:['chat.send','chat.attachments']};
 const snapshot=(owner='a',extra={})=>({runtime_id:'host',boot_id:'boot',owner_id:JSON.stringify(['space',owner]),conversation_id:'chat-'+owner,cursor:'0',running:false,turn_id:null,replies:[],messages:[],...extra});
@@ -124,9 +123,10 @@ for(const [name,change,problem]of [
  }finally{client.resources.clear();globalThis.fetch=fetch;}
 }
 {
- const f=fixture(),row=f.add('optimistic');const rows=projectOutboxRows([],f.rows);check(rows.length===1&&rows[0].queue===row&&!rows[0].activity,'Queue projection creates only a user message');check(projectOutboxRows([{request_id:'optimistic'}],f.rows).length===1,'Authoritative transcript replaces the optimistic identity');
- const key=outboxIdentityKey(row),editing=new Map([[key,'Keep this editor']]),successor={...row,request:{...row.request,request_id:'new-request-same-sequence'}};
- check(projectOutboxRows([],f.rows,{editing})[0].queueEditing&&!projectOutboxRows([],[successor],{editing})[0].queueEditing&&outboxIdentityKey({...row,revision:row.revision+1})===key&&['key','host','control','space','owner','conversation'].every(part=>outboxIdentityKey({...row,target:{...row.target,[part]:'changed'}})!==key),'Editor intent binds complete target/request across sequence reuse and survives its own revisions');
+ const f=fixture(),row=f.add('identity'),key=outboxIdentityKey(row),successor={...row,request:{...row.request,request_id:'different-request-same-sequence'}};
+ check(outboxIdentityKey(successor)!==key,'Identity binds the complete request across sequence reuse');
+ check(outboxIdentityKey({...row,revision:row.revision+1})===key,'Identity survives its own revisions');
+ check(['key','host','control','space','owner','conversation'].every(part=>outboxIdentityKey({...row,target:{...row.target,[part]:'changed'}})!==key),'Identity binds every target field');
  let failed=false;try{outboxTarget({...f.client,spaces:[]},scope,snapshot());}catch{failed=true;}check(failed,'Unknown initial Control cannot be guessed');
 }
 console.log('DONE '+checks+' outbox dispatcher checks');
