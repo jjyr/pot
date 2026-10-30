@@ -53,7 +53,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 		if scope == "" {
 			scope = d.Owner
 		}
-		if err := d.Usage.Tool(ctx, scope, d.Turn, usage.ToolEvent{CallID: call.ID, Name: call.Name, Action: "start"}, storage.Now()); err != nil {
+		role := "main"
+		if execution.Role == core.Worker {
+			role = "task"
+		}
+		callTokens := int64(agent.EstimateToolCallTokens(call))
+		if err := d.Usage.Tool(ctx, scope, d.Turn, usage.ToolEvent{CallID: call.ID, Name: call.Name, Action: "start", Arguments: call.Arguments, Agent: role, EstimatedTokens: &callTokens, EstimateMethod: agent.ContentEstimateMethod}, storage.Now()); err != nil {
 			return nil, err
 		}
 		defer func() {
@@ -61,7 +66,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 			if len(data) == 0 {
 				data = json.RawMessage("null")
 			}
-			err := d.Usage.Tool(context.WithoutCancel(ctx), scope, d.Turn, usage.ToolEvent{CallID: call.ID, Name: call.Name, Action: "end", Content: data, IsError: resultErr != nil || agent.ToolResultFailed(data)}, storage.Now())
+			var resultTokens *int64
+			if n, err := agent.EstimateToolResultTokens(call.ID, data); err == nil {
+				value := int64(n)
+				resultTokens = &value
+			}
+			err := d.Usage.Tool(context.WithoutCancel(ctx), scope, d.Turn, usage.ToolEvent{CallID: call.ID, Name: call.Name, Action: "end", Content: data, EstimatedTokens: resultTokens, EstimateMethod: agent.ContentEstimateMethod, IsError: resultErr != nil || agent.ToolResultFailed(data)}, storage.Now())
 			resultErr = errors.Join(resultErr, err)
 		}()
 	}

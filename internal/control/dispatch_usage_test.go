@@ -229,3 +229,38 @@ func TestToolUsageReplayKeepsScopeTurnAndCallIdentity(t *testing.T) {
 		assertToolUsage(t, d, scope, call.Name, 2, 2)
 	}
 }
+
+func TestToolContentEstimatesUseAgentEstimator(t *testing.T) {
+	d, execution := meteredDispatcher(t)
+	call := modelprotocol.ToolCall{ID: "content-call", Name: "content_fixture", Arguments: json.RawMessage(`{ "path": "中文.txt" }`)}
+	result := json.RawMessage(`{"content":[{"type":"text","text":"中文🙂"},{"type":"image","mimeType":"image/png","width":1,"height":1,"data":"AAAA"}]}`)
+	d.Product = map[string]agent.Dispatch{call.Name: func(context.Context, core.ExecutionContext, modelprotocol.ToolCall, func(core.Update) error) (json.RawMessage, error) {
+		return result, nil
+	}}
+	for range 2 {
+		if _, err := d.Dispatch(t.Context(), execution, call, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := d.Usage.Breakdown(t.Context(), usage.Query{Scope: d.UsageScope}, storage.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := agent.EstimateToolResultTokens(call.ID, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Tools.Calls != 1 || !got.Tools.ResultsKnown || got.Tools.CallEstimatedTokens != int64(agent.EstimateToolCallTokens(call)) || got.Tools.ResultEstimatedTokens != int64(want) || len(got.Models) != 0 {
+		t.Fatal(got)
+	}
+	// Unknown estimation must not alter a successfully dispatched tool result.
+	call.ID = "invalid-image"
+	result = json.RawMessage(`{"content":[{"type":"image","data":"bad"}]}`)
+	if _, err := d.Dispatch(t.Context(), execution, call, nil); err != nil {
+		t.Fatal("metering changed execution", err)
+	}
+	got, err = d.Usage.Breakdown(t.Context(), usage.Query{Scope: d.UsageScope}, storage.Now())
+	if err != nil || got.Tools.ResultsKnown || got.Tools.Calls != 2 || got.Tools.Failed != 0 {
+		t.Fatal(got, err)
+	}
+}

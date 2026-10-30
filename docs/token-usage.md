@@ -78,6 +78,34 @@ from unknown. If any contributing input/cache report is missing, its aggregate
 hit rate displays as unknown. Partial token sums remain visible as lower bounds;
 the bar represents reported usage. The tooltip shows input/output/cache details.
 
+## Internal single-record statistics
+
+The existing model request ledger remains the authority for assistant, Task and
+compaction usage. Internal breakdowns group those actual records by Agent role
+and conversation/background-update/compaction stage. They exclude rejected
+requests and retain whether input/output/cache totals are fully reported.
+
+Tool dispatch persists `call_estimated_tokens` and `result_estimated_tokens`
+with the estimator method alongside the existing scope, turn, call ID, role,
+bytes, duration and failure records. The call estimate includes the function
+name, namespace and original argument text. Results use the same tool-result
+normalization and logical-message estimator as Agent context accounting,
+including image extraction and call IDs. Estimation failures remain null and do
+not turn a successful tool into a failure. The first completed receipt wins.
+
+Inbox acceptance atomically records `content_estimated_tokens` and its method
+with each envelope. Ordinary communication uses its text; Task results use the
+structured result body once; plugin notifications use the event body. The
+outer routing envelope and duplicate display text are excluded. Existing
+message IDs deduplicate retries, including local delivery. Stored addresses,
+direction, kind and state support internal communication counts and details.
+
+Both use the shared `pkg/agent` content rules, versioned `codex-content-v1`.
+Historical estimates remain unknown. Estimates describe content once, not
+repeated context replay, transport retries, or provider-billed consumption;
+they must not be added to actual model totals. This collection introduces no
+new network API or UI. Existing UI byte-based estimates remain separate.
+
 ## Context estimation
 
 The default estimator in [`pkg/agent/meter.go`](../pkg/agent/meter.go)

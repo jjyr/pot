@@ -15,11 +15,15 @@ import (
 )
 
 type ToolEvent struct {
-	CallID  string
-	Name    string
-	Action  string
-	Content json.RawMessage
-	IsError bool
+	Arguments       json.RawMessage
+	EstimatedTokens *int64
+	EstimateMethod  string
+	Agent           string
+	CallID          string
+	Name            string
+	Action          string
+	Content         json.RawMessage
+	IsError         bool
 }
 
 func (l *Ledger) Tool(ctx context.Context, scope, turn string, e ToolEvent, atMS int64) error {
@@ -33,7 +37,20 @@ func (l *Ledger) Tool(ctx context.Context, scope, turn string, e ToolEvent, atMS
 		if name == "" {
 			name = "tool"
 		}
-		_, err := l.db.ExecContext(ctx, "INSERT OR IGNORE INTO tools(id,scope,turn_id,name,at) VALUES (?,?,?,?,?)", string(key), scope, turn, name, atMS)
+		var argumentBytes *int
+		if len(e.Arguments) > 0 {
+			var compact bytes.Buffer
+			n := len(e.Arguments)
+			if json.Compact(&compact, e.Arguments) == nil {
+				n = compact.Len()
+			}
+			argumentBytes = &n
+		}
+		agent := e.Agent
+		if agent == "" {
+			agent = "unknown"
+		}
+		_, err := l.db.ExecContext(ctx, "INSERT OR IGNORE INTO tools(id,scope,turn_id,name,at,argument_bytes,agent,call_estimated_tokens,call_estimate_method) VALUES (?,?,?,?,?,?,?,?,?)", string(key), scope, turn, name, atMS, argumentBytes, agent, e.EstimatedTokens, e.EstimateMethod)
 		return err
 	case "end", "tool_execution_end":
 		content := e.Content
@@ -44,7 +61,7 @@ func (l *Ledger) Tool(ctx context.Context, scope, turn string, e ToolEvent, atMS
 		if err := json.Compact(&compact, content); err != nil {
 			return err
 		}
-		_, err := l.db.ExecContext(ctx, "UPDATE tools SET end_at=?,bytes=?,failed=? WHERE id=?", atMS, compact.Len(), e.IsError, string(key))
+		_, err := l.db.ExecContext(ctx, "UPDATE tools SET end_at=?,bytes=?,failed=?,result_estimated_tokens=?,result_estimate_method=? WHERE id=? AND end_at IS NULL", atMS, compact.Len(), e.IsError, e.EstimatedTokens, e.EstimateMethod, string(key))
 		return err
 	default:
 		return errors.New("invalid tool usage event")

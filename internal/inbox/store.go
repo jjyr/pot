@@ -9,6 +9,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
@@ -36,6 +37,23 @@ func EnqueueTx(ctx context.Context, tx *sql.Tx, message protocol.Envelope, direc
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, "INSERT INTO agent_messages(id,envelope,direction,state,conversation,recipient,accepted_at_ms) VALUES(?,?,?,?,?,?,?)", message.ID, string(body), direction, state, message.ConversationID, message.To.AgentID, time.Now().UnixMilli())
+	content := message.Text
+	// Structured notifications carry their body in Result or Plugin.Event.
+	// Do not count a duplicate Text projection or the routing envelope.
+	if message.Result != nil {
+		data, err := json.Marshal(message.Result)
+		if err != nil {
+			return err
+		}
+		content = string(data)
+	} else if message.Plugin != nil {
+		data, err := json.Marshal(message.Plugin.Event)
+		if err != nil {
+			return err
+		}
+		content = string(data)
+	}
+	estimate := agent.EstimateTextTokens(content)
+	_, err = tx.ExecContext(ctx, "INSERT INTO agent_messages(id,envelope,direction,state,conversation,recipient,accepted_at_ms,content_estimated_tokens,content_estimate_method) VALUES(?,?,?,?,?,?,?,?,?)", message.ID, string(body), direction, state, message.ConversationID, message.To.AgentID, time.Now().UnixMilli(), estimate, agent.ContentEstimateMethod)
 	return err
 }

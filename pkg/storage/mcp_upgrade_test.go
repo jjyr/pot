@@ -119,8 +119,16 @@ func TestMCPUpgradePreservesHistory(t *testing.T) {
 					continue
 				}
 				var got string
-				if e = db.QueryRow("SELECT sql FROM sqlite_schema WHERE name=?", name).Scan(&got); e != nil || got != ddl {
-					t.Fatalf("prior schema changed %s: %v", name, e)
+				if e = db.QueryRow("SELECT sql FROM sqlite_schema WHERE name=?", name).Scan(&got); e != nil {
+					t.Fatal(e)
+				}
+				if kind == TasksDatabase && name == "agent_messages" {
+					// Only the appended, nullable usage columns may differ. The
+					// dedicated content-estimate upgrade test covers their contract.
+					got = strings.Replace(got, ", content_estimated_tokens INTEGER CHECK(content_estimated_tokens >= 0), content_estimate_method TEXT", "", 1)
+				}
+				if got != ddl {
+					t.Fatalf("prior schema changed %s", name)
 				}
 			}
 			if kind == TasksDatabase {
